@@ -26,6 +26,8 @@ need python3
 need crontab
 need systemctl
 need systemd-analyze
+need readlink
+need stat
 
 ROOT=/root/kelion
 BUNDLE_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
@@ -42,6 +44,8 @@ COMPOSE_BIN=$ROOT/bin/docker-compose
 SECCOMP_PROFILE=$RUNTIME_ROOT/playwright-seccomp-v1.62.1.json
 PROOF_FILE=$RUNTIME_ROOT/last-verified-backup.json
 PROOF_KEY=$SECRET_ROOT/migration-backup-proof-key
+PUBLICATION_LOCK=$ROOT/publicare.lock
+RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 BACKUP_INSTALL_ROOT=/opt/kelion-backup
 BACKUP_RELEASE_ROOT=$BACKUP_INSTALL_ROOT/releases
 PERSISTENT_BACKUP_SCRIPT=$BACKUP_RELEASE_ROOT/$COMMIT_SHA/backup.sh
@@ -66,7 +70,9 @@ backup_previous_timer_enabled=0
 backup_previous_timer_active=0
 
 for file in "$PRODUCT_FILE" "$COMPOSE_FILE" "$PROXY_COMPOSE_FILE" "$BUNDLE_DIR/Caddyfile" \
-  "$BUNDLE_DIR/backup.sh" "$BUNDLE_DIR/systemd/$BACKUP_SERVICE" "$BUNDLE_DIR/systemd/$BACKUP_TIMER"; do
+  "$BUNDLE_DIR/backup.sh" "$BUNDLE_DIR/restore-verified-backup.sh" \
+  "$BUNDLE_DIR/lib/restore-verified-backup.mjs" \
+  "$BUNDLE_DIR/systemd/$BACKUP_SERVICE" "$BUNDLE_DIR/systemd/$BACKUP_TIMER"; do
   [ -f "$file" ] || die "bundle incomplet: $(basename "$file")"
 done
 
@@ -321,8 +327,57 @@ cleanup_backup_schedule_snapshot() {
   backup_schedule_snapshot_dir=''
 }
 
-exec 8>"$ROOT/publicare.lock"
+if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
+  [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
+    || die 'lock-ul de publicare nu este fișier regulat'
+fi
+# `<>` nu trunchiază un eventual target schimbat într-o cursă. După open,
+# validăm obiectul ținut de FD 8, link count și identitatea path↔FD înainte de
+# orice chown/chmod; astfel nu urmăm și nu normalizăm un symlink arbitrar.
+exec 8<>"$PUBLICATION_LOCK"
+publication_fd_path=$(readlink "/proc/$$/fd/8") \
+  || die 'FD 8 pentru lock-ul de publicare nu poate fi citit'
+[ "$publication_fd_path" = "$PUBLICATION_LOCK" ] \
+  || die 'FD 8 nu indică pathul canonic al lock-ului de publicare'
+[ -f "/proc/$$/fd/8" ] || die 'FD 8 nu indică un fișier regulat'
+[ "$(stat -Lc '%h' "/proc/$$/fd/8")" = 1 ] \
+  || die 'lock-ul de publicare are hardlinkuri neașteptate'
+publication_fd_identity=$(stat -Lc '%d:%i' "/proc/$$/fd/8")
+[ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'identitatea lock-ului diferă între path și FD 8'
+chown root:root "/proc/$$/fd/8"
+chmod 0600 "/proc/$$/fd/8"
+[ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/8")" = '0:0:600:1' ] \
+  || die 'ACL-ul lock-ului de publicare nu poate fi normalizat'
+[ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'pathul lock-ului a fost schimbat în timpul normalizării'
 flock 8
+
+# O întrerupere dură nu execută trap-ul. Jurnalul root-only este autoritatea
+# persistentă care împiedică o nouă publicare să ghicească dacă DB-ul poate fi
+# restaurat sau dacă point-of-no-return a fost deja depășit.
+if [ -e "$RECOVERY_JOURNAL" ] || [ -L "$RECOVERY_JOURNAL" ]; then
+  [ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] \
+    || die 'jurnalul recovery existent nu este fișier regulat'
+  [ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul recovery existent are ACL invalid'
+  recovery_journal_phase=$(jq -er \
+    'select(.schema == 1 and (.phase | type == "string") and
+      (.pointOfNoReturn | type == "boolean")) | input_filename' \
+    "$RECOVERY_JOURNAL" 2>/dev/null || true)
+  # Citim separat câmpurile după validarea structurii, fără a include conținut
+  # controlabil din jurnal în comenzi shell.
+  if [ -n "$recovery_journal_phase" ]; then
+    recovery_journal_phase=$(jq -er '.phase | select(test("^[a-z-]{3,40}$"))' "$RECOVERY_JOURNAL") \
+      || die 'jurnalul recovery existent are fază invalidă'
+    recovery_journal_ponr=$(jq -r '.pointOfNoReturn | if . then "true" else "false" end' \
+      "$RECOVERY_JOURNAL") \
+      || die 'jurnalul recovery existent are PONR invalid'
+    die "există recovery neterminat: phase=$recovery_journal_phase pointOfNoReturn=$recovery_journal_ponr"
+  fi
+  die 'jurnalul recovery existent este invalid'
+fi
 
 PRODUCT_ORIGIN=$(jq -er '.publicAppOrigin | select(type == "string")' "$PRODUCT_FILE")
 PRODUCT_REPOSITORY=$(jq -er '.githubRepository | select(type == "string")' "$PRODUCT_FILE")
@@ -487,12 +542,643 @@ run_migrator() {
 migration_plan=$(run_migrator "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate -- --plan)
 jq -e '.kind == "migrations_plan" and (.risk == "safe" or .risk == "destructive") and (.pending | type == "array")' <<<"$migration_plan" >/dev/null \
   || die 'planul migrărilor este invalid'
+pending_count=$(jq -er '.pending | length' <<<"$migration_plan")
+migration_risk=$(jq -er '.risk' <<<"$migration_plan")
+migration_contract_before=$(jq -cS '{kind,risk,pending}' <<<"$migration_plan")
+destructive_cutover=0
+if [ "$pending_count" -gt 0 ] && [ "$migration_risk" = destructive ]; then
+  destructive_cutover=1
+fi
+
+if [ "$destructive_cutover" = 1 ]; then
+  for tool in node psql pg_restore df stat readlink; do need "$tool"; done
+  [[ "$(psql --version)" =~ \(PostgreSQL\)[[:space:]]16\. ]] \
+    || die 'restore-ul verificat cere clientul psql 16'
+  [[ "$(pg_restore --version)" =~ \(PostgreSQL\)[[:space:]]16\. ]] \
+    || die 'restore-ul verificat cere clientul pg_restore 16'
+  publication_lock_target=$(readlink -f "/proc/$$/fd/8") \
+    || die 'FD 8 pentru lock-ul de publicare nu poate fi verificat'
+  [ "$publication_lock_target" = "$(readlink -f "$ROOT/publicare.lock")" ] \
+    || die 'FD 8 nu deține lock-ul de publicare așteptat'
+  flock -n 8 || die 'lock-ul de publicare nu poate fi reutilizat de recovery'
+fi
+
+# Capturăm TOT ce trebuie refăcut înainte de prima mutație DB. Primul cutover
+# nu are încă proxy-ul managed pe calea publică: `kelion-caddy` rămâne proxy-ul
+# real, iar oprirea writerului său produce intenționat 502 fail-closed.
+UPSTREAM_FILE=$PROXY_CONFIG_ROOT/upstream/kelion-upstream.caddy
+LIVE_CADDYFILE=$PROXY_CONFIG_ROOT/Caddyfile
+old_upstream=''
+old_upstream_present=0
+if [ -e "$UPSTREAM_FILE" ] || [ -L "$UPSTREAM_FILE" ]; then
+  [ -f "$UPSTREAM_FILE" ] && [ ! -L "$UPSTREAM_FILE" ] \
+    || die 'upstreamul activ nu este fișier regulat'
+  [ "$(stat -c '%u:%g:%a' "$UPSTREAM_FILE")" = '0:0:644' ] \
+    || die 'upstreamul activ are ACL neașteptat'
+  old_upstream=$(cat "$UPSTREAM_FILE")
+  old_upstream_present=1
+fi
+
+managed_proxy_running=0
+legacy_proxy_running=0
+docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true && managed_proxy_running=1 || true
+docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true && legacy_proxy_running=1 || true
+case "$managed_proxy_running:$legacy_proxy_running" in
+  1:0)
+    case "$old_upstream" in
+      *app-blue:8080*) active_slot=blue; active_bind_port=18080; inactive_slot=green ;;
+      *app-green:8080*) active_slot=green; active_bind_port=18081; inactive_slot=blue ;;
+      *) die 'proxy-ul managed rulează fără un upstream activ valid' ;;
+    esac
+    ;;
+  0:1)
+    # Fișierul managed poate fi stale după un prim cutover eșuat; proxy-ul care
+    # deține efectiv 80/443 este autoritatea pentru starea legacy.
+    active_slot=legacy
+    active_bind_port=''
+    inactive_slot=blue
+    ;;
+  *) die 'starea proxy-urilor publice este ambiguă: trebuie să ruleze exact unul' ;;
+esac
+
+old_marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active")
+[ -n "$old_marker" ] || die 'markerul release activ este gol'
+case "$active_slot" in
+  blue|green) [[ "$old_marker" =~ ^[0-9a-f]{40}$ ]] || die 'markerul slotului activ nu este SHA integral' ;;
+  legacy) [ "$old_marker" = legacy ] || die 'markerul legacy nu corespunde proxy-ului public capturat' ;;
+  *) die "slot activ necunoscut: $active_slot" ;;
+esac
+
+LEGACY_RUNTIME_CONTAINERS=(kelionai-app omniroute kelionai-coqui)
+legacy_runtime_running=()
+active_runtime_containers=()
+active_runtime_output=''
+legacy_version_before=''
+previous_version_before=''
+case "$active_slot" in
+  blue|green)
+    [ "$managed_proxy_running" = 1 ] || die 'slotul managed este activ fără proxy-ul managed'
+    active_runtime_output=$(docker ps -q \
+      --filter 'label=com.kelion.managed=true' --filter "label=com.kelion.slot=$active_slot") \
+      || die 'containerele slotului activ nu pot fi enumerate'
+    [ -z "$active_runtime_output" ] || mapfile -t active_runtime_containers <<<"$active_runtime_output"
+    [ "${#active_runtime_containers[@]}" -gt 0 ] || die 'slotul activ nu are containere capturabile'
+    managed_version_payload=$(curl --fail --silent --show-error --max-time 10 \
+      --noproxy '*' \
+      "http://127.0.0.1:$active_bind_port/api/version")
+    previous_version_before=$(jq -er \
+      '.v | select(type == "string" and test("^[0-9a-f]{7,40}$"))' \
+      <<<"$managed_version_payload") || die 'versiunea slotului activ nu este JSON valid'
+    [ "${old_marker:0:${#previous_version_before}}" = "$previous_version_before" ] \
+      || die 'versiunea slotului activ nu corespunde markerului capturat'
+    ;;
+  legacy)
+    [ "$legacy_proxy_running" = 1 ] || die 'runtime-ul legacy este activ fără kelion-caddy'
+    for legacy in "${LEGACY_RUNTIME_CONTAINERS[@]}"; do
+      legacy_running=$(docker inspect -f '{{.State.Running}}' "$legacy" 2>/dev/null) \
+        || die "containerul legacy $legacy nu poate fi capturat"
+      case "$legacy_running" in
+        true) legacy_runtime_running+=("$legacy") ;;
+        false) ;;
+        *) die "containerul legacy $legacy are stare ambiguă" ;;
+      esac
+    done
+    [[ " ${legacy_runtime_running[*]} " == *' kelionai-app '* ]] \
+      || die 'writerul legacy kelionai-app nu este capturabil'
+    legacy_version_payload=$(curl --fail --silent --show-error --max-time 10 \
+      --noproxy '*' \
+      http://127.0.0.1:8080/api/version)
+    legacy_version_before=$(jq -er '.v | select(type == "string" and test("^[0-9a-f]{7,40}$"))' \
+      <<<"$legacy_version_payload") || die 'versiunea legacy nu este JSON valid'
+    previous_version_before=$legacy_version_before
+    ;;
+esac
+
+sync_recovery_path() {
+  local path=$1 mode=$2
+  python3 - "$path" "$mode" <<'PY'
+import os
+import sys
+
+path, mode = sys.argv[1:]
+if mode == 'file':
+    with open(path, 'rb') as handle:
+        os.fsync(handle.fileno())
+elif mode != 'directory':
+    raise SystemExit(2)
+directory = os.path.dirname(path)
+flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0)
+fd = os.open(directory, flags)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+PY
+}
+
+# Acest snapshot este ultima operație de capture și nu este urmat de nicio
+# validare care ar putea ieși înainte de armarea trap-ului de recovery.
+previous_caddyfile_present=0
+previous_caddyfile_snapshot=''
+if [ -e "$LIVE_CADDYFILE" ] || [ -L "$LIVE_CADDYFILE" ]; then
+  [ -f "$LIVE_CADDYFILE" ] && [ ! -L "$LIVE_CADDYFILE" ] \
+    || die 'Caddyfile-ul live nu este fișier regulat'
+  [ "$(stat -c '%u:%g:%a' "$LIVE_CADDYFILE")" = '0:0:644' ] \
+    || die 'Caddyfile-ul live are ACL neașteptat'
+  previous_caddyfile_snapshot=$(mktemp "$RUNTIME_ROOT/caddyfile-rollback.XXXXXX") \
+    || die 'snapshotul Caddyfile nu poate fi creat'
+  if ! install -o root -g root -m 0600 "$LIVE_CADDYFILE" "$previous_caddyfile_snapshot" \
+    || ! cmp -s "$LIVE_CADDYFILE" "$previous_caddyfile_snapshot" \
+    || ! sync_recovery_path "$previous_caddyfile_snapshot" file; then
+    rm -f -- "$previous_caddyfile_snapshot"
+    die 'Caddyfile-ul live nu poate fi capturat exact'
+  fi
+  previous_caddyfile_present=1
+fi
+if [ "$active_slot" != legacy ] && [ "$previous_caddyfile_present" != 1 ]; then
+  die 'proxy-ul managed nu are Caddyfile recuperabil'
+fi
+
+active_runtime_stopped=0
+db_restore_required=0
+database_restore_verified=0
+destructive_migration_attempted=0
+point_of_no_return=0
+recovery_armed=0
+
+write_recovery_journal() {
+  local phase=$1 ponr=$2 restore_required=$3 temporary
+  local ponr_json=false restore_json=false active_runtime_json='[]' legacy_runtime_json='[]'
+  case "$phase" in
+    maintenance|before-migrator|database-migrated|restore-in-progress|database-restored|point-of-no-return|rolled-back|completed) ;;
+    *) return 1 ;;
+  esac
+  case "$ponr:$restore_required" in
+    0:0|0:1|1:0|1:1) ;;
+    *) return 1 ;;
+  esac
+  [ "$ponr" = 0 ] || ponr_json=true
+  [ "$restore_required" = 0 ] || restore_json=true
+  if [ "${#active_runtime_containers[@]}" -gt 0 ]; then
+    active_runtime_json=$(printf '%s\n' "${active_runtime_containers[@]}" | jq -Rsc 'split("\n")[:-1]') \
+      || return 1
+  fi
+  if [ "${#legacy_runtime_running[@]}" -gt 0 ]; then
+    legacy_runtime_json=$(printf '%s\n' "${legacy_runtime_running[@]}" | jq -Rsc 'split("\n")[:-1]') \
+      || return 1
+  fi
+  temporary=$(mktemp "$RUNTIME_ROOT/destructive-cutover-recovery.XXXXXX") || return 1
+  if ! jq -n \
+    --arg commit "$COMMIT_SHA" \
+    --arg phase "$phase" \
+    --arg activeSlot "$active_slot" \
+    --arg inactiveSlot "$inactive_slot" \
+    --arg oldMarker "$old_marker" \
+    --arg previousVersion "$previous_version_before" \
+    --arg caddyfileSnapshot "$previous_caddyfile_snapshot" \
+    --arg oldUpstream "$old_upstream" \
+    --argjson pointOfNoReturn "$ponr_json" \
+    --argjson dbRestoreRequired "$restore_json" \
+    --argjson oldUpstreamPresent "$old_upstream_present" \
+    --argjson activeRuntimeContainers "$active_runtime_json" \
+    --argjson legacyRuntimeContainers "$legacy_runtime_json" \
+    '{schema:1,commit:$commit,phase:$phase,pointOfNoReturn:$pointOfNoReturn,
+      dbRestoreRequired:$dbRestoreRequired,activeSlot:$activeSlot,inactiveSlot:$inactiveSlot,
+      oldMarker:$oldMarker,previousVersion:$previousVersion,
+      activeRuntimeContainers:$activeRuntimeContainers,
+      legacyRuntimeContainers:$legacyRuntimeContainers,
+      oldUpstreamPresent:($oldUpstreamPresent == 1),oldUpstream:$oldUpstream,
+      caddyfileSnapshot:$caddyfileSnapshot,updatedAt:(now|todateiso8601)}' > "$temporary" \
+    || ! chown root:root "$temporary" \
+    || ! chmod 0600 "$temporary" \
+    || ! mv -f -- "$temporary" "$RECOVERY_JOURNAL" \
+    || ! sync_recovery_path "$RECOVERY_JOURNAL" file; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+  [ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ] \
+    || return 1
+}
+
+clear_recovery_journal() {
+  [ -e "$RECOVERY_JOURNAL" ] || [ -L "$RECOVERY_JOURNAL" ] || return 0
+  [ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ] \
+    || return 1
+  rm -f -- "$RECOVERY_JOURNAL" || return 1
+  sync_recovery_path "$RECOVERY_JOURNAL" directory
+}
+
+mark_point_of_no_return() {
+  [ "$destructive_cutover" = 1 ] || return 0
+  # RAM-ul devine conservator înainte de operația întreruptibilă de persistare:
+  # un semnal între assignment și fsync nu poate porni rollback-ul vechi. Jurnalul
+  # este apoi durabil înainte ca proxy-ul să poată accepta trafic.
+  point_of_no_return=1
+  write_recovery_journal point-of-no-return 1 "$db_restore_required" || return 1
+}
+
+restore_release_marker() {
+  local temporary
+  temporary=$(mktemp "$RELEASE_STATE_ROOT/rollback.XXXXXX") || return 1
+  printf '%s\n' "$old_marker" > "$temporary"
+  chown root:10050 "$temporary" || return 1
+  chmod 0640 "$temporary" || return 1
+  mv "$temporary" "$RELEASE_STATE_ROOT/active"
+}
+
+cleanup_caddyfile_snapshot() {
+  [ -n "$previous_caddyfile_snapshot" ] || return 0
+  case "$previous_caddyfile_snapshot" in
+    "$RUNTIME_ROOT"/caddyfile-rollback.[A-Za-z0-9]*) ;;
+    *) return 1 ;;
+  esac
+  rm -f -- "$previous_caddyfile_snapshot" || return 1
+  previous_caddyfile_snapshot=''
+}
+
+restore_caddyfile_snapshot() {
+  local temporary=''
+  if [ "$previous_caddyfile_present" = 1 ]; then
+    [ -f "$previous_caddyfile_snapshot" ] && [ ! -L "$previous_caddyfile_snapshot" ] \
+      || return 1
+    [ "$(stat -c '%u:%g:%a' "$previous_caddyfile_snapshot")" = '0:0:600' ] \
+      || return 1
+    temporary=$(mktemp "$PROXY_CONFIG_ROOT/Caddyfile.rollback.XXXXXX") || return 1
+    if ! install -o root -g root -m 0644 "$previous_caddyfile_snapshot" "$temporary"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    mv -f -- "$temporary" "$LIVE_CADDYFILE" || return 1
+    [ "$(stat -c '%u:%g:%a' "$LIVE_CADDYFILE")" = '0:0:644' ] || return 1
+    cmp -s "$previous_caddyfile_snapshot" "$LIVE_CADDYFILE" || return 1
+  else
+    [ ! -L "$LIVE_CADDYFILE" ] || return 1
+    rm -f -- "$LIVE_CADDYFILE" || return 1
+    [ ! -e "$LIVE_CADDYFILE" ] && [ ! -L "$LIVE_CADDYFILE" ] || return 1
+  fi
+}
+
+restore_upstream_snapshot() {
+  local temporary=''
+  if [ "$old_upstream_present" = 1 ]; then
+    temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/rollback.XXXXXX") || return 1
+    if ! printf '%s\n' "$old_upstream" > "$temporary" \
+      || ! chown root:root "$temporary" \
+      || ! chmod 0644 "$temporary"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    if ! mv -f -- "$temporary" "$UPSTREAM_FILE"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+    [ "$(stat -c '%u:%g:%a' "$UPSTREAM_FILE")" = '0:0:644' ] || return 1
+  else
+    [ ! -L "$UPSTREAM_FILE" ] || return 1
+    rm -f -- "$UPSTREAM_FILE" || return 1
+    [ ! -e "$UPSTREAM_FILE" ] && [ ! -L "$UPSTREAM_FILE" ] || return 1
+  fi
+}
+
+verify_database_contract() {
+  local restored_plan restored_contract
+  restored_plan=$(run_migrator "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate -- --plan) \
+    || return 1
+  jq -e '.kind == "migrations_plan" and (.risk == "safe" or .risk == "destructive") and (.pending | type == "array")' \
+    <<<"$restored_plan" >/dev/null || return 1
+  restored_contract=$(jq -cS '{kind,risk,pending}' <<<"$restored_plan") || return 1
+  [ "$restored_contract" = "$migration_contract_before" ]
+}
+
+enter_destructive_maintenance() {
+  local temporary maintenance_status
+  case "$active_slot" in
+    blue|green)
+      temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/maintenance.XXXXXX") || return 1
+      printf 'respond "Service temporarily unavailable" 503\n' > "$temporary"
+      chmod 0644 "$temporary" || return 1
+      mv "$temporary" "$UPSTREAM_FILE" || return 1
+      docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null || return 1
+      docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null || return 1
+      maintenance_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --max-time 10 --noproxy '*' http://127.0.0.1:18079/ || true)
+      [ "$maintenance_status" = 503 ] || return 1
+      ;;
+    legacy)
+      # kelion-caddy este încă proxy-ul public și nu importă UPSTREAM_FILE.
+      # Oprirea runtime-ului imediat după această funcție este maintenance-ul
+      # fail-closed real (502), fără a porni prematur kelion-proxy.
+      [ "$legacy_proxy_running" = 1 ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_containers_stopped() {
+  local container running
+  for container in "$@"; do
+    running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+    case "$running" in
+      true)
+        if ! docker stop --time 30 "$container" >/dev/null; then
+          running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+          [ "$running" = false ] || return 1
+        fi
+        ;;
+      false) ;;
+      *) return 1 ;;
+    esac
+  done
+  for container in "$@"; do
+    running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+    [ "$running" = false ] || return 1
+  done
+}
+
+ensure_containers_running() {
+  local container running
+  for container in "$@"; do
+    running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+    case "$running" in
+      true) ;;
+      false)
+        if ! docker start "$container" >/dev/null; then
+          running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+          [ "$running" = true ] || return 1
+        fi
+        ;;
+      *) return 1 ;;
+    esac
+  done
+  for container in "$@"; do
+    running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) || return 1
+    [ "$running" = true ] || return 1
+  done
+}
+
+stop_active_runtime() {
+  [ "$active_runtime_stopped" = 0 ] || return 0
+  active_runtime_stopped=1
+  case "$active_slot" in
+    blue|green)
+      ensure_containers_stopped "${active_runtime_containers[@]}" || return 1
+      ;;
+    legacy)
+      ensure_containers_stopped "${legacy_runtime_running[@]}" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+verify_destructive_maintenance() {
+  local maintenance_status
+  case "$active_slot" in
+    blue|green)
+      # enter_destructive_maintenance a verificat deja 503 pe control-plane.
+      return 0
+      ;;
+    legacy)
+      # kelion-caddy rămâne proxy-ul public. Cu writerul legacy oprit trebuie să
+      # răspundă 502 real, nu un 200 din fallback-ul SPA.
+      maintenance_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --max-time 10 --noproxy '*' --resolve "$PUBLIC_APP_DOMAIN:443:127.0.0.1" \
+        "https://$PUBLIC_APP_DOMAIN/api/version" || true)
+      [ "$maintenance_status" = 502 ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+stop_candidate_runtime() {
+  local output=''
+  local -a containers=()
+  output=$(docker ps -aq \
+    --filter 'label=com.kelion.managed=true' --filter "label=com.kelion.slot=$inactive_slot") \
+    || return 1
+  [ -z "$output" ] || mapfile -t containers <<<"$output"
+  if [ "${#containers[@]}" -gt 0 ]; then
+    ensure_containers_stopped "${containers[@]}" || return 1
+  fi
+}
+
+restore_database_if_required() {
+  [ "$db_restore_required" = 1 ] || return 0
+  [ "$point_of_no_return" = 0 ] || {
+    printf 'release: point-of-no-return depășit; restore-ul automat ar putea pierde scrieri\n' >&2
+    return 1
+  }
+  write_recovery_journal restore-in-progress 0 1 || return 1
+  KELION_RESTORE_APPROVED=1 KELION_PUBLICATION_LOCK_HELD=1 \
+    bash "$BUNDLE_DIR/restore-verified-backup.sh" "$PROOF_FILE" \
+    || return 1
+  verify_database_contract || return 1
+  database_restore_verified=1
+  db_restore_required=0
+  write_recovery_journal database-restored 0 0 || return 1
+}
+
+preflight_database_restore() {
+  KELION_RESTORE_APPROVED=1 KELION_PUBLICATION_LOCK_HELD=1 \
+    bash "$BUNDLE_DIR/restore-verified-backup.sh" --preflight "$PROOF_FILE"
+}
+
+restart_previous_slot() {
+  local rollback_ready=''
+  [ "$db_restore_required" = 0 ] || return 1
+  if [ "$destructive_migration_attempted" = 1 ]; then
+    [ "$database_restore_verified" = 1 ] || return 1
+    verify_database_contract || return 1
+  fi
+  [ "${#active_runtime_containers[@]}" -gt 0 ] || return 1
+  restore_release_marker || return 1
+  ensure_containers_running "${active_runtime_containers[@]}" || return 1
+  for _attempt in $(seq 1 45); do
+    rollback_ready=$(curl --fail --silent --show-error --max-time 10 \
+      "http://127.0.0.1:$active_bind_port/readyz" || true)
+    if jq -e '.ready == true and .release.sideEffectsActive == true' \
+      <<<"$rollback_ready" >/dev/null 2>&1; then
+      active_runtime_stopped=0
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+restart_legacy_runtime() {
+  local consecutive=0 version_payload=''
+  [ "$db_restore_required" = 0 ] || return 1
+  if [ "$destructive_migration_attempted" = 1 ]; then
+    [ "$database_restore_verified" = 1 ] || return 1
+    verify_database_contract || return 1
+  fi
+  [ "${#legacy_runtime_running[@]}" -gt 0 ] || return 1
+  restore_release_marker || return 1
+  ensure_containers_running "${legacy_runtime_running[@]}" || return 1
+
+  # Legacy nu are /livez sau /readyz: răspunsurile 200 erau fallback-ul SPA.
+  # Cerem JSON-ul /api/version exact și contractul DB verificat mai sus, de trei ori.
+  for _attempt in $(seq 1 30); do
+    version_payload=$(curl --fail --silent --show-error --max-time 10 \
+      --noproxy '*' \
+      http://127.0.0.1:8080/api/version || true)
+    if jq -e --arg expected "$legacy_version_before" \
+      '.v == $expected and (.v | type == "string")' <<<"$version_payload" >/dev/null 2>&1; then
+      consecutive=$((consecutive + 1))
+      if [ "$consecutive" -ge 3 ]; then
+        active_runtime_stopped=0
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+verify_public_previous_version() {
+  local consecutive=0 version_payload=''
+  [ -n "$previous_version_before" ] || return 1
+  for _attempt in $(seq 1 30); do
+    version_payload=$(curl --fail --silent --show-error --max-time 10 \
+      --noproxy '*' --resolve "$PUBLIC_APP_DOMAIN:443:127.0.0.1" \
+      "https://$PUBLIC_APP_DOMAIN/api/version" || true)
+    if jq -e --arg expected "$previous_version_before" \
+      '.v == $expected and (.v | type == "string")' <<<"$version_payload" >/dev/null 2>&1; then
+      consecutive=$((consecutive + 1))
+      [ "$consecutive" -lt 3 ] || return 0
+    else
+      consecutive=0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+restore_proxy_after_rollback() {
+  restore_caddyfile_snapshot || return 1
+  restore_upstream_snapshot || return 1
+  case "$active_slot" in
+    blue|green)
+      [ "$old_upstream_present" = 1 ] && [ -n "$old_upstream" ] || return 1
+      docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null || return 1
+      docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null || return 1
+      ;;
+    legacy)
+      if docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true; then
+        "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" down >/dev/null || return 1
+      fi
+      [ "$legacy_proxy_running" = 1 ] || return 1
+      ensure_containers_running kelion-caddy || return 1
+      docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  # Starea Docker `Running` și probele directe nu dovedesc TLS/rutarea publică.
+  # Dezarmăm recovery-ul numai după trei răspunsuri JSON cu versiunea capturată.
+  verify_public_previous_version || return 1
+  cleanup_caddyfile_snapshot
+}
+
+rollback_switch() {
+  local rollback_failed=0 runtime_ready=0
+  [ "$recovery_armed" = 1 ] || return 0
+  [ "$point_of_no_return" = 0 ] || return 1
+
+  # Ordine de fier: niciun writer candidat în timpul restore-ului; DB întâi;
+  # abia apoi runtime-ul vechi și proxy-ul public.
+  if ! stop_candidate_runtime; then
+    printf 'release: recovery a refuzat restore-ul cât candidatul poate scrie\n' >&2
+    return 1
+  fi
+  if ! restore_database_if_required; then
+    printf 'release: backupul verificat nu a putut restaura și schimba baza\n' >&2
+    return 1
+  fi
+  if ! rollback_backup_schedule; then
+    printf 'release: rollback-ul nu poate restaura schedulerul de backup\n' >&2
+    rollback_failed=1
+  elif ! cleanup_backup_schedule_snapshot; then
+    printf 'release: snapshotul schedulerului de backup nu poate fi curățat\n' >&2
+    rollback_failed=1
+  fi
+
+  if [ "$active_slot" = blue ] || [ "$active_slot" = green ]; then
+    # Markerul poate dezactiva singur runtime-ul vechi înainte ca shell-ul să-l
+    # marcheze oprit. Îl restaurăm și îl verificăm întotdeauna, idempotent.
+    if restart_previous_slot; then runtime_ready=1; else rollback_failed=1; fi
+  else
+    # Și primul cutover trebuie să refacă markerul `legacy` chiar dacă procesele
+    # vechi nu au fost încă oprite. Helperul de start acceptă starea running.
+    if restart_legacy_runtime; then runtime_ready=1; else rollback_failed=1; fi
+  fi
+  if [ "$runtime_ready" = 1 ]; then
+    restore_proxy_after_rollback || rollback_failed=1
+  fi
+  [ "$rollback_failed" = 0 ] || return 1
+  if [ "$destructive_cutover" = 1 ]; then
+    write_recovery_journal rolled-back 0 0 || return 1
+    clear_recovery_journal || return 1
+  fi
+  recovery_armed=0
+}
+
+recover_schedule_after_point_of_no_return() {
+  # Schedulerul nu poate produce write-uri în aplicație și are propriul snapshot;
+  # îl putem repara fără să atingem candidatul, DB-ul, runtime-ul sau proxy-ul.
+  if ! rollback_backup_schedule; then
+    printf 'release: schedulerul de backup nu a putut fi restaurat după point-of-no-return\n' >&2
+    return 1
+  fi
+  cleanup_backup_schedule_snapshot
+}
+
+on_release_exit() {
+  local rc=$?
+  # Recovery-ul nu poate fi întrerupt la al doilea Ctrl-C/TERM. SIGKILL/reboot
+  # este acoperit de jurnalul durabil și va bloca următoarea publicare.
+  trap '' HUP INT TERM
+  trap - EXIT
+  if [ "$rc" -ne 0 ] && [ "$recovery_armed" = 1 ]; then
+    if [ "$point_of_no_return" = 1 ]; then
+      recover_schedule_after_point_of_no_return \
+        || printf 'release: RECOVERY INCOMPLET pentru schedulerul de backup\n' >&2
+      printf 'release: eșec după point-of-no-return; candidatul, DB și proxy-ul rămân nemodificate\n' >&2
+    else
+      rollback_switch || printf 'release: RECOVERY INCOMPLET; runtime-ul vechi rămâne oprit\n' >&2
+    fi
+  fi
+  exit "$rc"
+}
+
+# Trap-ul este armat înainte de maintenance, backup și mai ales înainte de
+# migrator. Orice eșec ulterior revine prin aceeași ordine DB → runtime → proxy.
+recovery_armed=1
+trap on_release_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 install_persistent_backup_script
+if [ "$destructive_cutover" = 1 ]; then
+  write_recovery_journal maintenance 0 0
+  enter_destructive_maintenance
+  stop_active_runtime
+  stop_candidate_runtime
+  verify_destructive_maintenance
+fi
+rm -f -- "$PROOF_FILE"
 "$PERSISTENT_BACKUP_SCRIPT"
 [ -s "$PROOF_FILE" ] || die 'backup-ul nu a produs dovada verificată'
+if [ "$destructive_cutover" = 1 ]; then
+  # Exercită validatorul, arhiva, rolul DB, spațiul și restore-ul scratch fără
+  # swap. Numai după această dovadă permitem migratorului să mute baza live.
+  preflight_database_restore
+fi
 
-pending_count=$(jq -er '.pending | length' <<<"$migration_plan")
 if [ "$pending_count" -gt 0 ]; then
   migration_args=(
     --rm --network none --user 1000:1000 --group-add 10050
@@ -504,26 +1190,25 @@ if [ "$pending_count" -gt 0 ]; then
     -v /var/run/postgresql:/var/run/postgresql:ro
     -v "$SECRET_ROOT/database-url:/run/secrets/database-url:ro"
   )
-  if [ "$(jq -er '.risk' <<<"$migration_plan")" = destructive ]; then
+  if [ "$destructive_cutover" = 1 ]; then
     migration_args+=(
       -e MIGRATION_BACKUP_PROOF_FILE=/run/proof/backup.json
       -e MIGRATION_BACKUP_PROOF_KEY_FILE=/run/secrets/migration-backup-proof-key
       -v "$PROOF_FILE:/run/proof/backup.json:ro"
       -v "$PROOF_KEY:/run/secrets/migration-backup-proof-key:ro"
     )
+    # Fail-closed: comanda poate muta DB înainte să întoarcă o eroare, deci
+    # recovery-ul devine obligatoriu ÎNAINTE de pornirea migratorului.
+    destructive_migration_attempted=1
+    db_restore_required=1
+    write_recovery_journal before-migrator 0 1
   fi
   migration_output=$(docker run "${migration_args[@]}" "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate)
   [ "$migration_output" = migrations_ok ] || die 'migrările nu au confirmat succesul'
+  if [ "$destructive_cutover" = 1 ]; then
+    write_recovery_journal database-migrated 0 1
+  fi
 fi
-
-UPSTREAM_FILE=$PROXY_CONFIG_ROOT/upstream/kelion-upstream.caddy
-old_upstream=''
-[ ! -f "$UPSTREAM_FILE" ] || old_upstream=$(cat "$UPSTREAM_FILE")
-case "$old_upstream" in
-  *app-blue:8080*) active_slot=blue; active_bind_port=18080; inactive_slot=green ;;
-  *app-green:8080*) active_slot=green; active_bind_port=18081; inactive_slot=blue ;;
-  *) active_slot=legacy; active_bind_port=''; inactive_slot=blue ;;
-esac
 
 case "$inactive_slot" in
   blue)
@@ -596,122 +1281,16 @@ docker run --rm --network kelion-proxy --user 1000:1000 --read-only \
 rm -f -- "$temporary_proxy/Caddyfile" "$temporary_proxy/kelion-upstream.caddy"
 rmdir "$temporary_proxy"
 
-old_marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active")
-legacy_proxy_running=0
-docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true && legacy_proxy_running=1 || true
-LEGACY_RUNTIME_CONTAINERS=(kelionai-app omniroute kelionai-coqui)
-legacy_runtime_running=()
-for legacy in "${LEGACY_RUNTIME_CONTAINERS[@]}"; do
-  docker inspect -f '{{.State.Running}}' "$legacy" 2>/dev/null | grep -qx true \
-    && legacy_runtime_running+=("$legacy") || true
-done
-switched=0
-restore_release_marker() {
-  local temporary
-  temporary=$(mktemp "$RELEASE_STATE_ROOT/rollback.XXXXXX")
-  printf '%s\n' "$old_marker" > "$temporary"
-  chown root:10050 "$temporary"
-  chmod 0640 "$temporary"
-  mv "$temporary" "$RELEASE_STATE_ROOT/active"
-}
-
-restart_previous_slot() {
-  local rollback_ready=''
-  local -a containers=()
-  mapfile -t containers < <(
-    docker ps -aq \
-      --filter "label=com.kelion.managed=true" \
-      --filter "label=com.kelion.slot=$active_slot"
-  )
-  [ "${#containers[@]}" -gt 0 ] || return 1
-  docker start "${containers[@]}" >/dev/null
-  restore_release_marker
-  for _attempt in $(seq 1 45); do
-    rollback_ready=$(curl --fail --silent --show-error --max-time 10 \
-      "http://127.0.0.1:$active_bind_port/readyz" || true)
-    if jq -e '.ready == true and .release.sideEffectsActive == true' \
-      <<<"$rollback_ready" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-  return 1
-}
-
-restart_legacy_runtime() {
-  local consecutive=0
-  local legacy_state=''
-  [ "${#legacy_runtime_running[@]}" -gt 0 ] || return 1
-  docker start "${legacy_runtime_running[@]}" >/dev/null || return 1
-  for legacy in "${legacy_runtime_running[@]}"; do
-    legacy_state=$(docker inspect -f '{{.State.Running}}' "$legacy" 2>/dev/null) || return 1
-    [ "$legacy_state" = true ] || return 1
-  done
-
-  # Preflightul gazdei a măsurat ambele endpointuri pe upstreamul legacy local;
-  # imaginea veche nu are Docker Healthcheck. Cerem trei probe consecutive ca
-  # să nu restaurăm Caddy peste un proces abia pornit sau instabil.
-  for _attempt in $(seq 1 30); do
-    if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8080/livez >/dev/null \
-      && curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8080/readyz >/dev/null; then
-      consecutive=$((consecutive + 1))
-      [ "$consecutive" -lt 3 ] || return 0
-    else
-      consecutive=0
-    fi
-    sleep 2
-  done
-  return 1
-}
-
-rollback_switch() {
-  local rollback_failed=0 rollback_target_ready=0 temporary
-  [ "$switched" = 1 ] || return 0
-  if ! rollback_backup_schedule; then
-    printf 'release: rollback-ul nu poate restaura schedulerul de backup\n' >&2
-    rollback_failed=1
-  elif ! cleanup_backup_schedule_snapshot; then
-    printf 'release: snapshotul schedulerului de backup nu poate fi curățat\n' >&2
-    rollback_failed=1
-  fi
-  if [ "$active_slot" = blue ] || [ "$active_slot" = green ]; then
-    if restart_previous_slot; then
-      rollback_target_ready=1
-    else
-      printf 'release: rollback-ul nu poate confirma readiness-ul slotului %s\n' "$active_slot" >&2
-      rollback_failed=1
-    fi
-  else
-    restore_release_marker
-    if restart_legacy_runtime; then
-      rollback_target_ready=1
-    else
-      printf 'release: rollback-ul nu poate confirma runtime-ul legacy local\n' >&2
-      rollback_failed=1
-    fi
-  fi
-  if [ "$rollback_target_ready" = 1 ] && [ -n "$old_upstream" ]; then
-    temporary=$(mktemp "$PROXY_CONFIG_ROOT/upstream/rollback.XXXXXX")
-    printf '%s\n' "$old_upstream" > "$temporary"
-    chmod 0644 "$temporary"
-    mv "$temporary" "$UPSTREAM_FILE"
-    docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
-    docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
-  fi
-  if [ "$rollback_target_ready" = 1 ] && [ "$legacy_proxy_running" = 1 ]; then
-    "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" down >/dev/null 2>&1 || true
-    docker start kelion-caddy >/dev/null 2>&1 || true
-  fi
-  return "$rollback_failed"
-}
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then rollback_switch; fi' EXIT
-
 install -m 0644 "$BUNDLE_DIR/Caddyfile" "$PROXY_CONFIG_ROOT/Caddyfile"
 temporary_upstream=$(mktemp "$PROXY_CONFIG_ROOT/upstream/candidate.XXXXXX")
 printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$inactive_slot" > "$temporary_upstream"
 chmod 0644 "$temporary_upstream"
+# Pentru un slot managed, următorul mv poate deveni public la reload. Din acest
+# punct snapshotul nu mai poate fi aplicat fără risc de a pierde scrieri.
+if [ "$destructive_cutover" = 1 ] && [ "$active_slot" != legacy ]; then
+  mark_point_of_no_return
+fi
 mv "$temporary_upstream" "$UPSTREAM_FILE"
-switched=1
 
 export PUBLIC_APP_DOMAIN KELION_PROXY_CONFIG_ROOT=$PROXY_CONFIG_ROOT KELION_PROXY_STATE_ROOT=$PROXY_STATE_ROOT
 "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" config --quiet
@@ -719,7 +1298,13 @@ if docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx tr
   docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
   docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
 else
-  [ "$legacy_proxy_running" = 0 ] || docker stop --time 30 kelion-caddy >/dev/null
+  [ "$legacy_proxy_running" = 0 ] || ensure_containers_stopped kelion-caddy
+  # La primul cutover UPSTREAM_FILE nu este public cât timp kelion-caddy deține
+  # 80/443. Punctul ireversibil este chiar înainte ca noul proxy să poată primi
+  # trafic; după el recovery-ul nu oprește candidatul și nu restaurează snapshotul.
+  if [ "$destructive_cutover" = 1 ]; then
+    mark_point_of_no_return
+  fi
   "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up -d --no-build --wait --wait-timeout 90
 fi
 
@@ -760,30 +1345,11 @@ activate_persistent_backup_script
 install_backup_schedule
 retire_legacy_backup_cron
 
-case "$active_slot" in
-blue|green)
-  "$COMPOSE_BIN" -p "kelion-$active_slot" -f "$COMPOSE_FILE" stop --timeout 30 >/dev/null 2>&1 || true
-  ;;
-legacy)
-  # Stackul vechi este o plasă recuperabilă, nu gunoi: îl oprim numai după
-  # smoke-ul public exact de mai sus și nu ștergem containere, imagini sau
-  # volume. Lista vine din preflightul măsurat al gazdei.
-  if [ "${#legacy_runtime_running[@]}" -gt 0 ]; then
-    docker stop --time 30 "${legacy_runtime_running[@]}" >/dev/null
-    for legacy in "${legacy_runtime_running[@]}"; do
-      legacy_running=$(docker inspect -f '{{.State.Running}}' "$legacy" 2>/dev/null) \
-        || die "containerul legacy $legacy nu poate fi verificat după oprire"
-      [ "$legacy_running" = false ] \
-        || die "containerul legacy $legacy rulează încă după oprire"
-    done
-  fi
-  ;;
-*)
-  die "slot activ necunoscut: $active_slot"
-  ;;
-esac
+# Pentru un plan distructiv writerul vechi este deja oprit înainte de backup;
+# pentru orice alt plan îl oprim numai după smoke-ul public exact. Funcția este
+# idempotentă și păstrează containerele pentru recovery.
+stop_active_runtime
 
-rm -f -- "$PROOF_FILE"
 record=$(mktemp "$RUNTIME_ROOT/release.XXXXXX")
 jq -n --arg commit "$COMMIT_SHA" --arg slot "$inactive_slot" --arg mode "$RELEASE_MODE" \
   --argjson ciRunId "$KELION_CI_RUN_ID" --argjson buildRunId "$KELION_BUILD_RUN_ID" \
@@ -791,9 +1357,21 @@ jq -n --arg commit "$COMMIT_SHA" --arg slot "$inactive_slot" --arg mode "$RELEAS
 chmod 0600 "$record"
 mv "$record" "$RUNTIME_ROOT/last-release.json"
 backup_schedule_mutating=0
-switched=0
-trap - EXIT
 if ! cleanup_backup_schedule_snapshot; then
   printf 'release: avertisment: snapshotul schedulerului a rămas root-only în runtime\n' >&2
+fi
+if ! cleanup_caddyfile_snapshot; then
+  printf 'release: avertisment: snapshotul Caddyfile a rămas root-only în runtime\n' >&2
+fi
+db_restore_required=0
+if [ "$destructive_cutover" = 1 ]; then
+  [ "$point_of_no_return" = 1 ] || die 'release-ul distructiv nu a înregistrat point-of-no-return'
+  write_recovery_journal completed 1 0
+  clear_recovery_journal
+fi
+recovery_armed=0
+trap - HUP INT TERM EXIT
+if ! rm -f -- "$PROOF_FILE"; then
+  printf 'release: avertisment: dovada backupului a rămas root-only în runtime\n' >&2
 fi
 printf 'release_ok commit=%s slot=%s\n' "$COMMIT_SHA" "$inactive_slot"

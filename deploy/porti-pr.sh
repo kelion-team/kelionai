@@ -131,7 +131,7 @@ ruleaza_portile() {
   ( exec 9>&-; cd "$dir/frontend" && npm test ) >/dev/null 2>&1 && R_FRONT_TEST=TRECE
 
   ( exec 9>&-; cd "$dir" && npx --yes jscpd@5.0.16 --config .jscpd.json --threshold 0 --cross-formats js-ts ) >/dev/null 2>&1 && R_DUP=TRECE
-  ( exec 9>&-; cd "$dir" && node --test scripts/verifica-butoane.test.mjs scripts/verifica-exporturi.test.mjs scripts/verifica-hardcodari.test.mjs scripts/verifica-migrari.test.mjs scripts/inventar-audit.test.mjs scripts/verifica-contract-deploy.test.mjs ios/appstore-build.test.mjs deploy/lib/create-migration-proof.test.mjs deploy/lib/caddy-security.test.mjs deploy/lib/codex-boundary.test.mjs deploy/lib/constructor-publication.test.mjs deploy/lib/network-config.test.mjs deploy/lib/compose-security.test.mjs deploy/lib/security-policy.test.mjs ) >/dev/null 2>&1 && R_UNIT=TRECE
+  ( exec 9>&-; cd "$dir" && node --test scripts/verifica-butoane.test.mjs scripts/verifica-exporturi.test.mjs scripts/verifica-hardcodari.test.mjs scripts/verifica-migrari.test.mjs scripts/inventar-audit.test.mjs scripts/verifica-contract-deploy.test.mjs ios/appstore-build.test.mjs deploy/lib/create-migration-proof.test.mjs deploy/lib/restore-verified-backup.test.mjs deploy/lib/caddy-security.test.mjs deploy/lib/codex-boundary.test.mjs deploy/lib/constructor-publication.test.mjs deploy/lib/network-config.test.mjs deploy/lib/compose-security.test.mjs deploy/lib/security-policy.test.mjs ) >/dev/null 2>&1 && R_UNIT=TRECE
   ( exec 9>&-; cd "$dir" && node scripts/verifica-exporturi.mjs ) >/dev/null 2>&1 && R_EXP=TRECE
   ( exec 9>&-; cd "$dir" && node scripts/identifica-teste-moarte.mjs ) >/dev/null 2>&1 && R_MOARTE=TRECE
   ( exec 9>&-; cd "$dir" && node scripts/verifica-sintaxa.mjs ) >/dev/null 2>&1 && R_SINT=TRECE

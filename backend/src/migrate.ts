@@ -9,11 +9,18 @@ const migrationsDir = resolve(here, '..', 'migrations')
 const migrationName = /^\d{8}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/
 const destructiveSql = /\b(?:DROP\s+(?:TABLE|COLUMN|TYPE|FUNCTION|TRIGGER|INDEX|VIEW|SCHEMA|SEQUENCE|EXTENSION)|TRUNCATE(?:\s+TABLE)?|DELETE\s+FROM)\b/i
 
-type MigrationSpec = {
+export type MigrationSpec = {
   version: string
   sql: string
   digest: string
   destructive: boolean
+}
+
+export type MigrationClient = {
+  query<Row extends pg.QueryResultRow = pg.QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: Row[] }>
 }
 
 function secret(name: string): string {
@@ -133,23 +140,7 @@ function requireBackupProof(databaseUrl: string): void {
   if (!fingerprintOk || !signatureOk) throw new Error('destructive_migration_backup_proof_invalid_or_stale')
 }
 
-async function applyMigration(client: pg.PoolClient, version: string, sql: string, digest: string, databaseUrl: string): Promise<void> {
-  if (destructiveSql.test(sql)) requireBackupProof(databaseUrl)
-  await client.query('BEGIN')
-  try {
-    await client.query(transactionBody(sql))
-    await client.query(
-      'INSERT INTO schema_migrations (version, checksum_sha256) VALUES ($1, $2)',
-      [version, digest],
-    )
-    await client.query('COMMIT')
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined)
-    throw error
-  }
-}
-
-async function inspectApplied(client: pg.PoolClient, migrations: MigrationSpec[]): Promise<Map<string, string>> {
+async function inspectApplied(client: MigrationClient, migrations: MigrationSpec[]): Promise<Map<string, string>> {
   const registry = await client.query<{ name: string | null }>("SELECT to_regclass('public.schema_migrations')::text AS name")
   if (!registry.rows[0]?.name) return new Map()
   const applied = await client.query<{ version: string; checksum_sha256: string }>(
@@ -165,6 +156,37 @@ async function inspectApplied(client: pg.PoolClient, migrations: MigrationSpec[]
     if (existing && existing !== migration.digest) throw new Error(`migration_checksum_changed:${migration.version}`)
   }
   return byVersion
+}
+
+export async function applyMigrationsAtomically(
+  client: MigrationClient,
+  migrations: MigrationSpec[],
+  databaseUrl: string,
+): Promise<void> {
+  await client.query('BEGIN')
+  try {
+    const applied = await inspectApplied(client, migrations)
+    const pending = migrations.filter(({ version }) => !applied.has(version))
+
+    // One signed, recent proof covers this exact database snapshot. Validate it
+    // for every destructive file before the bootstrap or any other migration can
+    // mutate the database. A missing proof therefore rolls back an empty batch.
+    for (const migration of pending) {
+      if (destructiveSql.test(migration.sql)) requireBackupProof(databaseUrl)
+    }
+
+    for (const migration of pending) {
+      await client.query(transactionBody(migration.sql))
+      await client.query(
+        'INSERT INTO schema_migrations (version, checksum_sha256) VALUES ($1, $2)',
+        [migration.version, migration.digest],
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  }
 }
 
 export async function migrationPlan(): Promise<{
@@ -199,23 +221,12 @@ export async function runMigrations(): Promise<void> {
   const databaseUrl = secret('DATABASE_URL')
   if (!databaseUrl) throw new Error('DATABASE_URL_or_FILE_required')
   const migrations = loadMigrations()
-  const bootstrap = migrations[0]
 
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 })
   const client = await pool.connect()
   try {
     await client.query("SELECT pg_advisory_lock(hashtext('kelion-schema-migrations'))")
-    const registry = await client.query<{ name: string | null }>("SELECT to_regclass('public.schema_migrations')::text AS name")
-    if (!registry.rows[0]?.name) {
-      await applyMigration(client, bootstrap.version, bootstrap.sql, bootstrap.digest, databaseUrl)
-    }
-
-    const byVersion = await inspectApplied(client, migrations)
-    for (const migration of migrations) {
-      if (!byVersion.has(migration.version)) {
-        await applyMigration(client, migration.version, migration.sql, migration.digest, databaseUrl)
-      }
-    }
+    await applyMigrationsAtomically(client, migrations, databaseUrl)
   } finally {
     await client.query("SELECT pg_advisory_unlock(hashtext('kelion-schema-migrations'))").catch(() => undefined)
     client.release()
