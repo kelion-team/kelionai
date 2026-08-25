@@ -1422,9 +1422,12 @@ refresh_constructor_gate() (
   for user in kelion-codex kelion-publisher; do
     runtime=/run/$user
     install -d -o "$user" -g "$user" -m 0700 "$runtime"
+    local registry_owner
+    registry_owner="${KELION_CODEX_GATE_IMAGE#ghcr.io/}"
+    registry_owner="${registry_owner%%/*}"
     authfile=$runtime/release-gate-auth.json
     rm -f -- "$authfile"
-    cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username kelion-team --password-stdin >/dev/null
+    cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin >/dev/null
     if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE" >/dev/null; then
       runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
       exit 1

@@ -24,7 +24,7 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  actions: read
   packages: read
 
 concurrency:
@@ -57,14 +57,6 @@ jobs:
           [ "$VPS_USER" = root ]
           [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$PUBLIC_APP_ORIGIN"
-
-      - name: Persista activarea in configuratia canonica
-        if: inputs.operation == 'configure-constructor'
-        run: |
-          set -euo pipefail
-          for name in CODEX_WORKER_ENABLED CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_RELEASE_ENABLED; do
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/$name" -f value=1
-          done
 
       - name: Descopera cheia publica ed25519 pentru pinning
         if: inputs.operation == 'discover-host-key'
