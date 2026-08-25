@@ -31,6 +31,15 @@ describe('Dockerfile web — cache determinist și runtime minimal', () => {
     expect(source).not.toMatch(/npm install(?:\s|\\)/)
   })
 
+  it('păstrează pachetul local DOMException atât la instalare, cât și la runtime', () => {
+    const backendInstall = instructionPosition(source, 'RUN cd backend && npm ci')
+    const vendorInstall = instructionPosition(source, 'COPY backend/vendor/node-domexception ./backend/vendor/node-domexception')
+    const runtime = source.slice(instructionPosition(source, 'FROM ${NODE_IMAGE} AS runtime'))
+
+    expect(vendorInstall).toBeLessThan(backendInstall)
+    expect(runtime).toContain('COPY --chown=node:node --from=constructie /build/backend/vendor ./backend/vendor')
+  })
+
   it('runtime-ul primește doar artefactele necesare, nu repository-ul', () => {
     const runtime = source.slice(instructionPosition(source, 'FROM ${NODE_IMAGE} AS runtime'))
     expect(runtime).toContain('/build/backend/dist ./backend/dist')

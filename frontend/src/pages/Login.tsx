@@ -4,18 +4,38 @@ import React, { useState } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
 import BackLink from '../components/BackLink'
 import { apiFetch } from '../lib/transport'
-import { startGoogleLogin } from '../lib/api'
+import {
+  startGoogleLogin,
+  readAuthNavigation,
+  type AuthNavigationSnapshot,
+} from '../lib/api'
 
 type Mode = 'login' | 'magic' | 'reset'
 
-export default function Login(): React.JSX.Element {
+export default function Login({
+  initialAuthNavigation,
+}: {
+  initialAuthNavigation?: AuthNavigationSnapshot
+}): React.JSX.Element {
+  const [authNavigation] = useState(() =>
+    initialAuthNavigation ?? readAuthNavigation(window.location.search),
+  )
   const resetToken = new URLSearchParams(window.location.search).get('reset') ?? ''
-  const urlError = new URLSearchParams(window.location.search).get('error') ?? ''
+  const urlError = authNavigation.message
+    ? ''
+    : new URLSearchParams(window.location.search).get('error') ?? ''
   const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'login')
   const [email, setEmail] = useState('')
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState(urlError === 'link_expirat' ? T.errLinkExpired : '')
+  const [note, setNote] = useState(
+    authNavigation.message
+      ?? (urlError === 'link_expirat'
+        ? T.errLinkExpired
+        : urlError === 'oauth_failed'
+          ? 'Google sign-in did not complete. Please try again.'
+          : ''),
+  )
 
   const post = async (url: string, body: object): Promise<{ ok?: boolean; error?: string }> => {
     const r = await apiFetch(url, {
@@ -74,7 +94,7 @@ export default function Login(): React.JSX.Element {
 
         {mode !== 'reset' && (
           <>
-            <button type="button" className="login-google" onClick={startGoogleLogin}>🔵 {T.continueGoogle}</button>
+            <button type="button" className="login-google" onClick={() => startGoogleLogin(authNavigation.returnTo)}>🔵 {T.continueGoogle}</button>
             <div className="login-sep">{T.orEmail}</div>
           </>
         )}
