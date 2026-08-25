@@ -75,5 +75,9 @@ do
   install -o root -g root -m 0444 "$repo_root/deploy/systemd/$unit" "/etc/systemd/system/$unit"
 done
 
+rm -f -- \
+  /etc/kelion/codex-worker.enabled \
+  /etc/kelion/constructor-publisher.enabled \
+  /etc/kelion/constructor-release.enabled
 systemctl daemon-reload
-echo 'Constructor instalat fara a modifica starea markerilor de activare.'
+echo 'Constructor instalat dezactivat; configurarea si activarea sunt etape separate.'

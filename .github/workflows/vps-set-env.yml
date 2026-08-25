@@ -11,7 +11,6 @@ concurrency:
 
 jobs:
   provision:
-    if: github.ref == 'refs/heads/master' && github.event.repository.default_branch == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -37,9 +36,9 @@ jobs:
       OPENAI_VIDEO_SHUTDOWN_AT: ${{ vars.OPENAI_VIDEO_SHUTDOWN_AT }}
       PRIVACY_POLICY_UPDATED: ${{ vars.PRIVACY_POLICY_UPDATED }}
       DATA_CONTROLLER_NAME: ${{ vars.DATA_CONTROLLER_NAME }}
-      CODEX_WORKER_ENABLED: ${{ vars.CODEX_WORKER_ENABLED || '1' }}
-      CONSTRUCTOR_PUBLISHER_ENABLED: ${{ vars.CONSTRUCTOR_PUBLISHER_ENABLED || '1' }}
-      CONSTRUCTOR_RELEASE_ENABLED: ${{ vars.CONSTRUCTOR_RELEASE_ENABLED || '1' }}
+      CODEX_WORKER_ENABLED: ${{ vars.CODEX_WORKER_ENABLED || '0' }}
+      CONSTRUCTOR_PUBLISHER_ENABLED: ${{ vars.CONSTRUCTOR_PUBLISHER_ENABLED || '0' }}
+      CONSTRUCTOR_RELEASE_ENABLED: ${{ vars.CONSTRUCTOR_RELEASE_ENABLED || '0' }}
       VISITOR_CHAT_TTL_SECONDS: ${{ vars.VISITOR_CHAT_TTL_SECONDS || '3600' }}
       VISITOR_ANALYTICS_RETENTION_DAYS: ${{ vars.VISITOR_ANALYTICS_RETENTION_DAYS || '7' }}
       SESSION_ABSOLUTE_TTL_SECONDS: ${{ vars.SESSION_ABSOLUTE_TTL_SECONDS }}
@@ -95,15 +94,6 @@ jobs:
       - name: Scrie allowlist-ul fără restart sau deploy
         run: |
           set -euo pipefail
-          set +x
-          umask 077
-          database_url_normalized_file=''
-          key_file=''
-          known_hosts=''
-          cleanup() {
-            rm -f -- "$database_url_normalized_file" "$key_file" "$known_hosts"
-          }
-          trap cleanup EXIT
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           [ -n "$PUBLIC_APP_ORIGIN" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REDIRECT_URI" ]
           [ -n "$OPENAI_LUNA_MODEL" ] && [ -n "$OPENAI_MEDIUM_MODEL" ] && [ -n "$OPENAI_HEAVY_MODEL" ]
@@ -122,116 +112,48 @@ jobs:
           [ "${#CONVERTER_WORKER_SECRET}" -ge 32 ]
           [ "${#GOOGLE_TOKEN_ENCRYPTION_KEY}" -ge 32 ]
           [ -n "$DATABASE_URL" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]
-          # Normalizează numai cele două forme aprobate: socketul local deja
-          # canonic sau URL-ul legacy strict loopback cu sslmode=disable. Rezultatul
-          # nu trece prin stdout, iar mesajele de eroare nu includ secretul.
-          database_url_normalized_file=$(mktemp)
-          python3 - "$database_url_normalized_file" <<'PY'
-          import ipaddress
+          # Parsează canonic URL-ul, nu cu globuri de substring: duplicatele sau
+          # cheile necunoscute ar putea schimba hostul efectiv după validare.
+          # Mesajele de eroare nu includ niciodată valoarea secretului.
+          python3 - <<'PY'
           import os
-          import pathlib
           import re
-          import sys
-          from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
+          from urllib.parse import parse_qsl, unquote, urlsplit
 
           raw = os.environ.get('DATABASE_URL', '')
-          if not raw or len(raw) > 4096 or any(character in raw for character in ('\x00', '\r', '\n')):
-              raise SystemExit('DATABASE_URL este invalid')
           try:
               url = urlsplit(raw)
               authority_port = url.port
-              pairs = parse_qsl(
-                  url.query,
-                  keep_blank_values=True,
-                  strict_parsing=True,
-                  encoding='utf8',
-                  errors='strict',
-              )
-          except (TypeError, UnicodeError, ValueError):
+              pairs = parse_qsl(url.query, keep_blank_values=True, strict_parsing=True)
+          except (TypeError, ValueError):
               raise SystemExit('DATABASE_URL are sintaxă invalidă')
 
           query = {}
           for key, value in pairs:
-              if key in query:
-                  raise SystemExit('DATABASE_URL conține parametri duplicați')
+              if key not in {'host', 'port'} or key in query:
+                  raise SystemExit('DATABASE_URL conține parametri necunoscuți sau duplicați')
               query[key] = value
 
-          def decode_component(value):
-              if re.search(r'%(?![0-9A-Fa-f]{2})', value):
-                  raise ValueError('invalid percent escape')
-              return unquote(value, errors='strict')
-
-          try:
-              database = decode_component(url.path[1:]) if url.path.startswith('/') else ''
-              username = decode_component(url.username or '')
-              password = decode_component(url.password or '')
-          except (UnicodeError, ValueError):
-              raise SystemExit('DATABASE_URL conține codare invalidă')
-
-          def is_loopback(host):
-              if not host:
-                  return False
-              if host.lower() == 'localhost':
-                  return True
-              try:
-                  return ipaddress.ip_address(host).is_loopback
-              except ValueError:
-                  return False
-
-          socket_form = (
-              url.scheme == 'postgresql'
-              and url.hostname == 'localhost'
-              and set(query) in ({'host'}, {'host', 'port'})
-              and query.get('host') == '/var/run/postgresql'
-              and not (authority_port is not None and 'port' in query)
-          )
-          legacy_form = (
-              url.scheme in {'postgres', 'postgresql'}
-              and is_loopback(url.hostname)
-              and query == {'sslmode': 'disable'}
-          )
-          if socket_form:
-              effective_port = query.get('port', str(authority_port if authority_port is not None else 5432))
-          elif legacy_form:
-              effective_port = str(authority_port if authority_port is not None else 5432)
-          else:
-              raise SystemExit('DATABASE_URL este în afara contractului local')
-
+          database = unquote(url.path[1:]) if url.path.startswith('/') else ''
+          username = unquote(url.username or '')
+          password = unquote(url.password or '')
+          effective_port = query.get('port', str(authority_port or 5432))
           values = (database, username, password, effective_port)
           if (
-              url.fragment
-              or url.netloc.endswith(':')
-              or not re.fullmatch(r'[A-Za-z0-9_.-]{1,63}', database)
-              or not re.fullmatch(r'[A-Za-z0-9_.-]{1,63}', username)
+              url.scheme != 'postgresql'
+              or url.hostname != 'localhost'
+              or url.fragment
+              or query.get('host') != '/var/run/postgresql'
+              or (authority_port is not None and 'port' in query)
+              or not re.fullmatch(r'[A-Za-z0-9_.-]+', database)
+              or not username
               or not password
-              or len(password) > 1024
-              or not re.fullmatch(r'[0-9]{1,5}', effective_port)
+              or not effective_port.isdigit()
               or not 1 <= int(effective_port) <= 65535
               or any(any(character in value for character in ('\x00', '\r', '\n')) for value in values)
           ):
-              raise SystemExit('DATABASE_URL este în afara contractului local')
-
-          port = str(int(effective_port))
-          authority = f'{quote(username, safe="")}:{quote(password, safe="")}@localhost'
-          normalized = urlunsplit((
-              'postgresql',
-              authority,
-              f'/{database}',
-              urlencode((('host', '/var/run/postgresql'), ('port', port))),
-              '',
-          ))
-          destination = pathlib.Path(sys.argv[1])
-          destination.write_bytes((normalized + '\n').encode('utf8'))
-          os.chmod(destination, 0o600)
+              raise SystemExit('DATABASE_URL este în afara contractului socket local')
           PY
-          [ "$(wc -l < "$database_url_normalized_file")" -eq 1 ]
-          IFS= read -r DATABASE_URL < "$database_url_normalized_file"
-          [ -n "$DATABASE_URL" ]
-          # GitHub maschează secretul original, dar forma transformată trebuie
-          # înregistrată separat înainte să intre în payloadurile locale.
-          printf '::add-mask::%s\n' "$DATABASE_URL"
-          rm -f -- "$database_url_normalized_file"
-          database_url_normalized_file=''
           [[ "$CODEX_WORKER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_PUBLISHER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_RELEASE_ENABLED" =~ ^[01]$ ]]
@@ -286,8 +208,11 @@ jobs:
             *) exit 1 ;;
           esac
 
+          umask 077
           key_file=$(mktemp)
           known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
           printf '%s\n' "$SSH_KEY" > "$key_file"
           printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
           chmod 0600 "$key_file" "$known_hosts"
@@ -297,11 +222,13 @@ jobs:
               -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
               "$VPS_USER@$VPS_HOST" "$@"
           }
-          encode() { printf '%s=%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
+          # ':' nu face parte din alfabetul base64. Cu '=' ca separator, Bash
+          # poate elimina paddingul final '=' când face split prin IFS.
+          encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
 
           {
-            encode database-url "$DATABASE_URL"
             encode openai-project-key "$OPENAI_API_KEY"
+            encode database-url "$DATABASE_URL"
             encode session-secret "$SESSION_SECRET"
             encode google-client-secret "$GOOGLE_CLIENT_SECRET"
             encode google-token-encryption-key "$GOOGLE_TOKEN_ENCRYPTION_KEY"
@@ -316,36 +243,6 @@ jobs:
           } | ssh_vps '
             set -euo pipefail
             umask 077
-            IFS="=" read -r name encoded
-            [ "$name" = database-url ]
-            value=$(printf "%s" "$encoded" | base64 -d)
-            [ -n "$value" ] && [ "$(printf "%s" "$value" | wc -l)" -eq 0 ]
-
-            cutover_state=/root/kelion/runtime/db-role-cutover
-            complete_marker=$cutover_state/complete
-            candidate_sha_file=$cutover_state/candidate.sha256
-            active_database_secret=/root/kelion/secrets/database-url
-            if [ -e "$complete_marker" ] || [ -L "$complete_marker" ]; then
-              [ -d "$cutover_state" ] && [ ! -L "$cutover_state" ]
-              [ "$(stat -c "%u:%g:%a" "$cutover_state")" = "0:0:700" ]
-              [ -f "$complete_marker" ] && [ ! -L "$complete_marker" ] && [ -s "$complete_marker" ]
-              [ "$(stat -c "%u:%g:%a" "$complete_marker")" = "0:0:600" ]
-              [ -f "$candidate_sha_file" ] && [ ! -L "$candidate_sha_file" ]
-              [ "$(stat -c "%u:%g:%a" "$candidate_sha_file")" = "0:0:600" ]
-              [ "$(wc -c < "$candidate_sha_file")" -eq 65 ]
-              [ -f "$active_database_secret" ] && [ ! -L "$active_database_secret" ] && [ -s "$active_database_secret" ]
-              [ "$(stat -c "%u:%g:%a" "$active_database_secret")" = "0:10050:440" ]
-              expected_candidate_sha=$(tr -d "\r\n" < "$candidate_sha_file")
-              [[ "$expected_candidate_sha" =~ ^[0-9a-f]{64}$ ]]
-              incoming_database_sha=$(printf "%s\n" "$value" | sha256sum | cut -d" " -f1)
-              active_database_sha=$(sha256sum "$active_database_secret" | cut -d" " -f1)
-              if [ "$incoming_database_sha" != "$expected_candidate_sha" ] \
-                || [ "$active_database_sha" != "$expected_candidate_sha" ]; then
-                printf "%s\n" "database credential differs from completed cutover" >&2
-                exit 1
-              fi
-            fi
-
             install -d -o root -g 10050 -m 0750 /root/kelion/secrets
             if [ ! -s /root/kelion/secrets/migration-backup-proof-key ]; then
               temporary_proof_key=$(mktemp /root/kelion/secrets/migration-backup-proof-key.XXXXXX)
@@ -354,15 +251,9 @@ jobs:
               chmod 0440 "$temporary_proof_key"
               mv "$temporary_proof_key" /root/kelion/secrets/migration-backup-proof-key
             fi
-            temporary=$(mktemp /root/kelion/secrets/database-url.XXXXXX)
-            printf "%s\n" "$value" > "$temporary"
-            chown root:10050 "$temporary"
-            chmod 0440 "$temporary"
-            mv "$temporary" "$active_database_secret"
-
-            while IFS="=" read -r name encoded; do
+            while IFS=":" read -r name encoded; do
               case "$name" in
-                openai-project-key|session-secret|google-client-secret|google-token-encryption-key|codex-worker-secret|constructor-publisher-secret|constructor-release-secret|browser-worker-secret|converter-worker-secret|revolut-merchant-secret-key|revolut-webhook-signing-secret|vapid-private-key) ;;
+                openai-project-key|database-url|session-secret|google-client-secret|google-token-encryption-key|codex-worker-secret|constructor-publisher-secret|constructor-release-secret|browser-worker-secret|converter-worker-secret|revolut-merchant-secret-key|revolut-webhook-signing-secret|vapid-private-key) ;;
                 *) exit 1 ;;
               esac
               value=$(printf "%s" "$encoded" | base64 -d)
