@@ -9,6 +9,7 @@ User=root
 Group=root
 UMask=0077
 Environment=PATH=/usr/bin:/bin
+EnvironmentFile=/root/kelion/config/codex-worker.env
 LoadCredential=github-worker-token:/root/kelion/worker-secrets/github-worker-token
 ExecStart=/opt/kelion-constructor/constructor-sync-worker.sh
 NoNewPrivileges=true
