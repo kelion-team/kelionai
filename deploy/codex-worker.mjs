@@ -38,7 +38,6 @@ const CODEX_VERSION = 'codex-cli 0.149.1'
 const PROFILE_NAME = 'kelion-worker'
 const ADVERSARIAL_SENTINEL = 'KELION-CODEX-ADVERSARIAL-SENTINEL-V1'
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
-const GITHUB_ASKPASS = resolve(process.env.CODEX_GITHUB_ASKPASS ?? '/opt/kelion-constructor/github-askpass.sh')
 const REQUIRED_LAYOUT = Object.freeze({
   codexBin: '/opt/kelion-codex/bin/codex',
   repo: '/var/lib/kelion-codex/repo',
@@ -132,44 +131,6 @@ function gitSupervisorEnv() {
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '/bin/false',
   }
-}
-
-function githubWorkerTokenPath() {
-  const path = process.env.GITHUB_WORKER_TOKEN_FILE
-    ? resolve(process.env.GITHUB_WORKER_TOKEN_FILE)
-    : process.env.CREDENTIALS_DIRECTORY
-      ? join(process.env.CREDENTIALS_DIRECTORY, 'github-worker-token')
-      : ''
-  if (!path) fail('Lipsește credentiala GitHub read-only a workerului')
-  const info = statSync(path)
-  if (!info.isFile() || (process.platform !== 'win32' && (info.mode & 0o077) !== 0)) {
-    fail('Credentiala GitHub a workerului are permisiuni invalide')
-  }
-  return path
-}
-
-function syncOriginMaster() {
-  const askpass = statSync(GITHUB_ASKPASS)
-  if (!askpass.isFile() || askpass.uid !== 0 || (askpass.mode & 0o022) !== 0) {
-    fail('Askpass-ul GitHub al workerului trebuie să fie root-owned și read-only')
-  }
-  const result = spawnSync(
-    '/usr/bin/git',
-    ['-c', 'core.hooksPath=/dev/null', 'fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'],
-    {
-      cwd: REPO,
-      env: {
-        ...gitSupervisorEnv(),
-        GIT_ASKPASS: GITHUB_ASKPASS,
-        KELION_GITHUB_TOKEN_FILE: githubWorkerTokenPath(),
-      },
-      encoding: 'utf8',
-      maxBuffer: 256 * 1024,
-      timeout: 180_000,
-      windowsHide: true,
-    },
-  )
-  if (result.status !== 0) fail('Workerul nu a putut sincroniza origin/master din repository-ul privat')
 }
 
 export function codexExecArgs(jobDir) {
@@ -599,7 +560,6 @@ async function adversarialSandboxPreflight() {
 async function preflight() {
   if (!EXEC_ENABLED) return 'Execuția locală este dezactivată explicit'
   try {
-    syncOriginMaster()
     assertEnabledLayout()
     await adversarialSandboxPreflight()
   } catch (error) {
