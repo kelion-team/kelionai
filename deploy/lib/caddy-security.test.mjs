@@ -92,6 +92,34 @@ test('validarea CI montează upstream-ul exact în calea importată de Caddy', (
   )
 })
 
+test('proxy-ul vede înlocuirile atomice printr-un singur mount de director', () => {
+  assert.match(
+    composeProxy,
+    /source: \$\{KELION_PROXY_CONFIG_ROOT:\?proxy config root is required\}\r?\n\s+target: \/etc\/caddy\r?\n\s+read_only: true/,
+  )
+  assert.doesNotMatch(composeProxy, /KELION_PROXY_CONFIG_ROOT[^\r\n]*\/(?:Caddyfile|upstream)/)
+  assert.doesNotMatch(composeProxy, /target: \/etc\/caddy\/(?:Caddyfile|upstream)/)
+})
+
+test('deploy-ul reconciliază Compose înainte de validare și reload', () => {
+  const start = deploy.indexOf('export PUBLIC_APP_DOMAIN KELION_PROXY_CONFIG_ROOT=')
+  const end = deploy.indexOf('temporary_active=$(mktemp', start)
+  const reconcile = deploy.slice(start, end)
+  const composeUp = reconcile.indexOf('"$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up')
+  const validate = reconcile.indexOf('docker exec kelion-proxy caddy validate')
+  const reload = reconcile.indexOf('docker exec kelion-proxy caddy reload')
+
+  assert.ok(start >= 0 && end > start)
+  assert.match(
+    reconcile,
+    /if ! docker inspect[^\r\n]+kelion-proxy[^\r\n]+grep -qx true; then[\s\S]*?\r?\nfi\r?\n(?:#[^\r\n]*\r?\n)+"\$COMPOSE_BIN" -p kelion-proxy -f "\$PROXY_COMPOSE_FILE" up/,
+    'Compose up trebuie rulat în afara ramurii pentru proxy oprit',
+  )
+  assert.equal((reconcile.match(/"\$COMPOSE_BIN"[^\r\n]+ up /g) ?? []).length, 1)
+  assert.ok(validate > composeUp, 'validarea trebuie să urmeze reconcilierea mounturilor')
+  assert.ok(reload > validate, 'reload-ul trebuie să urmeze validarea configurației vizibile')
+})
+
 test('toate etapele folosesc același digest Caddy verificat', () => {
   for (const [name, source] of [['CI', prVerify], ['compose proxy', composeProxy], ['deploy', deploy]]) {
     const images = source.match(/caddy:2@sha256:[a-f0-9]{64}/g) ?? []

@@ -12,13 +12,11 @@ services:
       - "443:443"
       - "127.0.0.1:18079:18079"
     volumes:
+      # Configurația este înlocuită atomic de deploy. Montarea directorului
+      # păstrează vizibile noile inode-uri pentru Caddy și pentru rollback.
       - type: bind
-        source: ${KELION_PROXY_CONFIG_ROOT:?proxy config root is required}/Caddyfile
-        target: /etc/caddy/Caddyfile
-        read_only: true
-      - type: bind
-        source: ${KELION_PROXY_CONFIG_ROOT:?proxy config root is required}/upstream
-        target: /etc/caddy/upstream
+        source: ${KELION_PROXY_CONFIG_ROOT:?proxy config root is required}
+        target: /etc/caddy
         read_only: true
       - type: bind
         source: ${KELION_PROXY_STATE_ROOT:?proxy state root is required}/data

@@ -5,6 +5,14 @@ română. Codul, configurația validată, testele și runbook-urile curente sunt
 singurele surse de adevăr; handoff-urile și rapoartele istorice nu se păstrează
 în arborele activ.
 
+## Reluarea lucrului operațional
+
+La începutul oricărei lucrări de release, incident, producție sau continuitate,
+citește mai întâi `docs/operations/CURRENT.md`. Actualizează-l înainte de a
+întrerupe sesiunea și după orice schimbare materială de stare. Fișierul conține
+numai starea curentă verificată și următorul pas sigur; nu copiază loguri,
+secrete sau presupuneri din conversație.
+
 ## Invariante de produs
 
 - OpenAI Responses este singurul creier online al produsului. OpenAI Realtime,

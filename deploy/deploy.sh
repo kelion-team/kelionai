@@ -1355,10 +1355,7 @@ mv "$temporary_upstream" "$UPSTREAM_FILE"
 
 export PUBLIC_APP_DOMAIN KELION_PROXY_CONFIG_ROOT=$PROXY_CONFIG_ROOT KELION_PROXY_STATE_ROOT=$PROXY_STATE_ROOT
 "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" config --quiet
-if docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true; then
-  docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
-  docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
-else
+if ! docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true; then
   [ "$legacy_proxy_running" = 0 ] || ensure_containers_stopped kelion-caddy
   # La primul cutover UPSTREAM_FILE nu este public cât timp kelion-caddy deține
   # 80/443. Punctul ireversibil este chiar înainte ca noul proxy să poată primi
@@ -1366,8 +1363,13 @@ else
   if [ "$destructive_cutover" = 1 ]; then
     mark_point_of_no_return
   fi
-  "$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up -d --no-build --wait --wait-timeout 90
 fi
+# `up` reconciliază inclusiv un proxy deja pornit. Este obligatoriu când se
+# schimbă structura bind mount-urilor; altfel reload-ul ar putea citi în
+# continuare inode-ul vechi al Caddyfile-ului înlocuit atomic.
+"$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up -d --no-build --wait --wait-timeout 90
+docker exec kelion-proxy caddy validate --config /etc/caddy/Caddyfile >/dev/null
+docker exec kelion-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null
 
 temporary_active=$(mktemp "$RELEASE_STATE_ROOT/active.XXXXXX")
 printf '%s\n' "$COMMIT_SHA" > "$temporary_active"
