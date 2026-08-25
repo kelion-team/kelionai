@@ -7,10 +7,26 @@ lucrează la KelionAI. El completează Git, GitHub Actions și Deployments; nu l
 Ordinea de reluare este:
 
 1. citește `CURRENT.md`;
-2. verifică branch-ul și commiturile indicate față de Git/GitHub;
-3. confirmă din nou sondele live înaintea unei mutații;
-4. execută numai `Următorul pas sigur`;
-5. actualizează `CURRENT.md` când starea verificată s-a schimbat.
+2. citește `DELIVERY-RULES-AND-ROADMAP.md` înainte de planificarea sau
+   raportarea unei livrări către owner;
+3. verifică branch-ul și commiturile indicate față de Git/GitHub;
+4. confirmă din nou sondele live înaintea unei mutații;
+5. prezintă proactiv handofful concis din `CURRENT.md`, înainte de a cere
+   repetarea contextului;
+6. execută numai `Următorul pas sigur`;
+7. actualizează `CURRENT.md` când starea verificată s-a schimbat și la sfârșitul
+   fiecărei sesiuni.
+
+Documente canonice:
+
+- [`CURRENT.md`](CURRENT.md): starea verificată, lucrul neterminat, blocajele,
+  pașii următori și linkurile active;
+- [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md): contractul
+  versionat de livrare, milestone-urile agreate și criteriile de acceptare;
+- [`CONSTRUCTOR-CONTINUITY-RUNBOOK.md`](CONSTRUCTOR-CONTINUITY-RUNBOOK.md):
+  continuitatea unei cereri Constructor;
+- [`GITHUB-RELEASE-INTEGRATION.md`](GITHUB-RELEASE-INTEGRATION.md): integrarea
+  GitHub server-side pentru Admin → Constructor.
 
 `CURRENT.md` descrie exclusiv adevărul curent. Istoria rămâne în commituri,
 PR-uri, Actions și Deployments. Nu se adaugă aici chei, tokenuri, valori de
