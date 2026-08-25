@@ -23,6 +23,9 @@ Documente canonice:
   pașii următori și linkurile active;
 - [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md): contractul
   versionat de livrare, milestone-urile agreate și criteriile de acceptare;
+- [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md): registrul
+  canonic al tuturor suprafețelor Admin, starea lor factuală, dependențele,
+  hardcodările și dovezile necesare pentru închidere;
 - [`CONSTRUCTOR-CONTINUITY-RUNBOOK.md`](CONSTRUCTOR-CONTINUITY-RUNBOOK.md):
   continuitatea unei cereri Constructor;
 - [`GITHUB-RELEASE-INTEGRATION.md`](GITHUB-RELEASE-INTEGRATION.md): integrarea

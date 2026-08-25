@@ -651,6 +651,23 @@ interface BuildLiveJob {
       percent: number | null
     }>
   }
+  workCard?: {
+    id: string
+    canonicalLink: string
+    acceptanceCriteria: string[]
+    contextLinks: string[]
+    actor: string | null
+    currentStep: string | null
+    heartbeatAt: string | null
+    plan: Array<{ key: string; label: string; state: 'completed' | 'current' | 'pending' }>
+    decisions: string[]
+    approvals: string[]
+    risks: string[]
+    dependencies: string[]
+    escalationCondition: string
+    evidence: { prUrl: string | null; ci: string | null; commit: string | null; liveVersion: string | null; eventCount: number }
+    closure: { resolved: boolean; closedAt: string | null }
+  } | null
 }
 
 const buildLabel = (status: string): string => {
@@ -816,6 +833,24 @@ function BuildSurface({ zoom }: { zoom: number }) {
                 )}
               </div>
 
+              {j.workCard && (
+                <section id={`constructor-work-card-${j.id}`} className="build-progress" aria-label={`Fisa de lucru ${j.workCard.id}`}>
+                  <a href={j.workCard.canonicalLink}><strong>{j.workCard.id}</strong></a>
+                  {j.workCard.currentStep && <span> · {j.workCard.currentStep}</span>}
+                  {j.workCard.heartbeatAt && <time dateTime={j.workCard.heartbeatAt}> · heartbeat {new Date(j.workCard.heartbeatAt).toLocaleTimeString()}</time>}
+                  <details>
+                    <summary>Fisa canonica de lucru</summary>
+                    <div>Actor: {j.workCard.actor ?? 'in asteptare'}</div>
+                    <div>Acceptare: {j.workCard.acceptanceCriteria.join(' · ')}</div>
+                    <div>Plan: {j.workCard.plan.map((step) => `${step.label} [${step.state}]`).join(' · ')}</div>
+                    {j.workCard.contextLinks.map((link) => <div key={link}><a href={link} target="_blank" rel="noreferrer">Sursa</a></div>)}
+                    <div>Dovezi: {j.workCard.evidence.eventCount} evenimente{j.workCard.evidence.prUrl ? ' · PR atasat' : ''}{j.workCard.evidence.ci ? ` · CI ${j.workCard.evidence.ci}` : ''}</div>
+                    {j.workCard.risks.length > 0 && <div>Riscuri: {j.workCard.risks.join(' · ')}</div>}
+                    {j.workCard.dependencies.length > 0 && <div>Dependente: {j.workCard.dependencies.join(' · ')}</div>}
+                    <div>Escaladare: {j.workCard.escalationCondition}</div>
+                  </details>
+                </section>
+              )}
               {j.status === 'failed' ? (
                 <div className="build-fail">
                   ✗ Eșuat{j.progress ? ` — ${j.progress}` : ''}

@@ -21,6 +21,7 @@ import {
 import { verifyPublisherRequest, verifyReleaseRequest } from '../services/constructorServiceAuth.js'
 import { constructorContinuity } from '../services/constructorContinuity.js'
 import { constructorObservabilityForJobs } from '../services/constructorObservability.js'
+import { constructorWorkCardsForJobs } from '../services/constructorWorkCard.js'
 import { actOnRelease, readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -85,6 +86,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const raw = await listBuildJobs(40)
     if (!raw) return reply.code(500).send({ error: 'db_unreadable' })
     const observability = await constructorObservabilityForJobs(raw)
+    const workCards = await constructorWorkCardsForJobs(raw, observability)
     // `pct` și timeline-ul sunt proiectate din catalogul și evenimentele
     // persistate; endpointul nu deține procente sau praguri de etapă.
     const incidents = await Promise.all(raw.map((job) => getConstructorIncidentForJob(job.id)))
@@ -97,6 +99,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
       cerutDe: cineACerut(j.orderedBy),
       continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) },
+      workCard: workCards.get(j.id) ?? null,
     }))
     const worker = await getCodexWorkerStatus()
     return reply.send({
@@ -410,6 +413,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return
     const jobs = await listMonitorBuildJobs()
     const observability = await constructorObservabilityForJobs(jobs)
+    const workCards = await constructorWorkCardsForJobs(jobs, observability)
     const incidents = await Promise.all(jobs.map((job) => getConstructorIncidentForJob(job.id)))
     return reply.send({
       // P8: `order` devine FAPTA (numeleOrdinului), nu primele litere ale
@@ -417,7 +421,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: observability.get(j.id)?.progress.percent ?? null, ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) } })),
+      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: observability.get(j.id)?.progress.percent ?? null, ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) }, workCard: workCards.get(j.id) ?? null })),
     })
   })
 }

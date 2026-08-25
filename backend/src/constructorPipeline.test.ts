@@ -47,6 +47,7 @@ beforeEach(async () => {
   `)
   await database.exec(readFileSync(new URL('../migrations/20260901_constructor_publication_pipeline.sql', import.meta.url), 'utf8'))
   await database.exec(readFileSync(new URL('../migrations/20260902_constructor_observability.sql', import.meta.url), 'utf8'))
+  await database.exec(readFileSync(new URL('../migrations/20260903_constructor_work_cards.sql', import.meta.url), 'utf8'))
   await database.query(
     `INSERT INTO build_jobs(status, codex_task_id, constructor_stage)
      VALUES ('running', $1, 'working')`,
@@ -149,6 +150,12 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     expect(activity.rows.map((row) => row.activity_key)).toEqual(expect.arrayContaining([
       'working', 'gates_passed', 'pr_opened', 'merged', 'release_dispatched', 'deployed',
     ]))
+    const orphanedEvents = await database.query<{ count: string }>(
+      `SELECT count(*)::text FROM constructor_activity_events e
+        LEFT JOIN constructor_work_cards c ON c.job_id=e.job_id
+       WHERE c.job_id IS NULL`,
+    )
+    expect(orphanedEvents.rows[0]?.count).toBe('0')
   })
 
   it('keeps a failed release at merged and continues beyond the former retry cap', { timeout: 30_000 }, async () => {
