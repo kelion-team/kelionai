@@ -93,7 +93,15 @@ jobs:
           [[ "$gate_image" == "$gate_prefix"* ]]
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           printf 'image=%s\n' "$gate_image" >> "$GITHUB_OUTPUT"
-          tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$RUNNER_TEMP/constructor-bundle.tar.gz" AGENTS.md deploy
+          # Trimitem numai fișiere urmărite de commitul verificat.  `git archive`
+          # evită dependența de implementarea tar de pe runner și refuză explicit
+          # un input absent înainte ca VPS-ul să primească vreun artefact.
+          for input in AGENTS.md deploy; do
+            git cat-file -e "HEAD:$input"
+          done
+          git archive --format=tar HEAD AGENTS.md deploy | gzip -n > "$RUNNER_TEMP/constructor-bundle.tar.gz"
+          tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" | grep -qx 'AGENTS.md'
+          tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" | grep -q '^deploy/'
 
       - name: Configureaza Constructorul fara activare prematura
         if: inputs.operation == 'configure-constructor'

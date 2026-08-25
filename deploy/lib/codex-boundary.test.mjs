@@ -68,6 +68,16 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
 })
 
+test('controlul Constructorului arhivează numai intrările versionate, cu preflight fail-closed', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+
+  assert.match(workflow, /for input in AGENTS\.md deploy; do\s+git cat-file -e "HEAD:\$input"/)
+  assert.match(workflow, /git archive --format=tar HEAD AGENTS\.md deploy \| gzip -n > "\$RUNNER_TEMP\/constructor-bundle\.tar\.gz"/)
+  assert.match(workflow, /tar -tzf "\$RUNNER_TEMP\/constructor-bundle\.tar\.gz" \| grep -qx 'AGENTS\.md'/)
+  assert.match(workflow, /tar -tzf "\$RUNNER_TEMP\/constructor-bundle\.tar\.gz" \| grep -q '\^deploy\/'/)
+  assert.doesNotMatch(workflow, /tar --sort=name --owner=0 --group=0 --numeric-owner -czf "\$RUNNER_TEMP\/constructor-bundle\.tar\.gz"/)
+})
+
 test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențele read-only', () => {
   const ignore = read('.gitignore')
   const frontendPackage = JSON.parse(read('frontend/package.json'))
