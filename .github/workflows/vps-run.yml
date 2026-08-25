@@ -169,7 +169,7 @@ jobs:
 
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
-          apt-get install -y -qq ca-certificates curl git jq nodejs npm bubblewrap podman uidmap
+          apt-get install -y -qq ca-certificates curl git jq bubblewrap podman uidmap           if [ ! -x /usr/bin/node ]; then apt-get install -y -qq nodejs; fi           if [ ! -x /usr/bin/npm ]; then apt-get install -y -qq npm; fi           [ -x /usr/bin/node ]           [ -x /usr/bin/npm ]
           systemctl disable --now kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer >/dev/null 2>&1 || true
           KELION_CONSTRUCTOR_INSTALL=1 bash "$work/deploy/instaleaza-constructor.sh"
 
