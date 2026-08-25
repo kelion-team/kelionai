@@ -36,6 +36,12 @@ test('cele trei identități nu își pot împrumuta credentialele', () => {
   assert.match(release, /!readyResponse\.ok \|\| !activeReady/)
 })
 
+test('cheia privată de semnare rămâne root-only și ajunge la publisher numai prin LoadCredential', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /chown root:root "[$]signing_key"; chmod 0400 "[$]signing_key"/)
+  assert.doesNotMatch(workflow, /chown root:kelion-publisher "[$]signing_key"|chmod 0440 "[$]signing_key"/)
+})
+
 test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   const worker = read('deploy/systemd/kelion-codex-worker.service')
   const publisher = read('deploy/systemd/kelion-constructor-publisher.service')

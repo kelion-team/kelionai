@@ -209,7 +209,7 @@ jobs:
 
           signing_key=/root/kelion/publisher-secrets/github-publisher-signing-key
           if [ ! -s "$signing_key" ]; then ssh-keygen -q -t ed25519 -N '' -C "kelion-constructor@$public_host" -f "$signing_key"; fi
-          chown root:kelion-publisher "$signing_key"; chmod 0440 "$signing_key"
+          chown root:root "$signing_key"; chmod 0400 "$signing_key"
           signing_public=$(ssh-keygen -y -f "$signing_key")
           signing_fingerprint=$(ssh-keygen -lf "$signing_key" -E sha256 | awk '{print $2}')
           [[ "$signing_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
