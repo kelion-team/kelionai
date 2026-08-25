@@ -11,7 +11,7 @@ describe('privacy and integrity of the credits page', () => {
     const html = renderToStaticMarkup(<Credits authenticated={false} />)
 
     expect(html).toContain('Sign in to view your balance')
-    expect(html).toContain('href="/login"')
+    expect(html).toContain('href="/login?next=/credite"')
     expect(html).not.toContain('Current balance')
     expect(html).not.toContain('Transaction history')
     expect(html).not.toContain('Secure Revolut checkout')

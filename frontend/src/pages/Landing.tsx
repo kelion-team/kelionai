@@ -143,7 +143,7 @@ export default function Landing({ error }: { error?: string | null }) {
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
+            <button type="button" className="google-btn cta-primary" onClick={() => startGoogleLogin('/')}>
               <img src="/google-g-logo.svg" width="18" height="18" alt="" aria-hidden="true" />
               {t.signIn}
             </button>

@@ -262,7 +262,7 @@ export default function Credits({
 
   const buy = async (amount: number): Promise<void> => {
     if (!authenticated) {
-      window.location.href = '/login'
+      window.location.href = '/login?next=/credite'
       return
     }
     const minorUnit = balance?.minorUnit
@@ -329,7 +329,7 @@ export default function Credits({
           <p className="login-note" role="status">
             {T.creditsSignInFirst}
           </p>
-          <a className="credits-pack" href="/login">
+              <a className="credits-pack" href="/login?next=/credite">
             {T.accountLink}
           </a>
         </div>

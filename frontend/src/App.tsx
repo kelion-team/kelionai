@@ -1,5 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { cachedOfflineMe, fetchMe, type User } from './lib/api'
+import {
+  cachedOfflineMe,
+  fetchMe,
+  type User,
+  authNoticeForAuthenticatedUser,
+  readAuthNavigation,
+  type AuthNavigationSnapshot,
+} from './lib/api'
 import { useConectat } from './lib/conexiune'
 import DynamicBackground from './components/DynamicBackground'
 
@@ -22,7 +29,44 @@ import { uiStrings } from './lib/i18n'
 // Watchdog-ul global măsoară blocarea firului principal.
 watchdogInit()
 
+function AuthenticatedAuthNotice({
+  navigation,
+  authenticated,
+}: {
+  navigation: AuthNavigationSnapshot
+  authenticated: boolean
+}) {
+  const message = authNoticeForAuthenticatedUser(navigation, authenticated)
+  if (!message) return null
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      style={{
+        position: 'fixed',
+        top: '1rem',
+        right: '1rem',
+        left: '1rem',
+        zIndex: 10000,
+        margin: '0 auto',
+        maxWidth: '52rem',
+        border: '1px solid #a83232',
+        borderRadius: '0.75rem',
+        padding: '0.85rem 1rem',
+        background: '#fff2f2',
+        color: '#6f1717',
+        boxShadow: '0 0.75rem 2rem rgba(45, 12, 12, 0.24)',
+      }}
+    >
+      {message}
+    </div>
+  )
+}
+
 export default function App() {
+  const [initialAuthNavigation] = useState<AuthNavigationSnapshot>(() =>
+    readAuthNavigation(window.location.search),
+  )
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
   const [offlineSession, setOfflineSession] = useState(false)
@@ -76,6 +120,7 @@ export default function App() {
   return (
     <>
       <BannerOffline />
+      <AuthenticatedAuthNotice navigation={initialAuthNavigation} authenticated={Boolean(user)} />
       {applyUpdate && (
         <button
           type="button"
@@ -119,7 +164,7 @@ export default function App() {
         ) : user ? (
           <Stage user={user} offline={effectiveOffline} />
         ) : window.location.pathname === '/login' ? (
-          <Login />
+          <Login initialAuthNavigation={initialAuthNavigation} />
         ) : (
           <Landing error={error} />
         )}
