@@ -85,6 +85,10 @@ CI și worker-ul trebuie să ruleze aceleași porți în mod blocant. Inventarul
 hash-ează fiecare fișier versionat sau nou, neignorat, și eșuează dacă apare o
 familie de fișiere neclasificată.
 
+Schimbările dependente se adună într-un singur release train, cu preflight
+local și o singură poartă CI completă înainte de rebase merge. Vezi
+[`docs/RELEASE-TRAIN.md`](docs/RELEASE-TRAIN.md).
+
 ## Operare
 
 - Instalare, rollback și dovada publicării: [`deploy/DEPLOY.md`](deploy/DEPLOY.md)

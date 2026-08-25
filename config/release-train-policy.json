@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "baseBranch": "master",
+  "requiredPreflight": [
+    "clean-worktree",
+    "base-is-current-master",
+    "whitespace",
+    "backend-typecheck",
+    "backend-test",
+    "frontend-build",
+    "frontend-lint",
+    "static-gates"
+  ],
+  "fullGate": "pr-verify / container-isolation",
+  "mergeStrategy": "rebase",
+  "deploymentEvidence": "successful master pr-verify run and signed release images"
+}
