@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-25T04:09:55Z`
+Actualizat: `2026-08-25T04:15:47Z`
 
 ## Obiectiv activ
 
@@ -14,8 +14,10 @@ live, apoi repararea traseului creier -> control structurat -> avatar astfel
 - Worktree: `C:\Users\adria\kelionai-workspace`
 - Branch activ: `codex/ops-checkpoint-proxy-20260825`
 - Bază branch: `origin/master` la `b65d7483a581e3c42e285e76a1d1c3a1351a6c2d`
-- Schimbări locale intenționate: fixul durabil pentru mount/reconciliere proxy
-  și acest checkpoint. Verifică `git status` înainte de orice editare.
+- PR activ: `#1374`, deschis din branch-ul de mai sus; head înaintea acestei
+  actualizări era `69fe617d6012f18e41137285ac90689dc04f9f2d`.
+- Branch-ul remote conține fixul durabil și checkpointul. Verifică `git status`
+  și head-ul PR înainte de orice editare.
 
 ## Rutina de reluare Codex
 
@@ -55,7 +57,7 @@ Proba într-o filă publică proaspătă, urmată de aplicarea update-ului PWA, 
 avatarul texturat corect: păr mov, piele și tricou negru. Regresia avatarului gri
 este remediată live.
 
-## Fix durabil în lucru
+## Fix durabil în PR #1374
 
 Branch-ul activ modifică:
 
@@ -83,10 +85,8 @@ live autentificată.
 
 ## Următorul pas sigur
 
-1. rulează `git status` și inspectează toate fișierele intenționate din diff;
-2. rulează din nou testele țintite și `git diff --check`;
-3. commit, push și PR pentru checkpoint + fixul proxy;
-4. așteaptă toate verificările obligatorii și îmbină numai pe verde;
-5. rulează production-release și dovedește că mountul este director, CSP-ul
+1. rulează `git status`, verifică head-ul PR #1374 și starea tuturor checkurilor;
+2. așteaptă toate verificările obligatorii și îmbină numai pe verde;
+3. rulează production-release și dovedește că mountul este director, CSP-ul
    păstrează `blob:`, versiunea live este commitul îmbinat și `/readyz` e verde;
-6. apoi implementează protocolul creier-avatar și matricea de teste live.
+4. apoi implementează protocolul creier-avatar și matricea de teste live.
