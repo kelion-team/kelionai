@@ -51,6 +51,7 @@ import { makeLogTee, capturaConsole } from './services/logbuffer.js'
 import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
+import { realtimeHealth } from './services/realtimeHealth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -233,7 +234,9 @@ app.get('/readyz', async (_req, reply) => {
     && config.openai.medium
     && config.openai.heavy
     && config.openai.realtime
+    && config.openai.realtimeTranscription
   )
+  const realtime = await realtimeHealth()
   let database = false
   let migrations = false
   if (dbEnabled() && schemaReady) {
@@ -260,10 +263,17 @@ app.get('/readyz', async (_req, reply) => {
     && config.converterWorker.secret.length >= 32
     && fs.existsSync(config.converterWorker.socket),
   )
-  const ready = requiredConfig && database && migrations && browserWorker && converterWorker
+  const ready = requiredConfig && realtime.ok && database && migrations && browserWorker && converterWorker
   return reply.code(ready ? 200 : 503).send({
     ready,
-    checks: { config: requiredConfig, database, migrations, browserWorker, converterWorker },
+    checks: {
+      config: requiredConfig,
+      realtime: { ok: realtime.ok, reason: realtime.reason },
+      database,
+      migrations,
+      browserWorker,
+      converterWorker,
+    },
     release: {
       candidate: config.release.candidateMode,
       sideEffectsActive: releaseSideEffectsEnabled(),

@@ -82,9 +82,10 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
     expect(ruta).toMatch(/setSpeechLangPref\(user\.email, comisa\)/)
   })
 
-  it('userul NOU fără preferință primește limba implicită a aplicației (en-US), adminul româna', () => {
-    expect(ruta).toMatch(/limbaPin = 'en-US' \/\/ user nou → limba implicită a aplicației/)
-    expect(ruta).toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
+  it('vocea folosește preferința detectată a contului; fără ea revine doar la engleză', () => {
+    expect(ruta).toMatch(/let limbaPin = 'en-US'/)
+    expect(ruta).toMatch(/const selected = selectVoiceLocale\(pref\)/)
+    expect(ruta).not.toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
     expect(ruta).not.toMatch(/user\.role === 'admin'/)
   })
 })

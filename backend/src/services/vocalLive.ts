@@ -21,11 +21,11 @@ export interface AncoraRealitate {
   acc?: number
 }
 
-export function oraLocalaText(nowIso: string, tz?: string): string {
+export function oraLocalaText(nowIso: string, tz?: string, locale = 'en-US'): string {
   try {
     const date = new Date(nowIso)
     if (!Number.isFinite(date.getTime())) return ''
-    return new Intl.DateTimeFormat('ro-RO', {
+    return new Intl.DateTimeFormat(locale, {
       dateStyle: 'full',
       timeStyle: 'medium',
       ...(tz ? { timeZone: tz } : {}),
@@ -42,7 +42,7 @@ export function construiesteInstructiune(
   ancora?: AncoraRealitate,
   limba?: string,
 ): string {
-  const local = ancora?.nowIso ? oraLocalaText(ancora.nowIso, ancora.tz) : ''
+  const local = ancora?.nowIso ? oraLocalaText(ancora.nowIso, ancora.tz, limba || 'en-US') : ''
   const coordonate = Number.isFinite(ancora?.lat) && Number.isFinite(ancora?.lon)
     ? `${Number(ancora?.lat).toFixed(5)}, ${Number(ancora?.lon).toFixed(5)}`
     : ''

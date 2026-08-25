@@ -99,6 +99,9 @@ export interface VocalLiveOpts {
    *  sau suprimate rămânea lipit pe ecran pe termen nelimitat — exact
    *  „bălăriile" fotografiate de owner). */
   onTuraInchisa?(): void
+  /** A response was intentionally not played. This is distinct from a transport
+   * error, so callers can tell the person why silence occurred. */
+  onStatus?(code: string, reason: string): void
   /** Kelion a început/terminat de vorbit — pentru animația avatarului. */
   onVorbeste?(activ: boolean): void
   /** Cadru de ECRAN venit de la creierul complet prin ușa cere_creierului
@@ -487,7 +490,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   ws.onmessage = (ev: MessageEvent): void => {
     if (typeof ev.data !== 'string') return
-    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; frame?: unknown; opus?: boolean; codec?: string }
+    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; code?: string; reason?: string; frame?: unknown; opus?: boolean; codec?: string }
     try {
       m = JSON.parse(ev.data) as typeof m
     } catch {
@@ -595,6 +598,9 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
         // altfel finalul frazei se trunchiază (tăiat pe difuzor).
         void opusClient?.flush().catch(() => {})
         opts.onTuraInchisa?.() // tura încheiată își ia textul de pe bandă
+        break
+      case 'status':
+        opts.onStatus?.(m.code ?? 'voice_status', m.reason ?? 'unknown')
         break
       case 'ping':
         try {

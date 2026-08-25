@@ -83,6 +83,27 @@ import { parseInputImageDataUrl } from '../services/inputImage.js'
 // fazelor: vocea vorbește; lucrul greu vine după ce se dovedește.
 const UNELTE_LIVE_USER = new Set(['list_memories', 'dovada_faptelor'])
 
+const VOICE_BCP47: Record<string, string> = {
+  ro: 'ro-RO', en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
+}
+
+export function selectVoiceLocale(detected: string | null | undefined): {
+  language: string
+  source: 'detected_preference' | 'fallback'
+} {
+  const value = String(detected ?? '').trim()
+  const base = value.toLowerCase().split('-')[0]
+  if (VOICE_BCP47[base]) return { language: VOICE_BCP47[base], source: 'detected_preference' }
+  if (/^[a-z]{2,3}-[a-z]{2}$/i.test(value)) {
+    const [language, region] = value.split('-')
+    return { language: `${language.toLowerCase()}-${region.toUpperCase()}`, source: 'detected_preference' }
+  }
+  // O preferință ISO validă (ex. `ja` sau `zh`) este tot o limbă detectată;
+  // nu o înlocuim cu engleza doar fiindcă nu are încă o regiune salvată.
+  if (/^[a-z]{2,3}$/i.test(value)) return { language: value.toLowerCase(), source: 'detected_preference' }
+  return { language: 'en-US', source: 'fallback' }
+}
+
 // ── UȘA SPRE CREIERUL ÎNTREG (8 aug, ownerul, pe live: „kelion nu are acces
 // la unelte, vocea merge, și atât" + „nu are acces la gps, meteo" + „modelul
 // să rămână acesta, pe el construim") ────────────────────────────────────────
@@ -155,6 +176,55 @@ export const pulsVoce = {
   varianta: '',
   ultimaEroare: '',
   laUltimulCadru: 0,
+}
+
+/** Admin-only operational trace. It deliberately contains counters and state
+ * labels only: neither raw microphone audio nor transcript text is exposed. */
+const diagnosticVoce = {
+  language: 'en-US',
+  languageSource: 'fallback' as 'detected_preference' | 'fallback',
+  session: 'idle' as 'idle' | 'connecting' | 'ready' | 'closed' | 'error',
+  startedAt: 0,
+  lastEventAt: 0,
+  micFrames: 0,
+  micBytes: 0,
+  transcriptUserEvents: 0,
+  transcriptUserFinal: 0,
+  transcriptKelionEvents: 0,
+  transcriptKelionFinal: 0,
+  vadSpeechStarted: 0,
+  lastSuppression: '' as '' | 'wake_word_required' | 'language_guard' | 'manual_interrupt',
+}
+
+export function diagnosticVocalLive(): Record<string, unknown> {
+  return {
+    models: {
+      realtime: config.openai.realtime,
+      transcription: config.openai.realtimeTranscription,
+      configured: Boolean(config.openai.key && config.openai.realtime && config.openai.realtimeTranscription),
+    },
+    language: { effective: diagnosticVoce.language, source: diagnosticVoce.languageSource },
+    session: {
+      state: diagnosticVoce.session,
+      startedAt: diagnosticVoce.startedAt || null,
+      lastEventAt: diagnosticVoce.lastEventAt || null,
+      openSessions: pulsVoce.sesiuniDeschise,
+    },
+    micFrames: { count: diagnosticVoce.micFrames, bytes: diagnosticVoce.micBytes },
+    transcript: {
+      userEvents: diagnosticVoce.transcriptUserEvents,
+      userFinal: diagnosticVoce.transcriptUserFinal,
+      kelionEvents: diagnosticVoce.transcriptKelionEvents,
+      kelionFinal: diagnosticVoce.transcriptKelionFinal,
+    },
+    vad: { mode: 'server_vad', speechStarted: diagnosticVoce.vadSpeechStarted },
+    suppression: {
+      lastReason: diagnosticVoce.lastSuppression || null,
+      wakeWord: pulsVoce.suprimateAdresare,
+      language: pulsVoce.suprimateLimba,
+      manualInterrupt: pulsVoce.suprimateDupaTaiere,
+    },
+  }
 }
 
 const sesiuniLivePeUtilizator = new Map<string, number>()
@@ -352,6 +422,14 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     return pulsVoce
   })
 
+  app.get('/api/vocal-live/diagnostic', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    if (!esteAdminKelion(user.email)) return reply.code(403).send({ error: 'forbidden' })
+    reply.header('Cache-Control', 'no-store')
+    return diagnosticVocalLive()
+  })
+
   app.get('/api/vocal-live/capability', async (req, reply) => {
     if (!getSessionUser(req)) return reply.code(401).send({ error: 'unauthorized' })
     reply.header('Cache-Control', 'no-store')
@@ -371,6 +449,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       return
     }
     sesiuniLivePeUtilizator.set(userKey, 1)
+    diagnosticVoce.session = 'connecting'
+    diagnosticVoce.startedAt = Date.now()
+    diagnosticVoce.lastEventAt = Date.now()
     if (!vocalLiveDisponibila()) {
       try {
         socket.close(1011, 'vocal_live_indisponibil')
@@ -1009,6 +1090,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         socket.close(1009, 'audio_frame_too_large')
         return
       }
+      diagnosticVoce.micFrames++
+      diagnosticVoce.micBytes += buf.length
+      diagnosticVoce.lastEventAt = Date.now()
       // OPUS: cât e activ, cadrul de microfon vine [octet codec: 0=PCM, 1=Opus]
       // [payload]. Decodăm înainte de detector și de OpenAI Realtime — tot lanțul
       // lucrează pe PCM exact ca azi. Pachet corupt → sărim cadrul, nu crăpăm.
@@ -1044,6 +1128,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     })
     socket.on('close', () => {
       inchis = true
+      diagnosticVoce.session = 'closed'
+      diagnosticVoce.lastEventAt = Date.now()
       scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
@@ -1064,6 +1150,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     })
     socket.on('error', () => {
       inchis = true
+      diagnosticVoce.session = 'error'
+      diagnosticVoce.lastEventAt = Date.now()
       scadeSesiunea()
       clearInterval(ceasCost)
       clearInterval(ceasOrdine)
@@ -1091,38 +1179,23 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         app.log.warn('vocal-live: istoricul nu s-a putut citi — sesiunea pornește fără memorie')
       }
-      // PINUL DE LIMBĂ (9 aug, „Dime, ¿qué" — instrucțiunile nu țin): limba
-      // gurii se PINUIEȘTE determinist din preferința REALĂ a userului
-      // (speech_lang); fără preferință, româna (limba aplicației). O citire
-      // picată nu blochează vocea — cade pe ro-RO și spune în jurnal.
-      const BCP47: Record<string, string> = {
-        ro: 'ro-RO', en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
-      }
-      // PE TOATE LIMBILE (9 aug, ownerul: „la user chinez sau japonez ce
-      // face?"): pinul se pune DOAR pe ce știm sigur — limbile aplicației din
-      // hartă sau un BCP-47 complet salvat (ex. ja-JP). O limbă NECUNOSCUTĂ =
-      // FĂRĂ pin și FĂRĂ gard: sesiunea merge pe auto-detecția Google
-      // (comportamentul dinainte) — mai bine auto decât un pin GREȘIT pe
-      // română pentru un vorbitor de chineză.
-      let limbaPin: string | undefined = 'ro-RO'
+      // Preferința este limba deja detectată pentru acest cont după autentificare.
+      // Ea câștigă pentru orice rol, inclusiv admin; engleza este numai fallback.
+      let limbaPin = 'en-US'
+      let sursaLimba: 'detected_preference' | 'fallback' = 'fallback'
       let prefLimbaCurenta: string | null = null // pentru comiterea din vorbit (mai jos)
       try {
         const pref = await getSpeechLang(user.email)
         prefLimbaCurenta = pref
-        // AUDITUL 15 aug: fără preferință, vocea pinuia ro-RO în timp ce regula
-        // scrisă a ownerului (24 iul, chat.ts: „default for EVERYONE starts in
-        // English"; ADMIN = română mereu) dă engleza — gardul de limbă era armat
-        // CONTRA limbii implicite a aplicației și amuțea userii noi ne-români.
-        // Aceeași regulă acum pe ambele căi.
-        if (isAdminSession) limbaPin = 'ro-RO'
-        else if (!pref) limbaPin = 'en-US' // user nou → limba implicită a aplicației
-        else if (BCP47[pref]) limbaPin = BCP47[pref]
-        else if (/^[a-z]{2}-[A-Z]{2}$/.test(pref)) limbaPin = pref // ex. ja-JP întreg
-        else limbaPin = undefined // necunoscută → auto-detecție, fără gard
+        const selected = selectVoiceLocale(pref)
+        limbaPin = selected.language
+        sursaLimba = selected.source
       } catch {
-        limbaPin = isAdminSession ? 'ro-RO' : 'en-US'
+        limbaPin = 'en-US'
         app.log.warn(`vocal-live: speech_lang necitibil — pinul de limbă cade pe implicit (${limbaPin})`)
       }
+      diagnosticVoce.language = limbaPin
+      diagnosticVoce.languageSource = sursaLimba
       const nume = user.name || user.email.split('@')[0]
       // MEMORIA DE LUNGĂ DURATĂ (10 aug, ownerul: „nu ține minte nimic"): pe
       // scris, recallMemories injectează ce știe Kelion despre user în prompt;
@@ -1322,6 +1395,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       intrerupeTura = () => {
         if (taiereManuala) return
         taiereManuala = true
+        diagnosticVoce.lastSuppression = 'manual_interrupt'
+        diagnosticVoce.lastEventAt = Date.now()
         taiatDeVoce = true
         cadreInAsteptare.length = 0
         textInAsteptare.length = 0
@@ -1335,6 +1410,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       live = deschideVocalLive(instructiune, liveTools, {
         onGata: async () => {
           providerReady = true
+          diagnosticVoce.session = 'ready'
+          diagnosticVoce.lastEventAt = Date.now()
           // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
           // Îl anunțăm clientului DOAR dacă flagul e pornit ȘI codecul chiar s-a
           // încărcat — altfel clientul rămâne pe PCM (fără cursă, fără regresie).
@@ -1407,6 +1484,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           livreazaCadru(data)
         },
         onTranscriereUser: (text, final) => {
+          diagnosticVoce.transcriptUserEvents++
+          if (final) diagnosticVoce.transcriptUserFinal++
+          diagnosticVoce.lastEventAt = Date.now()
           const acum = Date.now()
           // O rostire nouă după o tăiere explicită deschide o tură nouă; nu
           // reanimăm replica pe care omul a oprit-o, ci pornim cu buffere curate.
@@ -1510,6 +1590,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         },
         onTranscriereKelion: (text, final) => {
+          diagnosticVoce.transcriptKelionEvents++
+          if (final) diagnosticVoce.transcriptKelionFinal++
+          diagnosticVoce.lastEventAt = Date.now()
           reseteazaCeasTacere() // Kelion transcrie → sesiunea e ACTIVĂ, nu idle
           bufKelion += text
           // Verdictul de LIMBĂ: la ≥6 caractere sau primul final, apoi
@@ -1786,6 +1869,8 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         },
         onIntrerupt: () => {
+          diagnosticVoce.vadSpeechStarted++
+          diagnosticVoce.lastEventAt = Date.now()
           pulsVoce.intreruperiModel++
           taiereManuala = false
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
@@ -1835,6 +1920,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           opresteCeasLimba()
           if (verdictTura === false || verdictLimba === false) {
+            diagnosticVoce.lastSuppression = verdictLimba === false ? 'language_guard' : 'wake_word_required'
+            diagnosticVoce.lastEventAt = Date.now()
+            trimite({ type: 'status', code: 'response_suppressed', reason: diagnosticVoce.lastSuppression })
             // Tura NU i se adresa SAU a răspuns într-o limbă necerută: nu se
             // salvează în memorie (o replică spaniolă salvată ar OTRĂVI
             // instrucțiunea sesiunii următoare — revizia, 9 aug), dar se

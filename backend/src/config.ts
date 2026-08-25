@@ -55,6 +55,7 @@ export const ENV_ALIASES: Record<string, string[]> = {
   openaiHeavy: ['OPENAI_HEAVY_MODEL'],
   openaiRealtime: ['OPENAI_REALTIME_MODEL'],
   openaiRealtimeTranscription: ['OPENAI_REALTIME_TRANSCRIPTION_MODEL'],
+  openaiApprovedRealtimeModels: ['OPENAI_APPROVED_REALTIME_MODELS'],
   openaiCallTranscription: ['OPENAI_CALL_TRANSCRIPTION_MODEL'],
   openaiTts: ['OPENAI_TTS_MODEL'],
   openaiImage: ['OPENAI_IMAGE_MODEL'],
@@ -350,7 +351,15 @@ function runtimeOpenAIKey(): string {
   const key = env(...ENV_ALIASES.openaiKey)
   // Organization Admin keys are privileged control-plane credentials. They
   // are never a fallback for runtime inference or the Codex worker.
-  return key.startsWith('sk-proj-') ? key : ''
+  if (!key) {
+    if (isProd) throw new Error('OPENAI_API_KEY_FILE este obligatoriu în producție pentru credențiala de proiect Kelion')
+    return ''
+  }
+  if (!key.startsWith('sk-proj-')) {
+    if (isProd) throw new Error('OPENAI_API_KEY_FILE trebuie să conțină o cheie OpenAI project-scoped (sk-proj-)')
+    return ''
+  }
+  return key
 }
 
 // Model IDs are deployment configuration. Production refuses to boot when a
@@ -360,6 +369,27 @@ function configuredModel(envName: string, aliases: string[]): string {
   const value = env(...aliases)
   if (!value && isProd) throw new Error(`${envName} este obligatoriu în producție`)
   return value
+}
+
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$/
+
+/** Realtime models are selected by the deployment owner, never silently by
+ * source code. Production also requires an explicit allow-list so a typo or a
+ * recently retired provider alias cannot turn into a live voice regression. */
+function configuredApprovedRealtimeModel(envName: string, aliases: string[]): string {
+  const model = configuredModel(envName, aliases)
+  if (model && !MODEL_ID.test(model)) throw new Error(`${envName} nu este un identificator de model valid`)
+  const approved = env(...ENV_ALIASES.openaiApprovedRealtimeModels)
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (isProd && approved.length === 0) {
+    throw new Error('OPENAI_APPROVED_REALTIME_MODELS este obligatoriu în producție')
+  }
+  if (approved.length > 0 && model && !approved.includes(model)) {
+    throw new Error(`${envName} nu este aprobat în OPENAI_APPROVED_REALTIME_MODELS`)
+  }
+  return model
 }
 
 const modelRapidActiv = configuredModel('OPENAI_LUNA_MODEL', ENV_ALIASES.openaiLuna)
@@ -494,8 +524,8 @@ export const config = {
     luna: modelRapidActiv,
     medium: modelUnicActiv,
     heavy: modelProfundActiv,
-    realtime: env(...ENV_ALIASES.openaiRealtime),
-    realtimeTranscription: configuredModel(
+    realtime: configuredApprovedRealtimeModel('OPENAI_REALTIME_MODEL', ENV_ALIASES.openaiRealtime),
+    realtimeTranscription: configuredApprovedRealtimeModel(
       'OPENAI_REALTIME_TRANSCRIPTION_MODEL',
       ENV_ALIASES.openaiRealtimeTranscription,
     ),

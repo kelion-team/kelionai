@@ -2152,6 +2152,14 @@ export default function ChatPanel({
           spus = ''
           setLiveVoice('')
         },
+        onStatus: (code, reason) => {
+          if (generatie !== vlGeneratieRef.current || code !== 'response_suppressed') return
+          const mesaj = reason === 'language_guard'
+            ? 'Răspunsul vocal a fost suprimat: limba nu corespunde sesiunii.'
+            : 'Răspunsul vocal a fost suprimat: nu a fost detectată adresarea către Kelion.'
+          setLiveVoice(`⚠ ${mesaj}`)
+          ack(mesaj)
+        },
         onNivelIntrare: (nivel) => {
           if (generatie === vlGeneratieRef.current) micNivelRef.current = nivel
         },

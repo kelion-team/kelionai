@@ -42,16 +42,15 @@ describe('P21 — veriga 2: urechea deschisă chiar AUDE (contextul suspendat)',
 })
 
 describe('P21 — veriga 3: limba urechii la deschidere (default pe user nou, a lui pe user setat)', () => {
-  it('user NOU fără preferință → limba implicită a aplicației (en-US); adminul → română', () => {
-    expect(ruta).toMatch(/limbaPin = 'en-US' \/\/ user nou → limba implicită a aplicației/)
-    expect(ruta).toMatch(/const isAdminSession = esteAdminKelion\(user\.email\)/)
-    expect(ruta).toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
-    expect(ruta).not.toMatch(/user\.role === 'admin'/)
+  it('user NOU fără preferință → engleză; limba detectată a contului câștigă pentru orice rol', () => {
+    expect(ruta).toMatch(/let limbaPin = 'en-US'/)
+    expect(ruta).toMatch(/const selected = selectVoiceLocale\(pref\)/)
+    expect(ruta).not.toMatch(/if \(isAdminSession\) limbaPin = 'ro-RO'/)
   })
 
   it('userul cu limbă SETATĂ o primește pe a lui (preferința citită din DB)', () => {
     expect(ruta).toMatch(/const pref = await getSpeechLang\(user\.email\)/)
-    expect(ruta).toMatch(/else if \(BCP47\[pref\]\) limbaPin = BCP47\[pref\]/)
+    expect(ruta).toMatch(/const selected = selectVoiceLocale\(pref\)/)
   })
 
   it('limba VORBITĂ constant se ține minte (trackSpeechLang → setSpeechLangPref) — data viitoare urechea se deschide direct pe ea', () => {

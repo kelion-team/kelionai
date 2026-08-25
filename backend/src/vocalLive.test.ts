@@ -7,7 +7,7 @@ import {
   interpreteazaCadru,
   oraLocalaText,
 } from './services/vocalLive.js'
-import { cadreVedereLive, capacitateVocalLive, unelteleSesiuniiLive } from './routes/vocalLive.js'
+import { cadreVedereLive, capacitateVocalLive, diagnosticVocalLive, selectVoiceLocale, unelteleSesiuniiLive } from './routes/vocalLive.js'
 import { inputImageBlock, parseInputImageDataUrl } from './services/inputImage.js'
 
 describe('OpenAI Realtime — session.update', () => {
@@ -28,7 +28,7 @@ describe('OpenAI Realtime — session.update', () => {
         audio: {
           input: {
             format: { type: string; rate: number }
-            transcription: { language?: string }
+            transcription: { language?: string; model?: string }
             turn_detection: { type: string; create_response: boolean; interrupt_response: boolean }
           }
           output: { format: { type: string; rate: number }; voice: string }
@@ -46,6 +46,12 @@ describe('OpenAI Realtime — session.update', () => {
     expect(message.session.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24_000 })
     expect(message.session.audio.output).toMatchObject({ format: { type: 'audio/pcm', rate: 24_000 }, voice: 'cedar' })
     expect(message.session.audio.input.transcription.language).toBe('ro')
+    if (config.openai.realtimeTranscription) {
+      expect(message.session.audio.input.transcription.model).toBe(config.openai.realtimeTranscription)
+    } else {
+      // Development/test may omit provider models; production rejects that at boot.
+      expect(message.session.audio.input.transcription.model).toBeUndefined()
+    }
     expect(message.session.audio.input.turn_detection).toMatchObject({
       type: 'server_vad', create_response: true, interrupt_response: true,
     })
@@ -127,6 +133,29 @@ describe('OpenAI Realtime — context și autorizare', () => {
     })
   })
 
+  it('expune administratorului numai diagnostice vocale fără audio, transcript sau secret', () => {
+    const diagnostic = diagnosticVocalLive()
+    expect(diagnostic).toMatchObject({
+      models: {
+        realtime: config.openai.realtime,
+        transcription: config.openai.realtimeTranscription,
+      },
+      language: { effective: 'en-US', source: 'fallback' },
+      vad: { mode: 'server_vad' },
+    })
+    const serializat = JSON.stringify(diagnostic)
+    expect(serializat).not.toMatch(/api.?key|authorization|bearer|audioData|transcriptText/i)
+    expect(diagnostic).toHaveProperty('micFrames')
+    expect(diagnostic).toHaveProperty('suppression')
+  })
+
+  it('folosește limba detectată a contului și engleza numai ca fallback', () => {
+    expect(selectVoiceLocale('ro')).toEqual({ language: 'ro-RO', source: 'detected_preference' })
+    expect(selectVoiceLocale('fr-FR')).toEqual({ language: 'fr-FR', source: 'detected_preference' })
+    expect(selectVoiceLocale('ja')).toEqual({ language: 'ja', source: 'detected_preference' })
+    expect(selectVoiceLocale(null)).toEqual({ language: 'en-US', source: 'fallback' })
+  })
+
   it('acceptă un singur cadru data URL compatibil cu /api/chat și respinge base64 brut', () => {
     const valid = 'data:image/jpeg;base64,AA=='
     expect(cadreVedereLive([valid, 'data:image/png;base64,AA=='])).toEqual([valid])
@@ -157,7 +186,7 @@ describe('OpenAI Realtime — context și autorizare', () => {
     expect(text).toContain('Limba preferată')
     expect(text).toContain('Ana: Ce am spus?')
     expect(text).toContain('Kelion: Ai întrebat despre context.')
-    expect(text).toContain(oraLocalaText('2026-08-24T12:00:00.000Z', 'Europe/London'))
+    expect(text).toContain(oraLocalaText('2026-08-24T12:00:00.000Z', 'Europe/London', 'ro-RO'))
   })
 
   it('nu închide o conversație normală după o pauză de 20 de secunde', () => {
