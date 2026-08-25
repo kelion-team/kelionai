@@ -3886,7 +3886,10 @@ async function runTool(
       // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
       // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
+      const { getConstructorIncidentForJob } = await import('../db.js')
+      const { constructorContinuity } = await import('../services/constructorContinuity.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
+      const incidents = await Promise.all(jobs.map((job) => getConstructorIncidentForJob(job.id)))
       return JSON.stringify({
         constructor: config.codexWorker.enabled
           ? 'CODEX WORKER activ — autentificare ChatGPT separată de cheia OpenAI API'
@@ -3895,7 +3898,7 @@ async function runTool(
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,
         // verified by CI (green)" — not on the worker's word.
-        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+        jobs: jobs.map((j, index) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt, continuity: constructorContinuity(j, incidents[index]) })),
         diagnostic, // { sanatos, verdict, probleme[], masuratori } — DE CE (nu) repară
       })
     }

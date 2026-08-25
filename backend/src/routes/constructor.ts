@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { adminSiId, cerAdmin } from '../session.js'
-import { advanceCodexBuildJob, claimNextBuildJob, createBuildJob, listBuildJobs, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, type CodexBuildEvent } from '../db.js'
+import { advanceCodexBuildJob, claimNextBuildJob, createBuildJob, listBuildJobs, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, getConstructorIncidentForJob, type CodexBuildEvent } from '../db.js'
 import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
 import { procentDinProgres } from '../services/progresOrdin.js'
 import { evalueazaOrdin, AI_CONSTRUCTORI } from '../services/evalOrdinConstructor.js'
@@ -20,6 +20,7 @@ import {
   renewReleaseLease,
 } from '../services/constructorPipeline.js'
 import { verifyPublisherRequest, verifyReleaseRequest } from '../services/constructorServiceAuth.js'
+import { constructorContinuity } from '../services/constructorContinuity.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SHA40 = /^[0-9a-f]{40}$/
@@ -85,7 +86,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // BARA 0–100% (Adrian, 3 aug): `pct` e harta etapei REALE raportate de
     // lucrător (progresOrdin.ts) — bara din panou o afișează lângă textul
     // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
-    const jobs = raw.map((j) => ({
+    const incidents = await Promise.all(raw.map((job) => getConstructorIncidentForJob(job.id)))
+    const jobs = raw.map((j, index) => ({
       ...j,
       pct: j.codexTaskId ? null : procentDinProgres(j.status, j.progress),
       // P8 (owner, 15 aug: „trebuie sa fie foarte clar ce executa"): numele
@@ -93,6 +95,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       nume: numeleOrdinului(j.orderText),
       // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
       cerutDe: cineACerut(j.orderedBy),
+      continuity: constructorContinuity(j, incidents[index]),
     }))
     const worker = await getCodexWorkerStatus()
     return reply.send({
@@ -375,13 +378,14 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const user = cerAdmin(req, reply)
     if (!user) return
     const jobs = await listMonitorBuildJobs()
+    const incidents = await Promise.all(jobs.map((job) => getConstructorIncidentForJob(job.id)))
     return reply.send({
       // P8: `order` devine FAPTA (numeleOrdinului), nu primele litere ale
       // promptului — monitorul arată „ce execută", cum a cerut ownerul.
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      jobs: jobs.map((j) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: j.codexTaskId ? null : procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt })),
+      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: j.codexTaskId ? null : procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: constructorContinuity(j, incidents[index]) })),
     })
   })
 }
