@@ -46,6 +46,7 @@ beforeEach(async () => {
     );
   `)
   await database.exec(readFileSync(new URL('../migrations/20260901_constructor_publication_pipeline.sql', import.meta.url), 'utf8'))
+  await database.exec(readFileSync(new URL('../migrations/20260902_constructor_observability.sql', import.meta.url), 'utf8'))
   await database.query(
     `INSERT INTO build_jobs(status, codex_task_id, constructor_stage)
      VALUES ('running', $1, 'working')`,
@@ -142,9 +143,15 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       patchSha256: hash1,
       gateReceiptSha256: hash2,
     })).resolves.toMatchObject({ status: 'done', stage: 'deployed' })
+    const activity = await database.query<{ activity_key: string }>(
+      'SELECT activity_key FROM constructor_activity_events WHERE job_id=1 ORDER BY id',
+    )
+    expect(activity.rows.map((row) => row.activity_key)).toEqual(expect.arrayContaining([
+      'working', 'gates_passed', 'pr_opened', 'merged', 'release_dispatched', 'deployed',
+    ]))
   })
 
-  it('keeps a failed release at merged and permits bounded retry', { timeout: 30_000 }, async () => {
+  it('keeps a failed release at merged and continues beyond the former retry cap', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, { handoffId, baseCommit: base, patchSha256: hash1, gateReceiptSha256: hash2 })
     await pipeline.claimPublisherJob(publisherLease)
     await pipeline.recordPublisherPrOpened({
@@ -163,25 +170,31 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     await expect(pipeline.claimReleaseJob(thirdLease)).resolves.toMatchObject({ commit: merged })
     await expect(pipeline.failReleaseLease(1, taskId, thirdLease, 'workflow_failed')).resolves.toBe(true)
     await expect(database.query<{ status: string; constructor_stage: string }>('SELECT status, constructor_stage FROM build_jobs WHERE id=1'))
-      .resolves.toMatchObject({ rows: [{ status: 'failed', constructor_stage: 'merged' }] })
-    await expect(pipeline.claimReleaseJob('423e4567-e89b-42d3-a456-426614174003')).resolves.toBeNull()
+      .resolves.toMatchObject({ rows: [{ status: 'running', constructor_stage: 'merged' }] })
+    const fourthLease = '423e4567-e89b-42d3-a456-426614174003'
+    await expect(pipeline.claimReleaseJob(fourthLease)).resolves.toMatchObject({ commit: merged, leaseId: fourthLease })
+    await expect(pipeline.failReleaseLease(1, taskId, fourthLease, 'workflow_timeout')).resolves.toBe(true)
   })
 
-  it('retries publisher failures without losing the last factual stage, then stops at the cap', { timeout: 30_000 }, async () => {
+  it('retries publisher failures without losing the last factual stage or stranding the job', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, { handoffId, baseCommit: base, patchSha256: hash1, gateReceiptSha256: hash2 })
     const leases = [
       publisherLease,
       '223e4567-e89b-42d3-a456-426614174002',
       '323e4567-e89b-42d3-a456-426614174002',
+      '423e4567-e89b-42d3-a456-426614174002',
     ]
-    for (const [index, lease] of leases.entries()) {
+    for (const lease of leases) {
       await expect(pipeline.claimPublisherJob(lease)).resolves.toMatchObject({ leaseId: lease })
       await expect(pipeline.failPublisherLease(1, taskId, lease, 'github_unavailable')).resolves.toMatchObject({
-        status: index === leases.length - 1 ? 'failed' : 'running',
+        status: 'running',
         stage: 'gates_passed',
       })
     }
-    await expect(pipeline.claimPublisherJob('423e4567-e89b-42d3-a456-426614174002')).resolves.toBeNull()
+    await expect(pipeline.claimPublisherJob('523e4567-e89b-42d3-a456-426614174002')).resolves.toMatchObject({
+      leaseId: '523e4567-e89b-42d3-a456-426614174002',
+      taskId,
+    })
   })
 
   it('consumes nonces durably and independently per HMAC domain', { timeout: 30_000 }, async () => {

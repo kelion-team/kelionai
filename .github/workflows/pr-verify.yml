@@ -3,6 +3,8 @@ name: pr-verify
 on:
   pull_request:
     branches: [master]
+  merge_group:
+    branches: [master]
   push:
     branches: [master]
 
@@ -14,7 +16,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-train-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verifică trainul înainte de CI complet
+        run: node scripts/release-train-preflight.mjs
+
   verify:
+    needs: release-train-preflight
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -54,6 +69,8 @@ jobs:
             scripts/verifica-migrari.test.mjs \
             scripts/inventar-audit.test.mjs \
             scripts/verifica-contract-deploy.test.mjs \
+            scripts/release-train-preflight.test.mjs \
+            scripts/release-train-workflow.test.mjs \
             ios/appstore-build.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
             deploy/lib/backup-schedule.test.mjs \

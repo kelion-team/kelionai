@@ -63,15 +63,21 @@ Fluxul unic este:
 1. admin Google autentificat creează un job validat;
 2. workerul HMAC îl revendică într-un checkout/worktree dedicat;
 3. `codex exec --ephemeral --sandbox workspace-write` produce schimbarea;
-4. toate porțile obligatorii trec;
-5. se deschide un PR auditat;
-6. PR-ul se îmbină în `master` numai pe verde;
-7. deploy-ul este separat, cu backup, health și dovada că versiunea live este
+4. schimbările dependente intră într-un singur release train bazat pe ultimul
+   `origin/master`; rulează `node scripts/release-train-preflight.mjs` și toate
+   porțile locale înainte de PR;
+5. toate porțile obligatorii trec o singură dată pentru trainul complet;
+6. se deschide un PR auditat;
+7. PR-ul se îmbină prin rebase în `master` numai pe verde;
+8. deploy-ul este separat, cu backup, health și dovada că versiunea live este
    exact commitul din `master`.
 
 Nu se face push direct în `master`, force-push, deploy din browser sau publicare
 dintr-un job care nu a trecut porțile. Credențialele Git/host sunt separate de
 aplicația publică și au permisiuni minime.
+
+Regula completă și setările GitHub cerute ownerului sunt în
+`docs/RELEASE-TRAIN.md`.
 
 ## Calitatea codului
 

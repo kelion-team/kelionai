@@ -1,91 +1,91 @@
-import type { BuildJob } from '../db.js'
-import type { ConstructorIncident } from './constructorIncident.js'
+export type ConstructorContinuityState =
+  | 'queued'
+  | 'running'
+  | 'recovering'
+  | 'waiting_external'
+  | 'completed'
+  | 'cancelled'
 
-/**
- * The single, safe projection of a Constructor order for Admin and chat.
- * It is deliberately derived only from durable job / incident records: a
- * friendly status must never turn an unverified transition into success.
- */
-export type ContinuityStepState = 'pending' | 'active' | 'verified' | 'blocked'
+export interface ConstructorContinuityJob {
+  status: string
+  constructorStage?: string | null
+  progress?: string | null
+  attempts?: number
+  commit?: string | null
+  liveVersion?: string | null
+}
 
 export interface ConstructorContinuity {
-  state: 'queued' | 'running' | 'blocked' | 'completed' | 'cancelled'
+  state: ConstructorContinuityState
   checkpoint: string
-  heartbeat: { lastAt: string; stale: boolean; timeoutMinutes: number }
-  steps: Array<{ id: string; label: string; state: ContinuityStepState }>
-  retry: { allowed: boolean; attempts: number; nextAction: string }
-  escalation: null | { cause: string; evidence: string; nextAction: string }
-  proof: null | { commit: string; liveVersion: string; ci: string }
   message: string
-}
-
-const stages = ['queued', 'claimed', 'accepted', 'working', 'gates_passed', 'pr_opened', 'merged', 'deployed'] as const
-const labels: Record<(typeof stages)[number], string> = {
-  queued: 'Cerință salvată',
-  claimed: 'Worker revendicat',
-  accepted: 'Plan acceptat',
-  working: 'Implementare și teste',
-  gates_passed: 'Porți verificate',
-  pr_opened: 'PR deschis',
-  merged: 'Master actualizat',
-  deployed: 'Live verificat',
-}
-
-function stageIndex(stage: string): number {
-  const found = stages.indexOf(stage as (typeof stages)[number])
-  return found < 0 ? 0 : found
-}
-
-function staleAt(updatedAt: string, now: number): boolean {
-  const parsed = Date.parse(updatedAt)
-  return !Number.isFinite(parsed) || now - parsed > 15 * 60_000
+  nextAction: string | null
+  retry: {
+    mode: 'automatic'
+    attempts: number
+  }
+  finalProof: {
+    complete: boolean
+    commit: string | null
+    liveVersion: string | null
+  }
 }
 
 export function constructorContinuity(
-  job: BuildJob,
-  incident: ConstructorIncident | null = null,
-  now = Date.now(),
+  job: ConstructorContinuityJob,
+  incident?: unknown,
 ): ConstructorContinuity {
-  const complete = job.status === 'done' && job.constructorStage === 'deployed'
-    && Boolean(job.commit && job.liveVersion && job.ci === 'green')
-  const failed = job.status === 'failed' || Boolean(incident && incident.state !== 'closed')
-  const activeStage = stageIndex(job.constructorStage)
-  const steps = stages.map((id, index) => ({
-    id,
-    label: labels[id],
-    state: (failed && index >= activeStage ? 'blocked' : index < activeStage || complete ? 'verified' : index === activeStage ? 'active' : 'pending') as ContinuityStepState,
-  }))
-  const escalation = incident ? {
-    cause: incident.causeSummary,
-    evidence: incident.evidence.slice(-500),
-    nextAction: incident.nextAction,
-  } : job.status === 'failed' ? {
-    cause: 'Eșec raportat fără incident lizibil.',
-    evidence: (job.log ?? job.progress ?? 'Fără dovadă disponibilă.').slice(-500),
-    nextAction: 'Creează sau repară incidentul Constructor înainte de reluare.',
-  } : null
-  const retryAllowed = !complete && job.status !== 'cancelled' && job.attempts < 3
-  const state: ConstructorContinuity['state'] = complete ? 'completed'
-    : job.status === 'cancelled' ? 'cancelled'
-      : failed ? 'blocked'
-        : job.status === 'queued' ? 'queued' : 'running'
-  const checkpoint = complete ? 'deployed' : job.constructorStage || 'queued'
+  const checkpoint = job.constructorStage ?? job.status
+  const progress = job.progress ?? ''
+  const cancelled = job.status === 'failed' && /anulat/i.test(progress)
+  const complete = job.status === 'done'
+    && checkpoint === 'deployed'
+    && Boolean(job.commit)
+    && Boolean(job.liveVersion)
+  const waitingExternal = progress === 'external_action_required'
+  const incidentStatus = typeof incident === 'object' && incident !== null && 'status' in incident
+    ? String(incident.status)
+    : null
+  const recovering = !cancelled && !complete && (
+    job.status === 'failed'
+    || incidentStatus === 'open'
+    || /retry|recover|reluare|recovery/i.test(progress)
+  )
+
+  let state: ConstructorContinuityState
+  let message: string
+  let nextAction: string | null = null
+  if (complete) {
+    state = 'completed'
+    message = 'Rezultatul este live si confirmat de serviciul de release.'
+  } else if (cancelled) {
+    state = 'cancelled'
+    message = 'Cererea a fost anulata explicit de administrator.'
+  } else if (waitingExternal) {
+    state = 'waiting_external'
+    message = 'Fluxul asteapta o autorizare externa si se va relua automat dupa confirmare.'
+    nextAction = 'Finalizeaza autorizarea externa indicata in starea workerului.'
+  } else if (recovering) {
+    state = 'recovering'
+    message = 'Constructorul recupereaza automat ultima tranzitie confirmata.'
+  } else if (job.status === 'queued') {
+    state = 'queued'
+    message = 'Cererea este persistata si va fi preluata automat de worker.'
+  } else {
+    state = 'running'
+    message = 'Fluxul avanseaza automat de la ultimul checkpoint confirmat.'
+  }
+
   return {
     state,
     checkpoint,
-    heartbeat: { lastAt: job.updatedAt, stale: state === 'running' && staleAt(job.updatedAt, now), timeoutMinutes: 15 },
-    steps,
-    retry: {
-      allowed: retryAllowed,
-      attempts: job.attempts,
-      nextAction: escalation?.nextAction ?? (complete ? 'Păstrează dovada și monitorizează regresiile.' : 'Continuă de la checkpointul durabil; nu crea un job duplicat.'),
+    message,
+    nextAction,
+    retry: { mode: 'automatic', attempts: job.attempts ?? 0 },
+    finalProof: {
+      complete,
+      commit: job.commit ?? null,
+      liveVersion: job.liveVersion ?? null,
     },
-    escalation,
-    proof: complete ? { commit: job.commit!, liveVersion: job.liveVersion!, ci: job.ci! } : null,
-    message: complete
-      ? 'Finalizat cu dovadă live.'
-      : escalation
-        ? `Blocat: ${escalation.cause} Următorul pas: ${escalation.nextAction}`
-        : `În curs la checkpointul ${checkpoint}.`,
   }
 }

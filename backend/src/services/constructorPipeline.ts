@@ -12,8 +12,10 @@ export interface ConstructorSql {
   query<Row = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<SqlResult<Row>>
 }
 
-const LEASE_SECONDS = 120
-const MAX_ATTEMPTS = 3
+const configuredLeaseSeconds = Number.parseInt(process.env.CONSTRUCTOR_PIPELINE_LEASE_SECONDS ?? '', 10)
+const LEASE_SECONDS = Number.isInteger(configuredLeaseSeconds) && configuredLeaseSeconds > 0
+  ? configuredLeaseSeconds
+  : 120
 
 interface PipelineRow {
   job_id: string | number
@@ -239,18 +241,6 @@ export async function recordWorkerHandoff(
 
 export async function claimPublisherJob(leaseId = randomUUID()): Promise<PublisherClaim | null> {
   return withTransaction(async (sql) => {
-      await sql.query(
-        `UPDATE build_jobs b
-            SET status='failed', progress='publisher_attempts_exhausted',
-                progress_at=now(), updated_at=now()
-           FROM constructor_pipeline p
-          WHERE p.job_id=b.id AND b.status='running'
-            AND b.constructor_stage IN ('gates_passed','pr_opened')
-            AND p.merged_commit_sha IS NULL
-            AND p.publisher_attempts >= $1
-            AND (p.publisher_lease_until IS NULL OR p.publisher_lease_until <= now())`,
-        [MAX_ATTEMPTS],
-      )
       const selected = await sql.query<PipelineRow>(
         `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, p.*
            FROM build_jobs b
@@ -258,11 +248,9 @@ export async function claimPublisherJob(leaseId = randomUUID()): Promise<Publish
           WHERE b.status='running'
             AND b.constructor_stage IN ('gates_passed','pr_opened')
             AND p.merged_commit_sha IS NULL
-            AND p.publisher_attempts < $1
             AND (p.publisher_lease_until IS NULL OR p.publisher_lease_until <= now())
           ORDER BY p.handoff_created_at, b.id
           LIMIT 1 FOR UPDATE OF b, p SKIP LOCKED`,
-        [MAX_ATTEMPTS],
       )
       const row = selected.rows[0]
       if (!row) return null
@@ -411,7 +399,6 @@ export async function failPublisherLease(jobId: number, taskId: string, leaseId:
     return await withTransaction(async (sql) => {
       const row = await lockPublisherLease(sql, jobId, taskId, leaseId)
       if (!row || row.status !== 'running' || row.constructor_stage === 'merged') return null
-      const exhausted = row.publisher_attempts >= MAX_ATTEMPTS
       await sql.query(
         `UPDATE constructor_pipeline SET publisher_lease_id=NULL,
             publisher_lease_until=NULL, publisher_last_error=$2, updated_at=now()
@@ -419,11 +406,10 @@ export async function failPublisherLease(jobId: number, taskId: string, leaseId:
         [jobId, code],
       )
       const updated = await sql.query<PipelineRow>(
-        `UPDATE build_jobs SET status=CASE WHEN $3 THEN 'failed' ELSE status END,
-            progress=CASE WHEN $3 THEN 'publisher_attempts_exhausted' ELSE 'publisher_retryable_failure' END,
+        `UPDATE build_jobs SET progress='publisher_retryable_failure',
             log=$2, progress_at=now(), updated_at=now() WHERE id=$1
           RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
-        [jobId, code, exhausted],
+        [jobId, code],
       )
       return updated.rows[0] ? eventResult(updated.rows[0]) : null
     })
@@ -434,30 +420,16 @@ export async function failPublisherLease(jobId: number, taskId: string, leaseId:
 
 export async function claimReleaseJob(leaseId = randomUUID()): Promise<ReleaseClaim | null> {
   return withTransaction(async (sql) => {
-      await sql.query(
-        `UPDATE build_jobs b
-            SET status='failed', progress='release_attempts_exhausted',
-                progress_at=now(), updated_at=now()
-           FROM constructor_pipeline p
-          WHERE p.job_id=b.id AND b.status='running'
-            AND b.constructor_stage='merged'
-            AND p.release_receipt_sha256 IS NULL
-            AND p.release_attempts >= $1
-            AND (p.release_lease_until IS NULL OR p.release_lease_until <= now())`,
-        [MAX_ATTEMPTS],
-      )
       const selected = await sql.query<PipelineRow>(
         `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, p.*
            FROM build_jobs b JOIN constructor_pipeline p ON p.job_id=b.id
-          WHERE b.status='running' AND b.constructor_stage='merged'
+          WHERE b.status='running' AND b.constructor_stage IN ('merged','release_dispatched')
             AND p.merged_commit_sha=b.commit_sha
             AND p.publisher_receipt_sha256 IS NOT NULL
             AND p.release_receipt_sha256 IS NULL
-            AND p.release_attempts < $1
             AND (p.release_lease_until IS NULL OR p.release_lease_until <= now())
           ORDER BY p.updated_at, b.id
           LIMIT 1 FOR UPDATE OF b, p SKIP LOCKED`,
-        [MAX_ATTEMPTS],
       )
       const row = selected.rows[0]
       if (!row) return null
@@ -466,10 +438,19 @@ export async function claimReleaseJob(leaseId = randomUUID()): Promise<ReleaseCl
             SET release_lease_id=$2::uuid,
                 release_lease_until=now() + ($3::text || ' seconds')::interval,
                 release_attempts=release_attempts + 1,
+                release_request_id=NULL, release_workflow_run_id=NULL,
+                release_dispatch_receipt_sha256=NULL,
                 release_last_error=NULL, updated_at=now()
           WHERE job_id=$1`,
         [row.job_id, leaseId, LEASE_SECONDS],
       )
+      if (row.constructor_stage === 'release_dispatched') {
+        await sql.query(
+          `UPDATE build_jobs SET constructor_stage='merged', progress='release_retry_recovered',
+              progress_at=now(), updated_at=now() WHERE id=$1`,
+          [row.job_id],
+        )
+      }
     return releaseClaim(row, leaseId)
   })
 }
@@ -482,7 +463,7 @@ export async function renewReleaseLease(jobId: number, taskId: string, leaseId: 
          FROM build_jobs b
         WHERE p.job_id=$1 AND p.task_id=$2 AND p.release_lease_id=$3::uuid
           AND p.release_lease_until > now() AND p.job_id=b.id
-          AND b.status='running' AND b.constructor_stage='merged'
+          AND b.status='running' AND b.constructor_stage IN ('merged','release_dispatched')
         RETURNING p.job_id`,
       [jobId, taskId, leaseId, LEASE_SECONDS],
     )
@@ -509,7 +490,7 @@ async function lockReleaseLeaseOrCompleted(sql: ConstructorSql, jobId: number, t
     `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, p.*
        FROM build_jobs b JOIN constructor_pipeline p ON p.job_id=b.id
       WHERE b.id=$1 AND p.task_id=$2 AND p.release_lease_id=$3::uuid
-        AND (p.release_lease_until > now() OR b.constructor_stage='deployed')
+        AND (p.release_lease_until > now() OR b.constructor_stage IN ('release_dispatched','deployed'))
       FOR UPDATE OF b, p`,
     [jobId, taskId, leaseId],
   )
@@ -540,7 +521,14 @@ export async function recordReleaseDispatched(input: {
             updated_at=now() WHERE job_id=$1`,
         [input.jobId, input.requestId, input.workflowRunId, input.receiptSha256],
       )
-      return true
+      const updated = await sql.query(
+        `UPDATE build_jobs SET constructor_stage='release_dispatched', progress='release_dispatched',
+            progress_at=now(), updated_at=now()
+          WHERE id=$1 AND status='running' AND constructor_stage='merged'
+          RETURNING id`,
+        [input.jobId],
+      )
+      return updated.rows.length === 1
     })
   } catch {
     return false
@@ -574,7 +562,7 @@ export async function recordReleaseDeployed(input: {
           && row.release_receipt_sha256 === input.receiptSha256
         return same ? eventResult(row) : null
       }
-      if (row.status !== 'running' || row.constructor_stage !== 'merged' || row.release_receipt_sha256) return null
+      if (row.status !== 'running' || row.constructor_stage !== 'release_dispatched' || row.release_receipt_sha256) return null
       await sql.query(
         `UPDATE constructor_pipeline SET release_receipt_sha256=$2,
             release_lease_until=NULL, updated_at=now()
@@ -602,19 +590,19 @@ export async function failReleaseLease(jobId: number, taskId: string, leaseId: s
   try {
     return await withTransaction(async (sql) => {
       const row = await lockReleaseLease(sql, jobId, taskId, leaseId)
-      if (!row || row.status !== 'running' || row.constructor_stage !== 'merged') return false
-      const exhausted = row.release_attempts >= MAX_ATTEMPTS
+      if (!row || row.status !== 'running' || !['merged', 'release_dispatched'].includes(row.constructor_stage)) return false
       await sql.query(
         `UPDATE constructor_pipeline SET release_lease_id=NULL, release_lease_until=NULL,
+            release_request_id=NULL, release_workflow_run_id=NULL,
+            release_dispatch_receipt_sha256=NULL,
             release_last_error=$2, updated_at=now() WHERE job_id=$1`,
         [jobId, code],
       )
       await sql.query(
-        `UPDATE build_jobs SET status=CASE WHEN $2 THEN 'failed' ELSE status END,
-            progress=CASE WHEN $2 THEN 'release_attempts_exhausted' ELSE 'release_retryable_failure' END,
+        `UPDATE build_jobs SET constructor_stage='merged', progress='release_retryable_failure',
             progress_at=now(), updated_at=now()
-          WHERE id=$1 AND status='running' AND constructor_stage='merged'`,
-        [jobId, exhausted],
+          WHERE id=$1 AND status='running' AND constructor_stage IN ('merged','release_dispatched')`,
+        [jobId],
       )
       return true
     })

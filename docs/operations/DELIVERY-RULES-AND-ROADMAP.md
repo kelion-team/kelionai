@@ -288,3 +288,56 @@ Aceasta regula este criteriu de acceptare obligatoriu, nu recomandare.
 Fundatia este declarata completa numai cand toate cele patru sectiuni de
 produs, regula fara setup de rutina si protocolul de reluare sunt bifate cu
 legaturi canonice verificabile.
+
+## Constructor observability and no-hardcoding rule
+
+This section is a mandatory carry-over requirement and supersedes any earlier
+wording that permits an accepted Constructor request to remain blocked or to
+require a routine manual retry.
+
+- Every user-visible operation exposes an on-screen status, real 0-100 progress,
+  and a plain-language activity timeline from start to a resolved result.
+- Progress and timeline entries come only from canonical persisted execution
+  state/events or an authoritative provider result. Timers, text matching,
+  cosmetic minimums, fixed stage percentages, and simulated output are forbidden.
+- Refresh reconstructs the same status from PostgreSQL. The UI is a projection;
+  it does not own stages, transition labels, percentages, or completion.
+- Once an admin request is accepted, recoverable worker, publisher, CI, and
+  release transitions retry automatically from their last durable checkpoint.
+  They do not become a blocking terminal result because an attempt counter was reached.
+- A truly external authority step may pause execution only for one explicit
+  action such as interactive provider login, OAuth consent, or payment. The UI
+  states that single action and the persisted request resumes automatically when
+  readiness is restored.
+- 100% is emitted only after the release service has persisted the deployed
+  commit and verified live version. Administrator cancellation is a separate
+  resolved terminal result.
+
+### Constructor evidence checklist
+
+- [ ] A real admin request has a durable job identifier and an initial persisted event.
+- [ ] Worker readiness/heartbeat and claim are visible without exposing credentials.
+- [ ] Every meaningful Constructor, PR, merge, and release transition appears after refresh.
+- [ ] Percentage changes are derived from the canonical activity catalog and event history.
+- [ ] A recoverable failure produces a persisted automatic-recovery event and advances again.
+- [ ] No accepted request remains failed, blocked, or lease-expired without automatic continuation.
+- [ ] The monitor reaches 100% only with deployed commit, live version, readiness proof, and canonical links.
+- [ ] The session handoff records verified state, unfinished work, owner-only blockers, ordered next steps, and links.
+
+### Intentional Constructor constants
+
+| Constant | Authority/owner | Rationale |
+| --- | --- | --- |
+| Public bounds 0 and 100 (99 before resolution) | Constructor observability contract | Accessibility/API scale; 100 uniquely means authoritative completion, never a stage threshold. |
+| Default lease 120s | Platform operations via CONSTRUCTOR_PIPELINE_LEASE_SECONDS | Safe fallback only; production may configure it at runtime without changing source. |
+| Cryptographic SHA/UUID lengths | Security protocol | Protocol invariants validated at trust boundaries, not environment data. |
+| Database event retention (no automatic deletion) | Data/operations owner | Evidence remains durable until a documented retention policy is approved. |
+
+### Post-foundation no-hardcoding audit backlog
+
+After the full Constructor-to-deploy and voice/chat foundation is live, audit
+the broader application for duplicated or hardcoded statuses, transitions,
+provider/environment values, simulated responses, progress, feature data, and
+timeouts. For each discovery record the authoritative owner, migration/runtime
+configuration, evidence, remedy, regression test, and reusable runbook. This
+backlog is not permission to delay tonight's Constructor release path.
