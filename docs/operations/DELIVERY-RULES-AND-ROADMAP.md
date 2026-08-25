@@ -133,6 +133,22 @@ pana la PR-uri, checkuri si probe proprii:
 Aceste puncte nu sunt dovezi de implementare si nu pot aparea ca `live` doar
 pentru ca sunt descrise aici.
 
+### Backlog amanat: Admin activity/audit history
+
+Status: `planificat`, post-foundation / sesiunea urmatoare. Acest punct nu se
+implementeaza in release train-ul curent. Poate incepe numai dupa ce traseul
+complet Constructor -> `master` protejat -> deploy -> dovada/rollback si
+fundatia voice/chat sunt confirmate live.
+
+Scope-ul viitor cere vizibilitate durabila si interogabila pentru vizite,
+pagini/functii vizualizate, actiuni user/admin, evenimente de job, rezultate si
+schimbari materiale de configurare. Admin trebuie sa primeasca o cronologie
+clara, legata de actor, obiect, moment, rezultat si dovezi canonice. Designul
+trebuie sa defineasca explicit retentia, minimizarea, accesul pe roluri,
+exportul si stergerea, astfel incat deciziile verbale sau scrise si urmarile lor
+operationale sa nu dispara. Pana la proiectarea si acceptarea acestor limite,
+punctul ramane backlog si nu este prezentat drept functie existenta.
+
 ## Invatare operationala si incidente
 
 Fiecare esec care afecteaza un check, release, deploy sau flux Constructor este
