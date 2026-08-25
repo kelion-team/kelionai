@@ -13,6 +13,18 @@ citește mai întâi `docs/operations/CURRENT.md`. Actualizează-l înainte de a
 numai starea curentă verificată și următorul pas sigur; nu copiază loguri,
 secrete sau presupuneri din conversație.
 
+## Zero erori ignorate
+
+Orice eroare, alertă, check roșu/anulat, excepție, degradare sau abatere
+observată în cod, teste, CI, deploy, runtime, browser ori interfață devine
+imediat blocantă pentru pasul următor. Agentul stabilește cauza reală, repară
+defectul și rerulează dovada până la verde. Este interzis să ascundă eroarea,
+să dezactiveze poarta, să reducă aserțiunea, să marcheze artificial succesul
+sau să o lase nerezolvată fiindcă pare „din altă zonă”. Dacă semnalul este
+istoric/anulat ori cauza este externă și nu poate fi modificată, agentul trebuie
+să dovedească acest fapt, să refacă verificarea curentă când platforma permite
+și să documenteze explicit starea; nu îl prezintă drept defect reparat.
+
 ## Invariante de produs
 
 - OpenAI Responses este singurul creier online al produsului. OpenAI Realtime,

@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-25T04:15:47Z`
+Actualizat: `2026-08-25T04:24:19Z`
 
 ## Obiectiv activ
 
@@ -12,12 +12,13 @@ live, apoi repararea traseului creier -> control structurat -> avatar astfel
 
 - Repo: `kelion-team/kelionai`
 - Worktree: `C:\Users\adria\kelionai-workspace`
-- Branch activ: `codex/ops-checkpoint-proxy-20260825`
-- Bază branch: `origin/master` la `b65d7483a581e3c42e285e76a1d1c3a1351a6c2d`
-- PR activ: `#1374`, deschis din branch-ul de mai sus; head înaintea acestei
-  actualizări era `69fe617d6012f18e41137285ac90689dc04f9f2d`.
-- Branch-ul remote conține fixul durabil și checkpointul. Verifică `git status`
-  și head-ul PR înainte de orice editare.
+- Branch activ: `codex/shared-ops-policy-20260825`
+- Bază branch: `origin/master` la
+  `75d3e0531d754333125877efd97556b37ef0f121`.
+- PR `#1374` este îmbinat; commit merge:
+  `75d3e0531d754333125877efd97556b37ef0f121`.
+- Branch-ul activ pregătește politica operațională comună Codex/Kelion și
+  readerul admin-only. Verifică `git status` înainte de orice editare.
 
 ## Rutina de reluare Codex
 
@@ -26,6 +27,11 @@ acest fișier primul. Skill-ul de proiect
 `.codex/skills/kelion-operations-memory/SKILL.md` aplică aceeași ordine după un
 restart sau upgrade și a trecut validatorul oficial local `quick_validate.py`.
 Procesele și subagenții anteriori nu se presupun activi după restart.
+
+`AGENTS.md` și skill-ul aplică regula „zero erori ignorate”: orice eroare,
+alertă, check roșu/anulat sau degradare observată blochează avansarea până la
+diagnostic, remediere și rerulare verde. Semnalele istorice/externe se clasifică
+numai cu dovadă și nu se ascund.
 
 ## Producție verificată
 
@@ -57,9 +63,9 @@ Proba într-o filă publică proaspătă, urmată de aplicarea update-ului PWA, 
 avatarul texturat corect: păr mov, piele și tricou negru. Regresia avatarului gri
 este remediată live.
 
-## Fix durabil în PR #1374
+## Fix durabil îmbinat, încă nedeployat
 
-Branch-ul activ modifică:
+PR #1374 a modificat:
 
 - `deploy/compose.proxy.yml`: montează directorul de configurare la
   `/etc/caddy`, astfel încât înlocuirile atomice și rollback-ul să fie vizibile;
@@ -85,8 +91,10 @@ live autentificată.
 
 ## Următorul pas sigur
 
-1. rulează `git status`, verifică head-ul PR #1374 și starea tuturor checkurilor;
-2. așteaptă toate verificările obligatorii și îmbină numai pe verde;
-3. rulează production-release și dovedește că mountul este director, CSP-ul
+1. verifică run-urile de pe `master` pentru merge-ul #1374 și așteaptă imaginile
+   de release verzi;
+2. rulează production-release și dovedește că mountul este director, CSP-ul
    păstrează `blob:`, versiunea live este commitul îmbinat și `/readyz` e verde;
+3. livrează politica operațională comună și checkpointul admin-only pentru
+   Kelion; orice semnal roșu rămâne blocant până la verde;
 4. apoi implementează protocolul creier-avatar și matricea de teste live.

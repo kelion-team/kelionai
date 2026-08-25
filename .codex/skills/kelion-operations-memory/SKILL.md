@@ -18,3 +18,8 @@ description: "Resume or hand off KelionAI release, deployment, production incide
    transcript or historical report.
 6. Never store secrets, environment values, IPs, raw logs, database dumps,
    personal data or unverified guesses in the checkpoint.
+7. Treat every observed error, alert, red/cancelled check, degradation or UI
+   fault as blocking. Diagnose it immediately, fix the actual cause and rerun
+   the evidence to green. Never hide, weaken, skip or relabel a failing gate.
+   For immutable historical/external signals, prove the classification, rerun
+   the current check when possible and record the unresolved evidence plainly.
