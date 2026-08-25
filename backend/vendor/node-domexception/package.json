@@ -1,0 +1,11 @@
+{
+  "name": "node-domexception",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Node 22 compatibility export for legacy fetch-blob consumers",
+  "main": "index.cjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
