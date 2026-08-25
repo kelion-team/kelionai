@@ -44,6 +44,7 @@ COMPOSE_BIN=$ROOT/bin/docker-compose
 SECCOMP_PROFILE=$RUNTIME_ROOT/playwright-seccomp-v1.62.1.json
 PROOF_FILE=$RUNTIME_ROOT/last-verified-backup.json
 PROOF_KEY=$SECRET_ROOT/migration-backup-proof-key
+migration_proof_copy=''
 PUBLICATION_LOCK=$ROOT/publicare.lock
 RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 BACKUP_INSTALL_ROOT=/opt/kelion-backup
@@ -71,10 +72,27 @@ backup_previous_timer_active=0
 
 for file in "$PRODUCT_FILE" "$COMPOSE_FILE" "$PROXY_COMPOSE_FILE" "$BUNDLE_DIR/Caddyfile" \
   "$BUNDLE_DIR/backup.sh" "$BUNDLE_DIR/restore-verified-backup.sh" \
+  "$BUNDLE_DIR/vps-curatenie.sh" \
   "$BUNDLE_DIR/lib/restore-verified-backup.mjs" \
   "$BUNDLE_DIR/systemd/$BACKUP_SERVICE" "$BUNDLE_DIR/systemd/$BACKUP_TIMER"; do
   [ -f "$file" ] || die "bundle incomplet: $(basename "$file")"
 done
+
+install_cleanup_script() {
+  local candidate
+  candidate=$(mktemp "$ROOT/vps-curatenie.XXXXXX")
+  if ! install -o root -g root -m 0700 "$BUNDLE_DIR/vps-curatenie.sh" "$candidate" \
+    || ! cmp -s -- "$BUNDLE_DIR/vps-curatenie.sh" "$candidate" \
+    || [ "$(stat -Lc '%u:%g:%a:%h' "$candidate")" != '0:0:700:1' ]; then
+    rm -f -- "$candidate"
+    die 'scriptul de curățenie nu poate fi pregătit exact'
+  fi
+  mv -f -- "$candidate" "$ROOT/vps-curatenie.sh"
+  [ -f "$ROOT/vps-curatenie.sh" ] && [ ! -L "$ROOT/vps-curatenie.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/vps-curatenie.sh")" = '0:0:700:1' ] \
+    && cmp -s -- "$BUNDLE_DIR/vps-curatenie.sh" "$ROOT/vps-curatenie.sh" \
+    || die 'scriptul de curățenie instalat diferă de bundle'
+}
 
 install_persistent_backup_script() {
   local candidate
@@ -537,6 +555,35 @@ run_migrator() {
     -v /var/run/postgresql:/var/run/postgresql:ro \
     -v "$SECRET_ROOT/database-url:/run/secrets/database-url:ro" \
     "$@"
+}
+
+cleanup_migration_proof_copy() {
+  local candidate=${migration_proof_copy:-}
+  [ -n "$candidate" ] || return 0
+  case "$candidate" in
+    "$RUNTIME_ROOT"/migration-backup-proof.*) ;;
+    *) return 1 ;;
+  esac
+  rm -f -- "$candidate" || return 1
+  [ ! -e "$candidate" ] && [ ! -L "$candidate" ] || return 1
+  migration_proof_copy=''
+}
+
+prepare_migration_proof_copy() {
+  [ -z "$migration_proof_copy" ] || return 1
+  [ -f "$PROOF_FILE" ] && [ ! -L "$PROOF_FILE" ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' "$PROOF_FILE")" = '0:0:600:1' ] || return 1
+
+  migration_proof_copy=$(mktemp "$RUNTIME_ROOT/migration-backup-proof.XXXXXX") || return 1
+  if ! install -o root -g 10050 -m 0440 "$PROOF_FILE" "$migration_proof_copy" \
+    || [ ! -f "$migration_proof_copy" ] || [ -L "$migration_proof_copy" ] \
+    || [ "$(stat -Lc '%u:%g:%a:%h' "$migration_proof_copy")" != '0:10050:440:1' ] \
+    || ! cmp -s -- "$PROOF_FILE" "$migration_proof_copy" \
+    || [ ! -f "$PROOF_FILE" ] || [ -L "$PROOF_FILE" ] \
+    || [ "$(stat -Lc '%u:%g:%a:%h' "$PROOF_FILE")" != '0:0:600:1' ]; then
+    cleanup_migration_proof_copy || true
+    return 1
+  fi
 }
 
 migration_plan=$(run_migrator "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate -- --plan)
@@ -1142,6 +1189,10 @@ on_release_exit() {
   # este acoperit de jurnalul durabil și va bloca următoarea publicare.
   trap '' HUP INT TERM
   trap - EXIT
+  if ! cleanup_migration_proof_copy; then
+    printf 'release: copia temporară a dovezii migratorului nu a putut fi eliminată\n' >&2
+    [ "$rc" -ne 0 ] || rc=1
+  fi
   if [ "$rc" -ne 0 ] && [ "$recovery_armed" = 1 ]; then
     if [ "$point_of_no_return" = 1 ]; then
       recover_schedule_after_point_of_no_return \
@@ -1162,6 +1213,10 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Cronul existent indică acest path. Îl actualizăm sub publication lock înainte
+# de maintenance, astfel încât niciun release viitor să nu poată pierde
+# containerele de rollback printr-un container prune concurent.
+install_cleanup_script
 install_persistent_backup_script
 if [ "$destructive_cutover" = 1 ]; then
   write_recovery_journal maintenance 0 0
@@ -1191,10 +1246,12 @@ if [ "$pending_count" -gt 0 ]; then
     -v "$SECRET_ROOT/database-url:/run/secrets/database-url:ro"
   )
   if [ "$destructive_cutover" = 1 ]; then
+    prepare_migration_proof_copy \
+      || die 'dovada backupului nu poate fi expusă migratorului cu ACL minim'
     migration_args+=(
       -e MIGRATION_BACKUP_PROOF_FILE=/run/proof/backup.json
       -e MIGRATION_BACKUP_PROOF_KEY_FILE=/run/secrets/migration-backup-proof-key
-      -v "$PROOF_FILE:/run/proof/backup.json:ro"
+      -v "$migration_proof_copy:/run/proof/backup.json:ro"
       -v "$PROOF_KEY:/run/secrets/migration-backup-proof-key:ro"
     )
     # Fail-closed: comanda poate muta DB înainte să întoarcă o eroare, deci
@@ -1204,6 +1261,10 @@ if [ "$pending_count" -gt 0 ]; then
     write_recovery_journal before-migrator 0 1
   fi
   migration_output=$(docker run "${migration_args[@]}" "$KELION_APP_IMAGE" npm --prefix /app/backend run --silent migrate)
+  if [ "$destructive_cutover" = 1 ]; then
+    cleanup_migration_proof_copy \
+      || die 'copia temporară a dovezii migratorului nu a putut fi eliminată'
+  fi
   [ "$migration_output" = migrations_ok ] || die 'migrările nu au confirmat succesul'
   if [ "$destructive_cutover" = 1 ]; then
     write_recovery_journal database-migrated 0 1

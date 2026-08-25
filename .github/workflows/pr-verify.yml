@@ -309,8 +309,14 @@ jobs:
           KELION_PROOF_OUTPUT_FILE=/tmp/kelion-ci-postgres/backup/proof.json \
             sudo --preserve-env=KELION_BACKUP_FILE,KELION_DATABASE_URL_FILE,KELION_PROOF_KEY_FILE,KELION_PROOF_OUTPUT_FILE \
             node deploy/lib/create-migration-proof.mjs
-          sudo chown root:10050 /tmp/kelion-ci-postgres/backup/proof.json
-          sudo chmod 0440 /tmp/kelion-ci-postgres/backup/proof.json
+          sudo chown root:root /tmp/kelion-ci-postgres/backup/proof.json
+          sudo chmod 0600 /tmp/kelion-ci-postgres/backup/proof.json
+          migration_proof_copy=/tmp/kelion-ci-postgres/backup/proof.migrator.json
+          sudo install -o root -g 10050 -m 0440 \
+            /tmp/kelion-ci-postgres/backup/proof.json "$migration_proof_copy"
+          [ "$(sudo stat -c '%u:%g:%a' /tmp/kelion-ci-postgres/backup/proof.json)" = '0:0:600' ]
+          [ "$(sudo stat -c '%u:%g:%a' "$migration_proof_copy")" = '0:10050:440' ]
+          sudo cmp -s -- /tmp/kelion-ci-postgres/backup/proof.json "$migration_proof_copy"
           migration_output=$(docker run --rm --network none --user 1000:1000 --group-add 10050 \
             --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 96 --memory 768m --cpus 1 \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,uid=1000,gid=1000 \
@@ -320,8 +326,10 @@ jobs:
             -v /tmp/kelion-ci-postgres/socket:/var/run/postgresql:ro \
             -v /tmp/kelion-ci-secrets/database-url:/run/secrets/database-url:ro \
             -v /tmp/kelion-ci-secrets/migration-backup-proof-key:/run/secrets/migration-backup-proof-key:ro \
-            -v /tmp/kelion-ci-postgres/backup/proof.json:/run/proof/backup.json:ro \
+            -v "$migration_proof_copy:/run/proof/backup.json:ro" \
             "$KELION_APP_IMAGE" node /app/backend/dist/migrate.js)
+          sudo rm -f -- "$migration_proof_copy"
+          [ "$(sudo stat -c '%u:%g:%a' /tmp/kelion-ci-postgres/backup/proof.json)" = '0:0:600' ]
           [ "$migration_output" = migrations_ok ]
 
           docker network create --driver bridge kelion-proxy >/dev/null
