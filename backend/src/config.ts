@@ -73,6 +73,10 @@ export const ENV_ALIASES: Record<string, string[]> = {
   googleTokenEncryptionKey: ['GOOGLE_TOKEN_ENCRYPTION_KEY'],
   googleTokenEncryptionPreviousKey: ['GOOGLE_TOKEN_ENCRYPTION_PREVIOUS_KEY'],
   githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
+  // Dedicated, server-side OAuth token for the Admin release console. It is
+  // deliberately separate from publisher credentials and is never sent to a
+  // browser or worker.
+  githubReleaseOAuthToken: ['GITHUB_RELEASE_OAUTH_TOKEN'],
 }
 
 function required(name: string): string {
@@ -674,6 +678,7 @@ export const config = {
   // exemption. Production fails closed when it is absent or malformed.
   adminEmail: configuredAdminEmail(),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
+  githubReleaseOAuthToken: env(...ENV_ALIASES.githubReleaseOAuthToken),
   githubRepo: (process.env.GITHUB_REPO ?? productConfig.githubRepository).trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
