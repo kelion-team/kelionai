@@ -194,7 +194,8 @@ jobs:
           chown -h root:root /opt/kelion-codex/bin/codex
           install -o root -g root -m 0444 /opt/kelion-codex/profile-home/kelion-worker.config.toml /var/lib/kelion-codex-auth/kelion-worker.config.toml
 
-          install -d -o root -g root -m 0750 /root/kelion/secrets /root/kelion/worker-secrets /root/kelion/publisher-secrets /root/kelion/release-secrets
+          install -d -o root -g 10050 -m 0750 /root/kelion/secrets
+          install -d -o root -g root -m 0750 /root/kelion/worker-secrets /root/kelion/publisher-secrets /root/kelion/release-secrets
           write_secret() {
             local path=$1 group=$2 value=$3 temporary
             temporary=$(mktemp "${path}.XXXXXX"); printf '%s\n' "$value" > "$temporary"
