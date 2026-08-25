@@ -93,12 +93,13 @@ export async function fetchMe(): Promise<MeResponse> {
   }
 }
 
-export function startGoogleLogin(): void {
+export function startGoogleLogin(next = '/'): void {
   if (isNativeShell()) {
     void startNativeGoogleLogin().catch(() => window.dispatchEvent(new CustomEvent('kelion-native-auth-error')))
     return
   }
-  window.location.href = authUrl('/auth/google/login')
+  const safeNext = next === '/manual' || next === '/credite' || next === '/credits' ? next : '/'
+  window.location.href = authUrl(`/auth/google/login?next=${encodeURIComponent(safeNext)}`)
 }
 
 export async function logout(): Promise<void> {

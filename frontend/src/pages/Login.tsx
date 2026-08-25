@@ -15,7 +15,13 @@ export default function Login(): React.JSX.Element {
   const [email, setEmail] = useState('')
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState(urlError === 'link_expirat' ? T.errLinkExpired : '')
+  const [note, setNote] = useState(
+    urlError === 'link_expirat'
+      ? T.errLinkExpired
+      : urlError === 'oauth_failed'
+        ? 'Google sign-in did not complete. Please try again.'
+        : '',
+  )
 
   const post = async (url: string, body: object): Promise<{ ok?: boolean; error?: string }> => {
     const r = await apiFetch(url, {
@@ -74,7 +80,7 @@ export default function Login(): React.JSX.Element {
 
         {mode !== 'reset' && (
           <>
-            <button type="button" className="login-google" onClick={startGoogleLogin}>🔵 {T.continueGoogle}</button>
+            <button type="button" className="login-google" onClick={() => startGoogleLogin('/')}>🔵 {T.continueGoogle}</button>
             <div className="login-sep">{T.orEmail}</div>
           </>
         )}

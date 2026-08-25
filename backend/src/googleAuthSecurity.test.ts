@@ -21,6 +21,26 @@ describe('poarta criptografică Google OAuth', () => {
     expect(redirect.searchParams.get('state')).toMatch(/^[a-f0-9]{32}$/)
   })
 
+  it('keeps an approved intended route, and turns a failed callback into a visible retry page', async () => {
+    const app = Fastify()
+    await app.register(cookie)
+    await app.register(authRoutes)
+    const start = await app.inject({ method: 'GET', url: '/auth/google/login?next=/credite' })
+    expect(start.statusCode).toBe(302)
+    expect((start.headers['set-cookie'] as string[]).some((value) => value.includes('kelionai_oauth_return_to=') && value.includes('credite'))).toBe(true)
+
+    const stateCookie = (start.headers['set-cookie'] as string[])
+      .find((value) => value.startsWith('kelionai_oauth_state='))
+    expect(stateCookie).toBeTruthy()
+    const failure = await app.inject({
+      method: 'GET',
+      url: '/auth/google/callback',
+      headers: { cookie: stateCookie ?? '' },
+    })
+    expect(failure.statusCode).toBe(302)
+    expect(failure.headers.location).toBe('http://localhost:5173/login?error=oauth_failed&reason=bad_state')
+  })
+
   it('requires both a known capability and an authenticated session for incremental connect', async () => {
     const app = Fastify()
     await app.register(cookie)
