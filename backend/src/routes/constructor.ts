@@ -98,7 +98,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       nume: numeleOrdinului(j.orderText),
       // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
       cerutDe: cineACerut(j.orderedBy),
-      continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) },
+      continuity: { ...constructorContinuity(j, incidents[index]), ...observability.get(j.id) },
       workCard: workCards.get(j.id) ?? null,
     }))
     const worker = await getCodexWorkerStatus()
@@ -421,7 +421,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: observability.get(j.id)?.progress.percent ?? null, ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) }, workCard: workCards.get(j.id) ?? null })),
+      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: observability.get(j.id)?.progress.percent ?? null, ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: { ...constructorContinuity(j, incidents[index]), ...observability.get(j.id) }, workCard: workCards.get(j.id) ?? null })),
     })
   })
 }

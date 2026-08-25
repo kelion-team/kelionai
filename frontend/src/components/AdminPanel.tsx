@@ -647,6 +647,48 @@ export default function AdminPanel({
       escalation: null | { cause: string; evidence: string; nextAction: string }
       proof: null | { commit: string; liveVersion: string; ci: string }
       message: string
+      activity?: {
+        id: string
+        eventKey: string
+        stage: string
+        label: string
+        state: 'completed' | 'current' | 'pending' | 'failed'
+        at: string | null
+        percent: number
+      }[]
+    }
+    workCard?: null | {
+      id: string
+      canonicalLink: string
+      objective: string
+      acceptanceCriteria: string[]
+      contextLinks: string[]
+      owner: string
+      actor: string
+      currentStep: string | null
+      heartbeatAt: string | null
+      progress: {
+        percent: number | null
+        completed: number
+        total: number
+        currentStage: string | null
+        resolved: boolean
+        source: string
+      }
+      decisions: string[]
+      approvals: string[]
+      risks: string[]
+      dependencies: string[]
+      escalationCondition: string | null
+      finalResult: string | null
+      evidence: {
+        eventCount: number
+        prUrl?: string | null
+        commit?: string | null
+        liveVersion?: string | null
+        ci?: string | null
+      }
+      closure: { resolved: boolean; closedAt: string | null }
     }
   }
 
@@ -2920,6 +2962,67 @@ export default function AdminPanel({
                         <><br />Cauză: {j.continuity.escalation.cause} → {j.continuity.escalation.nextAction}</>
                       )}
                     </div>
+                  )}
+                  {j.workCard && (
+                    <details
+                      id={`constructor-work-card-${j.id}`}
+                      className="build-progress"
+                      style={{ flexBasis: '100%', marginTop: 8 }}
+                    >
+                      <summary>
+                        <b>Fișa canonică {j.workCard.id}</b>
+                        {' · '}
+                        {j.workCard.currentStep ?? 'pas nepublicat'}
+                      </summary>
+                      <div className="chat-hint" style={{ marginTop: 6 }}>
+                        <b>Obiectiv:</b> {j.workCard.objective}
+                        <br />
+                        <b>Owner / actor:</b> {j.workCard.owner} / {j.workCard.actor}
+                        <br />
+                        <b>Heartbeat:</b>{' '}
+                        {j.workCard.heartbeatAt
+                          ? new Date(j.workCard.heartbeatAt).toLocaleString('ro-RO')
+                          : 'nepublicat'}
+                        {' · '}
+                        <b>Evenimente persistente:</b> {j.workCard.evidence.eventCount}
+                        {j.workCard.escalationCondition && (
+                          <><br /><b>Escaladare:</b> {j.workCard.escalationCondition}</>
+                        )}
+                        {j.workCard.finalResult && (
+                          <><br /><b>Rezultat:</b> {j.workCard.finalResult}</>
+                        )}
+                      </div>
+                      {j.workCard.acceptanceCriteria.length > 0 && (
+                        <ul className="chat-hint">
+                          {j.workCard.acceptanceCriteria.map((criterion) => (
+                            <li key={criterion}>{criterion}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {(j.continuity?.activity ?? []).length > 0 && (
+                        <ol className="chat-hint" aria-label={`Cronologia ${j.workCard.id}`}>
+                          {(j.continuity?.activity ?? []).map((event) => (
+                            <li key={event.id}>
+                              <b>{event.label}</b> · {event.percent}% · {event.state}
+                              {event.at
+                                ? ` · ${new Date(event.at).toLocaleString('ro-RO')}`
+                                : ''}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      {j.workCard.contextLinks.some((link) => /^https?:\/\//.test(link)) && (
+                        <div className="chat-hint">
+                          {j.workCard.contextLinks
+                            .filter((link) => /^https?:\/\//.test(link))
+                            .map((link) => (
+                              <a key={link} href={link} target="_blank" rel="noreferrer">
+                                Dovadă ↗
+                              </a>
+                            ))}
+                        </div>
+                      )}
+                    </details>
                   )}
                 </div>
               ))}
