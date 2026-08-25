@@ -42,6 +42,13 @@ test('cheia privată de semnare rămâne root-only și ajunge la publisher numai
   assert.doesNotMatch(workflow, /chown root:kelion-publisher "[$]signing_key"|chmod 0440 "[$]signing_key"/)
 })
 
+test('configurarea Constructor păstrează ACL-ul canonic al secretelor de producție', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /install -d -o root -g 10050 -m 0750 \/root\/kelion\/secrets/)
+  assert.match(workflow, /install -d -o root -g root -m 0750 \/root\/kelion\/worker-secrets \/root\/kelion\/publisher-secrets \/root\/kelion\/release-secrets/)
+  assert.doesNotMatch(workflow, /install -d -o root -g root -m 0750[^\n]*\/root\/kelion\/secrets/)
+})
+
 test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   const worker = read('deploy/systemd/kelion-codex-worker.service')
   const publisher = read('deploy/systemd/kelion-constructor-publisher.service')
