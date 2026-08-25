@@ -671,6 +671,16 @@ export default function AdminPanel({
       recomandare: string
     }[]
   } | null>(null)
+  const [release, setRelease] = useState<{
+    jobId: number | null
+    integration: 'ready' | 'setup_required' | 'unavailable'
+    setupInstructions: string | null
+    pr: null | { number: number; title: string; url: string; state: 'open' | 'closed'; merged: boolean }
+    checks: 'passed' | 'pending' | 'failed' | 'unknown'
+    approval: 'approved' | 'required' | 'unknown'
+    merge: 'ready' | 'blocked' | 'merged' | 'unknown'
+    nextAction: string
+  } | null>(null)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   const [agentName, setAgentName] = useState('')
@@ -934,9 +944,21 @@ export default function AdminPanel({
               recomandare: string
             }[]
           } | null,
-        ) => setDiagnostic(d && typeof d.verdict === 'string' ? d : null),
+      ) => setDiagnostic(d && typeof d.verdict === 'string' ? d : null),
       )
       .catch(() => setDiagnostic(null))
+    apiFetch('/api/admin/constructor/release', { credentials: 'include', cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => setRelease(r && typeof r.nextAction === 'string' ? r : null))
+      .catch(() => setRelease(null))
+  }
+
+  const releaseAction = (action: 'approve' | 'merge'): void => {
+    if (!release?.jobId) return
+    void apiFetch('/api/admin/constructor/release/action', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ jobId: release.jobId, action }),
+    }).then(() => refreshBuildJobs()).catch(() => refreshBuildJobs())
   }
   // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
@@ -2504,6 +2526,29 @@ export default function AdminPanel({
                       ))}
                     </div>
                   )}
+                {release && (
+                  <div style={{ marginTop: 10, padding: 10, border: '1px solid #8884', borderRadius: 8, fontSize: 12 }}>
+                    <div style={{ fontWeight: 700 }}>Publicare GitHub</div>
+                    {release.integration !== 'ready' ? (
+                      <>
+                        <div style={{ color: release.integration === 'setup_required' ? '#8a6d1a' : '#c1121f', marginTop: 5 }}>
+                          {release.integration === 'setup_required' ? '⚠ Integrarea GitHub nu este configurată' : '🔴 Integrarea GitHub nu poate fi citită'}
+                        </div>
+                        {release.setupInstructions && <div className="chat-hint" style={{ marginTop: 5 }}>{release.setupInstructions}</div>}
+                      </>
+                    ) : !release.pr ? (
+                      <div className="chat-hint" style={{ marginTop: 5 }}>Nu există încă un PR Constructor de urmărit.</div>
+                    ) : (
+                      <>
+                        <div style={{ marginTop: 5 }}><b>PR:</b>{' '}<a href={release.pr.url} target="_blank" rel="noreferrer">{release.pr.title}</a></div>
+                        <div className="chat-hint" style={{ marginTop: 4 }}>Verificări: {release.checks} · Review: {release.approval} · Merge: {release.merge}</div>
+                        <div style={{ marginTop: 5 }}>{release.nextAction}</div>
+                        {!release.pr.merged && release.approval === 'required' && <button className="ghost" type="button" style={{ marginTop: 7 }} onClick={() => releaseAction('approve')}>Aprobă în Keleon</button>}
+                        {!release.pr.merged && release.merge === 'ready' && <button className="ghost" type="button" style={{ marginTop: 7, marginLeft: 7 }} onClick={() => releaseAction('merge')}>Integrează în master</button>}
+                      </>
+                    )}
+                  </div>
+                )}
                 <div
                   style={{
                     marginTop: 10,
