@@ -636,17 +636,22 @@ interface BuildLiveJob {
   updatedAt?: string
 
   pct?: number | null
+  continuity?: {
+    progress?: {
+      percent: number | null
+      currentStage: string | null
+      resolved: boolean
+      source: 'constructor_activity_events' | 'unavailable'
+    }
+    activity?: Array<{
+      id: string
+      label: string
+      state: 'completed' | 'current' | 'recovery' | 'resolved'
+      at: string
+      percent: number | null
+    }>
+  }
 }
-
-const FAZE_BUILD: readonly { readonly prag: number; readonly nume: string }[] =
-  [
-    { prag: 0, nume: 'Preluat' },
-    { prag: 10, nume: 'Atelier' },
-    { prag: 15, nume: 'Construiește' },
-    { prag: 75, nume: 'Verifică' },
-    { prag: 90, nume: 'PR' },
-    { prag: 97, nume: 'CI / Deploy' },
-  ]
 
 const buildLabel = (status: string): string => {
   const t = uiStrings()
@@ -827,35 +832,25 @@ function BuildSurface({ zoom }: { zoom: number }) {
                     >
                       <div
                         className="build-bar-fill"
-                        style={{ width: `${Math.max(2, j.pct)}%` }}
+                        style={{ width: `${j.pct}%` }}
                       />
                       <span className="build-bar-num">{j.pct}%</span>
                     </div>
                   )}
-                  <div className="build-faze">
-                    {FAZE_BUILD.map((f, i) => {
-                      const pct =
-                        typeof j.pct === 'number'
-                          ? j.pct
-                          : j.status === 'done'
-                            ? 100
-                            : 0
-                      const urm = FAZE_BUILD[i + 1]
-                      const atinsa = j.status === 'done' || pct >= f.prag
-                      const activa =
-                        j.status === 'running' &&
-                        atinsa &&
-                        (!urm || pct < urm.prag)
-                      return (
-                        <span
-                          key={f.nume}
-                          className={`build-faza ${atinsa ? 'ok' : ''} ${activa ? 'activ' : ''}`}
+                  {j.continuity?.activity && j.continuity.activity.length > 0 && (
+                    <ol className="build-faze" aria-label="Istoricul real al executiei">
+                      {j.continuity.activity.map((event) => (
+                        <li
+                          key={event.id}
+                          className={`build-faza ${event.state === 'completed' || event.state === 'resolved' ? 'ok' : ''} ${event.state === 'current' || event.state === 'recovery' ? 'activ' : ''}`}
                         >
-                          {f.nume}
-                        </span>
-                      )
-                    })}
-                  </div>
+                          <span>{event.label}</span>
+                          {typeof event.percent === 'number' && <span> {event.percent}%</span>}
+                          <time dateTime={event.at}> {new Date(event.at).toLocaleTimeString()}</time>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </>
               )}
               {j.progress && j.status !== 'failed' ? (

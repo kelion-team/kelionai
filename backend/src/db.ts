@@ -5299,34 +5299,20 @@ async function abandoneazaJoburileBlocate(): Promise<void> {
 export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; abandonate: number }> {
   if (!dbEnabled()) return { repuse: 0, abandonate: 0 }
   try {
-    const fail = await getPool().query(
-      `UPDATE build_jobs SET status='failed',
-         log = COALESCE(log,'') || E'\\n[watchdog: lucrătorul a murit după preluare, fără progres, de prea multe ori — abandonat]',
-         updated_at = now()
-       WHERE status='running' AND attempts >= 3
-         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
-         -- După handoff, publisherul/releaserul au lease-uri proprii. Watchdog-ul
-         -- workerului nu are voie să rescrie un PR sau release legitim aflat în
-         -- așteptarea CI/aprobării.
-         AND (codex_task_id IS NULL OR constructor_stage IN ('claimed','accepted','working'))`,
-    )
     const requeue = await getPool().query(
-      `UPDATE build_jobs SET status='queued',
-         log = COALESCE(log,'') || E'\\n[watchdog: repus în coadă — running tăcut peste prag, lucrătorul nu a raportat progres după preluare]',
-         updated_at = now()
-       WHERE status='running' AND attempts < 3
-         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
-         AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
-          -- Un task Codex opac rămâne proprietatea workerului care l-a revendicat;
-          -- watchdog-ul nu pornește o a doua execuție plătită.
-          AND codex_task_id IS NULL`,
+      `UPDATE build_jobs SET status='queued', constructor_stage='queued',
+         codex_task_id=NULL, progress='worker_retry_scheduled',
+         log = COALESCE(log,'') || E'\\n[watchdog: executia tacuta a fost repusa automat in coada]',
+         progress_at=now(), updated_at=now()
+       WHERE status='running'
+         AND constructor_stage IN ('claimed','accepted','working')
+         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'`,
     )
-    return { repuse: requeue.rowCount ?? 0, abandonate: fail.rowCount ?? 0 }
+    return { repuse: requeue.rowCount ?? 0, abandonate: 0 }
   } catch {
     return { repuse: 0, abandonate: 0 }
   }
 }
-
 // ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
 // fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
 // sau se escaladeaza sau se raporteaza la kelion") ───────────────────────────
@@ -5581,9 +5567,10 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
     const failed = input.event === 'failed'
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
-         status=CASE WHEN $3 THEN 'failed' ELSE status END,
-         constructor_stage=$2,
-         progress=$4,
+         status=CASE WHEN $3 THEN 'queued' ELSE status END,
+         constructor_stage=CASE WHEN $3 THEN 'queued' ELSE $2 END,
+         codex_task_id=CASE WHEN $3 THEN NULL ELSE codex_task_id END,
+         progress=CASE WHEN $3 THEN 'worker_retry_scheduled' ELSE $4 END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
          brain='codex-worker',

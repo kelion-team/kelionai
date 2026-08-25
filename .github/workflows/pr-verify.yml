@@ -24,6 +24,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verifică trainul înainte de CI complet
         run: node scripts/release-train-preflight.mjs
 
@@ -68,6 +69,8 @@ jobs:
             scripts/verifica-migrari.test.mjs \
             scripts/inventar-audit.test.mjs \
             scripts/verifica-contract-deploy.test.mjs \
+            scripts/release-train-preflight.test.mjs \
+            scripts/release-train-workflow.test.mjs \
             ios/appstore-build.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
             deploy/lib/backup-schedule.test.mjs \

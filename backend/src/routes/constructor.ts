@@ -3,7 +3,6 @@ import { config } from '../config.js'
 import { adminSiId, cerAdmin } from '../session.js'
 import { advanceCodexBuildJob, claimNextBuildJob, createBuildJob, listBuildJobs, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob, getConstructorIncidentForJob, type CodexBuildEvent } from '../db.js'
 import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
-import { procentDinProgres } from '../services/progresOrdin.js'
 import { evalueazaOrdin, AI_CONSTRUCTORI } from '../services/evalOrdinConstructor.js'
 import { getCodexWorkerStatus, newCodexTaskId, planificaOrdinConstructor, recordCodexWorkerStatus, verifyCodexWorkerRequest, type CodexWorkerState } from '../services/codexWorker.js'
 import {
@@ -21,6 +20,7 @@ import {
 } from '../services/constructorPipeline.js'
 import { verifyPublisherRequest, verifyReleaseRequest } from '../services/constructorServiceAuth.js'
 import { constructorContinuity } from '../services/constructorContinuity.js'
+import { constructorObservabilityForJobs } from '../services/constructorObservability.js'
 import { actOnRelease, readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -84,19 +84,19 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // panoul scria „Niciun ordin încă" fără nicio măsurătoare reușită.
     const raw = await listBuildJobs(40)
     if (!raw) return reply.code(500).send({ error: 'db_unreadable' })
-    // BARA 0–100% (Adrian, 3 aug): `pct` e harta etapei REALE raportate de
-    // lucrător (progresOrdin.ts) — bara din panou o afișează lângă textul
-    // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
+    const observability = await constructorObservabilityForJobs(raw)
+    // `pct` și timeline-ul sunt proiectate din catalogul și evenimentele
+    // persistate; endpointul nu deține procente sau praguri de etapă.
     const incidents = await Promise.all(raw.map((job) => getConstructorIncidentForJob(job.id)))
     const jobs = raw.map((j, index) => ({
       ...j,
-      pct: j.codexTaskId ? null : procentDinProgres(j.status, j.progress),
+      pct: observability.get(j.id)?.progress.percent ?? null,
       // P8 (owner, 15 aug: „trebuie sa fie foarte clar ce executa"): numele
       // rândului = FAPTA extrasă din ordin, nu ambalajul promptului.
       nume: numeleOrdinului(j.orderText),
       // 16 aug: și AUTORUL, pe față — „cine e acolo?" nu se mai întreabă.
       cerutDe: cineACerut(j.orderedBy),
-      continuity: constructorContinuity(j, incidents[index]),
+      continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) },
     }))
     const worker = await getCodexWorkerStatus()
     return reply.send({
@@ -409,6 +409,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const user = cerAdmin(req, reply)
     if (!user) return
     const jobs = await listMonitorBuildJobs()
+    const observability = await constructorObservabilityForJobs(jobs)
     const incidents = await Promise.all(jobs.map((job) => getConstructorIncidentForJob(job.id)))
     return reply.send({
       // P8: `order` devine FAPTA (numeleOrdinului), nu primele litere ale
@@ -416,7 +417,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // 16 aug 05:47 (ownerul, pe #330: „aici nu esti tu" / „cine e acolo?"):
       // cardul spune de-acum CINE a cerut ordinul — omul, sau o buclă automată
       // pe nume. Un ordin fără autor vizibil arată ca o fantomă.
-      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: j.codexTaskId ? null : procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: constructorContinuity(j, incidents[index]) })),
+      jobs: jobs.map((j, index) => ({ id: j.id, jobId: String(j.id), status: j.status, stage: j.constructorStage, order: numeleOrdinului(j.orderText), cerutDe: cineACerut(j.orderedBy), progress: j.progress, pct: observability.get(j.id)?.progress.percent ?? null, ci: j.ci, prUrl: j.prUrl, commit: j.commit, liveVersion: j.liveVersion, attempts: j.attempts, updatedAt: j.updatedAt, continuity: { ...constructorContinuity(j, incidents[index]), ...(observability.get(j.id) ?? {}) } })),
     })
   })
 }

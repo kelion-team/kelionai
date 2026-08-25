@@ -60,6 +60,8 @@ node --test \
   scripts/verifica-migrari.test.mjs \
   scripts/inventar-audit.test.mjs \
   scripts/verifica-contract-deploy.test.mjs \
+  scripts/release-train-preflight.test.mjs \
+  scripts/release-train-workflow.test.mjs \
   ios/appstore-build.test.mjs \
   deploy/lib/create-migration-proof.test.mjs \
   deploy/lib/backup-schedule.test.mjs \
