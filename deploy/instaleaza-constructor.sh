@@ -48,10 +48,12 @@ install -o root -g root -m 0444 "$repo_root/deploy/codex-worker.profile.toml" /o
 install -o root -g root -m 0555 "$repo_root/deploy/constructor-publisher.mjs" /opt/kelion-constructor/constructor-publisher.mjs
 install -o root -g root -m 0555 "$repo_root/deploy/constructor-release.mjs" /opt/kelion-constructor/constructor-release.mjs
 install -o root -g root -m 0555 "$repo_root/deploy/github-askpass.sh" /opt/kelion-constructor/github-askpass.sh
+install -o root -g root -m 0555 "$repo_root/deploy/constructor-sync-worker.sh" /opt/kelion-constructor/constructor-sync-worker.sh
 install -o root -g root -m 0444 "$repo_root/deploy/lib/constructor-service-client.mjs" /opt/kelion-constructor/lib/constructor-service-client.mjs
 install -o root -g root -m 0444 "$repo_root/deploy/lib/github-fixed-client.mjs" /opt/kelion-constructor/lib/github-fixed-client.mjs
 
 for unit in \
+  kelion-constructor-sync.service \
   kelion-codex-worker.service kelion-codex-worker.timer \
   kelion-constructor-publisher.service kelion-constructor-publisher.timer \
   kelion-constructor-release.service kelion-constructor-release.timer
