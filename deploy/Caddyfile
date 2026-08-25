@@ -20,7 +20,7 @@
 		Cross-Origin-Opener-Policy "same-origin-allow-popups"
 		Cross-Origin-Resource-Policy "same-site"
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=(self), payment=(self), browsing-topics=()"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-YL6PctrGP2DPZgUWOG7ka1HXOS8epjETovXPq2W+jBA='; script-src-attr 'none'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' wss://{$PUBLIC_APP_DOMAIN} https://huggingface.co https://*.hf.co https://raw.githubusercontent.com; frame-src https://www.youtube.com https://youtube.com https://www.openstreetmap.org https://embed.waze.com https://embed.windy.com https://www.tradingview.com; manifest-src 'self'; upgrade-insecure-requests"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-YL6PctrGP2DPZgUWOG7ka1HXOS8epjETovXPq2W+jBA='; script-src-attr 'none'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' blob: wss://{$PUBLIC_APP_DOMAIN} https://huggingface.co https://*.hf.co https://raw.githubusercontent.com; frame-src https://www.youtube.com https://youtube.com https://www.openstreetmap.org https://embed.waze.com https://embed.windy.com https://www.tradingview.com; manifest-src 'self'; upgrade-insecure-requests"
 	}
 
 	@apple_association path /.well-known/apple-app-site-association
