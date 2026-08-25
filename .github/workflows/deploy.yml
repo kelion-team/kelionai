@@ -157,7 +157,7 @@ jobs:
 
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$CANDIDATE_SHA")
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
-            -czf "$archive" deploy config/product.json release-manifest/images.json
+            -czf "$archive" deploy config/product.json release-manifest/images.json release-manifest/codex-gates.json
           printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "install -d -o root -g root -m 0700 /root/kelion/runtime && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
           scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"

@@ -338,10 +338,14 @@ async function waitForGreen(token, prNumber, headCommit, renew) {
     const required = REQUIRED_CHECKS.map((name) => byName.get(name))
     const failed = required.some((check) => check && check.status === 'completed' && check.conclusion !== 'success')
     if (failed) fail('Un control CI obligatoriu a eșuat')
-    if (required.every((check) => check?.status === 'completed' && check?.conclusion === 'success')) return
+    const reviews = await github(token, `/repos/${REPOSITORY}/pulls/${prNumber}/reviews?per_page=100`)
+    const approved = Array.isArray(reviews) && reviews.some((review) =>
+      review?.state === 'APPROVED' && review?.commit_id === headCommit,
+    )
+    if (required.every((check) => check?.status === 'completed' && check?.conclusion === 'success') && approved) return
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 15_000))
   }
-  fail('Timeout așteptând controalele CI obligatorii')
+  fail('Timeout așteptând controalele CI obligatorii și aprobarea umană')
 }
 
 async function requiredChecksAreGreen(token, headCommit) {

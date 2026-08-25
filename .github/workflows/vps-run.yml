@@ -24,7 +24,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   packages: read
 
 concurrency:
@@ -45,9 +45,9 @@ jobs:
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
       CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
-      WORKER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_WORKER_GITHUB_TOKEN }}
+      SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
       PUBLISHER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
-      RELEASE_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_RELEASE_GITHUB_TOKEN }}
+      RELEASE_GITHUB_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Valideaza tinta fixa
@@ -57,6 +57,14 @@ jobs:
           [ "$VPS_USER" = root ]
           [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$PUBLIC_APP_ORIGIN"
+
+      - name: Persista activarea in configuratia canonica
+        if: inputs.operation == 'configure-constructor'
+        run: |
+          set -euo pipefail
+          for name in CODEX_WORKER_ENABLED CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_RELEASE_ENABLED; do
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/$name" -f value=1
+          done
 
       - name: Descopera cheia publica ed25519 pentru pinning
         if: inputs.operation == 'discover-host-key'
@@ -102,9 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
-          for value in "$CODEX_WORKER_SECRET" "$CONSTRUCTOR_PUBLISHER_SECRET" "$CONSTRUCTOR_RELEASE_SECRET" "$WORKER_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN"; do [ "${#value}" -ge 32 ]; done
-          [ "$WORKER_GITHUB_TOKEN" != "$PUBLISHER_GITHUB_TOKEN" ]
-          [ "$WORKER_GITHUB_TOKEN" != "$RELEASE_GITHUB_TOKEN" ]
+          for value in "$CODEX_WORKER_SECRET" "$CONSTRUCTOR_PUBLISHER_SECRET" "$CONSTRUCTOR_RELEASE_SECRET" "$SYNC_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN"; do [ "${#value}" -ge 32 ]; done
           [ "$PUBLISHER_GITHUB_TOKEN" != "$RELEASE_GITHUB_TOKEN" ]
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ "$current_host_key" = "$VPS_HOST_KEY" ]
@@ -128,7 +134,7 @@ jobs:
             encode codex-worker "$CODEX_WORKER_SECRET"
             encode constructor-publisher "$CONSTRUCTOR_PUBLISHER_SECRET"
             encode constructor-release "$CONSTRUCTOR_RELEASE_SECRET"
-            encode github-worker "$WORKER_GITHUB_TOKEN"
+            encode github-sync "$SYNC_GITHUB_TOKEN"
             encode github-publisher "$PUBLISHER_GITHUB_TOKEN"
             encode github-release "$RELEASE_GITHUB_TOKEN"
           } > "$payload"
@@ -164,9 +170,9 @@ jobs:
             [ -n "$encoded" ]; printf '%s' "$encoded" | base64 -d
           }
           codex_secret=$(decode codex-worker); publisher_secret=$(decode constructor-publisher); release_secret=$(decode constructor-release)
-          worker_token=$(decode github-worker); publisher_token=$(decode github-publisher); release_token=$(decode github-release)
-          for value in "$codex_secret" "$publisher_secret" "$release_secret" "$worker_token" "$publisher_token" "$release_token"; do [ "${#value}" -ge 32 ]; done
-          [ "$worker_token" != "$publisher_token" ] && [ "$worker_token" != "$release_token" ] && [ "$publisher_token" != "$release_token" ]
+          sync_token=$(decode github-sync); publisher_token=$(decode github-publisher); release_token=$(decode github-release)
+          for value in "$codex_secret" "$publisher_secret" "$release_secret" "$sync_token" "$publisher_token" "$release_token"; do [ "${#value}" -ge 32 ]; done
+          [ "$publisher_token" != "$release_token" ]
           for marker in codex-worker constructor-publisher constructor-release; do [ ! -e "/etc/kelion/$marker.enabled" ] || { echo 'Reconfigurarea unui Constructor activ este refuzata' >&2; exit 1; }; done
 
           export DEBIAN_FRONTEND=noninteractive
@@ -177,7 +183,8 @@ jobs:
 
           install -d -o root -g root -m 0755 /opt/kelion-codex/bin /opt/kelion-codex/npm
           npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1' >/dev/null
-          install -o root -g root -m 0555 /opt/kelion-codex/npm/bin/codex /opt/kelion-codex/bin/codex
+          ln -sfn /opt/kelion-codex/npm/bin/codex /opt/kelion-codex/bin/codex
+          chown -h root:root /opt/kelion-codex/bin/codex
           install -o root -g root -m 0444 /opt/kelion-codex/profile-home/kelion-worker.config.toml /var/lib/kelion-codex-auth/kelion-worker.config.toml
 
           install -d -o root -g root -m 0750 /root/kelion/secrets /root/kelion/worker-secrets /root/kelion/publisher-secrets /root/kelion/release-secrets
@@ -189,7 +196,7 @@ jobs:
           write_secret /root/kelion/secrets/codex-worker-secret 10050 "$codex_secret"
           write_secret /root/kelion/secrets/constructor-publisher-secret 10050 "$publisher_secret"
           write_secret /root/kelion/secrets/constructor-release-secret 10050 "$release_secret"
-          write_secret /root/kelion/worker-secrets/github-worker-token root "$worker_token"
+          write_secret /root/kelion/worker-secrets/github-worker-token root "$sync_token"
           write_secret /root/kelion/publisher-secrets/github-publisher-token kelion-publisher "$publisher_token"
           write_secret /root/kelion/release-secrets/github-release-token kelion-release "$release_token"
 
@@ -207,7 +214,7 @@ jobs:
 
           install -d -o root -g kelion-codex -m 0750 "$bootstrap/worker"
           install -d -o root -g kelion-publisher -m 0750 "$bootstrap/publisher"
-          write_secret "$bootstrap/worker/token" kelion-codex "$worker_token"
+          write_secret "$bootstrap/worker/token" kelion-codex "$sync_token"
           write_secret "$bootstrap/publisher/token" kelion-publisher "$publisher_token"
           clone_or_sync() {
             local user=$1 target=$2 token_file=$3 home_dir=$4 expected="https://github.com/$repository.git" origin dangerous
@@ -263,12 +270,19 @@ jobs:
 
           pull_gate() {
             local user=$1 runtime=$2 token=$3
+            local authfile="$runtime/constructor-auth.json"
             install -d -o "$user" -g "$user" -m 0700 "$runtime"
-            printf '%s' "$token" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login ghcr.io --username "${repository%%/*}" --password-stdin >/dev/null
-            runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull "$gate_image" >/dev/null
-            runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout ghcr.io >/dev/null
+            rm -f -- "$authfile"
+            printf '%s' "$token" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "${repository%%/*}" --password-stdin >/dev/null
+            if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$gate_image" >/dev/null; then
+              runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
+              rm -f -- "$authfile"
+              return 1
+            fi
+            runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
+            rm -f -- "$authfile"
           }
-          pull_gate kelion-codex /run/kelion-codex "$worker_token"
+          pull_gate kelion-codex /run/kelion-codex "$sync_token"
           pull_gate kelion-publisher /run/kelion-publisher "$publisher_token"
           systemctl daemon-reload
           printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si autentificarea ChatGPT'
