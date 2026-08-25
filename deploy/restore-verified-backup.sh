@@ -14,6 +14,14 @@ BACKUP_LOCK=$ROOT/backup.lock
 RESTORE_LOCK=$ROOT/restore.lock
 BUNDLE_DIRECTORY=$(cd -- "$(dirname -- "$0")" && pwd -P)
 VALIDATOR=$BUNDLE_DIRECTORY/lib/restore-verified-backup.mjs
+# Identitatea autentificată a backupului rămâne legată de socketul Unix local.
+# Control-plane-ul restore trebuie însă să se conecteze și la `postgres`, apoi
+# la baza scratch. HBA-ul de producție permite parola pe socket numai pentru
+# baza live și folosește peer pentru celelalte baze; helperul root nu trebuie
+# să se dea drept utilizatorul OS postgres. TCP loopback păstrează conexiunea
+# strict locală și folosește aceeași credențială prin PGPASSFILE pentru toate
+# bazele implicate în restore.
+DATABASE_CONTROL_HOST=127.0.0.1
 
 error_code=restore_failed
 operation_mode=restore
@@ -438,6 +446,7 @@ pg_port=$(jq -er '.port' "$plan_file")
 scratch_database=$(jq -er '.scratchDatabase' "$plan_file")
 quarantine_database=$(jq -er '.quarantineDatabase' "$plan_file")
 failed_database=$(jq -er '.failedDatabase' "$plan_file")
+[ "$pg_host" = /var/run/postgresql ] || fail restore_plan_invalid
 
 [ -f "$backup_path" ] && [ ! -L "$backup_path" ] || fail restore_backup_file_invalid
 [ "$(stat -Lc '%u:%g:%a:%h' -- "$backup_path")" = '0:0:600:1' ] \
@@ -445,7 +454,7 @@ failed_database=$(jq -er '.failedDatabase' "$plan_file")
 checksum_line=$(sha256sum -- "$backup_path") || fail restore_backup_hash_unavailable
 [ "${checksum_line%% *}" = "$backup_sha256" ] || fail restore_backup_hash_changed
 
-export PGHOST=$pg_host PGPORT=$pg_port PGUSER=$database_user PGPASSFILE=$pgpass_file
+export PGHOST=$DATABASE_CONTROL_HOST PGPORT=$pg_port PGUSER=$database_user PGPASSFILE=$pgpass_file
 export PGCONNECT_TIMEOUT=10 PGAPPNAME=kelion-verified-restore
 unset PGPASSWORD DATABASE_URL DATABASE_URL_FILE
 
@@ -477,6 +486,7 @@ WITH role_state AS (
 )
 SELECT json_build_object(
   'serverVersionNum', current_setting('server_version_num')::integer,
+  'serverAddressIsLoopback', inet_server_addr() = inet '127.0.0.1',
   'currentUserMatches', current_user = :'expected_user',
   'roleCanCreateDatabase', COALESCE((SELECT rolsuper OR rolcreatedb FROM role_state), false),
   'databaseExists', EXISTS (SELECT 1 FROM database_state),
@@ -494,6 +504,7 @@ SQL
 fi
 jq -e '
   (.serverVersionNum >= 160000 and .serverVersionNum < 170000)
+  and .serverAddressIsLoopback
   and .currentUserMatches
   and .roleCanCreateDatabase
   and .databaseExists
