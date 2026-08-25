@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.19.0",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -28,6 +29,7 @@
     "jsonwebtoken": "^9.0.2",
     "libsodium-wrappers": "^0.8.4",
     "nodemailer": "^9.0.3",
+    "node-domexception": "file:vendor/node-domexception",
     "opusscript": "^0.1.1",
     "pg": "^8.22.0",
     "postal-mime": "3.0.0",
@@ -46,5 +48,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }
