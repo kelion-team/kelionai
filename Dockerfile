@@ -5,6 +5,10 @@ ARG NODE_IMAGE=node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5
 FROM ${NODE_IMAGE} AS dependinte
 WORKDIR /build
 COPY backend/package.json backend/package-lock.json ./backend/
+# The lockfile contains the Node 22 DOMException adapter as a local package.
+# It must exist both when npm creates the link and in the final image where
+# Node resolves that link from backend/node_modules.
+COPY backend/vendor/node-domexception ./backend/vendor/node-domexception
 RUN cd backend && npm ci --no-audit --no-fund
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci --no-audit --no-fund
@@ -35,6 +39,7 @@ RUN apt-get update \
     && chown -R node:node /home/node /app
 
 COPY --chown=node:node --from=module-runtime /build/backend/node_modules ./backend/node_modules
+COPY --chown=node:node --from=constructie /build/backend/vendor ./backend/vendor
 COPY --chown=node:node --from=constructie /build/backend/dist ./backend/dist
 COPY --chown=node:node --from=constructie /build/backend/migrations ./backend/migrations
 COPY --chown=node:node --from=constructie /build/config ./config
