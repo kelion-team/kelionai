@@ -16,6 +16,10 @@ RELEASE_MODE=${3:-release}
 [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'commitul trebuie să fie SHA integral'
 [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]] || die 'modul release este invalid'
 [ -f "$MANIFEST_FILE" ] || die 'manifestul OCI lipsește'
+GATE_MANIFEST_FILE=$(dirname -- "$MANIFEST_FILE")/codex-gates.json
+[ -f "$GATE_MANIFEST_FILE" ] && [ ! -L "$GATE_MANIFEST_FILE" ] || die 'manifestul gate lipsește'
+KELION_CODEX_GATE_IMAGE=$(jq -er --arg commit "$COMMIT_SHA" 'select(.schema == 1 and .commit == $commit and (.image | type == "string")) | .image' "$GATE_MANIFEST_FILE")
+[[ "$KELION_CODEX_GATE_IMAGE" =~ ^ghcr.io/[a-z0-9_.-]+/[a-z0-9_.-]+/codex-gates@sha256:[0-9a-f]{64}$ ]] || die 'imaginea gate este invalidă'
 
 need docker
 need curl
@@ -1397,6 +1401,52 @@ for _attempt in $(seq 1 18); do
   sleep 5
 done
 [ "$public_ok" = 1 ] || die 'smoke-ul public nu confirmă commitul și readiness'
+
+refresh_constructor_gate() (
+  set -euo pipefail
+  local worker_env=/root/kelion/config/codex-worker.env
+  local publisher_env=/root/kelion/config/constructor-publisher.env
+  local token_file=/root/kelion/publisher-secrets/github-publisher-token
+  [ -f "$worker_env" ] && [ -f "$publisher_env" ] || return 0
+  [ -f "$token_file" ] && [ ! -L "$token_file" ] || die 'credentiala publisher pentru gate lipsește'
+  local authfile='' temporary='' user runtime config
+  cleanup_constructor_gate() {
+    [ -z "$authfile" ] || rm -f -- "$authfile"
+    if [ -f /etc/kelion/codex-worker.enabled ]; then systemctl enable --now kelion-codex-worker.timer >/dev/null 2>&1 || true; fi
+    if [ -f /etc/kelion/constructor-publisher.enabled ]; then systemctl enable --now kelion-constructor-publisher.timer >/dev/null 2>&1 || true; fi
+    if [ -f /etc/kelion/constructor-release.enabled ]; then systemctl enable --now kelion-constructor-release.timer >/dev/null 2>&1 || true; fi
+  }
+  trap cleanup_constructor_gate EXIT
+  systemctl stop kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer >/dev/null 2>&1 || true
+  systemctl stop kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service >/dev/null 2>&1 || true
+  for user in kelion-codex kelion-publisher; do
+    runtime=/run/$user
+    install -d -o "$user" -g "$user" -m 0700 "$runtime"
+    local registry_owner
+    registry_owner="${KELION_CODEX_GATE_IMAGE#ghcr.io/}"
+    registry_owner="${registry_owner%%/*}"
+    authfile=$runtime/release-gate-auth.json
+    rm -f -- "$authfile"
+    cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin >/dev/null
+    if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE" >/dev/null; then
+      runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
+      exit 1
+    fi
+    runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
+    rm -f -- "$authfile"
+    authfile=''
+  done
+  for config in "$worker_env" "$publisher_env"; do
+    temporary=$(mktemp "$config.XXXXXX")
+    awk -v image="$KELION_CODEX_GATE_IMAGE" '$0 !~ /^KELION_CODEX_GATE_IMAGE=/ { print } END { print "KELION_CODEX_GATE_IMAGE=" image }' "$config" > "$temporary"
+    chown root:root "$temporary"
+    chmod 0640 "$temporary"
+    mv "$temporary" "$config"
+    temporary=''
+  done
+  systemctl daemon-reload
+)
+refresh_constructor_gate
 
 # Schedulerul persistent este o mutație de producție: îl instalăm, activăm și
 # verificăm numai după dovada publică exactă. Cronul vechi dispare abia după ce

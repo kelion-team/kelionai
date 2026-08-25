@@ -6,7 +6,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: production-secrets
+  group: production-release
   cancel-in-progress: false
 
 jobs:

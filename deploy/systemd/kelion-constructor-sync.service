@@ -1,0 +1,35 @@
+[Unit]
+Description=Synchronize the private Constructor source before Codex execution
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+Environment=PATH=/usr/bin:/bin
+EnvironmentFile=/root/kelion/config/codex-worker.env
+LoadCredential=github-worker-token:/root/kelion/worker-secrets/github-worker-token
+ExecStart=/opt/kelion-constructor/constructor-sync-worker.sh
+NoNewPrivileges=true
+PrivateIPC=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/kelion-constructor
+ReadWritePaths=/var/lib/kelion-codex/repo
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+TimeoutStartSec=5min
+

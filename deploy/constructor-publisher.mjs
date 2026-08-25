@@ -338,10 +338,14 @@ async function waitForGreen(token, prNumber, headCommit, renew) {
     const required = REQUIRED_CHECKS.map((name) => byName.get(name))
     const failed = required.some((check) => check && check.status === 'completed' && check.conclusion !== 'success')
     if (failed) fail('Un control CI obligatoriu a eșuat')
-    if (required.every((check) => check?.status === 'completed' && check?.conclusion === 'success')) return
+    const reviews = await github(token, `/repos/${REPOSITORY}/pulls/${prNumber}/reviews?per_page=100`)
+    const approved = Array.isArray(reviews) && reviews.some((review) =>
+      review?.state === 'APPROVED' && review?.commit_id === headCommit,
+    )
+    if (required.every((check) => check?.status === 'completed' && check?.conclusion === 'success') && approved) return
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 15_000))
   }
-  fail('Timeout așteptând controalele CI obligatorii')
+  fail('Timeout așteptând controalele CI obligatorii și aprobarea umană')
 }
 
 async function requiredChecksAreGreen(token, headCommit) {
@@ -383,6 +387,10 @@ async function runOnce() {
   mkdirSync(STATE, { recursive: true, mode: 0o700 })
   const hmac = loadSystemdCredential('constructor-publisher-secret', process.env.CONSTRUCTOR_PUBLISHER_SECRET_FILE)
   const githubCredential = tokenPath()
+  const authenticatedGitEnv = gitEnv({
+    GIT_ASKPASS: ASKPASS,
+    KELION_GITHUB_TOKEN_FILE: githubCredential.path,
+  })
   const claim = await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: '/api/internal/constructor-publisher/jobs/claim', body: {} })
   if (!claim?.job) return
   const identity = strictJobIdentity(claim.job)
@@ -402,7 +410,7 @@ async function runOnce() {
       writeFileSync(join(STATE, `${identity.taskId}.json`), `${canonicalJson({ schema: 1, jobId: identity.jobId, taskId: identity.taskId, headCommit: recovered.headCommit, prNumber: recovered.prNumber, commit: recovered.commit, mergedReceipt })}\n`, { mode: 0o600 })
       return
     }
-    const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { timeout: 180_000 })
+    const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { env: authenticatedGitEnv, timeout: 180_000 })
     if (fetched.status !== 0) fail('Fetch public origin/master a eșuat')
     await stopLease.assert()
     const handoff = readHandoff({ ...claim.job, ...identity })
@@ -419,7 +427,7 @@ async function runOnce() {
     await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: `/api/internal/constructor-publisher/jobs/${identity.jobId}/event`, body: { taskId: identity.taskId, leaseId: identity.leaseId, event: 'pr_opened', branch: built.branch, headCommit: built.headCommit, prNumber, prUrl, receiptSha256: openedReceipt } })
     await waitForGreen(githubCredential.value, prNumber, built.headCommit, renewLease)
     await stopLease.assert()
-    if (gitOutput(['ls-remote', 'origin', 'refs/heads/master'], REPO).split(/\s+/)[0] !== handoff.baseCommit) fail('Master s-a schimbat înainte de merge; revalidare necesară')
+    if (gitOutput(['ls-remote', 'origin', 'refs/heads/master'], REPO, authenticatedGitEnv).split(/\s+/)[0] !== handoff.baseCommit) fail('Master s-a schimbat înainte de merge; revalidare necesară')
     const merged = await github(githubCredential.value, `/repos/${REPOSITORY}/pulls/${prNumber}/merge`, 'PUT', { sha: built.headCommit, merge_method: 'squash' })
     const commit = String(merged?.sha ?? '').toLowerCase()
     if (merged?.merged !== true || !/^[0-9a-f]{40}$/.test(commit)) fail('GitHub nu a confirmat merge-ul exact')
