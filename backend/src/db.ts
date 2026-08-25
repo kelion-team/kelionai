@@ -5065,6 +5065,22 @@ export async function getConstructorIncidentKnowledge(
   }
 }
 
+/** Read the durable escalation attached to one Constructor job. `null` is an
+ * actual absence; callers must keep a DB read error distinct from no incident. */
+export async function getConstructorIncidentForJob(jobId: number): Promise<ConstructorIncident | null> {
+  if (!dbEnabled() || !Number.isSafeInteger(jobId) || jobId <= 0) return null
+  try {
+    const result = await getPool().query<ConstructorIncidentDbRow>(
+      `SELECT * FROM constructor_incidents WHERE job_id=$1
+       ORDER BY updated_at DESC LIMIT 1`,
+      [jobId],
+    )
+    return result.rows[0] ? rowToConstructorIncident(result.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
 export async function updateConstructorIncident(
   id: number,
   fields: {

@@ -639,6 +639,15 @@ export default function AdminPanel({
     pct?: number | null
 
     workerTaskUrl?: string | null
+    continuity?: {
+      state: 'queued' | 'running' | 'blocked' | 'completed' | 'cancelled'
+      checkpoint: string
+      heartbeat: { stale: boolean; timeoutMinutes: number }
+      retry: { allowed: boolean; attempts: number; nextAction: string }
+      escalation: null | { cause: string; evidence: string; nextAction: string }
+      proof: null | { commit: string; liveVersion: string; ci: string }
+      message: string
+    }
   }
 
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>(
@@ -2853,6 +2862,17 @@ export default function AdminPanel({
                         >
                           {j.progress}
                         </span>
+                      )}
+                    </div>
+                  )}
+                  {j.continuity && (
+                    <div className="chat-hint" style={{ flexBasis: '100%', fontSize: 11, marginTop: 2 }}>
+                      <b>{j.continuity.state === 'completed' ? '✓ Dovadă live' : `Checkpoint: ${j.continuity.checkpoint}`}</b>
+                      {' · '}{j.continuity.message}
+                      {j.continuity.heartbeat.stale && ' · ⚠ heartbeat întârziat'}
+                      {j.continuity.proof && ` · versiune live ${j.continuity.proof.liveVersion}`}
+                      {j.continuity.escalation && (
+                        <><br />Cauză: {j.continuity.escalation.cause} → {j.continuity.escalation.nextAction}</>
                       )}
                     </div>
                   )}
