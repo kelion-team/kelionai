@@ -93,12 +93,65 @@ export async function fetchMe(): Promise<MeResponse> {
   }
 }
 
-export function startGoogleLogin(): void {
+export type SafeAuthReturnPath = '/' | '/manual' | '/credite' | '/credits'
+
+const SAFE_AUTH_RETURN_PATHS = new Set<SafeAuthReturnPath>(['/', '/manual', '/credite', '/credits'])
+
+export type AuthNavigationSnapshot = Readonly<{
+  returnTo: SafeAuthReturnPath
+  error: string | null
+  reason: string | null
+  message: string | null
+}>
+
+const AUTH_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  closed: 'KelionAI is currently private. This account does not have access.',
+  blocked: 'This account is blocked. Contact support; retrying will not restore access.',
+  bad_state: 'The Google security check expired or was invalid. Start sign-in again.',
+  token_exchange: 'Google sign-in could not be completed. Start sign-in again.',
+  no_id_token: 'Google did not return an identity. Start sign-in again.',
+  invalid_identity: 'Google did not return a verified identity. Start sign-in again.',
+  account_mismatch: 'Use the same Google account as the current KelionAI session, then reconnect.',
+  no_refresh_token: 'Google did not grant long-term access. Reconnect and approve access.',
+  token_store: 'KelionAI could not save the Google connection securely. Try again or contact support.',
+  session_expired: 'The KelionAI session expired during Google connection. Sign in again, then reconnect.',
+  native_request_expired: 'The sign-in request expired. Start sign-in again.',
+  oauth_failed: 'Google sign-in could not be completed. Please try again.',
+}
+
+export function safeAuthReturnPath(raw: unknown): SafeAuthReturnPath {
+  return typeof raw === 'string' && SAFE_AUTH_RETURN_PATHS.has(raw as SafeAuthReturnPath)
+    ? raw as SafeAuthReturnPath
+    : '/'
+}
+
+export function readAuthNavigation(search: string): AuthNavigationSnapshot {
+  const params = new URLSearchParams(search)
+  const error = params.get('error')
+  const reason = params.get('reason')
+  const diagnostic = error === 'oauth_failed' && reason ? reason : error
+  return Object.freeze({
+    returnTo: safeAuthReturnPath(params.get('next')),
+    error,
+    reason,
+    message: diagnostic ? AUTH_ERROR_MESSAGES[diagnostic] ?? AUTH_ERROR_MESSAGES.oauth_failed : null,
+  })
+}
+
+export function authNoticeForAuthenticatedUser(
+  navigation: AuthNavigationSnapshot,
+  authenticated: boolean,
+): string | null {
+  return authenticated ? navigation.message : null
+}
+
+export function startGoogleLogin(next = '/'): void {
   if (isNativeShell()) {
     void startNativeGoogleLogin().catch(() => window.dispatchEvent(new CustomEvent('kelion-native-auth-error')))
     return
   }
-  window.location.href = authUrl('/auth/google/login')
+  const safeNext = safeAuthReturnPath(next)
+  window.location.href = authUrl(`/auth/google/login?next=${encodeURIComponent(safeNext)}`)
 }
 
 export async function logout(): Promise<void> {

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'node:crypto'
 import { OAuth2Client } from 'google-auth-library'
 import { config, isAllowed, roleFor } from '../config.js'
+import { oauthFailureRedirect, oauthSuccessRedirect, safeReturnPath } from '../authNavigation.js'
 import {
   clearSession,
   createNativeSession,
@@ -27,6 +28,7 @@ import {
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 const PKCE_COOKIE = 'kelionai_oauth_pkce'
+const RETURN_TO_COOKIE = 'kelionai_oauth_return_to'
 const GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const googleIdentityVerifier = new OAuth2Client(config.google.clientId)
@@ -341,8 +343,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   )
 
   // Step 1 — kick off Google OAuth
-  app.get('/auth/google/login', async (_req, reply) => {
+  app.get<{ Querystring: { next?: string } }>('/auth/google/login', async (req, reply) => {
     const { state, params } = beginGoogleOAuth(reply)
+    // Preserve only a known client route. The callback must never be allowed to
+    // redirect a signed-in user to a URL supplied by somebody else.
+    reply.setCookie(RETURN_TO_COOKIE, safeReturnPath(req.query?.next), {
+      path: '/', httpOnly: true, secure: config.isProd, sameSite: 'lax', maxAge: 600,
+    })
     // IDENTITY ONLY at login (Adrian, Jul 25 — he saw live the red "Google
     // hasn't verified this app" screen that scares clients). These 3 scopes are
     // NON-sensitive → Google shows NO warning, any visitor signs in calmly. The
@@ -404,23 +411,27 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const { code, state } = req.query
       const expectedState = req.cookies[STATE_COOKIE]
       const browserPkceVerifier = req.cookies[PKCE_COOKIE]
+      const returnTo = safeReturnPath(req.cookies[RETURN_TO_COOKIE])
       reply.clearCookie(STATE_COOKIE, { path: '/' })
       reply.clearCookie(PKCE_COOKIE, { path: '/' })
+      reply.clearCookie(RETURN_TO_COOKIE, { path: '/' })
+
+      const fail = (reason: string): FastifyReply => reply.redirect(oauthFailureRedirect(config.frontendOrigin, reason))
 
       if (!code || !state || !expectedState || state !== expectedState) {
-        return reply.redirect(`${config.frontendOrigin}/?error=bad_state`)
+        return fail('bad_state')
       }
 
       const nativeRequest = state.startsWith('n.')
         ? await getNativeAuthByOauthState(sha256Hex(state)).catch(() => null)
         : null
       if (state.startsWith('n.') && !nativeRequest) {
-        return reply.redirect(`${config.frontendOrigin}/?error=native_request_expired`)
+        return fail('native_request_expired')
       }
       const codeVerifier = nativeRequest
         ? decryptNativePkce(nativeRequest.id, nativeRequest.googlePkceCipher)
         : (typeof browserPkceVerifier === 'string' && PKCE_RE.test(browserPkceVerifier) ? browserPkceVerifier : '')
-      if (!codeVerifier) return reply.redirect(`${config.frontendOrigin}/?error=bad_state`)
+      if (!codeVerifier) return fail('bad_state')
 
       // Exchange the code for tokens (server-to-server, with PKCE and client secret).
       const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -436,7 +447,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         }),
       })
       if (!tokenRes.ok) {
-        return reply.redirect(`${config.frontendOrigin}/?error=token_exchange`)
+        return fail('token_exchange')
       }
       const tokens = (await tokenRes.json()) as {
         id_token?: string
@@ -446,20 +457,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         scope?: string
       }
       if (!tokens.id_token) {
-        return reply.redirect(`${config.frontendOrigin}/?error=no_id_token`)
+        return fail('no_id_token')
       }
 
       const identity = await verificaIdentitateGoogle(tokens.id_token)
       if (!identity) {
-        return reply.redirect(`${config.frontendOrigin}/?error=invalid_identity`)
+        return fail('invalid_identity')
       }
       const email = identity.email
 
       if (nativeRequest) {
-        if (!isAllowed(email)) return reply.redirect(`${config.frontendOrigin}/?error=closed`)
+        if (!isAllowed(email)) return fail('closed')
         const block = await accountBlockStatus(email)
         if (!block.available) return reply.code(503).send({ error: 'account_status_unavailable' })
-        if (block.blocked) return reply.redirect(`${config.frontendOrigin}/?error=blocked`)
+        if (block.blocked) return fail('blocked')
         const exchangeCode = crypto.randomBytes(32).toString('base64url')
         const completed = await completeNativeAuthRequest({
           id: nativeRequest.id,
@@ -470,7 +481,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           exchangeCodeHash: sha256Hex(exchangeCode),
           exchangeTtlSeconds: config.nativeAuth.exchangeTtlSeconds,
         }).catch(() => false)
-        if (!completed) return reply.redirect(`${config.frontendOrigin}/?error=native_request_expired`)
+        if (!completed) return fail('native_request_expired')
         const redirect = new URL(config.product.nativeRedirects[nativeRequest.platform])
         redirect.searchParams.set('code', exchangeCode)
         redirect.searchParams.set('state', nativeRequest.clientState)
@@ -498,35 +509,35 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           // account A's authenticated session.
           if (existing.email.toLowerCase() !== email) {
             lastConnectDiag.error = 'identitatea Google nu corespunde sesiunii curente'
-            return reply.redirect(`${config.frontendOrigin}/?error=account_mismatch`)
+            return fail('account_mismatch')
           }
           if (!tokens.refresh_token) {
             lastConnectDiag.error = 'Google nu a emis refresh token'
-            return reply.redirect(`${config.frontendOrigin}/?error=no_refresh_token`)
+            return fail('no_refresh_token')
           }
           try {
             await saveGoogleRefreshToken(existing.email, tokens.refresh_token, tokens.scope ?? '')
             lastConnectDiag.savedToDb = true
           } catch {
             lastConnectDiag.error = 'credentiala nu a putut fi salvată sigur'
-            return reply.redirect(`${config.frontendOrigin}/?error=token_store`)
+            return fail('token_store')
           }
-          return reply.redirect(`${config.frontendOrigin}/?connected=google`)
+          return reply.redirect(oauthSuccessRedirect(config.frontendOrigin, '/'))
         }
         // A capability grant is bound to the session that started it. Never
         // reinterpret an expired connect flow as a fresh login.
         lastConnectDiag.error = 'sesiunea a expirat în timpul conectării (getSessionUser=null la callback)'
-        return reply.redirect(`${config.frontendOrigin}/?error=session_expired`)
+        return fail('session_expired')
       }
 
       // The gate: v1 admits only the allowlist.
       if (!isAllowed(email)) {
-        return reply.redirect(`${config.frontendOrigin}/?error=closed`)
+        return fail('closed')
       }
       const block = await accountBlockStatus(email)
       if (!block.available) return reply.code(503).send({ error: 'account_status_unavailable' })
       if (block.blocked) {
-        return reply.redirect(`${config.frontendOrigin}/?error=blocked`)
+        return fail('blocked')
       }
 
       // A plain login (identity only) does NOT bring a refresh token from
@@ -537,7 +548,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         try {
           await saveGoogleRefreshToken(email, tokens.refresh_token, tokens.scope ?? '')
         } catch {
-          return reply.redirect(`${config.frontendOrigin}/?error=token_store`)
+          return fail('token_store')
         }
       }
       await setSession(reply, {
@@ -548,7 +559,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         authProvider: 'google',
         locale: identity.locale ?? 'en',
       })
-      return reply.redirect(`${config.frontendOrigin}/`)
+      return reply.redirect(oauthSuccessRedirect(config.frontendOrigin, returnTo))
     },
   )
 

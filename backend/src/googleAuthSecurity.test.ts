@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cookie from '@fastify/cookie'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { oauthFailureRedirect } from './authNavigation.js'
 
 const authSource = readFileSync(fileURLToPath(new URL('./routes/auth.ts', import.meta.url)), 'utf8')
 const { authRoutes } = await import('./routes/auth.js')
@@ -21,6 +22,26 @@ describe('poarta criptografică Google OAuth', () => {
     expect(redirect.searchParams.get('state')).toMatch(/^[a-f0-9]{32}$/)
   })
 
+  it('keeps an approved intended route, and turns a failed callback into a visible retry page', async () => {
+    const app = Fastify()
+    await app.register(cookie)
+    await app.register(authRoutes)
+    const start = await app.inject({ method: 'GET', url: '/auth/google/login?next=/credite' })
+    expect(start.statusCode).toBe(302)
+    expect((start.headers['set-cookie'] as string[]).some((value) => value.includes('kelionai_oauth_return_to=') && value.includes('credite'))).toBe(true)
+
+    const stateCookie = (start.headers['set-cookie'] as string[])
+      .find((value) => value.startsWith('kelionai_oauth_state='))
+    expect(stateCookie).toBeTruthy()
+    const failure = await app.inject({
+      method: 'GET',
+      url: '/auth/google/callback',
+      headers: { cookie: stateCookie ?? '' },
+    })
+    expect(failure.statusCode).toBe(302)
+    expect(failure.headers.location).toBe('http://localhost:5173/login?error=oauth_failed&reason=bad_state')
+  })
+
   it('requires both a known capability and an authenticated session for incremental connect', async () => {
     const app = Fastify()
     await app.register(cookie)
@@ -33,6 +54,15 @@ describe('poarta criptografică Google OAuth', () => {
     expect(anonymous.statusCode).toBe(302)
     expect(anonymous.headers.location).toContain('?error=closed')
   })
+
+  it('preserves closed and blocked as final callback outcomes', () => {
+    expect(oauthFailureRedirect('https://kelion.ai', 'closed')).toBe('https://kelion.ai/login?error=closed')
+    expect(oauthFailureRedirect('https://kelion.ai', 'blocked')).toBe('https://kelion.ai/login?error=blocked')
+    expect(oauthFailureRedirect('https://kelion.ai', 'bad_state')).toBe(
+      'https://kelion.ai/login?error=oauth_failed&reason=bad_state',
+    )
+  })
+
   it('verifică id_token cu clientul oficial și audiența aplicației', () => {
     expect(authSource).toContain('googleIdentityVerifier.verifyIdToken({')
     expect(authSource).toContain('audience: config.google.clientId')
