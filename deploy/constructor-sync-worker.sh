@@ -11,16 +11,6 @@ repository=${KELION_GITHUB_REPOSITORY:-}
 [[ -f "$askpass" && ! -L "$askpass" && ! -w "$askpass" ]] || { echo 'askpass invalid' >&2; exit 1; }
 [[ -f "$token" && ! -L "$token" ]] || { echo 'credentială GitHub read-only lipsă' >&2; exit 1; }
 
-runuser -u kelion-codex -- env \
-  HOME=/var/lib/kelion-codex \
-  PATH=/usr/bin:/bin \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-  GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 \
-  GIT_ASKPASS="$askpass" KELION_GITHUB_TOKEN_FILE="$token" \
-  git -C "$repo" -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-  fetch --prune --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
-
 origin=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$repo" remote get-url origin)
@@ -28,6 +18,20 @@ origin=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
   echo 'remote worker necanonic' >&2
   exit 1
 }
-git -C "$repo" rev-parse --verify 'origin/master^{commit}' >/dev/null
-printf '%s\n' 'clona privată a workerului este sincronizată'
+dangerous=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$repo" config --local --get-regexp \
+  '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' || true)
+[[ -z "$dangerous" ]] || { echo 'config Git executabil sau de credentiale' >&2; exit 1; }
 
+env HOME=/root \
+  PATH=/usr/bin:/bin \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 \
+  GIT_ASKPASS="$askpass" KELION_GITHUB_TOKEN_FILE="$token" \
+  git -c safe.directory="$repo" -C "$repo" -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+  fetch --prune --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+chown -R kelion-codex:kelion-codex "$repo/.git"
+runuser -u kelion-codex -- git -C "$repo" rev-parse --verify 'origin/master^{commit}' >/dev/null
+printf '%s\n' 'clona privată a workerului este sincronizată'
