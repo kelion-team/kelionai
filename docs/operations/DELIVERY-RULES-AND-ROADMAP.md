@@ -37,6 +37,21 @@ inlocuieste legatura canonica. O concluzie planificata, un workflow aflat in
 coada sau un PR verde nu se prezinta drept functionalitate live. Daca dovada nu
 poate fi citita, starea este `necunoscuta` sau `blocata`, nu succes presupus.
 
+## Legea unicitatii / single source of truth
+
+Fiecare regula, configuratie, stare, inregistrare de job, runbook si legatura
+canonica are exact un owner si un loc autoritativ. Orice UI, document, worker
+sau workflow secundar citeste ori referentiaza acea autoritate; nu copiaza
+campul pentru a crea o a doua sursa de adevar.
+
+Identitatea canonica a obiectului ramane stabila de-a lungul proiectiilor sale.
+O actualizare se face la autoritate si se propaga catre consumatori. Daca
+autoritatea nu poate fi citita sau propagarea nu este confirmata, consumatorul
+afiseaza starea necunoscuta/degradata si linkul canonic; nu pastreaza o valoare
+copiata ca adevar curent. Orice exceptie de ownership trebuie eliminata sau
+migrata explicit catre o singura autoritate, nu sincronizata permanent intre
+surse concurente.
+
 ## Banda persistenta Admin -> Constructor -> productie
 
 O cerere de produs foloseste o singura identitate durabila de la creare pana
@@ -206,6 +221,15 @@ s-a schimbat si il actualizeaza; nu transforma starea veche in adevar curent.
 Aceasta regula este criteriu de acceptare obligatoriu, nu recomandare.
 
 ## Checklist de acceptare si dovezi
+
+### Legea unicitatii
+
+- [ ] Nu exista campuri duplicate care pot actiona independent drept sursa de
+      adevar pentru aceeasi regula, configuratie, stare sau inregistrare.
+- [ ] Fiecare obiect are identificator si legatura canonica stabile, folosite de
+      toate proiectiile UI, documentele si joburile aferente.
+- [ ] O actualizare facuta la autoritate se propaga catre toti consumatorii, iar
+      lipsa propagarii este detectata si afisata factual, nu mascata de copii.
 
 ### Chat natural
 
