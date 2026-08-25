@@ -37,7 +37,12 @@ test('CSP este enforced, autorizează exact runtime-ul offline și refuză scrip
   assert.match(policy, /worker-src 'self' blob:/)
   assert.match(policy, /media-src 'self' data: blob: https:/)
   const connect = directive(policy, 'connect-src')
-  assert.equal(connect, "connect-src 'self' wss://{$PUBLIC_APP_DOMAIN} https://huggingface.co https://*.hf.co https://raw.githubusercontent.com")
+  // GLTFLoader transforms the avatar's embedded PNGs into object URLs and its
+  // ImageBitmapLoader reads those URLs with fetch(). That is governed by
+  // connect-src (not img-src), so blob: is required for the complete RPM
+  // material package while arbitrary remote HTTP/WebSocket origins stay denied.
+  assert.equal(connect, "connect-src 'self' blob: wss://{$PUBLIC_APP_DOMAIN} https://huggingface.co https://*.hf.co https://raw.githubusercontent.com")
+  assert.match(connect, /(?:^|\s)blob:(?:\s|$)/)
   assert.doesNotMatch(connect, /(?:^|\s)(?:https:|wss:)(?:\s|$)|api\.openai\.com|googleapis|example\.com/)
   assert.doesNotMatch(caddy, /^\s*Content-Security-Policy-Report-Only /m)
   // COEP ar bloca resurse cross-origin fără CORP/CORS. Se adaugă numai după
