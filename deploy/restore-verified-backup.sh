@@ -51,9 +51,11 @@ psql_admin() {
     --set ON_ERROR_STOP=1 "$@"
 }
 
-# Read-only contract shared by preflight on the live legacy database and by
-# recovery on the restored scratch database. A zero result proves that every
-# required object is a public table/partitioned table with the expected column.
+# Read-only compatibility contract shared by preflight on the live database
+# and by recovery on the restored scratch database. It follows the canonical,
+# privacy-minimised schema: objects deliberately removed by one-way migrations
+# must never be required again. A zero result proves that every required object
+# is a public table/partitioned table with the expected column.
 verify_legacy_contract() {
   local contract_database=$1 missing_count
   missing_count=$(PGDATABASE="$contract_database" psql \
@@ -76,33 +78,18 @@ WITH required(table_name, column_name) AS (
     ('memories', 'user_email'), ('memories', 'content'),
     ('google_accounts', 'email'), ('google_accounts', 'refresh_token'),
     ('local_accounts', 'email'), ('local_accounts', 'pass_hash'),
-    ('visits', 'id'), ('visits', 'fingerprint'), ('visits', 'ip'),
-    ('visits', 'country'), ('visits', 'country_code'), ('visits', 'city'),
-    ('visits', 'region'), ('visits', 'isp'), ('visits', 'tz'),
-    ('visits', 'browser'), ('visits', 'os'), ('visits', 'device'),
-    ('visits', 'lang'), ('visits', 'referrer'), ('visits', 'is_bot'),
-    ('visits', 'started_at'), ('visits', 'user_email'),
-    ('visits', 'last_seen_at'), ('visits', 'actions'),
-    ('visits', 'photo_url'), ('visits', 'pages'),
-    ('demo_uses', 'id'), ('demo_uses', 'fingerprint'), ('demo_uses', 'ip'),
-    ('demo_uses', 'country'), ('demo_uses', 'country_code'),
-    ('demo_uses', 'city'), ('demo_uses', 'region'), ('demo_uses', 'isp'),
-    ('demo_uses', 'tz'), ('demo_uses', 'browser'), ('demo_uses', 'os'),
-    ('demo_uses', 'device'), ('demo_uses', 'lang'),
-    ('demo_uses', 'referrer'), ('demo_uses', 'is_bot'),
-    ('demo_uses', 'started_at'), ('demo_uses', 'session_email'),
-    ('app_files', 'name'), ('app_files', 'content'),
-    ('app_files', 'content_type'), ('app_files', 'updated_at'),
-    ('app_downloads', 'id'), ('app_downloads', 'file'),
-    ('app_downloads', 'user_email'), ('app_downloads', 'ip'),
-    ('app_downloads', 'country'), ('app_downloads', 'ua'),
-    ('app_downloads', 'created_at'),
+    ('visit_daily', 'day'), ('visit_daily', 'path'),
+    ('visit_daily', 'country_code'), ('visit_daily', 'views'),
+    ('visit_daily', 'last_seen_at'),
+    ('user_presence_daily', 'user_email'), ('user_presence_daily', 'day'),
+    ('user_presence_daily', 'first_seen_at'),
+    ('user_presence_daily', 'last_seen_at'),
+    ('user_presence_daily', 'actions'), ('user_presence_daily', 'pages'),
     ('client_errors', 'id'), ('client_errors', 'type'),
     ('client_errors', 'message'), ('client_errors', 'stack'),
-    ('client_errors', 'url'), ('client_errors', 'ip'),
+    ('client_errors', 'url'), ('client_errors', 'account_id'),
     ('client_errors', 'created_at'),
     ('voiceprints', 'user_email'), ('voiceprints', 'name'),
-    ('voiceprints', 'gender'), ('voiceprints', 'is_admin'),
     ('voiceprints', 'features'), ('voiceprints', 'feature_meta'),
     ('voiceprints', 'audio_clip'), ('voiceprints', 'created_at'),
     ('voiceprints', 'updated_at')
