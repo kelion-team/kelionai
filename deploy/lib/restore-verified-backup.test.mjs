@@ -206,7 +206,13 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
   assert.doesNotMatch(script, /DROP DATABASE/)
   assert.match(script, /quarantineDatabase:\$quarantineDatabase/)
   assert.match(script, /\{"schema":1,"ok":false,"error":"%s","preservedDatabase":/)
-  for (const legacyFragment of [
+  for (const canonicalFragment of [
+    "('visit_daily', 'day')",
+    "('user_presence_daily', 'user_email')",
+    "('client_errors', 'account_id')",
+    "('voiceprints', 'audio_clip')",
+  ]) assert.ok(script.includes(canonicalFragment), `lipsește contractul canonic ${canonicalFragment}`)
+  for (const removedFragment of [
     "('visits', 'id')",
     "('demo_uses', 'id')",
     "('app_files', 'name')",
@@ -214,7 +220,7 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
     "('client_errors', 'ip')",
     "('voiceprints', 'gender')",
     "('voiceprints', 'is_admin')",
-  ]) assert.ok(script.includes(legacyFragment), `lipsește contractul legacy ${legacyFragment}`)
+  ]) assert.ok(!script.includes(removedFragment), `contractul reintroduce obiectul eliminat ${removedFragment}`)
 })
 
 test('booleanul JSON false este o valoare validă, nu un exit de recovery', {
