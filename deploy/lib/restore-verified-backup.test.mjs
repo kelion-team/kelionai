@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
@@ -12,6 +13,11 @@ import {
   verifyBackupManifest,
   verifyRestoreProof,
 } from './restore-verified-backup.mjs'
+
+const bashExecutable = process.platform === 'win32'
+  ? `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Git\\bin\\bash.exe`
+  : 'bash'
+const jqAvailable = spawnSync(bashExecutable, ['-lc', 'command -v jq'], { encoding: 'utf8' }).status === 0
 
 function secureStat(overrides = {}) {
   return {
@@ -164,7 +170,7 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
   const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
   const approval = script.indexOf('KELION_RESTORE_APPROVED')
   const authenticated = script.indexOf('node "$VALIDATOR"')
-  const importScratch = script.indexOf('PGDATABASE="$scratch_database" pg_restore')
+  const importScratch = script.indexOf('--dbname="$scratch_database"')
   const legacyContract = script.indexOf('verify_legacy_contract "$scratch_database"', importScratch)
   const swap = script.indexOf('\nswap_started=1\n')
   const swapBody = script.slice(swap)
@@ -183,11 +189,20 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
   assert.match(script, /serverAddressIsLoopback[\s\S]*inet_server_addr\(\) = inet '127\.0\.0\.1'[\s\S]*and \.serverAddressIsLoopback/)
   assert.doesNotMatch(script, /export\s+PGPASSWORD|--password(?:=|\s)/)
   assert.match(script, /sha256sum -- "\$backup_path"[\s\S]*restore_backup_hash_changed/)
-  assert.match(script, /pg_restore[\s\S]*--single-transaction --no-owner --no-privileges/)
+  assert.match(script, /pg_restore[\s\S]*--dbname="\$scratch_database"[\s\S]*--single-transaction --no-owner --no-privileges/)
+  assert.doesNotMatch(script, /PGDATABASE="\$scratch_database"\s+pg_restore/)
   assert.match(script, /format\('ALTER DATABASE %I RENAME TO %I'/)
   assert.match(swapBody, /pg_terminate_backend[\s\S]*RENAME TO %I[\s\S]*RENAME TO %I/)
   assert.match(script, /rollback_swap[\s\S]*rename_database "\$quarantine_database" "\$database"/)
   assert.match(script, /preserve_scratch_database[\s\S]*rename_database "\$scratch_database" "\$failed_database"/)
+  assert.match(script, /json_boolean\(\)[\s\S]*jq -r[\s\S]*type == "boolean"[\s\S]*true\|false/)
+  assert.match(script, /scratch_exists=\$\(json_boolean "\$state" scratch\)[\s\S]*failed_exists=\$\(json_boolean "\$state" failed\)/)
+  assert.match(script, /target_exists=\$\(json_boolean "\$state" target\)[\s\S]*quarantine_exists=\$\(json_boolean "\$state" quarantine\)/)
+  assert.doesNotMatch(script, /jq -er '\.(?:target|scratch|quarantine|failed)'/)
+  assert.match(script, /recovery_error_code=restore_rollback_failed/)
+  assert.match(script, /recovery_error_code=restore_failure_quarantine_failed/)
+  assert.doesNotMatch(script, /(?:^|\n)\s*error_code=restore_(?:rollback|failure_quarantine)_failed/)
+  assert.match(script, /"error":"%s","recoveryError":"%s","preservedDatabase":/)
   assert.doesNotMatch(script, /DROP DATABASE/)
   assert.match(script, /quarantineDatabase:\$quarantineDatabase/)
   assert.match(script, /\{"schema":1,"ok":false,"error":"%s","preservedDatabase":/)
@@ -200,6 +215,25 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
     "('voiceprints', 'gender')",
     "('voiceprints', 'is_admin')",
   ]) assert.ok(script.includes(legacyFragment), `lipsește contractul legacy ${legacyFragment}`)
+})
+
+test('booleanul JSON false este o valoare validă, nu un exit de recovery', {
+  skip: jqAvailable ? false : 'jq nu este disponibil pentru proba comportamentală',
+}, () => {
+  const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
+  const match = /json_boolean\(\) \{([\s\S]*?)\n\}/m.exec(script)
+  assert.ok(match)
+  const probe = `
+set -euo pipefail
+json_boolean() {${match[1]}
+}
+[ "$(json_boolean '{"value":false}' value)" = false ]
+[ "$(json_boolean '{"value":true}' value)" = true ]
+if json_boolean '{"value":"false"}' value >/dev/null 2>&1; then exit 1; fi
+if json_boolean '{}' value >/dev/null 2>&1; then exit 1; fi
+`
+  const result = spawnSync(bashExecutable, ['-c', probe], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
 })
 
 test('preflightul reutilizează autentificarea și se oprește înainte de orice mutație DB', () => {

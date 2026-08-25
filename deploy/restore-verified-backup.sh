@@ -35,6 +35,7 @@ scratch_database=''
 quarantine_database=''
 failed_database=''
 preserved_database=''
+recovery_error_code=''
 
 fail() {
   error_code=$1
@@ -157,6 +158,20 @@ SELECT json_build_object(
 SQL
 }
 
+json_boolean() {
+  local document=$1 field=$2 value
+  value=$(jq -r --arg field "$field" '
+    if (type == "object" and has($field) and (.[$field] | type == "boolean"))
+    then .[$field]
+    else error("invalid boolean")
+    end
+  ' <<<"$document") || return 1
+  case "$value" in
+    true|false) printf '%s\n' "$value" ;;
+    *) return 1 ;;
+  esac
+}
+
 verify_lock_fd_identity() {
   local fd=$1 path=$2 label=$3 fd_path fd_target fd_identity path_identity
   fd_path=/proc/self/fd/$fd
@@ -263,8 +278,8 @@ SQL
 preserve_scratch_database() {
   local state scratch_exists failed_exists
   state=$(database_state) || return 1
-  scratch_exists=$(jq -er '.scratch' <<<"$state") || return 1
-  failed_exists=$(jq -er '.failed' <<<"$state") || return 1
+  scratch_exists=$(json_boolean "$state" scratch) || return 1
+  failed_exists=$(json_boolean "$state" failed) || return 1
   if [ "$scratch_exists" = true ]; then
     [ "$failed_exists" = false ] || return 1
     set_connections "$scratch_database" false || return 1
@@ -279,10 +294,10 @@ preserve_scratch_database() {
 rollback_swap() {
   local state target_exists scratch_exists quarantine_exists failed_exists
   state=$(database_state) || return 1
-  target_exists=$(jq -er '.target' <<<"$state") || return 1
-  scratch_exists=$(jq -er '.scratch' <<<"$state") || return 1
-  quarantine_exists=$(jq -er '.quarantine' <<<"$state") || return 1
-  failed_exists=$(jq -er '.failed' <<<"$state") || return 1
+  target_exists=$(json_boolean "$state" target) || return 1
+  scratch_exists=$(json_boolean "$state" scratch) || return 1
+  quarantine_exists=$(json_boolean "$state" quarantine) || return 1
+  failed_exists=$(json_boolean "$state" failed) || return 1
 
   if [ "$quarantine_exists" = true ]; then
     [ "$failed_exists" = false ] || return 1
@@ -298,9 +313,12 @@ rollback_swap() {
   set_connections "$database" true || return 1
   preserve_scratch_database || return 1
   state=$(database_state) || return 1
-  [ "$(jq -er '.target' <<<"$state")" = true ] || return 1
-  [ "$(jq -er '.quarantine' <<<"$state")" = false ] || return 1
-  [ "$(jq -er '.scratch' <<<"$state")" = false ] || return 1
+  target_exists=$(json_boolean "$state" target) || return 1
+  quarantine_exists=$(json_boolean "$state" quarantine) || return 1
+  scratch_exists=$(json_boolean "$state" scratch) || return 1
+  [ "$target_exists" = true ] || return 1
+  [ "$quarantine_exists" = false ] || return 1
+  [ "$scratch_exists" = false ] || return 1
 }
 
 on_exit() {
@@ -310,11 +328,11 @@ on_exit() {
   if [ "$rc" -ne 0 ] && [ "$postgres_ready" = 1 ] && [ "$operation_mode" = restore ]; then
     if [ "$swap_started" = 1 ]; then
       if ! rollback_swap >/dev/null 2>&1; then
-        error_code=restore_rollback_failed
+        recovery_error_code=restore_rollback_failed
       fi
     else
       if ! preserve_scratch_database >/dev/null 2>&1; then
-        error_code=restore_failure_quarantine_failed
+        recovery_error_code=restore_failure_quarantine_failed
       fi
     fi
   fi
@@ -330,7 +348,13 @@ on_exit() {
     esac
   fi
   if [ "$rc" -ne 0 ] || [ "$completed" != 1 ]; then
-    if [ -n "$preserved_database" ]; then
+    if [ -n "$recovery_error_code" ] && [ -n "$preserved_database" ]; then
+      printf '{"schema":1,"ok":false,"error":"%s","recoveryError":"%s","preservedDatabase":"%s"}\n' \
+        "$error_code" "$recovery_error_code" "$preserved_database" >&2
+    elif [ -n "$recovery_error_code" ]; then
+      printf '{"schema":1,"ok":false,"error":"%s","recoveryError":"%s","preservedDatabase":null}\n' \
+        "$error_code" "$recovery_error_code" >&2
+    elif [ -n "$preserved_database" ]; then
       printf '{"schema":1,"ok":false,"error":"%s","preservedDatabase":"%s"}\n' \
         "$error_code" "$preserved_database" >&2
     else
@@ -570,7 +594,8 @@ then
   fail restore_scratch_create_failed
 fi
 
-if ! PGDATABASE="$scratch_database" pg_restore \
+if ! pg_restore \
+  --dbname="$scratch_database" \
   --exit-on-error --single-transaction --no-owner --no-privileges \
   < "$plaintext_dump" >/dev/null 2>"$diagnostic_file"; then
   fail restore_scratch_import_failed

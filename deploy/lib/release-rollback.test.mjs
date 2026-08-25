@@ -5,6 +5,7 @@ import test from 'node:test'
 
 const deploy = readFileSync(new URL('../deploy.sh', import.meta.url), 'utf8')
 const backend = readFileSync(new URL('../../backend/src/index.ts', import.meta.url), 'utf8')
+const prVerify = readFileSync(new URL('../../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
 const bashExecutable = process.platform === 'win32'
   ? `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Git\\bin\\bash.exe`
   : 'bash'
@@ -180,6 +181,88 @@ test('restore-ul este probat complet fără swap înainte de migrator', () => {
   assert.ok(call >= 0 && restoreRequired > call && migrator > restoreRequired)
 })
 
+test('migratorul primește numai copia exactă cu ACL minim a dovezii root-only', () => {
+  const prepare = body('prepare_migration_proof_copy')
+  const cleanup = body('cleanup_migration_proof_copy')
+  const exitHandler = body('on_release_exit')
+  const prepareCall = deploy.indexOf('\n    prepare_migration_proof_copy \\\n')
+  const mountCopy = deploy.indexOf('-v "$migration_proof_copy:/run/proof/backup.json:ro"', prepareCall)
+  const migrator = deploy.indexOf('migration_output=$(docker run', mountCopy)
+  const cleanupCall = deploy.indexOf('\n    cleanup_migration_proof_copy \\\n', migrator)
+  const confirmMigration = deploy.indexOf('[ "$migration_output" = migrations_ok ]', cleanupCall)
+
+  assert.match(prepare, /\[ -f "\$PROOF_FILE" \] && \[ ! -L "\$PROOF_FILE" \]/)
+  assert.match(prepare, /stat -Lc '%u:%g:%a:%h' "\$PROOF_FILE"[\s\S]*'0:0:600:1'/)
+  assert.match(prepare, /mktemp "\$RUNTIME_ROOT\/migration-backup-proof\.XXXXXX"/)
+  assert.match(prepare, /install -o root -g 10050 -m 0440 "\$PROOF_FILE" "\$migration_proof_copy"/)
+  assert.match(prepare, /\[ ! -f "\$migration_proof_copy" \] \|\| \[ -L "\$migration_proof_copy" \]/)
+  assert.match(prepare, /stat -Lc '%u:%g:%a:%h' "\$migration_proof_copy"[\s\S]*'0:10050:440:1'/)
+  assert.match(prepare, /cmp -s -- "\$PROOF_FILE" "\$migration_proof_copy"/)
+  assert.doesNotMatch(prepare, /(?:chown|chmod)[^\n]*"\$PROOF_FILE"/)
+  assert.match(cleanup, /"\$RUNTIME_ROOT"\/migration-backup-proof\.\*/)
+  assert.match(cleanup, /rm -f -- "\$candidate"/)
+  assert.match(exitHandler, /cleanup_migration_proof_copy/)
+  assert.ok(exitHandler.indexOf('cleanup_migration_proof_copy') < exitHandler.indexOf('rollback_switch'))
+  assert.doesNotMatch(deploy, /-v "\$PROOF_FILE:\/run\/proof\/backup\.json:ro"/)
+  assert.ok(prepareCall >= 0 && mountCopy > prepareCall)
+  assert.ok(migrator > mountCopy && cleanupCall > migrator && confirmMigration > cleanupCall)
+})
+
+test('CI reproduce ACL-ul canonic și copia montată din release', () => {
+  const canonicalAcl = prVerify.indexOf('sudo chmod 0600 /tmp/kelion-ci-postgres/backup/proof.json')
+  const copy = prVerify.indexOf('migration_proof_copy=/tmp/kelion-ci-postgres/backup/proof.migrator.json', canonicalAcl)
+  const install = prVerify.indexOf('sudo install -o root -g 10050 -m 0440', copy)
+  const mount = prVerify.indexOf('-v "$migration_proof_copy:/run/proof/backup.json:ro"', install)
+  const migrator = prVerify.indexOf('"$KELION_APP_IMAGE" node /app/backend/dist/migrate.js)', mount)
+  const remove = prVerify.indexOf('sudo rm -f -- "$migration_proof_copy"', migrator)
+
+  assert.ok(canonicalAcl >= 0 && copy > canonicalAcl && install > copy)
+  assert.ok(mount > install && migrator > mount && remove > migrator)
+  assert.match(prVerify, /stat -c '%u:%g:%a' \/tmp\/kelion-ci-postgres\/backup\/proof\.json\)" = '0:0:600'/)
+  assert.match(prVerify, /stat -c '%u:%g:%a' "\$migration_proof_copy"\)" = '0:10050:440'/)
+  assert.match(prVerify, /cmp -s -- \/tmp\/kelion-ci-postgres\/backup\/proof\.json "\$migration_proof_copy"/)
+})
+
+test('copia dovezii se curăță și când pregătirea ACL eșuează', {
+  skip: bashAvailable ? false : 'Bash nu este disponibil pentru proba comportamentală',
+}, () => {
+  const script = `
+set -euo pipefail
+${'cleanup_migration_proof_copy'}() {${body('cleanup_migration_proof_copy')}
+}
+${'prepare_migration_proof_copy'}() {${body('prepare_migration_proof_copy')}
+}
+RUNTIME_ROOT=$(mktemp -d)
+PROOF_FILE="$RUNTIME_ROOT/last-verified-backup.json"
+printf '%s\\n' exact-proof > "$PROOF_FILE"
+migration_proof_copy=''
+stat() {
+  local candidate="\${!#}"
+  if [ "$candidate" = "$PROOF_FILE" ]; then
+    printf '%s\\n' '0:0:600:1'
+  else
+    printf '%s\\n' '0:10050:440:1'
+  fi
+}
+install() {
+  command cp -- "\${@: -2:1}" "\${@: -1}"
+}
+prepare_migration_proof_copy
+prepared=$migration_proof_copy
+[ -f "$prepared" ] && cmp -s -- "$PROOF_FILE" "$prepared"
+cleanup_migration_proof_copy
+[ -z "$migration_proof_copy" ] && [ ! -e "$prepared" ] && [ ! -L "$prepared" ]
+install() { return 1; }
+if prepare_migration_proof_copy; then exit 1; fi
+[ -z "$migration_proof_copy" ]
+if compgen -G "$RUNTIME_ROOT/migration-backup-proof.*" >/dev/null; then exit 1; fi
+rm -f -- "$PROOF_FILE"
+rmdir "$RUNTIME_ROOT"
+`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
 test('restore-ul verificat este obligatoriu înainte de orice writer sau proxy vechi', () => {
   const restore = body('restore_database_if_required')
   const restartManaged = body('restart_previous_slot')
@@ -201,7 +284,7 @@ test('restore-ul verificat este obligatoriu înainte de orice writer sau proxy v
   assert.ok(rollback.indexOf('restore_database_if_required') < rollback.indexOf('restart_previous_slot'))
   assert.ok(rollback.indexOf('restart_previous_slot') < rollback.indexOf('restore_proxy_after_rollback'))
   assert.match(deploy, /exec 8<>"\$PUBLICATION_LOCK"[\s\S]*flock 8/)
-  assert.match(deploy, /"\$BUNDLE_DIR\/backup\.sh" "\$BUNDLE_DIR\/restore-verified-backup\.sh"[\s\\]*\n[\s\\]*"\$BUNDLE_DIR\/lib\/restore-verified-backup\.mjs"/)
+  assert.match(deploy, /"\$BUNDLE_DIR\/backup\.sh" "\$BUNDLE_DIR\/restore-verified-backup\.sh"[\s\\]*\n[\s\\]*"\$BUNDLE_DIR\/vps-curatenie\.sh"[\s\\]*\n[\s\\]*"\$BUNDLE_DIR\/lib\/restore-verified-backup\.mjs"/)
   assert.match(deploy, /psql --version[\s\S]*PostgreSQL[\s\S]*16/)
   assert.match(deploy, /pg_restore --version[\s\S]*PostgreSQL[\s\S]*16/)
   assert.match(deploy, /readlink -f "\/proc\/\$\$\/fd\/8"[\s\S]*flock -n 8/)
