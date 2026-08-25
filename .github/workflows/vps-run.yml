@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 45
     environment: production
     env:
-      VPS_HOST: ${{ vars.VPS_HOST || '164.68.120.87' }}
-      VPS_USER: ${{ vars.VPS_USER || 'root' }}
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
       VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
-      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN || 'https://kelionai.app' }}
+      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
@@ -42,8 +42,9 @@ jobs:
       - name: Validează ținta fixă
         run: |
           set -euo pipefail
-          [ "$VPS_HOST" = '164.68.120.87' ]
+          [ -n "$VPS_HOST" ]
           [ "$VPS_USER" = 'root' ]
+          [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$PUBLIC_APP_ORIGIN"
 
       - name: Descoperă cheia publică ed25519 pentru pinning
@@ -73,7 +74,9 @@ jobs:
           run_id=$(jq -er '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")][0].id' --arg sha "$commit" <<<"$runs")
           gh run download "$run_id" --name "release-images-$commit" --dir "$RUNNER_TEMP/release-manifest"
           gate_image=$(jq -er --arg commit "$commit" '.schema == 1 and .commit == $commit and (.image | type == "string") and .image' "$RUNNER_TEMP/release-manifest/codex-gates.json")
-          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]]
+          gate_prefix="ghcr.io/${GITHUB_REPOSITORY,,}/codex-gates@sha256:"
+          [[ "$gate_image" == "$gate_prefix"* ]]
+          [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           printf 'image=%s\n' "$gate_image" >> "$GITHUB_OUTPUT"
           tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$RUNNER_TEMP/constructor-bundle.tar.gz" AGENTS.md deploy
 
@@ -116,16 +119,21 @@ jobs:
           remote_payload="/root/kelion/runtime/constructor-payload.${GITHUB_RUN_ID}"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; install -d -o root -g root -m 0700 /root/kelion/runtime; cat > '$remote_payload'" < "$payload"
           scp "${ssh_opts[@]}" "$RUNNER_TEMP/constructor-bundle.tar.gz" "$VPS_USER@$VPS_HOST:$remote_bundle"
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" <<'REMOTE'
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" <<'REMOTE'
           set -euo pipefail
           bundle=$1
           payload=$2
           gate_image=$3
           public_origin=$4
+          repository=$5
           case "$bundle" in /root/kelion/runtime/constructor-bundle.[0-9]*.tar.gz) ;; *) exit 1 ;; esac
           case "$payload" in /root/kelion/runtime/constructor-payload.[0-9]*) ;; *) exit 1 ;; esac
-          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]]
-          [ "$public_origin" = 'https://kelionai.app' ]
+          [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          gate_prefix="ghcr.io/${repository,,}/codex-gates@sha256:"
+          [[ "$gate_image" == "$gate_prefix"* ]]
+          [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
+          node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$public_origin"
+          public_host=$(node -e 'process.stdout.write(new URL(process.argv[1]).hostname)' "$public_origin")
           work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)
           cleanup_remote() {
             rm -f -- "$bundle" "$payload"
@@ -178,7 +186,7 @@ jobs:
 
           signing_key=/root/kelion/publisher-secrets/github-publisher-signing-key
           if [ ! -s "$signing_key" ]; then
-            ssh-keygen -q -t ed25519 -N '' -C 'kelion-constructor@kelionai.app' -f "$signing_key"
+            ssh-keygen -q -t ed25519 -N '' -C "kelion-constructor@$public_host" -f "$signing_key"
           fi
           chown root:kelion-publisher "$signing_key"
           chmod 0440 "$signing_key"
@@ -197,9 +205,9 @@ jobs:
               runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git -C "$target" fetch --prune --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
             else
               [ ! -e "$target" ] || { echo "Ținta clonei este necanonică: $target" >&2; exit 1; }
-              runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git clone --no-tags https://github.com/kelion-team/kelionai.git "$target"
+              runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git clone --no-tags "https://github.com/$repository.git" "$target"
             fi
-            runuser -u "$user" -- git -C "$target" remote set-url origin https://github.com/kelion-team/kelionai.git
+            runuser -u "$user" -- git -C "$target" remote set-url origin "https://github.com/$repository.git"
           }
           clone_or_sync kelion-codex /var/lib/kelion-codex/repo /root/kelion/worker-secrets/github-worker-token /var/lib/kelion-codex
           clone_or_sync kelion-publisher /var/lib/kelion-publisher/repo /root/kelion/publisher-secrets/github-publisher-token /var/lib/kelion-publisher
@@ -208,25 +216,25 @@ jobs:
           cat > /root/kelion/config/codex-worker.env <<EOF
           CODEX_WORKER_EXEC_ENABLED=1
           KELION_CODEX_API=http://127.0.0.1:18079
-          KELION_GITHUB_REPOSITORY=kelion-team/kelionai
+          KELION_GITHUB_REPOSITORY=$repository
           KELION_CODEX_GATE_IMAGE=$gate_image
           EOF
           install -o root -g root -m 0640 /dev/null /root/kelion/config/constructor-publisher.env
           cat > /root/kelion/config/constructor-publisher.env <<EOF
           CONSTRUCTOR_PUBLISHER_EXEC_ENABLED=1
           KELION_CONSTRUCTOR_API=http://127.0.0.1:18079
-          KELION_GITHUB_REPOSITORY=kelion-team/kelionai
+          KELION_GITHUB_REPOSITORY=$repository
           KELION_CODEX_GATE_IMAGE=$gate_image
           CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation
           CONSTRUCTOR_GIT_AUTHOR_NAME=Kelion Constructor Publisher
-          CONSTRUCTOR_GIT_AUTHOR_EMAIL=constructor@kelionai.app
+          CONSTRUCTOR_GIT_AUTHOR_EMAIL=constructor@$public_host
           CONSTRUCTOR_GIT_SIGNING_FINGERPRINT=$signing_fingerprint
           EOF
           install -o root -g root -m 0640 /dev/null /root/kelion/config/constructor-release.env
           cat > /root/kelion/config/constructor-release.env <<EOF
           CONSTRUCTOR_RELEASE_EXEC_ENABLED=1
           KELION_CONSTRUCTOR_API=http://127.0.0.1:18079
-          KELION_GITHUB_REPOSITORY=kelion-team/kelionai
+          KELION_GITHUB_REPOSITORY=$repository
           KELION_PUBLIC_APP_ORIGIN=$public_origin
           CONSTRUCTOR_RELEASE_WORKFLOW=deploy.yml
           CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation
@@ -252,7 +260,7 @@ jobs:
           pull_gate() {
             local user=$1 runtime=$2 token_file=$3
             install -d -o "$user" -g "$user" -m 0700 "$runtime"
-            cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login ghcr.io --username kelion-team --password-stdin >/dev/null
+            cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login ghcr.io --username "${repository%%/*}" --password-stdin >/dev/null
             runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull "$gate_image" >/dev/null
             runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout ghcr.io >/dev/null
           }
