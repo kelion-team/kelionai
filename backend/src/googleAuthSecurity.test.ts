@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cookie from '@fastify/cookie'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { oauthFailureRedirect } from './authNavigation.js'
 
 const authSource = readFileSync(fileURLToPath(new URL('./routes/auth.ts', import.meta.url)), 'utf8')
 const { authRoutes } = await import('./routes/auth.js')
@@ -53,6 +54,15 @@ describe('poarta criptografică Google OAuth', () => {
     expect(anonymous.statusCode).toBe(302)
     expect(anonymous.headers.location).toContain('?error=closed')
   })
+
+  it('preserves closed and blocked as final callback outcomes', () => {
+    expect(oauthFailureRedirect('https://kelion.ai', 'closed')).toBe('https://kelion.ai/login?error=closed')
+    expect(oauthFailureRedirect('https://kelion.ai', 'blocked')).toBe('https://kelion.ai/login?error=blocked')
+    expect(oauthFailureRedirect('https://kelion.ai', 'bad_state')).toBe(
+      'https://kelion.ai/login?error=oauth_failed&reason=bad_state',
+    )
+  })
+
   it('verifică id_token cu clientul oficial și audiența aplicației', () => {
     expect(authSource).toContain('googleIdentityVerifier.verifyIdToken({')
     expect(authSource).toContain('audience: config.google.clientId')

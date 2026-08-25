@@ -15,9 +15,16 @@ export function oauthSuccessRedirect(frontendOrigin: string, returnTo: unknown):
 
 export function oauthFailureRedirect(frontendOrigin: string, reason: string): string {
   const target = new URL('/login', frontendOrigin)
-  // Do not reflect provider text into the app. This is a fixed diagnostic code
-  // that the login page can turn into a recoverable, visible message.
-  target.searchParams.set('error', 'oauth_failed')
-  target.searchParams.set('reason', reason)
+  if (reason === 'closed' || reason === 'blocked') {
+    // These are final account decisions, not transient OAuth failures. Keep the
+    // machine-readable reason at the top level so the UI cannot invite a retry
+    // that will never succeed.
+    target.searchParams.set('error', reason)
+  } else {
+    // Do not reflect provider text into the app. This is a fixed diagnostic code
+    // that the login page can turn into a recoverable, visible message.
+    target.searchParams.set('error', 'oauth_failed')
+    target.searchParams.set('reason', reason)
+  }
   return target.toString()
 }
