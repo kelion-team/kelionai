@@ -1,7 +1,8 @@
 [Unit]
 Description=Kelion Constructor Codex queue and isolated executor
-After=network-online.target
+After=network-online.target kelion-constructor-sync.service
 Wants=network-online.target
+Requires=kelion-constructor-sync.service
 ConditionPathExists=/etc/kelion/codex-worker.enabled
 
 [Service]
@@ -18,11 +19,9 @@ Environment=CODEX_WORKER_REPO=/var/lib/kelion-codex/repo
 Environment=CODEX_WORKER_JOBS=/var/lib/kelion-codex/jobs
 Environment=CODEX_WORKER_PROFILE_HOME=/opt/kelion-codex/profile-home
 Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
-Environment=CODEX_GITHUB_ASKPASS=/opt/kelion-constructor/github-askpass.sh
 Environment=KELION_CODEX_ADVERSARIAL_SENTINEL=KELION-CODEX-ADVERSARIAL-SENTINEL-V1
 EnvironmentFile=/root/kelion/config/codex-worker.env
 LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
-LoadCredential=github-worker-token:/root/kelion/worker-secrets/github-worker-token
 ExecStartPre=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test
 ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
 NoNewPrivileges=true
