@@ -100,8 +100,11 @@ jobs:
             git cat-file -e "HEAD:$input"
           done
           git archive --format=tar HEAD AGENTS.md deploy | gzip -n > "$RUNNER_TEMP/constructor-bundle.tar.gz"
-          tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" | grep -qx 'AGENTS.md'
-          tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" | grep -q '^deploy/'
+          # Nu pune `grep -q` direct după `tar`: cu pipefail, închiderea
+          # timpurie a grep ar transforma SIGPIPE-ul tar într-un fals eșec.
+          tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" > "$RUNNER_TEMP/constructor-bundle.entries"
+          grep -qx 'AGENTS.md' "$RUNNER_TEMP/constructor-bundle.entries"
+          grep -q '^deploy/' "$RUNNER_TEMP/constructor-bundle.entries"
 
       - name: Configureaza Constructorul fara activare prematura
         if: inputs.operation == 'configure-constructor'
