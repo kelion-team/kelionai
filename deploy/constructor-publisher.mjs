@@ -383,6 +383,10 @@ async function runOnce() {
   mkdirSync(STATE, { recursive: true, mode: 0o700 })
   const hmac = loadSystemdCredential('constructor-publisher-secret', process.env.CONSTRUCTOR_PUBLISHER_SECRET_FILE)
   const githubCredential = tokenPath()
+  const authenticatedGitEnv = gitEnv({
+    GIT_ASKPASS: ASKPASS,
+    KELION_GITHUB_TOKEN_FILE: githubCredential.path,
+  })
   const claim = await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: '/api/internal/constructor-publisher/jobs/claim', body: {} })
   if (!claim?.job) return
   const identity = strictJobIdentity(claim.job)
@@ -402,7 +406,7 @@ async function runOnce() {
       writeFileSync(join(STATE, `${identity.taskId}.json`), `${canonicalJson({ schema: 1, jobId: identity.jobId, taskId: identity.taskId, headCommit: recovered.headCommit, prNumber: recovered.prNumber, commit: recovered.commit, mergedReceipt })}\n`, { mode: 0o600 })
       return
     }
-    const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { timeout: 180_000 })
+    const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { env: authenticatedGitEnv, timeout: 180_000 })
     if (fetched.status !== 0) fail('Fetch public origin/master a eșuat')
     await stopLease.assert()
     const handoff = readHandoff({ ...claim.job, ...identity })
@@ -419,7 +423,7 @@ async function runOnce() {
     await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: `/api/internal/constructor-publisher/jobs/${identity.jobId}/event`, body: { taskId: identity.taskId, leaseId: identity.leaseId, event: 'pr_opened', branch: built.branch, headCommit: built.headCommit, prNumber, prUrl, receiptSha256: openedReceipt } })
     await waitForGreen(githubCredential.value, prNumber, built.headCommit, renewLease)
     await stopLease.assert()
-    if (gitOutput(['ls-remote', 'origin', 'refs/heads/master'], REPO).split(/\s+/)[0] !== handoff.baseCommit) fail('Master s-a schimbat înainte de merge; revalidare necesară')
+    if (gitOutput(['ls-remote', 'origin', 'refs/heads/master'], REPO, authenticatedGitEnv).split(/\s+/)[0] !== handoff.baseCommit) fail('Master s-a schimbat înainte de merge; revalidare necesară')
     const merged = await github(githubCredential.value, `/repos/${REPOSITORY}/pulls/${prNumber}/merge`, 'PUT', { sha: built.headCommit, merge_method: 'squash' })
     const commit = String(merged?.sha ?? '').toLowerCase()
     if (merged?.merged !== true || !/^[0-9a-f]{40}$/.test(commit)) fail('GitHub nu a confirmat merge-ul exact')
