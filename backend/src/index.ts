@@ -46,6 +46,7 @@ import { auzRoutes } from './routes/auz.js'
 import { deployRoutes } from './routes/deploy.js'
 import { cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, getPool, initDb, recordSimptomLive } from './db.js'
 import { hydrateSession, trustedMutationOrigin } from './session.js'
+import { isOperationalHealthRequest } from './services/operationalHealth.js'
 import { makeLogTee, capturaConsole } from './services/logbuffer.js'
 import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
@@ -168,6 +169,12 @@ app.addHook('onRequest', async (req, reply) => {
   reply.header('X-Frame-Options', 'SAMEORIGIN')
   reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)')
+
+  // Readiness is a machine-to-machine contract.  Do not touch the session
+  // store here: CI and release probes have no browser credentials, and an
+  // unrelated session failure must be reported by /readyz itself, never 403.
+  if (isOperationalHealthRequest(req.method, req.raw.url)) return
+
   await hydrateSession(req)
 
   // Cookie-authenticated mutations require an exact first-party Origin. CORS
