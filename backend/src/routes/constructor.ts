@@ -21,6 +21,7 @@ import {
 } from '../services/constructorPipeline.js'
 import { verifyPublisherRequest, verifyReleaseRequest } from '../services/constructorServiceAuth.js'
 import { constructorContinuity } from '../services/constructorContinuity.js'
+import { actOnRelease, readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SHA40 = /^[0-9a-f]{40}$/
@@ -125,6 +126,36 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const diagnostic = await diagnosticConstructorViu(Date.now())
     if ('error' in diagnostic) return reply.code(500).send(diagnostic)
     return reply.send(diagnostic)
+  })
+
+  // Admin release console: GitHub is contacted only by a dedicated server-side
+  // OAuth integration. The browser receives status and can request a bounded
+  // review/merge action; it never sees a credential or bypasses branch rules.
+  app.get<{ Querystring: { jobId?: string } }>('/api/admin/constructor/release', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const jobs = await listBuildJobs(40)
+    if (!jobs) return reply.code(503).send({ error: 'db_unreadable' })
+    const requestedId = Number(req.query.jobId)
+    const job = Number.isSafeInteger(requestedId) && requestedId > 0
+      ? jobs.find((candidate) => candidate.id === requestedId) ?? null
+      : jobs.find((candidate) => candidate.prUrl) ?? null
+    return reply.send({ jobId: job?.id ?? null, ...(await readReleaseSnapshot(job?.prUrl ?? null)) })
+  })
+
+  app.post<{ Body: { jobId?: number; action?: 'approve' | 'merge' } }>('/api/admin/constructor/release/action', async (req, reply) => {
+    const user = cerAdmin(req, reply)
+    if (!user) return
+    const jobId = Number(req.body?.jobId)
+    const action = req.body?.action
+    if (!Number.isSafeInteger(jobId) || jobId <= 0 || (action !== 'approve' && action !== 'merge')) return reply.code(400).send({ error: 'invalid_release_action' })
+    const jobs = await listBuildJobs(40)
+    if (!jobs) return reply.code(503).send({ error: 'db_unreadable' })
+    const job = jobs.find((candidate) => candidate.id === jobId)
+    if (!job) return reply.code(404).send({ error: 'job_not_found' })
+    const result = await actOnRelease(job.prUrl, action)
+    if (!result.ok) return reply.code(409).send(result)
+    return reply.send({ ok: true, release: await readReleaseSnapshot(job.prUrl) })
   })
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
