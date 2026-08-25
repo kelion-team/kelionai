@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kelion Operations Memory"
+  short_description: "Resume verified KelionAI operational work safely"
+  default_prompt: "Read docs/operations/CURRENT.md, verify its facts, and continue only from the documented safe next step."
