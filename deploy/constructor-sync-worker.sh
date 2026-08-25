@@ -5,6 +5,8 @@ set -euo pipefail
 repo=/var/lib/kelion-codex/repo
 askpass=/opt/kelion-constructor/github-askpass.sh
 token=${CREDENTIALS_DIRECTORY:?lipsește directorul systemd credentials}/github-worker-token
+repository=${KELION_GITHUB_REPOSITORY:-}
+[[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo 'repository configurat invalid' >&2; exit 1; }
 [[ -d "$repo/.git" && ! -L "$repo" ]] || { echo 'clona workerului lipsește sau nu este canonică' >&2; exit 1; }
 [[ -f "$askpass" && ! -L "$askpass" && ! -w "$askpass" ]] || { echo 'askpass invalid' >&2; exit 1; }
 [[ -f "$token" && ! -L "$token" ]] || { echo 'credentială GitHub read-only lipsă' >&2; exit 1; }
@@ -22,7 +24,7 @@ runuser -u kelion-codex -- env \
 origin=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$repo" remote get-url origin)
-[[ "$origin" == 'https://github.com/kelion-team/kelionai.git' ]] || {
+[[ "$origin" == "https://github.com/$repository.git" ]] || {
   echo 'remote worker necanonic' >&2
   exit 1
 }
