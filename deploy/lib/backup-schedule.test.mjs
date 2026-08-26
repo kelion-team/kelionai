@@ -97,6 +97,8 @@ test('schedulerul este restaurat fără rollback DB după point-of-no-return', (
 
 test('unitățile persistente rulează zilnic, cu lock-ul scriptului și hardening', () => {
   assert.match(service, /^ExecStart=\/opt\/kelion-backup\/current\/backup\.sh$/m)
+  assert.match(service, /^ConditionFileIsExecutable=\/opt\/kelion-backup\/current\/backup\.sh$/m)
+  assert.doesNotMatch(service, /^ConditionPathIsExecutable=/m)
   assert.match(service, /^NoNewPrivileges=true$/m)
   assert.match(service, /^ProtectSystem=strict$/m)
   assert.match(timer, /^OnCalendar=\*-\*-\* 03:17:00 UTC$/m)

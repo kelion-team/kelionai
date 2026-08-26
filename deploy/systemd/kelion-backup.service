@@ -2,7 +2,7 @@
 Description=Kelion encrypted and restore-verified PostgreSQL backup
 After=docker.service
 Requires=docker.service
-ConditionPathIsExecutable=/opt/kelion-backup/current/backup.sh
+ConditionFileIsExecutable=/opt/kelion-backup/current/backup.sh
 
 [Service]
 Type=oneshot

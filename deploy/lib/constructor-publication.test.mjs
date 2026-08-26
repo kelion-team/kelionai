@@ -427,6 +427,10 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
     assert.match(unit, /ConditionPathExists=\/run\/kelion\/runtime-config-recovery\.ready/)
     assert.doesNotMatch(unit, /\[Install\]|WantedBy=multi-user\.target/)
   }
+  for (const unit of [worker, publisher]) {
+    assert.match(unit, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
+    assert.doesNotMatch(unit, /^RestrictNamespaces=.*\bmount\b/m)
+  }
 })
 
 test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () => {
@@ -1068,9 +1072,16 @@ test('release-ul drenează handoff-urile Constructor după quiesce și înainte 
 test('markerul release și helperul de recovery sunt persistate în ordinea sigură', () => {
   const deploy = read('deploy/deploy.sh')
   const oldRecovery = deploy.indexOf("# Jurnalele runtime/activare sunt recuperate cu helperul instalat")
-  const installHelper = deploy.indexOf('install_recovery_artifact "$BUNDLE_DIR/lib/runtime-config-cutover.sh"', oldRecovery)
-  assert.ok(oldRecovery >= 0 && installHelper > oldRecovery,
-    'jurnalul vechi trebuie recuperat înainte ca helperul instalat să fie înlocuit')
+  const nextRecovery = deploy.indexOf('# Un SIGKILL/reboot în timpul rotației runtime', oldRecovery)
+  const recoveryBootstrap = deploy.slice(oldRecovery, nextRecovery)
+  const helperInstalls = [...recoveryBootstrap.matchAll(/install_recovery_artifact "[$]BUNDLE_DIR\/lib\/runtime-config-cutover\.sh"/g)]
+    .map((match) => match.index)
+  const verifyRecoveryUnit = recoveryBootstrap.indexOf('if ! systemd-analyze verify "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service"')
+  assert.equal(helperInstalls.length, 2)
+  assert.ok(oldRecovery >= 0 && helperInstalls[0] < verifyRecoveryUnit && verifyRecoveryUnit < helperInstalls[1],
+    'hostul nou pregătește executabilul înainte de verify, iar hostul existent îl înlocuiește numai după verify')
+  assert.match(recoveryBootstrap, /recovery_helper_bootstrapped=1[\s\S]*if ! systemd-analyze verify[\s\S]*if \[ "[$]recovery_helper_bootstrapped" = 1 \][\s\S]*recovery_helper_bootstrap_identity[\s\S]*rm -f -- "[$]ROOT\/bin\/runtime-config-cutover\.sh"[\s\S]*fsync_release_artifact "[$]ROOT\/bin" directory/)
+  assert.match(recoveryBootstrap, /if \[ "[$]recovery_helper_bootstrapped" = 0 \]; then[\s\S]*install_recovery_artifact "[$]BUNDLE_DIR\/lib\/runtime-config-cutover\.sh"/)
   assert.match(deploy, /restore_release_marker\(\)[\s\S]*fsync_release_artifact "[$]temporary" file[\s\S]*mv -f -- "[$]temporary" "[$]RELEASE_STATE_ROOT\/active"[\s\S]*fsync_release_artifact "[$]RELEASE_STATE_ROOT" directory/)
   assert.match(deploy, /printf '%s\\n' "[$]COMMIT_SHA" > "[$]temporary_active"[\s\S]*fsync_release_artifact "[$]temporary_active" file[\s\S]*mv -f -- "[$]temporary_active" "[$]RELEASE_STATE_ROOT\/active"[\s\S]*fsync_release_artifact "[$]RELEASE_STATE_ROOT" directory/)
   assert.match(deploy, /\[ ! -e "[$]RELEASE_STATE_ROOT\/active" \] && \[ ! -L "[$]RELEASE_STATE_ROOT\/active" \][\s\S]*markerul release activ existent este gol sau necanonic/)
