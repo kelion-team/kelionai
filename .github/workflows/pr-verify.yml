@@ -234,6 +234,11 @@ jobs:
           CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret
           CONSTRUCTOR_RELEASE_ENABLED=0
           CONSTRUCTOR_RELEASE_SECRET_FILE=/run/secrets/constructor-release-secret
+          GITHUB_RELEASE_OAUTH_TOKEN_FILE=/run/secrets/github-release-oauth-token
+          CONSTRUCTOR_RETRY_BASE_SECONDS=60
+          CONSTRUCTOR_RETRY_MAX_SECONDS=1800
+          CONSTRUCTOR_EXTERNAL_RETRY_SECONDS=900
+          CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation
           BROWSER_WORKER_SOCKET=/run/kelion-browser-api/browser.sock
           BROWSER_WORKER_SECRET_FILE=/run/secrets/browser-worker-secret
           CONVERTER_WORKER_SOCKET=/run/kelion-converter-api/converter.sock
@@ -281,6 +286,7 @@ jobs:
           PUSH_ENDPOINT_HOSTS=
           PUSH_MAX_SUBSCRIPTIONS=5
           GOOGLE_TTS_ENABLED=false
+          GOOGLE_TTS_VOICE=Charon
           SEARCH_ENABLED=false
           MAIL_ENABLED=false
           RELEASE_CANDIDATE_MODE=1

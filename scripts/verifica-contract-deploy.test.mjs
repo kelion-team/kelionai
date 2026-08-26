@@ -1,7 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { contractErrors, productionRequirements } from './verifica-contract-deploy.mjs'
+import {
+  contractErrors,
+  cutoverRuntimeNames,
+  exampleRuntimeNames,
+  productionRequirements,
+  runtimeContractNames,
+  workflowRuntimeNames,
+} from './verifica-contract-deploy.mjs'
 
 test('extrage cerințele fail-closed din configul de producție', () => {
   const source = `required('A_SECRET'); configuredModel('A_MODEL', []); positiveInteger('A_TTL', raw, 1)`
@@ -12,6 +19,26 @@ test('extrage cerințele fail-closed din configul de producție', () => {
 
 test('contractul real backend-provision-compose este complet', () => {
   assert.deepEqual(contractErrors(), [])
+})
+
+test('contractul declară exact schema runtime și toate intrările de control ale provisioning-ului', () => {
+  const contract = JSON.parse(readFileSync(new URL('../config/runtime-contract.json', import.meta.url), 'utf8'))
+  const expected = [...runtimeContractNames(contract)].sort()
+  assert.equal(expected.length, 86)
+  assert.deepEqual([...workflowRuntimeNames()].sort(), expected)
+  assert.deepEqual([...cutoverRuntimeNames()].sort(), expected)
+  const example = exampleRuntimeNames()
+  assert.ok(expected.every((name) => example.has(name)))
+  assert.deepEqual(contract.secretFiles.GITHUB_RELEASE_OAUTH_TOKEN, {
+    actionsSecret: 'KELION_GITHUB_RELEASE_OAUTH_TOKEN',
+    file: 'github-release-oauth-token',
+  })
+  assert.deepEqual(contract.hostProvisionedSecretFiles.CONSTRUCTOR_GHCR_READ_TOKEN, {
+    environment: 'GHCR_READ_TOKEN',
+    file: 'github-ghcr-read-token',
+    target: '/root/kelion/gate-secrets/github-ghcr-read-token',
+  })
+  assert.deepEqual(contract.workflowControlSecrets, ['VPS_SSH_KEY'])
 })
 
 test('Revolut Merchant este clasificat complet și moneda nu mai este env', () => {
