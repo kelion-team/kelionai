@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('./config.js', () => ({
   config: {
@@ -13,6 +16,9 @@ vi.mock('./config.js', () => ({
     serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
     mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
     codexWorkerSecret: ['CODEX_WORKER_SECRET'],
+    constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
+    constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
+    githubReleaseOAuthToken: ['GITHUB_RELEASE_OAUTH_TOKEN'],
     revolutMerchantSecretKey: ['REVOLUT_MERCHANT_SECRET_KEY'],
     revolutWebhookSigningSecret: ['REVOLUT_WEBHOOK_SIGNING_SECRET'],
     vapidPublicKey: ['VAPID_PUBLIC_KEY'],
@@ -33,6 +39,10 @@ describe('env-check secret minimisation', () => {
     delete process.env.SERPER_API_KEY
     delete process.env.SERPER_KEY
     delete process.env.KELION_ALT_KEY
+    delete process.env.CODEX_WORKER_SECRET_FILE
+    delete process.env.CONSTRUCTOR_PUBLISHER_SECRET_FILE
+    delete process.env.CONSTRUCTOR_RELEASE_SECRET_FILE
+    delete process.env.GITHUB_RELEASE_OAUTH_TOKEN_FILE
   })
 
   it('reports presence and length but never a secret value or prefix', () => {
@@ -57,5 +67,42 @@ describe('env-check secret minimisation', () => {
     expect(envCheck().find((entry) => entry.name === 'SERPER_API_KEY')?.foundAs).toBe('SERPER_KEY')
     expect(envOrphans()).toContain('KELION_ALT_KEY')
     expect(JSON.stringify(envOrphans())).not.toContain(SECRET)
+  })
+
+  it('includes all privileged Constructor identities in summary and never reports their file variants as orphans', () => {
+    const secretDir = mkdtempSync(join(tmpdir(), 'kelion-env-check-'))
+    const constructorFiles = {
+      CODEX_WORKER_SECRET_FILE: join(secretDir, 'codex-worker-secret'),
+      CONSTRUCTOR_PUBLISHER_SECRET_FILE: join(secretDir, 'constructor-publisher-secret'),
+      CONSTRUCTOR_RELEASE_SECRET_FILE: join(secretDir, 'constructor-release-secret'),
+      GITHUB_RELEASE_OAUTH_TOKEN_FILE: join(secretDir, 'github-release-oauth-token'),
+    }
+    try {
+      for (const path of Object.values(constructorFiles)) writeFileSync(path, `${SECRET}\n`, { mode: 0o600 })
+      Object.assign(process.env, constructorFiles)
+
+      const report = envCheck()
+      const summary = envSummary()
+      for (const [fileName] of Object.entries(constructorFiles)) {
+        const canonical = fileName.replace(/_FILE$/, '')
+        expect(report.find((entry) => entry.name === canonical)).toMatchObject({
+          present: true,
+          length: SECRET.length,
+          foundAs: fileName,
+        })
+        expect(summary.nume).not.toContain(canonical)
+        expect(envOrphans()).not.toContain(fileName)
+      }
+
+      process.env.GITHUB_RELEASE_OAUTH_TOKEN_FILE = secretDir
+      expect(envCheck().find((entry) => entry.name === 'GITHUB_RELEASE_OAUTH_TOKEN')).toMatchObject({
+        present: true,
+        length: 0,
+      })
+      expect(envSummary().nume).toContain('GITHUB_RELEASE_OAUTH_TOKEN')
+      expect(envOrphans()).not.toContain('GITHUB_RELEASE_OAUTH_TOKEN_FILE')
+    } finally {
+      rmSync(secretDir, { recursive: true, force: true })
+    }
   })
 })

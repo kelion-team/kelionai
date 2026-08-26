@@ -37,20 +37,41 @@ test('deploy-ul validează separat familia video Sora de modelele GPT', () => {
   assert.match(prVerify, /^\s*OPENAI_VIDEO_MODEL=sora-ci-video$/m)
 })
 
-test('provisionarea runtime trimite linia base64 completă către read-ul fail-closed', () => {
+test('provisionarea runtime transportă și decodează exact fiecare valoare base64', () => {
   const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
   assert.match(workflow, /encode\(\) \{ printf '%s:%s\\n'/)
-  assert.match(workflow, /while IFS=":" read -r name encoded/)
   assert.doesNotMatch(workflow, /while IFS="=" read -r name encoded/)
-  assert.match(
-    workflow,
-    /\{\s*printf '%s' "\$env_payload" \| base64 -w0\s*printf '\\n'\s*\} \| ssh_vps '[\s\S]{0,120}IFS= read -r encoded/,
-  )
+  assert.match(workflow, /awk -F: -v wanted="\$name" '\$1 == wanted \{ count\+\+ \}/)
+  assert.match(workflow, /substr\(\$0, index\(\$0, ":"\) \+ 1\)/)
+  const cleanupArm = workflow.indexOf("systemd-run --quiet --unit='$cleanup_unit'")
+  const payloadUpload = workflow.indexOf("cat > '$remote_payload'", cleanupArm)
+  assert.ok(cleanupArm >= 0 && payloadUpload > cleanupArm,
+    'timerul de ștergere trebuie armat într-un SSH separat înainte de upload')
+  assert.match(workflow.slice(cleanupArm, payloadUpload), /systemctl is-active --quiet '\$cleanup_unit\.timer'/)
+  assert.match(workflow, /\[ -f "\$payload" \] && \[ ! -L "\$payload" \]/)
+  assert.match(workflow, /GITHUB_RUN_ID" =~ \^\[1-9\]\[0-9\]\*\$[\s\S]*GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$/)
+  assert.match(workflow, /runtime-cutover-bundle\.\$\{GITHUB_RUN_ID\}\.\$\{GITHUB_RUN_ATTEMPT\}\.tar\.gz/)
+  assert.match(workflow, /systemd-run --quiet --unit='\$cleanup_unit' --on-active=15m \/usr\/bin\/rm -f -- '\$remote_payload'; systemctl is-active --quiet '\$cleanup_unit\.timer'/)
+  assert.match(workflow, /systemctl stop "\$cleanup_unit\.timer" "\$cleanup_unit\.service"/)
+  assert.match(workflow, /kelion-runtime-payload-cleanup-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/)
   assert.ok(workflow.includes("pairs = parse_qsl(url.query, keep_blank_values=True, strict_parsing=True)"))
   assert.ok(workflow.includes("key not in {'host', 'port'} or key in query"))
   assert.ok(workflow.includes("url.hostname != 'localhost'"))
   assert.ok(workflow.includes("query.get('host') != '/var/run/postgresql'"))
   assert.doesNotMatch(workflow, /case "\$DATABASE_URL" in/)
+})
+
+test('rerunurile controlului Constructor folosesc payloaduri și unități distincte pe attempt', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/vps-run.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /GITHUB_RUN_ID" =~ \^\[1-9\]\[0-9\]\*\$[\s\S]*GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$/)
+  assert.match(workflow, /constructor-bundle\.\$\{GITHUB_RUN_ID\}\.\$\{GITHUB_RUN_ATTEMPT\}\.tar\.gz/)
+  assert.match(workflow, /constructor-payload\.\$\{GITHUB_RUN_ID\}\.\$\{GITHUB_RUN_ATTEMPT\}/)
+  assert.match(workflow, /payload-cleanup-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/)
+  const cleanupArm = workflow.indexOf("systemd-run --quiet --unit='$cleanup_unit'")
+  const payloadUpload = workflow.indexOf("cat > '$remote_payload'", cleanupArm)
+  assert.ok(cleanupArm >= 0 && payloadUpload > cleanupArm)
+  assert.match(workflow.slice(cleanupArm, payloadUpload), /systemctl is-active --quiet '\$cleanup_unit\.timer'/)
+  assert.match(workflow, /systemctl stop "\$cleanup_unit\.timer" "\$cleanup_unit\.service"/)
 })
 
 test('dovezile publice de deploy validează semantic readiness-ul activ', () => {
@@ -67,9 +88,9 @@ test('dovezile publice de deploy validează semantic readiness-ul activ', () => 
 
   assert.match(
     workflow,
-    /readiness=\$\(curl --fail --silent --show-error --max-time 12 "\$origin\/readyz"\)[\s\S]{0,200}jq -e '\.ready == true and \.release\.sideEffectsActive == true' <<<"\$readiness"/,
+    /proof=\$\(curl --fail --silent --show-error --max-time 12 "\$origin\/api\/release-proof"\)[\s\S]{0,300}\.ready == true and \.release\.sideEffectsActive == true and \.activeCommit == \$expected/,
   )
-  assert.doesNotMatch(workflow, /readiness=.*--write-out '%\{http_code\}'/)
+  assert.doesNotMatch(workflow, /proof=.*--write-out '%\{http_code\}'/)
 
   assert.match(sentinel, /ready=\$\(curl --fail --silent --show-error --max-time 15 "\$PUBLIC_APP_ORIGIN\/readyz" \|\| true\)/)
   assert.match(sentinel, /jq -e '\.ready == true and \.release\.sideEffectsActive == true' <<<"\$ready"/)

@@ -73,8 +73,10 @@ se reia automat; ownerul nu recreează cererea.
    commitul o singură dată;
 3. completează vizibilitatea Admin/Stage și incidentul Live Voice fără progres
    simulat;
-4. rulează testele țintite, build, lint, typecheck și verificarea migrației;
-5. deschide PR, rezolvă review-ul și așteaptă toate checkurile obligatorii;
+4. rulează testele țintite, build, lint, typecheck și verificarea migrației,
+   apoi persistă receiptul `local_gates`; acesta nu înseamnă CI GitHub verde;
+5. deschide PR, rezolvă review-ul și așteaptă toate checkurile obligatorii până
+   când rezultatul GitHub autoritativ este persistat separat ca `ci=green`;
 6. după acțiunile externe, rerulează configurarea oficială și confirmă
    heartbeatul workerului;
 7. execută un singur E2E benign și păstrează linkurile/receipturile;

@@ -36,6 +36,7 @@ export function contractErrors() {
   const example = read('deploy/kelionai.env.example')
   const backendExample = read('backend/.env.example')
   const deploy = read('deploy/deploy.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const prVerify = read('.github/workflows/pr-verify.yml')
   const requiredNonSecret = setOf(contract.requiredNonSecret)
   const secretFiles = new Map(Object.entries(contract.secretFiles))
@@ -69,7 +70,10 @@ export function contractErrors() {
   if (!compose.includes('${KELION_CONFIG_FILE:?') || compose.includes('kelionai.env')) {
     errors.push('compose nu cere config runtime dedicat fail-closed')
   }
-  if (!workflow.includes('/root/kelion/config/runtime.env')) errors.push('workflow nu scrie configul dedicat')
+  if (
+    !workflow.includes('stage_value runtime.env "$(decode runtime-env)"')
+    || !/runtime\.env\)[\s\S]{0,160}mapped_target=\$CONFIG_ROOT\/runtime\.env/.test(cutover)
+  ) errors.push('workflow nu scrie configul dedicat prin cutover-ul atomic')
   if (/toJSON\(secrets\)|OPENAI_ADMIN_KEY|kelionai\.env/.test(workflow)) errors.push('workflow conține secret bulk/admin sau env legacy')
   if (![workflow, compose, example, backendExample, deploy, prVerify].every((source) => !/\bBILLING_CURRENCY\b/.test(source))) {
     errors.push('BILLING_CURRENCY este configurație stale; moneda vine numai din politica versionată')

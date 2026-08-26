@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   GESTURE_CATALOG,
   GESTURE_CATEGORIES,
   previewGesture,
   fetchDisabledGestures,
-  saveDisabledGestures,
+  saveDisabledGesturesCanonical,
 } from '../lib/gestures'
 import BackLink from './BackLink'
 import { adminStrings } from '../lib/adminText'
@@ -65,6 +65,30 @@ import {
 } from '../lib/billing'
 import { productConfig } from '../lib/productConfig'
 import { apiFetch } from '../lib/transport'
+import {
+  constructorAvailabilityFromSnapshot,
+  constructorFinalResultText,
+  constructorHasVerifiedLiveResult,
+  constructorJobCanBeCancelled,
+  constructorPersistentEventsText,
+  type ConstructorWorkerSummary,
+} from '../lib/constructorContract'
+import {
+  adminContractText,
+  adminMutationAcknowledged,
+  adminReleaseActionAcknowledged,
+  parseAdminArchiveAcknowledgement,
+  parseAdminBuildArchive,
+  parseAdminConstructorDiagnostic,
+  parseAdminConstructorIntake,
+  parseAdminConstructorSnapshot,
+  parseAdminReleaseSnapshot,
+  parseAdminRestoreAcknowledgement,
+  type AdminConstructorDiagnostic,
+  type AdminReleaseSnapshot,
+  type BuildArchiveCursor,
+  type BuildJobRow,
+} from '../lib/adminConstructorContract'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
 function fmtDur(seconds: number): string {
@@ -503,6 +527,8 @@ export default function AdminPanel({
 
   const [gestOff, setGestOff] = useState<string[] | null | 'necitit'>('necitit')
   const [gestSaved, setGestSaved] = useState(false)
+  const [gestSaving, setGestSaving] = useState(false)
+  const gestSavePendingRef = useRef(false)
 
   const [gestErr, setGestErr] = useState('')
 
@@ -622,109 +648,34 @@ export default function AdminPanel({
   >('necitit')
   const [stores, setStores] = useState<StoresData | null | 'necitit'>('necitit')
 
-  interface BuildJobRow {
-    id: number
-    status: 'queued' | 'running' | 'done' | 'failed'
-    orderText: string
-
-    nume?: string
-    branch: string | null
-    prUrl: string | null
-    tokens: number
-
-    brain: string | null
-    updatedAt: string
-
-    progress?: string | null
-    pct?: number | null
-
-    workerTaskUrl?: string | null
-    continuity?: {
-      state: 'queued' | 'running' | 'blocked' | 'completed' | 'cancelled'
-      checkpoint: string
-      heartbeat: { stale: boolean; timeoutMinutes: number }
-      retry: { allowed: boolean; attempts: number; nextAction: string }
-      escalation: null | { cause: string; evidence: string; nextAction: string }
-      proof: null | { commit: string; liveVersion: string; ci: string }
-      message: string
-      activity?: {
-        id: string
-        eventKey: string
-        stage: string
-        label: string
-        state: 'completed' | 'current' | 'pending' | 'failed'
-        at: string | null
-        percent: number
-      }[]
-    }
-    workCard?: null | {
-      id: string
-      canonicalLink: string
-      objective: string
-      acceptanceCriteria: string[]
-      contextLinks: string[]
-      owner: string
-      actor: string
-      currentStep: string | null
-      heartbeatAt: string | null
-      progress: {
-        percent: number | null
-        completed: number
-        total: number
-        currentStage: string | null
-        resolved: boolean
-        source: string
-      }
-      decisions: string[]
-      approvals: string[]
-      risks: string[]
-      dependencies: string[]
-      escalationCondition: string | null
-      finalResult: string | null
-      evidence: {
-        eventCount: number
-        prUrl?: string | null
-        commit?: string | null
-        liveVersion?: string | null
-        ci?: string | null
-      }
-      closure: { resolved: boolean; closedAt: string | null }
-    }
-  }
-
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>(
     'necitit',
   )
+  const [buildArchive, setBuildArchive] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'error'
+    jobs: BuildJobRow[]
+    nextCursor: BuildArchiveCursor | null
+    appendError: boolean
+  }>({ status: 'idle', jobs: [], nextCursor: null, appendError: false })
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
-  const [buildPaused, setBuildPaused] = useState(false)
+  const [constructorAcceptingWork, setConstructorAcceptingWork] = useState<boolean | null>(null)
+  const [constructorWorkerCanStartNow, setConstructorWorkerCanStartNow] = useState<boolean | null>(null)
 
-  const [constructorId, setConstructorId] = useState<{
-    cine: 'codex_worker' | 'unavailable'
-    motiv: string
-  } | null>(null)
+  const [constructorId, setConstructorId] =
+    useState<ConstructorWorkerSummary | null>(null)
 
-  const [diagnostic, setDiagnostic] = useState<{
-    sanatos: boolean
-    verdict: string
-    probleme: {
-      cod: string
-      severitate: 'critic' | 'atentie'
-      ce: string
-      recomandare: string
-    }[]
-  } | null>(null)
-  const [release, setRelease] = useState<{
-    jobId: number | null
-    integration: 'ready' | 'setup_required' | 'unavailable'
-    setupInstructions: string | null
-    pr: null | { number: number; title: string; url: string; state: 'open' | 'closed'; merged: boolean }
-    checks: 'passed' | 'pending' | 'failed' | 'unknown'
-    approval: 'approved' | 'required' | 'unknown'
-    merge: 'ready' | 'blocked' | 'merged' | 'unknown'
-    nextAction: string
-  } | null>(null)
+  const [diagnostic, setDiagnostic] = useState<AdminConstructorDiagnostic | null>(null)
+  const [release, setRelease] = useState<AdminReleaseSnapshot | null>(null)
+  const [releaseBusy, setReleaseBusy] = useState(false)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
+  const [buildSubmitBusy, setBuildSubmitBusy] = useState(false)
+  const buildRefreshRef = useRef<{ generation: number; controller: AbortController | null }>({ generation: 0, controller: null })
+  const archiveRefreshRef = useRef<{ generation: number; controller: AbortController | null }>({ generation: 0, controller: null })
+  const evalGenerationRef = useRef(0)
+  const pendingBuildMutationRef = useRef(new Set<number>())
+  const [pendingBuildMutations, setPendingBuildMutations] = useState<Set<number>>(new Set())
   const [agentName, setAgentName] = useState('')
   const [agentRole, setAgentRole] = useState('')
   const [agentDeep, setAgentDeep] = useState(false)
@@ -734,6 +685,7 @@ export default function AdminPanel({
 
   const [evalOrdin, setEvalOrdin] = useState<EvalConstructor | null>(null)
   useEffect(() => {
+    const generation = ++evalGenerationRef.current
     if (tab !== 'constructor') return
     const text = buildOrder.trim()
     if (text.length < 3) {
@@ -742,9 +694,14 @@ export default function AdminPanel({
     }
     // Debounce: nu lovim serverul la fiecare tastă.
     const id = window.setTimeout(() => {
-      void evalueazaOrdinConstructor(text).then((e) => setEvalOrdin(e))
+      void evalueazaOrdinConstructor(text).then((evaluation) => {
+        if (evalGenerationRef.current === generation) setEvalOrdin(evaluation)
+      })
     }, 400)
-    return () => window.clearTimeout(id)
+    return () => {
+      window.clearTimeout(id)
+      if (evalGenerationRef.current === generation) evalGenerationRef.current += 1
+    }
   }, [buildOrder, tab])
 
   async function addCustomAgent(
@@ -949,58 +906,115 @@ export default function AdminPanel({
   }, [tab])
 
   const refreshBuildJobs = (): void => {
-    apiFetch('/api/admin/constructor', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          j: {
-            jobs?: BuildJobRow[]
-            paused?: boolean
-            constructor?: {
-              cine: 'codex_worker' | 'unavailable'
-              motiv: string
-            }
-          } | null,
-        ) => {
-          if (j?.jobs) {
-            setBuildJobs(j.jobs)
-            setBuildPaused(!!j.paused)
-            setConstructorId(j.constructor ?? null)
-          } else setBuildJobs(null)
-        },
-      )
-      .catch(() => setBuildJobs(null))
+    buildRefreshRef.current.controller?.abort()
+    const controller = new AbortController()
+    const generation = buildRefreshRef.current.generation + 1
+    buildRefreshRef.current = { generation, controller }
+    const isCurrent = (): boolean => buildRefreshRef.current.generation === generation
+    apiFetch('/api/admin/constructor', { credentials: 'include', signal: controller.signal })
+      .then(async (response) => response.ok
+        ? parseAdminConstructorSnapshot(await response.json())
+        : null)
+      .then((snapshot) => {
+        if (!isCurrent()) return
+        if (snapshot) {
+          const availability = constructorAvailabilityFromSnapshot(snapshot)
+          setBuildJobs(snapshot.jobs)
+          setConstructorAcceptingWork(availability.acceptingWork)
+          setConstructorWorkerCanStartNow(availability.workerCanStartNow)
+          setConstructorId(snapshot.constructor)
+        } else {
+          setBuildJobs(null)
+          setConstructorAcceptingWork(false)
+          setConstructorWorkerCanStartNow(false)
+          setConstructorId({
+            cine: 'unavailable',
+            state: 'unknown',
+            motiv: 'starea Constructorului nu a putut fi citită',
+            lastHeartbeat: null,
+          })
+        }
+      })
+      .catch(() => {
+        if (!isCurrent()) return
+        setBuildJobs(null)
+        setConstructorAcceptingWork(false)
+        setConstructorWorkerCanStartNow(false)
+        setConstructorId({
+          cine: 'unavailable',
+          state: 'unknown',
+          motiv: 'starea Constructorului nu a putut fi citită',
+          lastHeartbeat: null,
+        })
+      })
     // DIAGNOSTICUL AUTONOM: de ce (nu) repară, măsurat pe server (regula #1 — pe
-    // eșec îl ascundem, nu inventăm „sănătos").
-    apiFetch('/api/admin/constructor/diagnostic', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          d: {
-            sanatos: boolean
-            verdict: string
-            probleme: {
-              cod: string
-              severitate: 'critic' | 'atentie'
-              ce: string
-              recomandare: string
-            }[]
-          } | null,
-      ) => setDiagnostic(d && typeof d.verdict === 'string' ? d : null),
-      )
-      .catch(() => setDiagnostic(null))
-    apiFetch('/api/admin/constructor/release', { credentials: 'include', cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((r) => setRelease(r && typeof r.nextAction === 'string' ? r : null))
-      .catch(() => setRelease(null))
+    // eșec îl afișăm explicit; absența unui diagnostic nu înseamnă sănătate.
+    apiFetch('/api/admin/constructor/diagnostic', { credentials: 'include', signal: controller.signal })
+      .then(async (response) => response.ok
+        ? parseAdminConstructorDiagnostic(await response.json())
+        : null)
+      .then((d) => {
+        if (!isCurrent()) return
+        setDiagnostic(d ?? {
+          sanatos: false,
+          verdict: 'Diagnosticul Constructor nu poate fi citit.',
+          probleme: [{ cod: 'diagnostic_unavailable', severitate: 'critic', ce: 'Citirea diagnosticului a eșuat.', recomandare: 'Reîncearcă și verifică backendul și baza de date.' }],
+          masuratori: null,
+        })
+      })
+      .catch(() => {
+        if (!isCurrent()) return
+        setDiagnostic({
+          sanatos: false,
+          verdict: 'Diagnosticul Constructor nu poate fi citit.',
+          probleme: [{ cod: 'diagnostic_unavailable', severitate: 'critic', ce: 'Conexiunea pentru diagnostic a eșuat.', recomandare: 'Reîncearcă și verifică serviciul backend.' }],
+          masuratori: null,
+        })
+      })
+    apiFetch('/api/admin/constructor/release', { credentials: 'include', cache: 'no-store', signal: controller.signal })
+      .then(async (response) => response.ok
+        ? parseAdminReleaseSnapshot(await response.json())
+        : null)
+      .then((snapshot) => {
+        if (!isCurrent()) return
+        setRelease(snapshot ?? {
+          jobId: null, integration: 'unavailable', setupInstructions: null, pr: null,
+          checks: 'unknown', approval: 'unknown', merge: 'unknown',
+          nextAction: 'Starea integrării GitHub nu a putut fi citită.',
+        })
+      })
+      .catch(() => {
+        if (!isCurrent()) return
+        setRelease({
+          jobId: null, integration: 'unavailable', setupInstructions: null, pr: null,
+          checks: 'unknown', approval: 'unknown', merge: 'unknown',
+          nextAction: 'Conexiunea către starea de publicare a eșuat.',
+        })
+      })
   }
 
-  const releaseAction = (action: 'approve' | 'merge'): void => {
-    if (!release?.jobId) return
+  const releaseAction = (): void => {
+    if (!release?.jobId || !release.pr || releaseBusy) return
+    setReleaseBusy(true)
+    setBuildMsg('')
     void apiFetch('/api/admin/constructor/release/action', {
       method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify({ jobId: release.jobId, action }),
-    }).then(() => refreshBuildJobs()).catch(() => refreshBuildJobs())
+      body: JSON.stringify({ jobId: release.jobId, action: 'approve', prNumber: release.pr.number, headSha: release.pr.headSha }),
+    })
+      .then(async (response) => {
+        const body: unknown = await response.json().catch(() => null)
+        if (response.ok && adminReleaseActionAcknowledged(body)) {
+          setBuildMsg('Aprobarea a fost înregistrată; publisherul separat va integra schimbarea după verificările obligatorii.')
+          return
+        }
+        const error = adminContractText(body, 'error')
+        setBuildMsg(`Acțiunea de publicare a eșuat${error ? `: ${error}` : '.'}`)
+      })
+      .catch(() => setBuildMsg('Acțiunea de publicare a eșuat: conexiunea cu serverul a căzut.'))
+      .finally(() => {
+        setReleaseBusy(false)
+        refreshBuildJobs()
+      })
   }
   // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
@@ -1014,101 +1028,223 @@ export default function AdminPanel({
   }, [tab])
 
   const sendBuildOrder = (): void => {
+    if (buildSubmitBusy) return
     const text = buildOrder.trim()
     if (text.length < 8) {
       setBuildMsg(A.writeCompleteOrder)
       return
     }
     const order = text
+    setBuildSubmitBusy(true)
+    setBuildMsg('')
     void apiFetch('/api/admin/constructor', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ order }),
     })
-      .then(async (r) => ({
-        ok: r.ok,
-        j: (await r.json().catch(() => null)) as {
-          id?: number
-          error?: string
-          motiv?: string
-        } | null,
+      .then(async (response) => ({
+        ok: response.ok,
+        body: await response.json().catch(() => null) as unknown,
       }))
-      .then(({ ok, j }) => {
-        if (ok && j?.id) {
-          setBuildOrder('')
+      .then(({ ok, body }) => {
+        const intake = ok ? parseAdminConstructorIntake(body) : null
+        if (intake) {
+          const availability = constructorAvailabilityFromSnapshot(intake)
+          setConstructorAcceptingWork(availability.acceptingWork)
+          setConstructorWorkerCanStartNow(availability.workerCanStartNow)
+          setConstructorId(intake.constructor)
+          setBuildOrder((current) => current.trim() === order ? '' : current)
           setEvalOrdin(null)
 
           setBuildMsg(
-            buildPaused
-              ? A.orderEnqueuedPaused(j.id)
-              : A.orderEnqueuedActive(j.id),
+            intake.deduplicated
+              ? `Ordinul #${intake.id} era deja activ; am reutilizat aceeași execuție fără dublură.`
+              : availability.workerCanStartNow
+              ? A.orderEnqueuedActive(intake.id)
+              : A.orderEnqueuedWaiting(intake.id),
           )
-        } else if (j?.error === 'ordin_respins') {
-          setBuildMsg(`Ordin respins: ${j.motiv ?? 'cerință neclară'}`)
-        } else setBuildMsg(A.orderSendFailed)
+        } else if (adminContractText(body, 'error') === 'ordin_respins') {
+          setBuildMsg(`Ordin respins: ${adminContractText(body, 'motiv') ?? 'cerință neclară'}`)
+        } else {
+          setBuildMsg(A.orderSendFailed)
+          // Intake-ul poate fi deja persistat dacă numai ACK-ul a fost corupt.
+          // Reîmprospătarea arată adevărul serverului înainte de o retrimitere.
+          refreshBuildJobs()
+        }
       })
       .catch(() => setBuildMsg(A.orderSendFailed))
+      .finally(() => setBuildSubmitBusy(false))
   }
 
-  const stergeCuVerdict = (url: string): Promise<boolean> =>
-    apiFetch(url, { method: 'DELETE', credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { ok?: boolean } | null) => j?.ok === true)
-      .catch(() => false)
-  const deleteBuildOrder = (id: number): void => {
-    if (!window.confirm(A.confirmDeleteBuildOrder(id))) return
-    void stergeCuVerdict(`/api/admin/constructor/${id}`).then((ok) => {
-      if (ok) {
-        setBuildJobs((prev) =>
-          Array.isArray(prev) ? prev.filter((x) => x.id !== id) : prev,
-        )
-        setBuildMsg(A.orderDeleted(id))
-      } else setBuildMsg(A.orderDeleteFailed)
-    })
+  const beginBuildMutation = (id: number): boolean => {
+    if (pendingBuildMutationRef.current.has(id)) return false
+    pendingBuildMutationRef.current.add(id)
+    setPendingBuildMutations(new Set(pendingBuildMutationRef.current))
+    return true
   }
-
-  const cancelBuildOrder = (id: number): void => {
-    if (!window.confirm(A.confirmStopBuildOrder(id))) return
-    void apiFetch(`/api/admin/constructor/${id}/anuleaza`, {
+  const endBuildMutation = (id: number): void => {
+    pendingBuildMutationRef.current.delete(id)
+    setPendingBuildMutations(new Set(pendingBuildMutationRef.current))
+  }
+  const submitBuildMutation = (
+    job: BuildJobRow,
+    action: 'anuleaza' | 'reia',
+    successMessage: string,
+    staleMessage: string,
+    failureMessage: string,
+  ): void => {
+    void apiFetch(`/api/admin/constructor/${job.id}/${action}`, {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       credentials: 'include',
+      body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { ok?: boolean } | null) => {
-        refreshBuildJobs()
-        setBuildMsg(j?.ok ? A.orderStopped(id) : A.orderStopFailed)
+      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
+      .then(({ httpOk, body }) => {
+        setBuildMsg(
+          httpOk && adminMutationAcknowledged(body)
+            ? successMessage
+            : adminContractText(body, 'error') === 'stale_job_state'
+              ? staleMessage
+              : failureMessage,
+        )
       })
-      .catch(() => setBuildMsg(A.orderStopFailed))
+      .catch(() => setBuildMsg(failureMessage))
+      .finally(() => {
+        endBuildMutation(job.id)
+        refreshBuildJobs()
+      })
+  }
+  const deleteBuildOrder = (job: BuildJobRow): void => {
+    if (!window.confirm(A.confirmDeleteBuildOrder(job.id)) || !beginBuildMutation(job.id)) return
+    const query = new URLSearchParams({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt })
+    void apiFetch(`/api/admin/constructor/${job.id}?${query.toString()}`, { method: 'DELETE', credentials: 'include' })
+      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
+      .then(({ httpOk, body }) => {
+      if (httpOk && adminMutationAcknowledged(body)) {
+        setBuildJobs((prev) =>
+          Array.isArray(prev) ? prev.filter((x) => x.id !== job.id) : prev,
+        )
+        setBuildMsg(A.orderDeleted(job.id))
+      } else setBuildMsg(adminContractText(body, 'error') === 'stale_job_state' ? 'Starea ordinului s-a schimbat; lista a fost reîmprospătată.' : A.orderDeleteFailed)
+    })
+      .catch(() => setBuildMsg(A.orderDeleteFailed))
+      .finally(() => {
+        endBuildMutation(job.id)
+        refreshBuildJobs()
+      })
+  }
+
+  const cancelBuildOrder = (job: BuildJobRow): void => {
+    if (!window.confirm(A.confirmStopBuildOrder(job.id)) || !beginBuildMutation(job.id)) return
+    submitBuildMutation(
+      job,
+      'anuleaza',
+      A.orderStopped(job.id),
+      'Starea ordinului s-a schimbat; oprirea nu a fost aplicată.',
+      A.orderStopFailed,
+    )
   }
   const cleanBuildOrders = (): void => {
     if (!window.confirm(A.confirmClearFailedJobs)) return
+    const jobs = (buildJobsData ?? [])
+      .filter((job) => ['failed', 'done', 'cancelled'].includes(job.status))
+      .map((job) => ({ id: job.id, status: job.status, updatedAt: job.updatedAt }))
     void apiFetch('/api/admin/constructor/curata', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ scope: 'failed_done' }),
+      body: JSON.stringify({ scope: 'failed_done', jobs }),
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { sterse?: number } | null) => {
+      .then(async (response) => {
+        const body: unknown = await response.json().catch(() => null)
+        return {
+          archived: response.ok ? parseAdminArchiveAcknowledgement(body) : null,
+          error: adminContractText(body, 'error'),
+        }
+      })
+      .then(({ archived, error }) => {
         refreshBuildJobs()
-        setBuildMsg(j ? A.ordersCleaned(j.sterse ?? 0) : A.ordersCleanFailed)
+        if (archiveOpen) loadBuildArchive()
+        setBuildMsg(archived !== null
+          ? A.ordersCleaned(archived)
+          : error === 'stale_job_state'
+            ? 'Starea ordinelor s-a schimbat; lista a fost reîmprospătată.'
+            : A.ordersCleanFailed)
       })
       .catch(() => setBuildMsg(A.ordersCleanFailed))
   }
-  const retryBuildOrder = (id: number): void => {
-    void apiFetch(`/api/admin/constructor/${id}/reia`, {
+  const retryBuildOrder = (job: BuildJobRow): void => {
+    if (!beginBuildMutation(job.id)) return
+    submitBuildMutation(
+      job,
+      'reia',
+      A.orderResumed(job.id),
+      'Starea ordinului s-a schimbat; reluarea nu a fost aplicată.',
+      A.orderResumeFailed,
+    )
+  }
+
+  const loadBuildArchive = (cursor: BuildArchiveCursor | null = null, append = false): void => {
+    archiveRefreshRef.current.controller?.abort()
+    const controller = new AbortController()
+    const generation = archiveRefreshRef.current.generation + 1
+    archiveRefreshRef.current = { generation, controller }
+    const isCurrent = (): boolean => archiveRefreshRef.current.generation === generation
+    const query = cursor
+      ? `?cursorUpdatedAt=${encodeURIComponent(cursor.updatedAt)}&cursorId=${cursor.id}`
+      : ''
+    setBuildArchive((previous) => ({
+      status: 'loading',
+      jobs: append ? previous.jobs : [],
+      nextCursor: append ? previous.nextCursor : null,
+      appendError: false,
+    }))
+    void apiFetch(`/api/admin/constructor/arhiva${query}`, { credentials: 'include', cache: 'no-store', signal: controller.signal })
+      .then(async (response) => response.ok ? parseAdminBuildArchive(await response.json().catch(() => null)) : null)
+      .then((body) => {
+        if (!isCurrent()) return
+        if (!body) throw new Error('archive_unreadable')
+        setBuildArchive((previous) => {
+          const combined = append ? [...previous.jobs, ...body.jobs] : body.jobs
+          return {
+            status: 'ready',
+            jobs: [...new Map(combined.map((job) => [job.id, job])).values()],
+            nextCursor: body.nextCursor,
+            appendError: false,
+          }
+        })
+      })
+      .catch(() => {
+        if (!isCurrent()) return
+        setBuildArchive((previous) => append && previous.jobs.length > 0
+          ? { ...previous, status: 'ready', appendError: true }
+          : { ...previous, status: 'error', appendError: false })
+      })
+  }
+  const restoreBuildOrder = (job: BuildJobRow): void => {
+    if (!beginBuildMutation(job.id)) return
+    void apiFetch(`/api/admin/constructor/${job.id}/restaureaza`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { ok?: boolean } | null) => {
+      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
+      .then(({ httpOk, body }) => setBuildMsg(
+        httpOk && parseAdminRestoreAcknowledgement(body) !== null
+          ? `Ordinul #${job.id} a fost restaurat în istoricul vizibil.`
+          : adminContractText(body, 'error') === 'stale_job_state'
+            ? 'Arhiva s-a schimbat; reîncarc lista.'
+            : 'Ordinul nu a putut fi restaurat.',
+      ))
+      .catch(() => setBuildMsg('Arhiva nu a putut fi actualizată: conexiunea a eșuat.'))
+      .finally(() => {
+        endBuildMutation(job.id)
+        loadBuildArchive()
         refreshBuildJobs()
-        setBuildMsg(j?.ok ? A.orderResumed(id) : A.orderResumeFailed)
       })
-      .catch(() => setBuildMsg(A.orderResumeFailed))
   }
 
   // Tab „Recuperare” open → loads the saved recovery points.
@@ -1237,22 +1373,34 @@ export default function AdminPanel({
   }, [tab])
 
   const toggleGesture = (clip: string): void => {
-    if (!Array.isArray(gestOff)) return
-    const inainte = gestOff
+    if (!Array.isArray(gestOff) || gestSavePendingRef.current) return
     const next = gestOff.includes(clip)
       ? gestOff.filter((c) => c !== clip)
       : [...gestOff, clip]
+    gestSavePendingRef.current = true
+    setGestSaving(true)
+    setGestSaved(false)
     setGestOff(next)
     setGestErr('')
-    void saveDisabledGestures(next).then((ok) => {
-      if (ok) {
-        setGestSaved(true)
-        window.setTimeout(() => setGestSaved(false), 1500)
-      } else {
-        setGestOff(inainte)
+    void (async () => {
+      try {
+        const persisted = await saveDisabledGesturesCanonical(next)
+        if (persisted !== null) {
+          setGestOff(persisted)
+          setGestSaved(true)
+          window.setTimeout(() => setGestSaved(false), 1500)
+          return
+        }
         setGestErr(A.gestureSaveFailed)
+        setGestOff(await fetchDisabledGestures())
+      } catch {
+        setGestErr(A.gestureSaveFailed)
+        setGestOff(await fetchDisabledGestures())
+      } finally {
+        gestSavePendingRef.current = false
+        setGestSaving(false)
       }
-    })
+    })()
   }
 
   const A = adminStrings()
@@ -2291,11 +2439,15 @@ export default function AdminPanel({
                       <b>
                         {codex.worker.state === 'ready'
                           ? 'pregătit'
-                          : codex.worker.state === 'offline'
-                            ? 'offline'
-                            : codex.worker.state === 'setup_required'
-                              ? 'necesită configurare'
-                              : 'stare necunoscută'}
+                          : codex.worker.state === 'busy'
+                            ? 'ocupat'
+                            : codex.worker.state === 'offline'
+                              ? 'offline'
+                              : codex.worker.state === 'setup_required'
+                                ? 'necesită configurare'
+                                : codex.worker.state === 'degraded'
+                                  ? 'degradat'
+                                  : 'stare necunoscută'}
                       </b>
                       .{codex.status ? ` ${codex.status}` : ''}
                     </p>
@@ -2322,6 +2474,13 @@ export default function AdminPanel({
                       <p className="chat-hint">
                         Workerul nu răspunde. Kelionai nu încearcă să refacă
                         autentificarea Codex în browser.
+                      </p>
+                    )}
+                    {codex.worker.state === 'degraded' && (
+                      <p className="chat-hint" style={{ color: '#8a6d1a' }}>
+                        Workerul răspunde, dar a raportat o stare degradată. Cauza
+                        afișată mai sus trebuie rezolvată înainte ca panoul să-l
+                        considere pregătit.
                       </p>
                     )}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -2489,8 +2648,8 @@ export default function AdminPanel({
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
                 Constructorul — dai ordinul, Kelion construiește pe server
-                (build + teste), deschide PR-ul; pe verde se îmbină singur (sau
-                îl dai tu, dacă ești logat). Poți ordona și prin voce/chat:
+                (build + teste), deschide PR-ul; după verificări și aprobarea ta,
+                publisherul separat îl îmbină. Poți ordona și prin voce/chat:
                 „Kelion, construiește…".
               </div>
               <div
@@ -2511,9 +2670,13 @@ export default function AdminPanel({
                     color:
                       constructorId == null
                         ? undefined
-                        : constructorId.cine === 'codex_worker'
+                        : constructorWorkerCanStartNow === true
                           ? '#1a7f37'
-                          : '#c1121f',
+                          : constructorAcceptingWork === true
+                            ? '#2563eb'
+                            : constructorId.state === 'degraded'
+                              ? '#8a6d1a'
+                              : '#c1121f',
                   }}
                   title={
                     constructorId?.motiv ??
@@ -2522,9 +2685,13 @@ export default function AdminPanel({
                 >
                   {constructorId == null
                     ? 'Constructor: se citește…'
-                    : constructorId.cine === 'codex_worker'
-                      ? '🟢 Constructorul rulează în workerul Codex separat'
-                      : `🔴 Constructor indisponibil — ${constructorId.motiv}`}
+                    : constructorWorkerCanStartNow === true
+                      ? '🟢 Lanțul Constructor este pregătit: worker + publisher + release'
+                      : constructorAcceptingWork === true
+                        ? '🔵 Lanțul Constructor execută o etapă verificată'
+                        : constructorId.state === 'degraded'
+                          ? `🟠 Constructor degradat — ${constructorId.motiv}`
+                          : `🔴 Constructor indisponibil — ${constructorId.motiv}`}
                 </span>
                 {diagnostic &&
                   (diagnostic.probleme.length > 0 || !diagnostic.sanatos) && (
@@ -2585,8 +2752,7 @@ export default function AdminPanel({
                         <div style={{ marginTop: 5 }}><b>PR:</b>{' '}<a href={release.pr.url} target="_blank" rel="noreferrer">{release.pr.title}</a></div>
                         <div className="chat-hint" style={{ marginTop: 4 }}>Verificări: {release.checks} · Review: {release.approval} · Merge: {release.merge}</div>
                         <div style={{ marginTop: 5 }}>{release.nextAction}</div>
-                        {!release.pr.merged && release.approval === 'required' && <button className="ghost" type="button" style={{ marginTop: 7 }} onClick={() => releaseAction('approve')}>Aprobă în Keleon</button>}
-                        {!release.pr.merged && release.merge === 'ready' && <button className="ghost" type="button" style={{ marginTop: 7, marginLeft: 7 }} onClick={() => releaseAction('merge')}>Integrează în master</button>}
+                        {!release.pr.merged && release.pr.state === 'open' && release.pr.baseRef === 'master' && release.checks === 'passed' && release.approval === 'required' && <button className="ghost" type="button" disabled={releaseBusy} style={{ marginTop: 7 }} onClick={releaseAction}>{releaseBusy ? 'Se procesează…' : 'Aprobă în Kelion'}</button>}
                       </>
                     )}
                   </div>
@@ -2604,7 +2770,7 @@ export default function AdminPanel({
                   Creier cloud: <b>OpenAI</b>. Constructor:{' '}
                   {constructorId == null ? (
                     'se citește de pe server…'
-                  ) : constructorId.cine === 'codex_worker' ? (
+                  ) : constructorAcceptingWork === true ? (
                     <>
                       <b>Codex worker</b> — {constructorId.motiv}
                     </>
@@ -2624,10 +2790,11 @@ export default function AdminPanel({
                   value={buildOrder}
                   onChange={(e) => setBuildOrder(e.target.value)}
                   placeholder={A.buildOrderPlaceholder}
+                  disabled={buildSubmitBusy}
                   style={{ flex: 1, minWidth: 0 }}
                 />
-                <button type="submit" className="ghost">
-                  Trimite ordinul
+                <button type="submit" className="ghost" disabled={buildSubmitBusy}>
+                  {buildSubmitBusy ? 'Se trimite…' : 'Trimite ordinul'}
                 </button>
               </form>
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
@@ -2758,26 +2925,80 @@ export default function AdminPanel({
                 }}
               >
                 <span>Coada ordinelor</span>
-                {buildJobsData?.some(
-                  (j) => j.status === 'failed' || j.status === 'done',
-                ) && (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
                   <button
                     type="button"
                     className="ghost"
                     style={{ fontSize: 12 }}
-                    onClick={cleanBuildOrders}
-                    title="Șterge din coadă toate ordinele eșuate și terminate (rămân doar cele în curs)"
+                    onClick={() => {
+                      const next = !archiveOpen
+                      setArchiveOpen(next)
+                      if (next) loadBuildArchive()
+                    }}
                   >
-                    Curăță eșuate/terminate
+                    {archiveOpen ? 'Închide arhiva' : 'Arhivă'}
                   </button>
-                )}
+                  {buildJobsData?.some(
+                    (j) => j.status === 'failed' || j.status === 'done' || j.status === 'cancelled',
+                  ) && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 12 }}
+                      onClick={cleanBuildOrders}
+                      title="Arhivează recuperabil numai rândurile terminale vizibile în snapshotul curent"
+                    >
+                      Curăță rândurile vizibile
+                    </button>
+                  )}
+                </span>
               </div>
 
-              {buildPaused && (
+              {archiveOpen && (
+                <div style={{ margin: '8px 0', padding: 8, border: '1px solid #8884', borderRadius: 8 }}>
+                  <b style={{ fontSize: 12 }}>Arhivă recuperabilă</b>
+                  {(buildArchive.status === 'idle' || (buildArchive.status === 'loading' && buildArchive.jobs.length === 0)) ? (
+                    <div className="chat-hint">Se încarcă arhiva…</div>
+                  ) : buildArchive.status === 'error' ? (
+                    <div className="chat-hint">Arhiva nu poate fi citită acum.</div>
+                  ) : buildArchive.jobs.length === 0 ? (
+                    <div className="chat-hint">Arhiva este goală.</div>
+                  ) : buildArchive.jobs.map((job) => (
+                    <div className="fin-row" key={`archived-${job.id}`} style={{ fontSize: 12 }}>
+                      <span>#{job.id} · {job.status} · {job.orderText.slice(0, 90)}</span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={pendingBuildMutations.has(job.id)}
+                        onClick={() => restoreBuildOrder(job)}
+                      >
+                        Restaurează
+                      </button>
+                    </div>
+                  ))}
+                  {buildArchive.nextCursor && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={buildArchive.status === 'loading'}
+                      onClick={() => loadBuildArchive(buildArchive.nextCursor, true)}
+                    >
+                      {buildArchive.status === 'loading' ? 'Se încarcă…' : 'Mai vechi'}
+                    </button>
+                  )}
+                  {buildArchive.appendError && (
+                    <div className="chat-hint">Pagina următoare nu a putut fi citită; rândurile deja încărcate au fost păstrate.</div>
+                  )}
+                </div>
+              )}
+
+              {constructorWorkerCanStartNow === false && (
                 <div className="chat-hint" style={{ color: '#e6a23c' }}>
-                  ⏸ Autonomia e PE PAUZĂ (oprită de tine din tabul Bani) —
-                  ordinele așteaptă în coadă, nu se pierd; lucrătorul nu ia
-                  nimic până n-o repornești.
+                  {constructorAcceptingWork
+                    ? '⏳ Lanțul Constructor execută deja altă etapă — ordinele noi așteaptă în coadă, fără termen garantat.'
+                    : '⏸ Lanțul Constructor nu acceptă lucru acum — ordinele rămân în coadă până când workerul, publisherul și releaserul redevin disponibile.'}
+                  {' '}
+                  Stare: {constructorId?.state ?? 'unknown'} · {constructorId?.motiv ?? 'stare necitibilă'}
                 </div>
               )}
 
@@ -2802,15 +3023,19 @@ export default function AdminPanel({
                   <span>
                     <strong>#{j.id}</strong>{' '}
                     <span
-                      className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}
+                      className={`vis-badge ${constructorHasVerifiedLiveResult(j.status, j.continuity) ? 'human' : ['done', 'failed'].includes(j.status) ? 'kind-demo' : ''}`}
                     >
-                      {j.status === 'queued'
-                        ? 'în coadă'
-                        : j.status === 'running'
-                          ? 'lucrează…'
-                          : j.status === 'done'
-                            ? 'în așteptare'
-                            : 'eșuat'}
+                       {j.status === 'queued'
+                          ? 'în coadă'
+                          : j.status === 'running'
+                            ? 'lucrează…'
+                            : j.status === 'done'
+                              ? constructorHasVerifiedLiveResult(j.status, j.continuity)
+                                ? 'live și verificat'
+                                : 'terminat fără dovadă live'
+                              : j.status === 'cancelled'
+                                ? 'anulat'
+                                : 'eșuat'}
                     </span>{' '}
                     {j.workerTaskUrl && codexTaskUrl(j.workerTaskUrl) ? (
                       <a
@@ -2849,41 +3074,44 @@ export default function AdminPanel({
                         minute: '2-digit',
                       })}
                     </span>
-                    {/* REIA — doar pentru cele care nu sunt în curs (eșuat/GATA/în coadă). */}
-                    {(j.status === 'failed' ||
-                      j.status === 'done' ||
-                      j.status === 'queued') && (
+                    {/* REIA — numai rezultate terminale; un ordin deja în coadă nu se resetează. */}
+                    {j.retryable && (
                       <button
                         type="button"
                         className="ghost"
                         style={{ fontSize: 12 }}
-                        onClick={() => retryBuildOrder(j.id)}
+                        onClick={() => retryBuildOrder(j)}
+                        disabled={pendingBuildMutations.has(j.id)}
                         title="Repune ordinul în coadă (îl reia de la zero)"
                       >
                         ↻ reia
                       </button>
                     )}
 
-                    {j.status !== 'running' && (
+                    {j.deletable && (
                       <button
                         type="button"
                         className="ghost"
                         style={{ fontSize: 12, color: '#ff7a7a' }}
-                        onClick={() => deleteBuildOrder(j.id)}
+                        onClick={() => deleteBuildOrder(j)}
+                        disabled={pendingBuildMutations.has(j.id)}
                         title="Șterge definitiv ordinul"
                       >
                         ✕
                       </button>
                     )}
 
-                    {j.status === 'running' && (
+                    {constructorJobCanBeCancelled(j.status, j.constructorStage) && (
                       <button
                         type="button"
                         className="ghost"
                         style={{ fontSize: 12, color: '#ff7a7a' }}
-                        onClick={() => cancelBuildOrder(j.id)}
+                        onClick={() => cancelBuildOrder(j)}
+                        disabled={pendingBuildMutations.has(j.id)}
                         title={
-                          'Oprește ordinul aflat în lucru (trece pe „eșuat”)'
+                          j.status === 'queued'
+                            ? 'Anulează ordinul aflat în coadă'
+                            : 'Oprește ordinul aflat în lucru (devine „anulat”)'
                         }
                       >
                         ⏹ oprește
@@ -2920,8 +3148,12 @@ export default function AdminPanel({
                             width: `${j.pct}%`,
                             height: '100%',
                             borderRadius: 999,
-                            background:
-                              j.status === 'done' ? '#38b26e' : '#4a8df0',
+                           background:
+                              constructorHasVerifiedLiveResult(j.status, j.continuity)
+                                ? '#38b26e'
+                                : j.status === 'cancelled'
+                                  ? '#7a7a7a'
+                                  : '#4a8df0',
                             transition: 'width 0.6s ease',
                           }}
                         />
@@ -2954,12 +3186,19 @@ export default function AdminPanel({
                   )}
                   {j.continuity && (
                     <div className="chat-hint" style={{ flexBasis: '100%', fontSize: 11, marginTop: 2 }}>
-                      <b>{j.continuity.state === 'completed' ? '✓ Dovadă live' : `Checkpoint: ${j.continuity.checkpoint}`}</b>
+                      <b>
+                        {j.continuity.state === 'completed'
+                          ? '✓ Dovadă live'
+                          : j.continuity.state === 'cancelled'
+                            ? 'Cerere anulată'
+                            : `Checkpoint: ${j.continuity.checkpoint}`}
+                      </b>
                       {' · '}{j.continuity.message}
-                      {j.continuity.heartbeat.stale && ' · ⚠ heartbeat întârziat'}
-                      {j.continuity.proof && ` · versiune live ${j.continuity.proof.liveVersion}`}
-                      {j.continuity.escalation && (
-                        <><br />Cauză: {j.continuity.escalation.cause} → {j.continuity.escalation.nextAction}</>
+                      {j.continuity.finalProof.complete && j.continuity.finalProof.liveVersion
+                        ? ` · versiune live ${j.continuity.finalProof.liveVersion}`
+                        : ''}
+                      {j.continuity.nextAction && (
+                        <><br />Acțiune necesară: {j.continuity.nextAction}</>
                       )}
                     </div>
                   )}
@@ -2972,26 +3211,35 @@ export default function AdminPanel({
                       <summary>
                         <b>Fișa canonică {j.workCard.id}</b>
                         {' · '}
-                        {j.workCard.currentStep ?? 'pas nepublicat'}
+                        {j.workCard.progress.source === 'unavailable'
+                          ? 'cronologie necitibilă'
+                          : j.workCard.currentStep ?? 'pas nepublicat'}
                       </summary>
                       <div className="chat-hint" style={{ marginTop: 6 }}>
                         <b>Obiectiv:</b> {j.workCard.objective}
                         <br />
-                        <b>Owner / actor:</b> {j.workCard.owner} / {j.workCard.actor}
+                        <b>Owner / actor:</b>{' '}
+                        {j.workCard.owner ?? 'neatribuit'} / {j.workCard.actor ?? 'în așteptare'}
                         <br />
                         <b>Heartbeat:</b>{' '}
                         {j.workCard.heartbeatAt
                           ? new Date(j.workCard.heartbeatAt).toLocaleString('ro-RO')
                           : 'nepublicat'}
                         {' · '}
-                        <b>Evenimente persistente:</b> {j.workCard.evidence.eventCount}
+                        <b>Evenimente persistente:</b>{' '}
+                        {constructorPersistentEventsText(j.workCard.progress, j.workCard.evidence.eventCount)}
                         {j.workCard.escalationCondition && (
                           <><br /><b>Escaladare:</b> {j.workCard.escalationCondition}</>
                         )}
-                        {j.workCard.finalResult && (
-                          <><br /><b>Rezultat:</b> {j.workCard.finalResult}</>
+                        {constructorFinalResultText(j.workCard.finalResult) && (
+                          <><br /><b>Rezultat:</b> {constructorFinalResultText(j.workCard.finalResult)}</>
                         )}
                       </div>
+                      {j.workCard.progress.source === 'unavailable' && (
+                        <div className="chat-hint" style={{ color: '#c1121f', marginTop: 6 }}>
+                          ⚠ Cronologia persistentă nu poate fi citită; lipsa evenimentelor din această fișă nu este un zero măsurat.
+                        </div>
+                      )}
                       {j.workCard.acceptanceCriteria.length > 0 && (
                         <ul className="chat-hint">
                           {j.workCard.acceptanceCriteria.map((criterion) => (
@@ -3071,13 +3319,13 @@ export default function AdminPanel({
                               display: 'flex',
                               alignItems: 'center',
                               gap: 8,
-                              cursor: gestOffData ? 'pointer' : 'not-allowed',
+                              cursor: gestOffData && !gestSaving ? 'pointer' : 'not-allowed',
                             }}
                           >
                             <input
                               type="checkbox"
                               checked={on}
-                              disabled={!gestOffData}
+                              disabled={!gestOffData || gestSaving}
                               onChange={() => toggleGesture(g.clip)}
                             />
                             <span style={{ opacity: on ? 1 : 0.5 }}>

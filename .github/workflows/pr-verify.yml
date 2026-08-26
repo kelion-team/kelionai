@@ -194,7 +194,7 @@ jobs:
           sudo install -d -o 999 -g 999 -m 0700 /tmp/kelion-ci-postgres/data
           sudo install -d -o 999 -g 999 -m 0775 /tmp/kelion-ci-postgres/socket
           umask 077
-          for name in session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret migration-backup-proof-key; do
+          for name in session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret migration-backup-proof-key; do
             openssl rand -hex 32 > "/tmp/kelion-ci-secrets/$name"
           done
           for name in revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do

@@ -47,6 +47,8 @@ export interface ConstructorObservabilityView {
     source: 'constructor_activity_events' | 'unavailable'
   }
   activity: ConstructorActivityView[]
+  /** Numărul total durabil; `activity` conține numai fereastra recentă. */
+  eventCount: number
 }
 
 const unavailable = (): ConstructorObservabilityView => ({
@@ -59,12 +61,14 @@ const unavailable = (): ConstructorObservabilityView => ({
     source: 'unavailable',
   },
   activity: [],
+  eventCount: 0,
 })
 
 export function projectConstructorObservability(
   job: ConstructorObservableJob,
   catalog: readonly ConstructorCatalogEntry[],
   events: readonly ConstructorPersistedEvent[],
+  summary?: { eventCount: number; highestSequence: number | null },
 ): ConstructorObservabilityView {
   const sequenced = catalog
     .filter((entry): entry is ConstructorCatalogEntry & { sequenceNo: number } => entry.sequenceNo !== null)
@@ -75,10 +79,13 @@ export function projectConstructorObservability(
   const total = sequenced[sequenced.length - 1].sequenceNo - sequenced[0].sequenceNo
   const finalResolved = job.status === 'done'
     && job.constructorStage === 'deployed'
-    && Boolean(job.commit)
-    && Boolean(job.liveVersion)
+    && /^[0-9a-f]{40}$/.test(job.commit ?? '')
+    && job.liveVersion === job.commit
 
-  let highestSequence = sequenced[0].sequenceNo
+  let highestSequence = Math.max(
+    sequenced[0].sequenceNo,
+    summary?.highestSequence ?? sequenced[0].sequenceNo,
+  )
   const orderedEvents = [...events].sort((a, b) => {
     const byTime = Date.parse(a.createdAt) - Date.parse(b.createdAt)
     return byTime || a.id.localeCompare(b.id, undefined, { numeric: true })
@@ -125,6 +132,7 @@ export function projectConstructorObservability(
       source: 'constructor_activity_events',
     },
     activity,
+    eventCount: summary?.eventCount ?? events.length,
   }
 }
 
@@ -144,6 +152,8 @@ interface EventRow {
   created_at: Date | string
   label_ro: string
   sequence_no: number | null
+  total_events: string | number
+  highest_sequence: string | number | null
 }
 
 export async function constructorObservabilityForJobs(
@@ -159,12 +169,23 @@ export async function constructorObservabilityForJobs(
           ORDER BY sequence_no NULLS LAST, activity_key`,
       ),
       getPool().query<EventRow>(
-        `SELECT e.id::text, e.job_id::text, e.activity_key, e.stage_key, e.status,
-                e.created_at, c.label_ro, c.sequence_no
-           FROM constructor_activity_events e
-           JOIN constructor_activity_catalog c ON c.activity_key=e.activity_key
-          WHERE e.job_id = ANY($1::bigint[])
-          ORDER BY e.job_id, e.created_at, e.id`,
+        `WITH ranked AS (
+           SELECT e.id, e.job_id, e.activity_key, e.stage_key, e.status,
+                  e.created_at, c.label_ro, c.sequence_no,
+                  count(*) OVER (PARTITION BY e.job_id) AS total_events,
+                  max(c.sequence_no) OVER (PARTITION BY e.job_id) AS highest_sequence,
+                  row_number() OVER (
+                    PARTITION BY e.job_id ORDER BY e.created_at DESC, e.id DESC
+                  ) AS recent_rank
+             FROM constructor_activity_events e
+             JOIN build_jobs b ON b.id=e.job_id AND b.execution_cycle=e.execution_cycle
+             JOIN constructor_activity_catalog c ON c.activity_key=e.activity_key
+            WHERE e.job_id = ANY($1::bigint[])
+         )
+         SELECT id::text, job_id::text, activity_key, stage_key, status,
+                created_at, label_ro, sequence_no, total_events, highest_sequence
+           FROM ranked WHERE recent_rank <= 100
+          ORDER BY job_id, created_at, id`,
         [jobs.map((job) => job.id)],
       ),
     ])
@@ -187,7 +208,11 @@ export async function constructorObservabilityForJobs(
           label: row.label_ro,
           sequenceNo: row.sequence_no === null ? null : Number(row.sequence_no),
         }))
-      result.set(job.id, projectConstructorObservability(job, catalog, events))
+      const first = eventResult.rows.find((row) => Number(row.job_id) === job.id)
+      result.set(job.id, projectConstructorObservability(job, catalog, events, first ? {
+        eventCount: Number(first.total_events),
+        highestSequence: first.highest_sequence === null ? null : Number(first.highest_sequence),
+      } : undefined))
     }
   } catch {
     for (const job of jobs) result.set(job.id, unavailable())

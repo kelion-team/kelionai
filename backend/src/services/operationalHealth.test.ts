@@ -3,7 +3,7 @@ import { isOperationalHealthRequest } from './operationalHealth.js'
 
 describe('operational health boundary', () => {
   it('keeps readiness probes outside browser-session and CSRF handling', () => {
-    for (const path of ['/health', '/livez', '/readyz', '/api/health?probe=1']) {
+    for (const path of ['/health', '/livez', '/readyz', '/api/health?probe=1', '/api/release-proof']) {
       expect(isOperationalHealthRequest('GET', path)).toBe(true)
     }
   })

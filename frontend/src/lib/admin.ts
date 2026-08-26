@@ -236,13 +236,23 @@ export interface InboundEmail {
   received_at: string
 }
 
+function parseAdminArray<T>(value: unknown, key: string): T[] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const rows = (value as Record<string, unknown>)[key]
+  return Array.isArray(rows) ? rows as T[] : null
+}
+
+export function parseInboundAdmin(value: unknown): InboundEmail[] | null {
+  return parseAdminArray<InboundEmail>(value, 'emails')
+}
+
 // null = citirea a EȘUAT (auditul admin, 3 aug: o sesiune expirată vopsea
 // simultan trei secțiuni din Inbox ca „goale" — trei ❌ dintr-un singur apel).
 export async function fetchInbound(): Promise<InboundEmail[] | null> {
   try {
     const r = await apiFetch('/api/admin/inbound', { credentials: 'include' })
     if (!r.ok) return null
-    return ((await r.json()) as { emails?: InboundEmail[] }).emails ?? []
+    return parseInboundAdmin(await r.json())
   } catch {
     return null
   }
@@ -267,12 +277,25 @@ export interface MailboxLiveResult {
   motiv: string | null
   emails: MailboxLiveItem[]
 }
+export function parseMailboxLiveAdmin(value: unknown): MailboxLiveResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const result = value as Record<string, unknown>
+  if (
+    typeof result.ok !== 'boolean'
+    || !Array.isArray(result.emails)
+    || (result.motiv !== null && typeof result.motiv !== 'string')
+  ) return null
+  return {
+    ok: result.ok,
+    motiv: result.motiv,
+    emails: result.emails as MailboxLiveItem[],
+  }
+}
 export async function fetchMailboxLive(): Promise<MailboxLiveResult | null> {
   try {
     const r = await apiFetch('/api/admin/mailbox-live', { credentials: 'include' })
     if (!r.ok) return null
-    const j = (await r.json()) as Partial<MailboxLiveResult>
-    return { ok: j.ok === true, motiv: j.motiv ?? null, emails: j.emails ?? [] }
+    return parseMailboxLiveAdmin(await r.json())
   } catch {
     return null
   }
@@ -292,12 +315,16 @@ export interface ContactMessage {
   created_at: string
 }
 
+export function parseContactMessagesAdmin(value: unknown): ContactMessage[] | null {
+  return parseAdminArray<ContactMessage>(value, 'messages')
+}
+
 // null = citirea a EȘUAT (auditul admin, 3 aug) — nu „Niciun mesaj de contact".
 export async function fetchContactMessages(): Promise<ContactMessage[] | null> {
   try {
     const r = await apiFetch('/api/admin/contact-messages', { credentials: 'include' })
     if (!r.ok) return null
-    return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
+    return parseContactMessagesAdmin(await r.json())
   } catch {
     return null
   }
@@ -317,14 +344,17 @@ export async function fetchActivity(): Promise<UserActivity | null> {
 // fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
 // unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
 // „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
+export function parseHistoryAdmin(value: unknown): HistoryRow[] | null {
+  return parseAdminArray<HistoryRow>(value, 'history')
+}
+
 export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
   try {
     const r = await apiFetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
       credentials: 'include',
     })
     if (!r.ok) return null
-    const j = (await r.json()) as { history?: HistoryRow[] }
-    return j.history ?? []
+    return parseHistoryAdmin(await r.json())
   } catch {
     return null
   }
@@ -385,12 +415,44 @@ export interface EroriAdmin {
   browser: EroareBrowser[]
   sistem: ProblemaSistem[]
 }
+
+const esteObiect = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const esteSeveritateEroare = (value: unknown): value is SeveritateEroare =>
+  value === 'critic' || value === 'important' || value === 'minor'
+
+export function parseEroriAdmin(value: unknown): EroriAdmin | null {
+  if (!esteObiect(value) || !Array.isArray(value.browser) || !Array.isArray(value.sistem)) return null
+  const browserValid = value.browser.every((row) => {
+    if (!esteObiect(row)) return false
+    return typeof row.text === 'string'
+      && typeof row.ceEste === 'string'
+      && esteSeveritateEroare(row.severitate)
+      && typeof row.categorie === 'string'
+      && Number.isSafeInteger(row.cate)
+      && Number(row.cate) >= 1
+      && (row.cine === null || typeof row.cine === 'string')
+      && typeof row.cand === 'string'
+      && Number.isFinite(Date.parse(row.cand))
+  })
+  const sistemValid = value.sistem.every((row) => {
+    if (!esteObiect(row)) return false
+    return (row.sursa === 'server' || row.sursa === 'ordin')
+      && typeof row.text === 'string'
+      && typeof row.ceEste === 'string'
+      && esteSeveritateEroare(row.severitate)
+      && typeof row.categorie === 'string'
+  })
+  if (!browserValid || !sistemValid) return null
+  return { browser: value.browser as EroareBrowser[], sistem: value.sistem as ProblemaSistem[] }
+}
+
 export async function fetchErori(): Promise<EroriAdmin | null> {
   try {
     const r = await apiFetch('/api/admin/erori', { credentials: 'include' })
     if (!r.ok) return null
-    const j = (await r.json()) as Partial<EroriAdmin>
-    return { browser: j.browser ?? [], sistem: j.sistem ?? [] }
+    return parseEroriAdmin(await r.json())
   } catch {
     return null
   }
@@ -407,12 +469,14 @@ export interface NotificareAdmin {
   read: boolean
   createdAt: string
 }
+export function parseNotificariAdmin(value: unknown): NotificareAdmin[] | null {
+  return parseAdminArray<NotificareAdmin>(value, 'notificari')
+}
 export async function fetchNotificari(): Promise<NotificareAdmin[] | null> {
   try {
     const r = await apiFetch('/api/admin/notificari', { credentials: 'include' })
     if (!r.ok) return null
-    const j = (await r.json()) as { notificari?: NotificareAdmin[] }
-    return j.notificari ?? []
+    return parseNotificariAdmin(await r.json())
   } catch {
     return null
   }
@@ -453,7 +517,7 @@ export async function fetchCreier(): Promise<CreierAdmin | null> {
 
 export interface CodexAdmin {
   worker: {
-    state: 'ready' | 'offline' | 'setup_required' | 'unknown'
+    state: 'ready' | 'busy' | 'offline' | 'setup_required' | 'degraded' | 'unknown'
     lastHeartbeat: string | null
   }
   setupInstructions: string | null
@@ -479,7 +543,14 @@ export function codexTaskUrl(value: unknown): string | null {
   }
 }
 
-const CODEX_WORKER_STATES = new Set(['ready', 'offline', 'setup_required', 'unknown'])
+const CODEX_WORKER_STATES = new Set([
+  'ready',
+  'busy',
+  'offline',
+  'setup_required',
+  'degraded',
+  'unknown',
+])
 
 /** Starea workerului Codex separat. Loginul și credentialele rămân în worker. */
 export async function fetchCodexAdmin(): Promise<CodexAdmin | null> {

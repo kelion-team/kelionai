@@ -1,5 +1,8 @@
 [Unit]
 Description=Poll Kelion Constructor queue with the isolated Codex executor
+After=kelion-runtime-config-recovery.service
+ConditionPathExists=/run/kelion/runtime-config-recovery.ready
+ConditionPathExists=!/run/kelion/constructor-activation.pending
 
 [Timer]
 OnBootSec=2min

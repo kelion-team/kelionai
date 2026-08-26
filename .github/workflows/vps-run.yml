@@ -41,13 +41,18 @@ jobs:
       VPS_USER: ${{ vars.VPS_USER }}
       VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
       PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
+      CONSTRUCTOR_RETRY_BASE_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_BASE_SECONDS || '60' }}
+      CONSTRUCTOR_RETRY_MAX_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_MAX_SECONDS || '1800' }}
+      CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
+      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
       CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
-      SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
+      SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
       PUBLISHER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
       RELEASE_GITHUB_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+      GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Valideaza tinta fixa
@@ -57,6 +62,30 @@ jobs:
           [ "$VPS_USER" = root ]
           [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$PUBLIC_APP_ORIGIN"
+          validate_constructor_seconds() {
+            local name=$1 value=$2 minimum=$3 maximum=$4
+            if ! [[ "$value" =~ ^[1-9][0-9]{0,4}$ ]] || [ "$value" -lt "$minimum" ] || [ "$value" -gt "$maximum" ]; then
+              echo "::error::$name trebuie să fie între $minimum și $maximum secunde."
+              exit 1
+            fi
+          }
+          validate_constructor_seconds CONSTRUCTOR_RETRY_BASE_SECONDS "$CONSTRUCTOR_RETRY_BASE_SECONDS" 5 3600
+          validate_constructor_seconds CONSTRUCTOR_RETRY_MAX_SECONDS "$CONSTRUCTOR_RETRY_MAX_SECONDS" 30 86400
+          validate_constructor_seconds CONSTRUCTOR_EXTERNAL_RETRY_SECONDS "$CONSTRUCTOR_EXTERNAL_RETRY_SECONDS" 60 86400
+          [ "$CONSTRUCTOR_RETRY_BASE_SECONDS" -le "$CONSTRUCTOR_RETRY_MAX_SECONDS" ] || { echo '::error::CONSTRUCTOR_RETRY_BASE_SECONDS nu poate depăși CONSTRUCTOR_RETRY_MAX_SECONDS.'; exit 1; }
+          validate_constructor_checks() {
+            local value=$1 check
+            local -a checks=()
+            local -A seen=()
+            [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}(,[A-Za-z0-9][A-Za-z0-9._/-]{0,79}){1,15}$ ]] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS trebuie să conțină între 2 și 16 identificatori CI siguri.'; exit 1; }
+            IFS=',' read -r -a checks <<<"$value"
+            for check in "${checks[@]}"; do
+              [ -z "${seen[$check]:-}" ] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS conține duplicate.'; exit 1; }
+              seen[$check]=1
+            done
+            [ "${seen[verify]:-}" = 1 ] && [ "${seen[container-isolation]:-}" = 1 ] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS trebuie să păstreze verify și container-isolation.'; exit 1; }
+          }
+          validate_constructor_checks "$CONSTRUCTOR_REQUIRED_CHECKS"
 
       - name: Descopera cheia publica ed25519 pentru pinning
         if: inputs.operation == 'discover-host-key'
@@ -113,15 +142,41 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
-          for value in "$CODEX_WORKER_SECRET" "$CONSTRUCTOR_PUBLISHER_SECRET" "$CONSTRUCTOR_RELEASE_SECRET" "$SYNC_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN"; do [ "${#value}" -ge 32 ]; done
-          [ "$PUBLISHER_GITHUB_TOKEN" != "$RELEASE_GITHUB_TOKEN" ]
+          python3 - <<'PY'
+          import os
+
+          names = (
+              'CODEX_WORKER_SECRET', 'CONSTRUCTOR_PUBLISHER_SECRET', 'CONSTRUCTOR_RELEASE_SECRET',
+              'SYNC_GITHUB_TOKEN', 'PUBLISHER_GITHUB_TOKEN', 'RELEASE_GITHUB_TOKEN', 'GHCR_READ_TOKEN',
+          )
+          for name in names:
+              value = os.environ.get(name)
+              if value is None:
+                  raise SystemExit(f'{name} lipsește')
+              encoded = value.encode('utf-8')
+              if not 32 <= len(encoded) <= 8192:
+                  raise SystemExit(f'{name} are lungime invalidă')
+              if any(byte < 32 or byte == 127 for byte in encoded):
+                  raise SystemExit(f'{name} conține caractere de control')
+          PY
+          [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_PUBLISHER_SECRET" ]
+          [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
+          [ "$CONSTRUCTOR_PUBLISHER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
+          github_tokens=("$SYNC_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN" "$GHCR_READ_TOKEN")
+          for left in "${!github_tokens[@]}"; do
+            for ((right=left + 1; right < ${#github_tokens[@]}; right++)); do
+              [ "${github_tokens[$left]}" != "${github_tokens[$right]}" ]
+            done
+          done
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
 
           umask 077
           key_file=$(mktemp); known_hosts=$(mktemp); payload=$(mktemp); ssh_opts=()
-          remote_bundle="/root/kelion/runtime/constructor-bundle.${GITHUB_RUN_ID}.tar.gz"
-          remote_payload="/run/kelion-constructor-payload.${GITHUB_RUN_ID}"
+          remote_bundle="/root/kelion/runtime/constructor-bundle.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
+          remote_payload="/run/kelion-constructor-payload.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
           cleanup() {
             if [ "${#ssh_opts[@]}" -gt 0 ]; then ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f -- '$remote_bundle' '$remote_payload'" >/dev/null 2>&1 || true; fi
             rm -f -- "$key_file" "$known_hosts" "$payload"
@@ -140,26 +195,50 @@ jobs:
             encode github-sync "$SYNC_GITHUB_TOKEN"
             encode github-publisher "$PUBLISHER_GITHUB_TOKEN"
             encode github-release "$RELEASE_GITHUB_TOKEN"
+            encode github-ghcr-read "$GHCR_READ_TOKEN"
+            encode constructor-retry-base-seconds "$CONSTRUCTOR_RETRY_BASE_SECONDS"
+            encode constructor-retry-max-seconds "$CONSTRUCTOR_RETRY_MAX_SECONDS"
+            encode constructor-external-retry-seconds "$CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"
+            encode constructor-required-checks "$CONSTRUCTOR_REQUIRED_CHECKS"
           } > "$payload"
 
+          bundle_commit=$(git rev-parse HEAD)
+          [ "$bundle_commit" = "$GITHUB_SHA" ]
+          latest_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+          [ "$bundle_commit" = "$latest_master" ] \
+            || { echo '::error::master a avansat înainte de primul mutator VPS; bundle-ul vechi este refuzat.'; exit 1; }
           scp "${ssh_opts[@]}" "$RUNNER_TEMP/constructor-bundle.tar.gz" "$VPS_USER@$VPS_HOST:$remote_bundle"
-          cleanup_unit="kelion-constructor-payload-cleanup-${GITHUB_RUN_ID}"
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > '$remote_payload'; systemd-run --quiet --unit='$cleanup_unit' --on-active=15m /usr/bin/rm -f '$remote_payload'" < "$payload"
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" <<'REMOTE'
+          cleanup_unit="kelion-constructor-payload-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "systemd-run --quiet --unit='$cleanup_unit' --on-active=15m /usr/bin/rm -f -- '$remote_payload'; systemctl is-active --quiet '$cleanup_unit.timer'"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "umask 077; systemctl is-active --quiet '$cleanup_unit.timer'; [ ! -e '$remote_payload' ] && [ ! -L '$remote_payload' ]; cat > '$remote_payload'" < "$payload"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" <<'REMOTE'
           set -euo pipefail
-          bundle=$1; payload=$2; gate_image=$3; public_origin=$4; repository=$5
-          case "$bundle" in /root/kelion/runtime/constructor-bundle.[0-9]*.tar.gz) ;; *) exit 1 ;; esac
-          case "$payload" in /run/kelion-constructor-payload.[0-9]*) ;; *) exit 1 ;; esac
+          umask 077
+          bundle=$1; payload=$2; cleanup_unit=$3; gate_image=$4; public_origin=$5; repository=$6
+          [[ "$bundle" =~ ^/root/kelion/runtime/constructor-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
+          [[ "$payload" =~ ^/run/kelion-constructor-payload\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
+          [[ "$cleanup_unit" =~ ^kelion-constructor-payload-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
           [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           gate_prefix="ghcr.io/${repository,,}/codex-gates@sha256:"
           [[ "$gate_image" == "$gate_prefix"* ]]
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$public_origin"
           public_host=$(node -e 'process.stdout.write(new URL(process.argv[1]).hostname)' "$public_origin")
+          exec 9>/root/kelion/publicare.lock
+          flock -n 9
+          export KELION_CUTOVER_LOCK_HELD=1
           work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)
           bootstrap=/run/kelion-constructor-bootstrap
+          cutover_stage=''
           cleanup_remote() {
             rm -f -- "$bundle" "$payload"; rm -rf -- "$bootstrap"
+            systemctl stop "$cleanup_unit.timer" "$cleanup_unit.service" >/dev/null 2>&1 || true
+            systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || true
+            if [ -n "$cutover_stage" ]; then
+              if [[ "$cutover_stage" =~ ^/root/kelion/runtime/runtime-cutover\.[A-Za-z0-9]+$ ]]; then rm -rf -- "$cutover_stage"; fi
+            fi
             case "$work" in /root/kelion/runtime/constructor.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
           trap cleanup_remote EXIT
@@ -167,16 +246,116 @@ jobs:
           if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
 
+          deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
+          constructor_install_resume=0
+          constructor_install_resumed=0
+          if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
+            if [ -f "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
+              && [ "$(stat -c '%u:%g:%a' "$deploy_quiesce_journal")" = '0:0:600' ] \
+              && jq -e '.schema == 1 and .kind == "constructor-install" and
+                (.phase == "armed" or .phase == "quiesced") and
+                (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+                (.manifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+                (.sourceSha256 | strings | test("^[0-9a-f]{64}$"))' "$deploy_quiesce_journal" >/dev/null; then
+              constructor_install_resume=1
+            else
+              [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
+                && [ "$(stat -c '%u:%g:%a' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500' ]
+              [ -f /root/kelion/config/compose.production.yml ] && [ ! -L /root/kelion/config/compose.production.yml ] \
+                && [ "$(stat -c '%u:%g:%a' /root/kelion/config/compose.production.yml)" = '0:0:444' ]
+              KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+                --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+              echo 'Deploy release quiesced este activ; configurarea Constructor rămâne blocată fail-closed' >&2
+              exit 1
+            fi
+          fi
+          if [ "$constructor_install_resume" = 1 ]; then
+            # Intentul autentificat de instalare deține generația întreruptă și
+            # trebuie reluat înaintea precheck-ului 0/6. Installerul consumă mai
+            # întâi orice jurnal runtime cu helperul care l-a creat, apoi
+            # republică exact toți cei șase candidați din manifest.
+            KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              bash "$work/deploy/instaleaza-constructor.sh"
+            constructor_install_resumed=1
+            constructor_install_resume=0
+          fi
+          if [ "$constructor_install_resume" = 0 ] && { \
+            [ -e /root/kelion/runtime/runtime-config-cutover.journal ] || [ -L /root/kelion/runtime/runtime-config-cutover.journal ] \
+            || [ -e /root/kelion/runtime/constructor-activation.journal ] || [ -L /root/kelion/runtime/constructor-activation.journal ] \
+            || [ -e /root/kelion/runtime/constructor-gate-refresh.journal ] || [ -L /root/kelion/runtime/constructor-gate-refresh.journal ]; }; then
+            [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500' ]
+            [ -f /root/kelion/config/compose.production.yml ] && [ ! -L /root/kelion/config/compose.production.yml ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/config/compose.production.yml)" = '0:0:444' ]
+            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+              --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+          fi
+
           decode() {
             local name=$1 encoded
             encoded=$(awk -F: -v wanted="$name" '$1 == wanted { print substr($0, index($0, ":") + 1) }' "$payload")
             [ -n "$encoded" ]; printf '%s' "$encoded" | base64 -d
           }
           codex_secret=$(decode codex-worker); publisher_secret=$(decode constructor-publisher); release_secret=$(decode constructor-release)
-          sync_token=$(decode github-sync); publisher_token=$(decode github-publisher); release_token=$(decode github-release)
-          for value in "$codex_secret" "$publisher_secret" "$release_secret" "$sync_token" "$publisher_token" "$release_token"; do [ "${#value}" -ge 32 ]; done
-          [ "$publisher_token" != "$release_token" ]
-          for marker in codex-worker constructor-publisher constructor-release; do [ ! -e "/etc/kelion/$marker.enabled" ] || { echo 'Reconfigurarea unui Constructor activ este refuzata' >&2; exit 1; }; done
+          sync_token=$(decode github-sync); publisher_token=$(decode github-publisher); release_token=$(decode github-release); ghcr_read_token=$(decode github-ghcr-read)
+          constructor_retry_base_seconds=$(decode constructor-retry-base-seconds)
+          constructor_retry_max_seconds=$(decode constructor-retry-max-seconds)
+          constructor_external_retry_seconds=$(decode constructor-external-retry-seconds)
+          constructor_required_checks=$(decode constructor-required-checks)
+          validate_decoded_secret() {
+            local name=$1 value=$2 bytes clean_bytes
+            bytes=$(printf '%s' "$value" | wc -c)
+            clean_bytes=$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\037\177' | wc -c)
+            [ "$bytes" -ge 32 ] && [ "$bytes" -le 8192 ] && [ "$bytes" -eq "$clean_bytes" ] \
+              || { printf '%s are lungime invalidă sau caractere de control\n' "$name" >&2; exit 1; }
+          }
+          validate_decoded_secret codex-worker "$codex_secret"
+          validate_decoded_secret constructor-publisher "$publisher_secret"
+          validate_decoded_secret constructor-release "$release_secret"
+          validate_decoded_secret github-sync "$sync_token"
+          validate_decoded_secret github-publisher "$publisher_token"
+          validate_decoded_secret github-release "$release_token"
+          validate_decoded_secret github-ghcr-read "$ghcr_read_token"
+          [ "$codex_secret" != "$publisher_secret" ]
+          [ "$codex_secret" != "$release_secret" ]
+          [ "$publisher_secret" != "$release_secret" ]
+          github_tokens=("$sync_token" "$publisher_token" "$release_token" "$ghcr_read_token")
+          for left in "${!github_tokens[@]}"; do
+            for ((right=left + 1; right < ${#github_tokens[@]}; right++)); do
+              [ "${github_tokens[$left]}" != "${github_tokens[$right]}" ]
+            done
+          done
+          [[ "$constructor_retry_base_seconds" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$constructor_retry_base_seconds" -ge 5 ] && [ "$constructor_retry_base_seconds" -le 3600 ]
+          [[ "$constructor_retry_max_seconds" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$constructor_retry_max_seconds" -ge 30 ] && [ "$constructor_retry_max_seconds" -le 86400 ]
+          [[ "$constructor_external_retry_seconds" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$constructor_external_retry_seconds" -ge 60 ] && [ "$constructor_external_retry_seconds" -le 86400 ]
+          [ "$constructor_retry_base_seconds" -le "$constructor_retry_max_seconds" ]
+          [[ "$constructor_required_checks" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}(,[A-Za-z0-9][A-Za-z0-9._/-]{0,79}){1,15}$ ]]
+          [ "$(tr ',' '\n' <<<"$constructor_required_checks" | sort | uniq -d | wc -l)" -eq 0 ]
+          case ",$constructor_required_checks," in *,verify,*) ;; *) exit 1 ;; esac
+          case ",$constructor_required_checks," in *,container-isolation,*) ;; *) exit 1 ;; esac
+          if [ "$constructor_install_resume" = 0 ]; then
+            for marker in codex-worker constructor-publisher constructor-release; do
+              [ ! -e "/etc/kelion/$marker.enabled" ] && [ ! -L "/etc/kelion/$marker.enabled" ] || { echo 'Reconfigurarea unui Constructor activ este refuzata' >&2; exit 1; }
+            done
+          fi
+          config_count=0
+          for path in /root/kelion/config/codex-worker.env /root/kelion/config/constructor-publisher.env /root/kelion/config/constructor-release.env; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ]
+              config_count=$((config_count + 1))
+            fi
+          done
+          case "$config_count" in 0|3) ;; *) echo 'Set de configuri Constructor parțial; configurarea este refuzată' >&2; exit 1 ;; esac
+          constructor_timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
+          constructor_services=(kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service)
+          unit_count=0
+          for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+            if systemctl cat "$unit" >/dev/null 2>&1; then unit_count=$((unit_count + 1)); fi
+          done
+          case "$unit_count" in
+            0|6) ;;
+            *) echo 'Set systemd Constructor parțial; configurarea este refuzată' >&2; exit 1 ;;
+          esac
 
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
@@ -185,8 +364,26 @@ jobs:
           if [ ! -x /usr/bin/npm ]; then apt-get install -y -qq npm; fi
           [ -x /usr/bin/node ]
           [ -x /usr/bin/npm ]
-          systemctl disable --now kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer >/dev/null 2>&1 || true
-          KELION_CONSTRUCTOR_INSTALL=1 bash "$work/deploy/instaleaza-constructor.sh"
+          if [ "$constructor_install_resumed" = 0 ]; then
+            KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              bash "$work/deploy/instaleaza-constructor.sh"
+          fi
+          install_atomic() {
+            local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
+            temporary=$(mktemp "$target.install.XXXXXX")
+            install -o "$owner" -g "$group" -m "$mode" "$source" "$temporary"
+            sync -f "$temporary"
+            mv -f -- "$temporary" "$target"
+            sync -f "$(dirname -- "$target")"
+          }
+          install -d -o root -g root -m 0755 /root/kelion/bin
+          install -d -o root -g 10050 -m 0750 /root/kelion/config
+          install_atomic "$work/deploy/lib/runtime-config-cutover.sh" /root/kelion/bin/runtime-config-cutover.sh root root 0500
+          install_atomic "$work/deploy/compose.production.yml" /root/kelion/config/compose.production.yml root root 0444
+          for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+            state=$(systemctl show "$unit" --property=ActiveState --value)
+            case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; exit 1 ;; esac
+          done
 
           install -d -o root -g root -m 0755 /opt/kelion-codex/bin /opt/kelion-codex/npm
           npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1' >/dev/null
@@ -194,87 +391,256 @@ jobs:
           chown -h root:root /opt/kelion-codex/bin/codex
           install -o root -g root -m 0444 /opt/kelion-codex/profile-home/kelion-worker.config.toml /var/lib/kelion-codex-auth/kelion-worker.config.toml
 
-          install -d -o root -g 10050 -m 0750 /root/kelion/secrets
-          install -d -o root -g root -m 0750 /root/kelion/worker-secrets /root/kelion/publisher-secrets /root/kelion/release-secrets
-          write_secret() {
+          install -d -o root -g root -m 0750 /root/kelion/publisher-secrets
+          cutover_stage=$(mktemp -d /root/kelion/runtime/runtime-cutover.XXXXXX)
+          install -d -o root -g root -m 0700 "$cutover_stage/files"
+          : > "$cutover_stage/manifest"
+          stage_value() {
+            local logical=$1 value=$2
+            [[ "$logical" =~ ^[a-z0-9.-]+$ ]]
+            printf '%s\n' "$value" > "$cutover_stage/files/$logical"
+            chmod 0600 "$cutover_stage/files/$logical"
+            printf '%s\n' "$logical" >> "$cutover_stage/manifest"
+          }
+          stage_value app-secret.codex-worker-secret "$codex_secret"
+          stage_value app-secret.constructor-publisher-secret "$publisher_secret"
+          stage_value app-secret.constructor-release-secret "$release_secret"
+          stage_value worker-secret.github-worker-token "$sync_token"
+          stage_value publisher-secret.github-publisher-token "$publisher_token"
+          stage_value release-secret.github-release-token "$release_token"
+          stage_value gate-secret.github-ghcr-read-token "$ghcr_read_token"
+
+          write_bootstrap_secret() {
             local path=$1 group=$2 value=$3 temporary
             temporary=$(mktemp "${path}.XXXXXX"); printf '%s\n' "$value" > "$temporary"
             chown root:"$group" "$temporary"; chmod 0440 "$temporary"; mv "$temporary" "$path"
           }
-          write_secret /root/kelion/secrets/codex-worker-secret 10050 "$codex_secret"
-          write_secret /root/kelion/secrets/constructor-publisher-secret 10050 "$publisher_secret"
-          write_secret /root/kelion/secrets/constructor-release-secret 10050 "$release_secret"
-          write_secret /root/kelion/worker-secrets/github-worker-token root "$sync_token"
-          write_secret /root/kelion/publisher-secrets/github-publisher-token kelion-publisher "$publisher_token"
-          write_secret /root/kelion/release-secrets/github-release-token kelion-release "$release_token"
 
+          install -d -o root -g root -m 0700 "$bootstrap"
           signing_key=/root/kelion/publisher-secrets/github-publisher-signing-key
-          if [ ! -s "$signing_key" ]; then ssh-keygen -q -t ed25519 -N '' -C "kelion-constructor@$public_host" -f "$signing_key"; fi
-          chown root:root "$signing_key"; chmod 0400 "$signing_key"
+          signing_dir=$(dirname -- "$signing_key")
+          validate_signing_key() {
+            local key=$1 public info
+            [ -f "$key" ] && [ ! -L "$key" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$key")" = '0:0:400:1' ] || return 1
+            public=$(ssh-keygen -y -f "$key") || return 1
+            [[ "$public" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}$ ]] || return 1
+            info=$(ssh-keygen -lf "$key" -E sha256) || return 1
+            [[ "$info" =~ ^256\ SHA256:[A-Za-z0-9+/]{43}\ .+\ \(ED25519\)$ ]]
+          }
+          for stale_signing_root in "$signing_dir"/.github-publisher-signing-key.tmp.*; do
+            [ -e "$stale_signing_root" ] || continue
+            [[ "$stale_signing_root" =~ ^/root/kelion/publisher-secrets/\.github-publisher-signing-key\.tmp\.[A-Za-z0-9]+$ ]]
+            [ -d "$stale_signing_root" ] && [ ! -L "$stale_signing_root" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$stale_signing_root")" = '0:0:700' ]
+            rm -rf -- "$stale_signing_root"
+            sync -f "$signing_dir"
+          done
+          if [ ! -e "$signing_key" ] && [ ! -L "$signing_key" ]; then
+            signing_root=$(mktemp -d "$signing_dir/.github-publisher-signing-key.tmp.XXXXXX")
+            signing_candidate=$signing_root/key
+            ssh-keygen -q -t ed25519 -N '' -C "kelion-constructor@$public_host" -f "$signing_candidate"
+            chown root:root "$signing_candidate"; chmod 0400 "$signing_candidate"
+            validate_signing_key "$signing_candidate"
+            sync -f "$signing_candidate"
+            rm -f -- "$signing_candidate.pub"
+            sync -f "$signing_root"
+            [ ! -e "$signing_key" ] && [ ! -L "$signing_key" ]
+            mv -f -- "$signing_candidate" "$signing_key"
+            sync -f "$signing_dir"
+            rmdir -- "$signing_root"
+            sync -f "$signing_dir"
+          fi
+          validate_signing_key "$signing_key"
           signing_public=$(ssh-keygen -y -f "$signing_key")
           signing_fingerprint=$(ssh-keygen -lf "$signing_key" -E sha256 | awk '{print $2}')
           [[ "$signing_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
-          existing_keys=$(curl --fail --silent --show-error -H "Authorization: Bearer $publisher_token" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' https://api.github.com/user/ssh_signing_keys)
+          publisher_headers=$bootstrap/publisher-api.headers
+          printf 'Authorization: Bearer %s\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\n' "$publisher_token" > "$publisher_headers"
+          chown root:root "$publisher_headers"; chmod 0600 "$publisher_headers"
+          existing_keys=$(curl --fail --silent --show-error --header "@$publisher_headers" https://api.github.com/user/ssh_signing_keys)
           if ! jq -e --arg key "$signing_public" '.[] | select(.key == $key)' <<<"$existing_keys" >/dev/null; then
             jq -n --arg title 'Kelion Constructor Publisher' --arg key "$signing_public" '{title:$title,key:$key}' |
-              curl --fail --silent --show-error -X POST -H "Authorization: Bearer $publisher_token" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' -H 'Content-Type: application/json' --data-binary @- https://api.github.com/user/ssh_signing_keys >/dev/null
+              curl --fail --silent --show-error -X POST --header "@$publisher_headers" -H 'Content-Type: application/json' --data-binary @- https://api.github.com/user/ssh_signing_keys >/dev/null
           fi
 
           install -d -o root -g kelion-codex -m 0750 "$bootstrap/worker"
           install -d -o root -g kelion-publisher -m 0750 "$bootstrap/publisher"
-          write_secret "$bootstrap/worker/token" kelion-codex "$sync_token"
-          write_secret "$bootstrap/publisher/token" kelion-publisher "$publisher_token"
+          write_bootstrap_secret "$bootstrap/worker/token" kelion-codex "$sync_token"
+          write_bootstrap_secret "$bootstrap/publisher/token" kelion-publisher "$publisher_token"
           clone_or_sync() {
-            local user=$1 target=$2 token_file=$3 home_dir=$4 expected="https://github.com/$repository.git" origin dangerous
+            local user=$1 target=$2 token_file=$3 home_dir=$4 expected="https://github.com/$repository.git"
+            local origin dangerous parent primary_group candidate_root candidate marker marker_temporary lock ref candidate_mode
+            prepare_clone_cleanup() {
+              local cleanup_root=$1
+              [ -d "$cleanup_root" ] && [ ! -L "$cleanup_root" ] \
+                && [ "$(realpath -e -- "$cleanup_root")" = "$cleanup_root" ] \
+                && [ "$(stat -Lc '%u:%g:%a' "$cleanup_root")" = '0:0:711' ]
+              # 0700 este faza durabilă de cleanup. Parentul root-owned face
+              # această stare imposibil de substituit de identitatea serviciului;
+              # un SIGKILL în orice rm/rmdir poate fi reluat de ramura 0:0:700.
+              chmod 0700 "$cleanup_root"
+              sync -f "$cleanup_root"
+              sync -f "$parent"
+              [ "$(stat -Lc '%u:%g:%a' "$cleanup_root")" = '0:0:700' ]
+            }
+            case "$user" in kelion-codex|kelion-publisher) ;; *) return 1 ;; esac
+            parent=$(dirname -- "$target")
+            [ "$target" = "$parent/repo" ] && [ "$home_dir" = "$parent" ]
+            [ -d "$parent" ] && [ ! -L "$parent" ] \
+              && [ "$(realpath -e -- "$parent")" = "$parent" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$parent")" = '0:0:711' ]
+            primary_group=$(id -gn "$user")
+            for candidate_root in "$parent"/.kelion-repo-bootstrap."$user".*; do
+              [ -e "$candidate_root" ] || continue
+              [[ "$candidate_root" =~ ^/var/lib/(kelion-codex|kelion-publisher)/\.kelion-repo-bootstrap\.(kelion-codex|kelion-publisher)\.[A-Za-z0-9]+$ ]]
+              [ -d "$candidate_root" ] && [ ! -L "$candidate_root" ] \
+                && [ "$(realpath -e -- "$candidate_root")" = "$candidate_root" ]
+              candidate_mode=$(stat -Lc '%u:%g:%a' "$candidate_root")
+              case "$candidate_mode" in
+                0:0:700)
+                  # Crash înainte de publicarea markerului: parentul root-owned
+                  # dovedește că identitatea de serviciu nu a putut substitui pathul.
+                  rm -rf --one-file-system -- "$candidate_root"
+                  sync -f "$parent"
+                  continue
+                  ;;
+                0:0:711) ;;
+                *) return 1 ;;
+              esac
+              marker=$candidate_root/owner
+              [ -f "$marker" ] && [ ! -L "$marker" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:400:1' ]
+              printf 'schema=1\nuser=%s\ntarget=%s\n' "$user" "$target" | cmp -s - "$marker"
+              prepare_clone_cleanup "$candidate_root"
+              rm -rf --one-file-system -- "$candidate_root"
+              sync -f "$parent"
+            done
             if [ -d "$target/.git" ]; then
+              [ -d "$target" ] && [ ! -L "$target" ] \
+                && [ "$(realpath -e -- "$target")" = "$target" ] \
+                && [ "$(stat -Lc '%U:%G:%a' "$target")" = "$user:$primary_group:700" ]
               origin=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" remote get-url origin); [ "$origin" = "$expected" ]
               dangerous=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" config --local --get-regexp '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' || true); [ -z "$dangerous" ]
+              for lock in "$target/.git/FETCH_HEAD.lock" "$target/.git/packed-refs.lock" "$target/.git/index.lock" "$target/.git/refs/remotes/origin/master.lock"; do
+                if [ -e "$lock" ] || [ -L "$lock" ]; then
+                  [ -f "$lock" ] && [ ! -L "$lock" ] \
+                    && [ "$(stat -Lc '%U:%G:%h' "$lock")" = "$user:$primary_group:1" ]
+                  rm -f -- "$lock"
+                fi
+              done
               runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git -C "$target" fetch --prune --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+              ref=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" rev-parse --verify 'refs/remotes/origin/master^{commit}')
+              [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+              sync -f "$target"
             else
               [ ! -e "$target" ]
-              runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git clone --no-tags "$expected" "$target"
+              candidate_root=$(mktemp -d "$parent/.kelion-repo-bootstrap.$user.XXXXXX")
+              marker=$candidate_root/owner
+              marker_temporary=$(mktemp "$candidate_root/.owner.XXXXXX")
+              printf 'schema=1\nuser=%s\ntarget=%s\n' "$user" "$target" > "$marker_temporary"
+              chown root:root "$marker_temporary"; chmod 0400 "$marker_temporary"; sync -f "$marker_temporary"
+              mv -f -- "$marker_temporary" "$marker"
+              sync -f "$candidate_root"
+              chmod 0711 "$candidate_root"
+              sync -f "$candidate_root"
+              [ "$(realpath -e -- "$candidate_root")" = "$candidate_root" ] \
+                && [ "$(stat -Lc '%u:%g:%a' "$candidate_root")" = '0:0:711' ]
+              candidate=$candidate_root/repo
+              install -d -o "$user" -g "$primary_group" -m 0700 "$candidate"
+              runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/opt/kelion-constructor/github-askpass.sh KELION_GITHUB_TOKEN_FILE="$token_file" git clone --no-tags "$expected" "$candidate"
+              [ -d "$candidate" ] && [ ! -L "$candidate" ] \
+                && [ "$(realpath -e -- "$candidate")" = "$candidate" ] \
+                && [ "$(stat -Lc '%U:%G:%a' "$candidate")" = "$user:$primary_group:700" ]
+              origin=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$candidate" remote get-url origin); [ "$origin" = "$expected" ]
+              dangerous=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$candidate" config --local --get-regexp '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' || true); [ -z "$dangerous" ]
+              ref=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$candidate" rev-parse --verify 'refs/remotes/origin/master^{commit}')
+              [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+              sync -f "$candidate"
+              [ -d "$parent" ] && [ ! -L "$parent" ] \
+                && [ "$(realpath -e -- "$parent")" = "$parent" ] \
+                && [ "$(stat -Lc '%u:%g:%a' "$parent")" = '0:0:711' ]
+              [ -d "$candidate_root" ] && [ ! -L "$candidate_root" ] \
+                && [ "$(realpath -e -- "$candidate_root")" = "$candidate_root" ] \
+                && [ "$(stat -Lc '%u:%g:%a' "$candidate_root")" = '0:0:711' ]
+              [ ! -e "$target" ] && [ ! -L "$target" ]
+              mv -f -- "$candidate" "$target"
+              sync -f "$parent"
+              prepare_clone_cleanup "$candidate_root"
+              rm -f -- "$marker"; rmdir -- "$candidate_root"; sync -f "$parent"
             fi
-            runuser -u "$user" -- git -C "$target" remote set-url origin "$expected"
+            [ -d "$target" ] && [ ! -L "$target" ] \
+              && [ "$(realpath -e -- "$target")" = "$target" ] \
+              && [ "$(stat -Lc '%U:%G:%a' "$target")" = "$user:$primary_group:700" ]
+            origin=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" remote get-url origin)
+            [ "$origin" = "$expected" ]
+            dangerous=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" config --local --get-regexp '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' || true)
+            [ -z "$dangerous" ]
           }
           clone_or_sync kelion-codex /var/lib/kelion-codex/repo "$bootstrap/worker/token" /var/lib/kelion-codex
           clone_or_sync kelion-publisher /var/lib/kelion-publisher/repo "$bootstrap/publisher/token" /var/lib/kelion-publisher
 
-          install -o root -g root -m 0640 /dev/null /root/kelion/config/codex-worker.env
-          cat > /root/kelion/config/codex-worker.env <<EOF
+          cat > "$cutover_stage/files/constructor-config.codex-worker.env" <<EOF
           CODEX_WORKER_EXEC_ENABLED=1
           KELION_CODEX_API=http://127.0.0.1:18079
           KELION_GITHUB_REPOSITORY=$repository
           KELION_CODEX_GATE_IMAGE=$gate_image
           EOF
-          install -o root -g root -m 0640 /dev/null /root/kelion/config/constructor-publisher.env
-          cat > /root/kelion/config/constructor-publisher.env <<EOF
+          chmod 0600 "$cutover_stage/files/constructor-config.codex-worker.env"
+          printf '%s\n' constructor-config.codex-worker.env >> "$cutover_stage/manifest"
+          cat > "$cutover_stage/files/constructor-config.constructor-publisher.env" <<EOF
           CONSTRUCTOR_PUBLISHER_EXEC_ENABLED=1
           KELION_CONSTRUCTOR_API=http://127.0.0.1:18079
           KELION_GITHUB_REPOSITORY=$repository
           KELION_CODEX_GATE_IMAGE=$gate_image
-          CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation
+          CONSTRUCTOR_REQUIRED_CHECKS=$constructor_required_checks
           CONSTRUCTOR_GIT_AUTHOR_NAME=Kelion Constructor Publisher
           CONSTRUCTOR_GIT_AUTHOR_EMAIL=constructor@$public_host
           CONSTRUCTOR_GIT_SIGNING_FINGERPRINT=$signing_fingerprint
           EOF
-          install -o root -g root -m 0640 /dev/null /root/kelion/config/constructor-release.env
-          cat > /root/kelion/config/constructor-release.env <<EOF
+          chmod 0600 "$cutover_stage/files/constructor-config.constructor-publisher.env"
+          printf '%s\n' constructor-config.constructor-publisher.env >> "$cutover_stage/manifest"
+          cat > "$cutover_stage/files/constructor-config.constructor-release.env" <<EOF
           CONSTRUCTOR_RELEASE_EXEC_ENABLED=1
           KELION_CONSTRUCTOR_API=http://127.0.0.1:18079
           KELION_GITHUB_REPOSITORY=$repository
           KELION_PUBLIC_APP_ORIGIN=$public_origin
           CONSTRUCTOR_RELEASE_WORKFLOW=deploy.yml
-          CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation
+          CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$constructor_required_checks
           EOF
+          chmod 0600 "$cutover_stage/files/constructor-config.constructor-release.env"
+          printf '%s\n' constructor-config.constructor-release.env >> "$cutover_stage/manifest"
 
-          set_runtime_flag() {
-            local name=$1 file=/root/kelion/config/runtime.env
-            [ -f "$file" ] && [ ! -L "$file" ]
-            if grep -q "^${name}=" "$file"; then sed -i "s/^${name}=.*/${name}=1/" "$file"; else printf '%s=1\n' "$name" >> "$file"; fi
-          }
-          set_runtime_flag CODEX_WORKER_ENABLED
-          set_runtime_flag CONSTRUCTOR_PUBLISHER_ENABLED
-          set_runtime_flag CONSTRUCTOR_RELEASE_ENABLED
+          runtime_file=/root/kelion/config/runtime.env
+          [ -f "$runtime_file" ] && [ ! -L "$runtime_file" ]
+          [ "$(stat -c '%u:%g:%a' "$runtime_file")" = '0:10050:640' ]
+          awk -F= \
+            -v retry_base="$constructor_retry_base_seconds" \
+            -v retry_max="$constructor_retry_max_seconds" \
+            -v retry_external="$constructor_external_retry_seconds" \
+            -v required_checks="$constructor_required_checks" '
+            BEGIN {
+              replacement["CODEX_WORKER_ENABLED"] = "1"
+              replacement["CONSTRUCTOR_PUBLISHER_ENABLED"] = "1"
+              replacement["CONSTRUCTOR_RELEASE_ENABLED"] = "1"
+              replacement["CONSTRUCTOR_RETRY_BASE_SECONDS"] = retry_base
+              replacement["CONSTRUCTOR_RETRY_MAX_SECONDS"] = retry_max
+              replacement["CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"] = retry_external
+              replacement["CONSTRUCTOR_REQUIRED_CHECKS"] = required_checks
+              order[1] = "CODEX_WORKER_ENABLED"
+              order[2] = "CONSTRUCTOR_PUBLISHER_ENABLED"
+              order[3] = "CONSTRUCTOR_RELEASE_ENABLED"
+              order[4] = "CONSTRUCTOR_RETRY_BASE_SECONDS"
+              order[5] = "CONSTRUCTOR_RETRY_MAX_SECONDS"
+              order[6] = "CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"
+              order[7] = "CONSTRUCTOR_REQUIRED_CHECKS"
+            }
+            $1 in replacement { if (!written[$1]++) print $1 "=" replacement[$1]; next }
+            { print }
+            END { for (index = 1; index <= 7; index++) if (!written[order[index]]) print order[index] "=" replacement[order[index]] }
+          ' "$runtime_file" > "$cutover_stage/files/runtime.env"
+          chmod 0600 "$cutover_stage/files/runtime.env"
+          printf '%s\n' runtime.env >> "$cutover_stage/manifest"
 
           pull_gate() {
             local user=$1 runtime=$2 token=$3
@@ -290,9 +656,10 @@ jobs:
             runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
             rm -f -- "$authfile"
           }
-          pull_gate kelion-codex /run/kelion-codex "$sync_token"
-          pull_gate kelion-publisher /run/kelion-publisher "$publisher_token"
-          systemctl daemon-reload
+          pull_gate kelion-codex /run/kelion-codex "$ghcr_read_token"
+          pull_gate kelion-publisher /run/kelion-publisher "$ghcr_read_token"
+          KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" "$cutover_stage" "$work/deploy/compose.production.yml"
+          cutover_stage=''
           printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si autentificarea ChatGPT'
           REMOTE
 
@@ -319,6 +686,7 @@ jobs:
         if: inputs.operation == 'activate-worker-publisher' || inputs.operation == 'activate-release' || inputs.operation == 'constructor-status'
         env:
           OPERATION: ${{ inputs.operation }}
+          PILOT_COMMIT: ${{ inputs.pilot_merge_commit }}
         run: |
           set -euo pipefail
           [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
@@ -326,36 +694,323 @@ jobs:
           key_file=$(mktemp); known_hosts=$(mktemp)
           trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
           printf '%s\n' "$SSH_KEY" > "$key_file"; printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"; chmod 0600 "$key_file" "$known_hosts"
-          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s -- "$OPERATION" <<'REMOTE'
+          pilot_commit=''
+          if [ "$OPERATION" = activate-release ]; then
+            [[ "$PILOT_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+            current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+            [ "$current_master" = "$PILOT_COMMIT" ]
+            pilot_commit=$PILOT_COMMIT
+          fi
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s -- "$OPERATION" "$pilot_commit" <<'REMOTE'
           set -euo pipefail
           operation=$1
+          pilot_commit=$2
+          if [ "$operation" = activate-release ]; then
+            [[ "$pilot_commit" =~ ^[0-9a-f]{40}$ ]]
+          else
+            [ -z "$pilot_commit" ]
+          fi
+          activation_journal=/root/kelion/runtime/constructor-activation.journal
+          activation_pending=/run/kelion/constructor-activation.pending
+          activation_dir=''
+          activation_in_progress=0
+          activation_committed=0
+          activation_mutated=0
+          activation_resume_pending=0
+          declare -a activation_markers=() activation_prepared=()
+          all_markers=(/etc/kelion/codex-worker.enabled /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled)
+          all_timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
+          all_services=(kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service)
+          declare -a snapshot_marker_present=() snapshot_timer_enabled=() snapshot_timer_active=() snapshot_service_active=()
+
+          validate_runtime() {
+            [ -f /root/kelion/config/runtime.env ] && [ ! -L /root/kelion/config/runtime.env ]
+            [ "$(stat -c '%u:%g:%a' /root/kelion/config/runtime.env)" = '0:10050:640' ]
+            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+              --validate-env-file runtime.env /root/kelion/config/runtime.env
+          }
+          require_enabled_flag() {
+            local flag=$1
+            [ "$(grep -c "^${flag}=1$" /root/kelion/config/runtime.env)" -eq 1 ]
+          }
+          assert_backend_side_effects_active() {
+            local payload
+            payload=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18079/readyz)
+            jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$payload" >/dev/null
+            jq -c '{ready,release}' <<<"$payload"
+          }
+          force_quiesce_activation() {
+            local unit state failed=0 ready_root=/run/kelion stamp=/run/kelion/runtime-config-recovery.ready
+            if [ -e "$ready_root" ] || [ -L "$ready_root" ]; then
+              [ -d "$ready_root" ] && [ ! -L "$ready_root" ] \
+                && [ "$(stat -c '%u:%g:%a' "$ready_root")" = '0:0:755' ] || return 1
+              if [ -e "$stamp" ] || [ -L "$stamp" ]; then
+                [ -f "$stamp" ] && [ ! -L "$stamp" ] \
+                  && [ "$(stat -c '%u:%g:%a' "$stamp")" = '0:0:444' ] || return 1
+                rm -f -- "$stamp" || return 1
+                fsync_remote "$ready_root" || return 1
+              fi
+            fi
+            for unit in "${all_timers[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+            for unit in "${all_services[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+            if systemctl cat kelion-constructor-sync.service >/dev/null 2>&1; then
+              systemctl stop kelion-constructor-sync.service >/dev/null || failed=1
+            fi
+            for unit in "${all_timers[@]}" "${all_services[@]}" kelion-constructor-sync.service; do
+              systemctl cat "$unit" >/dev/null 2>&1 || continue
+              state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
+              case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+              [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
+            done
+            [ "$failed" = 0 ]
+          }
+          validate_marker() {
+            local marker=$1
+            [ -f "$marker" ] && [ ! -L "$marker" ] && [ "$(stat -c '%u:%g:%a' "$marker")" = '0:0:444' ]
+          }
+          fsync_remote() {
+            python3 - "$1" <<'PY'
+          import os
+          import stat
+          import sys
+          path = sys.argv[1]
+          mode = os.stat(path, follow_symlinks=False).st_mode
+          if stat.S_ISLNK(mode): raise SystemExit(1)
+          descriptor = os.open(path, os.O_RDONLY | (os.O_DIRECTORY if stat.S_ISDIR(mode) else 0))
+          try: os.fsync(descriptor)
+          finally: os.close(descriptor)
+          PY
+          }
+          prepare_marker_root_durable() {
+            local ownership mode
+            if [ -e /etc/kelion ] || [ -L /etc/kelion ]; then
+              [ -d /etc/kelion ] && [ ! -L /etc/kelion ]
+              ownership=$(stat -c '%u:%g' /etc/kelion)
+              mode=$(stat -c '%a' /etc/kelion)
+              [ "$ownership" = '0:0' ]
+              case "$mode" in 750|755) ;; *) return 1 ;; esac
+              chmod 0755 /etc/kelion
+            else
+              install -d -o root -g root -m 0755 /etc/kelion
+            fi
+            [ "$(stat -c '%u:%g:%a' /etc/kelion)" = '0:0:755' ]
+            fsync_remote /etc/kelion
+            fsync_remote /etc
+          }
+          write_activation_journal() {
+            local temporary
+            [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ]
+            temporary=$(mktemp /root/kelion/runtime/.constructor-activation.journal.XXXXXX)
+            jq -n --arg activationRoot "$activation_dir" --arg operation "$operation" \
+              '{schema:2,phase:"prepared",activationRoot:$activationRoot,operation:$operation}' > "$temporary"
+            chown root:root "$temporary"; chmod 0600 "$temporary"
+            fsync_remote "$temporary"
+            mv -f -- "$temporary" "$activation_journal"
+            fsync_remote /root/kelion/runtime
+          }
+          clear_activation_journal() {
+            if [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; then
+              [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] && [ "$(stat -c '%u:%g:%a' "$activation_journal")" = '0:0:600' ]
+              [ ! -e "$activation_pending" ] && [ ! -L "$activation_pending" ]
+              rm -f -- "$activation_journal"
+              fsync_remote /root/kelion/runtime
+            fi
+          }
+          recover_activation_preflight() {
+            if [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; then
+              # Un applied rămas de la un caller căzut trebuie întâi rescris
+              # quiesced; preflight-ul generic nu are voie să-l finalizeze.
+              KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+                --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+            else
+              KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+                --recover-only /root/kelion/config/compose.production.yml
+            fi
+          }
+          load_activation_barrier() {
+            if [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ]; then
+              activation_resume_pending=0
+              return 0
+            fi
+            [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+              && [ "$(stat -c '%u:%g:%a' "$activation_journal")" = '0:0:600' ]
+            [ -f "$activation_pending" ] && [ ! -L "$activation_pending" ] \
+              && [ "$(stat -c '%u:%g:%a' "$activation_pending")" = '0:0:444' ] \
+              && [ "$(wc -l < "$activation_pending")" -eq 1 ] \
+              && grep -qx 'schema=1' "$activation_pending"
+            jq -e --arg operation "$operation" \
+              '.schema == 2 and .phase == "quiesced" and .operation == $operation and
+               (.activationRoot | strings | test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))' \
+              "$activation_journal" >/dev/null
+            activation_dir=$(jq -er '.activationRoot' "$activation_journal")
+            [ -d "$activation_dir" ] && [ ! -L "$activation_dir" ] \
+              && [ "$(stat -c '%u:%g:%a' "$activation_dir")" = '0:0:700' ]
+            activation_resume_pending=1
+            activation_in_progress=1
+            activation_mutated=1
+          }
+          snapshot_activation_state() {
+            local index marker timer service present enabled active state_file="$activation_dir/state"
+            # ACL-ul traversabil al părintelui face parte din commit și trebuie
+            # să fie durabil înainte ca jurnalul extern să poată apărea.
+            prepare_marker_root_durable
+            : > "$state_file"
+            for index in "${!all_markers[@]}"; do
+              marker=${all_markers[$index]}
+              if [ -e "$marker" ] || [ -L "$marker" ]; then
+                validate_marker "$marker"
+                cp --preserve=mode,ownership,timestamps -- "$marker" "$activation_dir/marker.$index"
+                present=1
+              else
+                : > "$activation_dir/marker.$index"
+                chmod 0600 "$activation_dir/marker.$index"
+                present=0
+              fi
+              snapshot_marker_present+=("$present")
+              printf 'marker\t%s\t%s\tmarker.%s\n' "$marker" "$present" "$index" >> "$state_file"
+              fsync_remote "$activation_dir/marker.$index"
+            done
+            for timer in "${all_timers[@]}"; do
+              if systemctl is-enabled --quiet "$timer"; then enabled=1; else enabled=0; fi
+              if systemctl is-active --quiet "$timer"; then active=1; else active=0; fi
+              snapshot_timer_enabled+=("$enabled"); snapshot_timer_active+=("$active")
+              printf 'timer\t%s\t%s\t%s\n' "$timer" "$enabled" "$active" >> "$state_file"
+            done
+            for service in "${all_services[@]}"; do
+              if systemctl is-active --quiet "$service"; then active=1; else active=0; fi
+              snapshot_service_active+=("$active")
+              printf 'service\t%s\t%s\t-\n' "$service" "$active" >> "$state_file"
+            done
+            chown root:root "$state_file"; chmod 0600 "$state_file"
+            fsync_remote "$state_file"
+            fsync_remote "$activation_dir"
+            # Snapshotul vechii stări este durabil înainte de oprire. Retragem
+            # apoi capabilitatea ready și dovedim 0 joburi înainte ca jurnalul
+            # prepared să ajungă vizibil; astfel nici fereastra caller→helper nu
+            # poate avea simultan jurnal pending și side effects active.
+            force_quiesce_activation
+            write_activation_journal
+            activation_in_progress=1
+            activation_mutated=1
+          }
+          cleanup_activation_artifacts() {
+            local path
+            for path in "${activation_prepared[@]:-}"; do [ -z "$path" ] || rm -f -- "$path"; done
+            if [ -n "$activation_dir" ]; then
+              [[ "$activation_dir" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]]
+              [ -d "$activation_dir" ] && [ ! -L "$activation_dir" ]
+              rm -f -- "$activation_dir"/marker.* "$activation_dir/state"
+              rmdir -- "$activation_dir"
+              activation_dir=''
+            fi
+          }
+          cleanup_activation() {
+            local rc=$? cleanup_failed=0
+            trap - EXIT
+            set +e
+            # Chiar dacă helperul a activat și și-a închis jurnalul, un eșec al
+            # dovezii finale trebuie să recreeze un snapshot durabil înainte de
+            # quiesce. Altfel markerii ar permite reactivarea la retry/reboot.
+            if [ "$rc" != 0 ] && [ "$activation_mutated" = 1 ] \
+              && [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ]; then
+              activation_dir=$(mktemp -d /root/kelion/runtime/constructor-activation.XXXXXX) || cleanup_failed=1
+              if [ "$cleanup_failed" = 0 ]; then
+                chmod 0700 "$activation_dir" || cleanup_failed=1
+                snapshot_activation_state || cleanup_failed=1
+              fi
+            fi
+            if [ "$activation_in_progress" = 1 ] && [ "$cleanup_failed" = 0 ]; then
+              if KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+                  --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced; then
+                activation_in_progress=0
+                activation_dir=''
+              else
+                cleanup_failed=1
+              fi
+            fi
+            if [ "$rc" != 0 ] && [ "$activation_mutated" = 1 ]; then
+              force_quiesce_activation || cleanup_failed=1
+            fi
+            if [ "$cleanup_failed" = 0 ]; then cleanup_activation_artifacts || cleanup_failed=1; fi
+            if [ "$cleanup_failed" != 0 ]; then
+              printf 'activarea Constructor nu a putut restaura starea anterioară\n' >&2
+              rc=1
+            fi
+            exit "$rc"
+          }
+          trap cleanup_activation EXIT
+
           status() {
-            for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer; do printf '%s=' "$unit"; systemctl is-active "$unit" || true; done
-            for marker in codex-worker constructor-publisher constructor-release; do if [ -f "/etc/kelion/$marker.enabled" ]; then printf '%s=enabled\n' "$marker"; else printf '%s=disabled\n' "$marker"; fi; done
+            local unit marker state
+            for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer; do
+              state=$(systemctl show "$unit" --property=ActiveState --value)
+              printf '%s=%s\n' "$unit" "$state"
+            done
+            for marker in codex-worker constructor-publisher constructor-release; do
+              if [ -e "/etc/kelion/$marker.enabled" ] || [ -L "/etc/kelion/$marker.enabled" ]; then
+                validate_marker "/etc/kelion/$marker.enabled"
+                printf '%s=enabled\n' "$marker"
+              else
+                printf '%s=disabled\n' "$marker"
+              fi
+            done
             if runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login status >/dev/null 2>&1; then echo 'codex-auth=ready'; else echo 'codex-auth=required'; fi
-            curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18079/readyz | jq -c '{ready,release}'
+            assert_backend_side_effects_active
           }
           case "$operation" in
             activate-worker-publisher)
-              [ ! -e /etc/kelion/constructor-release.enabled ]
-              grep -qx 'CODEX_WORKER_ENABLED=1' /root/kelion/config/runtime.env
-              grep -qx 'CONSTRUCTOR_PUBLISHER_ENABLED=1' /root/kelion/config/runtime.env
+              exec 9>/root/kelion/publicare.lock
+              flock -n 9
+              recover_activation_preflight
+              load_activation_barrier
+              validate_runtime
+              [ ! -e /etc/kelion/constructor-release.enabled ] && [ ! -L /etc/kelion/constructor-release.enabled ]
+              require_enabled_flag CODEX_WORKER_ENABLED
+              require_enabled_flag CONSTRUCTOR_PUBLISHER_ENABLED
               runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login status >/dev/null
-              install -o root -g root -m 0444 /dev/null /etc/kelion/codex-worker.enabled
-              install -o root -g root -m 0444 /dev/null /etc/kelion/constructor-publisher.enabled
-              systemctl daemon-reload
-              systemctl enable --now kelion-codex-worker.timer kelion-constructor-publisher.timer
-              systemctl start kelion-codex-worker.service
+              assert_backend_side_effects_active >/dev/null
+              if [ "$activation_resume_pending" = 0 ]; then
+                activation_dir=$(mktemp -d /root/kelion/runtime/constructor-activation.XXXXXX)
+                chmod 0700 "$activation_dir"
+                snapshot_activation_state
+              fi
+              KELION_CUTOVER_LOCK_HELD=1 KELION_ACTIVATION_RESUME_OPERATION="$operation" \
+                /root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml
               ;;
             activate-release)
-              [ -f /etc/kelion/codex-worker.enabled ] && [ -f /etc/kelion/constructor-publisher.enabled ]
-              grep -qx 'CONSTRUCTOR_RELEASE_ENABLED=1' /root/kelion/config/runtime.env
-              install -o root -g root -m 0444 /dev/null /etc/kelion/constructor-release.enabled
-              systemctl daemon-reload
-              systemctl enable --now kelion-constructor-release.timer
+              exec 9>/root/kelion/publicare.lock
+              flock -n 9
+              recover_activation_preflight
+              load_activation_barrier
+              validate_runtime
+              validate_marker /etc/kelion/codex-worker.enabled
+              validate_marker /etc/kelion/constructor-publisher.enabled
+              require_enabled_flag CODEX_WORKER_ENABLED
+              require_enabled_flag CONSTRUCTOR_PUBLISHER_ENABLED
+              require_enabled_flag CONSTRUCTOR_RELEASE_ENABLED
+              assert_backend_side_effects_active >/dev/null
+              if [ "$activation_resume_pending" = 0 ]; then
+                systemctl is-enabled --quiet kelion-codex-worker.timer
+                systemctl is-active --quiet kelion-codex-worker.timer
+                systemctl is-enabled --quiet kelion-constructor-publisher.timer
+                systemctl is-active --quiet kelion-constructor-publisher.timer
+                activation_dir=$(mktemp -d /root/kelion/runtime/constructor-activation.XXXXXX)
+                chmod 0700 "$activation_dir"
+                snapshot_activation_state
+              fi
+              KELION_CUTOVER_LOCK_HELD=1 KELION_ACTIVATION_RESUME_OPERATION="$operation" \
+                /root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml
               ;;
             constructor-status) ;;
             *) exit 1 ;;
           esac
           status
+          if [ "$activation_in_progress" = 1 ]; then
+            jq -e --arg operation "$operation" --arg activationRoot "$activation_dir" \
+              '.schema == 2 and .phase == "applied" and .operation == $operation and .activationRoot == $activationRoot' \
+              "$activation_journal" >/dev/null
+            clear_activation_journal
+            activation_committed=1
+            activation_in_progress=0
+          fi
           REMOTE

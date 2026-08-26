@@ -1,5 +1,5 @@
 name: production-release
-run-name: production-${{ inputs.release_request_id }}
+run-name: production-${{ inputs.release_request_id }}-${{ inputs.commit_sha }}-${{ inputs.ci_run_id }}-${{ inputs.build_run_id }}
 
 on:
   workflow_dispatch:
@@ -18,6 +18,16 @@ on:
         description: UUID idempotent al cererii de release
         required: true
         type: string
+      ci_run_id:
+        description: Runul push CI canonic; gol numai pentru dispatcherul v1 din rollout
+        required: false
+        default: ''
+        type: string
+      build_run_id:
+        description: Buildul legat de ci_run_id; gol numai pentru dispatcherul v1 din rollout
+        required: false
+        default: ''
+        type: string
 
 permissions: {}
 
@@ -26,7 +36,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  idempotency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      execute: ${{ steps.guard.outputs.execute }}
+    steps:
+      - name: Alege runul canonic pentru requestul persistent
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
+          CANDIDATE_SHA: ${{ inputs.commit_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_REQUEST_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$CI_RUN_ID" ] || [ -n "$BUILD_RUN_ID" ]; then
+            [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          fi
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          title="production-$RELEASE_REQUEST_ID-$CANDIDATE_SHA-$CI_RUN_ID-$BUILD_RUN_ID"
+          canonical=$GITHUB_RUN_ID
+          for page in $(seq 1 100); do
+            payload=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?event=workflow_dispatch&per_page=100&page=$page")
+            count=$(jq -er '.workflow_runs | length' <<<"$payload")
+            while IFS= read -r run_id; do
+              [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+              if [ "$run_id" -lt "$canonical" ]; then canonical=$run_id; fi
+            done < <(jq -r --arg title "$title" '.workflow_runs[] | select(.event == "workflow_dispatch" and .display_title == $title) | .id' <<<"$payload")
+            if [ "$count" -lt 100 ]; then break; fi
+            [ "$page" -lt 100 ] || { echo '::error::Căutarea requestului release canonic nu a fost exhaustivă.'; exit 1; }
+          done
+          if [ "$canonical" = "$GITHUB_RUN_ID" ]; then
+            echo 'execute=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'execute=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::Run duplicat pentru același request; runul canonic este $canonical."
+          fi
+
   verify-candidate:
+    needs: idempotency
+    if: needs.idempotency.outputs.execute == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -48,6 +104,8 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.commit_sha }}
           RELEASE_MODE: ${{ inputs.release_mode }}
           RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
+          EXPECTED_CI_RUN_ID: ${{ inputs.ci_run_id }}
+          EXPECTED_BUILD_RUN_ID: ${{ inputs.build_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -60,17 +118,57 @@ jobs:
             [ "$CANDIDATE_SHA" = "$(git rev-parse origin/master)" ]
           fi
 
-          ci_runs=$(gh api --method GET \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/pr-verify.yml/runs" \
-            -f head_sha="$CANDIDATE_SHA" -f event=push -f status=completed -f per_page=30)
-          ci_run_id=$(jq -r '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .conclusion == "success")][0].id // empty' --arg sha "$CANDIDATE_SHA" <<<"$ci_runs")
-          [[ "$ci_run_id" =~ ^[0-9]+$ ]]
+          if [ -z "$EXPECTED_CI_RUN_ID" ] && [ -z "$EXPECTED_BUILD_RUN_ID" ]; then
+            # Compatibilitate strictă pentru singurul rollout condus de
+            # dispatcherul v1. Identitățile sunt reconstruite din aceeași
+            # pereche commit -> push CI -> build cu titlu determinist.
+            for page in $(seq 1 100); do
+              ci_page=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/pr-verify.yml/runs?head_sha=${CANDIDATE_SHA}&event=push&status=completed&per_page=100&page=$page")
+              ci_count=$(jq -er '.workflow_runs | length' <<<"$ci_page")
+              while IFS= read -r candidate_run; do
+                [[ "$candidate_run" =~ ^[1-9][0-9]*$ ]]
+                jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate_run}/jobs?filter=latest&per_page=100")
+                if jq -e '[.jobs[] | select((.name == "verify" or .name == "container-isolation") and .conclusion == "success") | .name] | unique | sort == ["container-isolation", "verify"]' <<<"$jobs" >/dev/null; then
+                  EXPECTED_CI_RUN_ID=$candidate_run
+                  break
+                fi
+              done < <(jq -r --arg sha "$CANDIDATE_SHA" '.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .conclusion == "success") | .id' <<<"$ci_page")
+              [ -z "$EXPECTED_CI_RUN_ID" ] || break
+              if [ "$ci_count" -lt 100 ]; then break; fi
+              [ "$page" -lt 100 ] || { echo '::error::Căutarea CI v1 nu a fost exhaustivă.'; exit 1; }
+            done
+            [[ "$EXPECTED_CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            expected_title="build-release-${EXPECTED_CI_RUN_ID}-${CANDIDATE_SHA}"
+            for page in $(seq 1 100); do
+              build_page=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs?event=workflow_run&status=completed&per_page=100&page=$page")
+              build_count=$(jq -er '.workflow_runs | length' <<<"$build_page")
+              EXPECTED_BUILD_RUN_ID=$(jq -r --arg title "$expected_title" '[.workflow_runs[] | select((.head_sha | type) == "string" and (.head_sha | test("^[0-9a-f]{40}$")) and .event == "workflow_run" and .conclusion == "success" and (.path == ".github/workflows/build-images.yml" or (.path | startswith(".github/workflows/build-images.yml@"))) and .display_title == $title)][0].id // empty' <<<"$build_page")
+              [ -z "$EXPECTED_BUILD_RUN_ID" ] || break
+              if [ "$build_count" -lt 100 ]; then break; fi
+              [ "$page" -lt 100 ] || { echo '::error::Căutarea buildului v1 nu a fost exhaustivă.'; exit 1; }
+            done
+          elif [ -z "$EXPECTED_CI_RUN_ID" ] || [ -z "$EXPECTED_BUILD_RUN_ID" ]; then
+            echo '::error::Checkpointul CI/build primit este parțial.'
+            exit 1
+          fi
+          [[ "$EXPECTED_CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EXPECTED_BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
 
-          build_runs=$(gh api --method GET \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
-            -f status=completed -f per_page=50)
-          build_run_id=$(jq -r '[.workflow_runs[] | select(.head_sha == $sha and .event == "workflow_run" and .conclusion == "success")][0].id // empty' --arg sha "$CANDIDATE_SHA" <<<"$build_runs")
-          [[ "$build_run_id" =~ ^[0-9]+$ ]]
+          ci_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_CI_RUN_ID}")
+          jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha and .event == "push" and .conclusion == "success"
+            and (.path == ".github/workflows/pr-verify.yml" or (.path | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$ci_run" >/dev/null
+          ci_run_id=$EXPECTED_CI_RUN_ID
+
+          build_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_BUILD_RUN_ID}")
+          jq -e --arg title "build-release-${EXPECTED_CI_RUN_ID}-${CANDIDATE_SHA}" '
+            (.head_sha | type) == "string" and (.head_sha | test("^[0-9a-f]{40}$"))
+            and .event == "workflow_run" and .conclusion == "success"
+            and (.path == ".github/workflows/build-images.yml" or (.path | startswith(".github/workflows/build-images.yml@")))
+            and .display_title == $title
+          ' <<<"$build_run" >/dev/null
+          build_run_id=$EXPECTED_BUILD_RUN_ID
           printf 'ci_run_id=%s\nbuild_run_id=%s\ncommit_sha=%s\n' "$ci_run_id" "$build_run_id" "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
   release:
@@ -87,11 +185,13 @@ jobs:
       CI_RUN_ID: ${{ needs.verify-candidate.outputs.ci_run_id }}
       BUILD_RUN_ID: ${{ needs.verify-candidate.outputs.build_run_id }}
       RELEASE_MODE: ${{ inputs.release_mode }}
+      RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
       VPS_HOST: ${{ vars.VPS_HOST }}
       VPS_USER: ${{ vars.VPS_USER }}
       VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
       REGISTRY_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -119,9 +219,13 @@ jobs:
           jq -e --arg sha "$CANDIDATE_SHA" --argjson source "$CI_RUN_ID" \
             '.schema == 1 and .commit == $sha and .sourceRunId == $source and (.images | length == 5)' "$manifest" >/dev/null
           identity="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images\\.yml@refs/heads/master$"
+          registry_repo=${GITHUB_REPOSITORY,,}
           for component in app browser browser-egress converter-gateway converter-parser; do
             ref=$(jq -er --arg component "$component" '.images[$component]' "$manifest")
-            [[ "$ref" =~ ^ghcr\.io/.+/$component@sha256:[0-9a-f]{64}$ ]]
+            prefix="ghcr.io/$registry_repo/$component@sha256:"
+            case "$ref" in "$prefix"*) ;; *) exit 1 ;; esac
+            digest=${ref#"$prefix"}
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
             cosign verify \
               --certificate-identity-regexp "$identity" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -129,12 +233,32 @@ jobs:
               "$ref" >/dev/null
           done
 
+          gate_manifest=release-manifest/codex-gates.json
+          jq -e --arg sha "$CANDIDATE_SHA" --argjson source "$CI_RUN_ID" '
+            type == "object"
+            and .schema == 1
+            and .commit == $sha
+            and .sourceRunId == $source
+            and (.image | type == "string")
+          ' "$gate_manifest" >/dev/null
+          gate_ref=$(jq -er '.image' "$gate_manifest")
+          gate_prefix="ghcr.io/$registry_repo/codex-gates@sha256:"
+          case "$gate_ref" in "$gate_prefix"*) ;; *) exit 1 ;; esac
+          gate_digest=${gate_ref#"$gate_prefix"}
+          [[ "$gate_digest" =~ ^[0-9a-f]{64}$ ]]
+          cosign verify \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --annotations "git_sha=$CANDIDATE_SHA" \
+            "$gate_ref" >/dev/null
+
       - name: Release blue-green pe VPS
         run: |
           set -euo pipefail
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] && [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]]
+          [[ "$RELEASE_REQUEST_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+$ ]]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ] && [ -n "$REGISTRY_TOKEN" ]
 
@@ -158,16 +282,27 @@ jobs:
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$CANDIDATE_SHA")
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
             -czf "$archive" deploy config/product.json release-manifest/images.json release-manifest/codex-gates.json
+          # Environment approval may wait after verify-candidate.  Re-read the
+          # protected ref immediately before the first VPS side effect so an
+          # ancestor cannot be deployed as a normal forward release.
+          current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          [[ "$current_master" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$RELEASE_MODE" = release ] && [ "$CANDIDATE_SHA" != "$current_master" ]; then
+            echo "::error::Master a avansat în timpul aprobării production; release-ul vechi este retras."
+            exit 1
+          fi
           printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "install -d -o root -g root -m 0700 /root/kelion/runtime && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
           scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
-            "$CANDIDATE_SHA" "$CI_RUN_ID" "$BUILD_RUN_ID" "$RELEASE_MODE" "$remote_archive" <<'REMOTE'
+            "$CANDIDATE_SHA" "$CI_RUN_ID" "$BUILD_RUN_ID" "$RELEASE_MODE" "$RELEASE_REQUEST_ID" "$GITHUB_RUN_ID" "$remote_archive" <<'REMOTE'
           set -euo pipefail
-          sha=$1; ci_run=$2; build_run=$3; release_mode=$4; archive=$5
+          sha=$1; ci_run=$2; build_run=$3; release_mode=$4; release_request_id=$5; release_workflow_run_id=$6; archive=$7
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ci_run" =~ ^[0-9]+$ ]] && [[ "$build_run" =~ ^[0-9]+$ ]]
           [[ "$release_mode" = release || "$release_mode" = rollback ]]
+          [[ "$release_request_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$release_workflow_run_id" =~ ^[1-9][0-9]*$ ]]
           case "$archive" in /root/kelion/runtime/release-bundle.[0-9]*.tar.gz) ;; *) exit 1 ;; esac
           [ -f "$archive" ] && [ ! -L "$archive" ]
           work=$(mktemp -d /root/kelion/runtime/release.XXXXXX)
@@ -178,7 +313,9 @@ jobs:
           trap cleanup_remote EXIT
           if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
           tar --extract --gzip --file "$archive" --directory "$work" --no-same-owner --no-same-permissions
-          KELION_RELEASE_APPROVED=1 KELION_CI_RUN_ID="$ci_run" KELION_BUILD_RUN_ID="$build_run" \
+          KELION_RELEASE_APPROVED=1 KELION_RELEASE_REQUEST_ID="$release_request_id" \
+            KELION_RELEASE_WORKFLOW_RUN_ID="$release_workflow_run_id" \
+            KELION_CI_RUN_ID="$ci_run" KELION_BUILD_RUN_ID="$build_run" \
             bash "$work/deploy/deploy.sh" "$sha" "$work/release-manifest/images.json" "$release_mode"
           REMOTE
 
@@ -186,8 +323,7 @@ jobs:
         run: |
           set -euo pipefail
           origin=$(jq -er '.publicAppOrigin' config/product.json)
-          expected=${CANDIDATE_SHA:0:7}
-          version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -er '.v')
-          readiness=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz")
-          [ "$version" = "$expected" ]
-          jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$readiness" >/dev/null
+          proof=$(curl --fail --silent --show-error --max-time 12 "$origin/api/release-proof")
+          jq -e --arg expected "$CANDIDATE_SHA" '
+            .ready == true and .release.sideEffectsActive == true and .activeCommit == $expected
+          ' <<<"$proof" >/dev/null

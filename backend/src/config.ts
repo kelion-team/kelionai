@@ -678,7 +678,7 @@ export const config = {
   // exemption. Production fails closed when it is absent or malformed.
   adminEmail: configuredAdminEmail(),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
-  githubReleaseOAuthToken: env(...ENV_ALIASES.githubReleaseOAuthToken),
+  githubReleaseOAuthToken: fileOnlySecret(ENV_ALIASES.githubReleaseOAuthToken[0]),
   githubRepo: (process.env.GITHUB_REPO ?? productConfig.githubRepository).trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
@@ -698,6 +698,21 @@ if (config.googleTokenEncryptionPreviousKeyId
   && (!/^[A-Za-z0-9_-]{1,32}$/.test(config.googleTokenEncryptionPreviousKeyId)
     || config.googleTokenEncryptionPreviousKeyId === config.googleTokenEncryptionKeyId)) {
   throw new Error('GOOGLE_TOKEN_ENCRYPTION_PREVIOUS_KEY_ID invalid')
+}
+
+if (isProd) {
+  const constructorIdentities = [
+    { name: 'CODEX_WORKER_SECRET', enabled: config.codexWorker.enabled, secret: config.codexWorker.secret },
+    { name: 'CONSTRUCTOR_PUBLISHER_SECRET', enabled: config.constructorPublisher.enabled, secret: config.constructorPublisher.secret },
+    { name: 'CONSTRUCTOR_RELEASE_SECRET', enabled: config.constructorRelease.enabled, secret: config.constructorRelease.secret },
+  ].filter((identity) => identity.enabled)
+  for (let left = 0; left < constructorIdentities.length; left += 1) {
+    for (let right = left + 1; right < constructorIdentities.length; right += 1) {
+      if (constructorIdentities[left].secret === constructorIdentities[right].secret) {
+        throw new Error(`${constructorIdentities[left].name} și ${constructorIdentities[right].name} trebuie să fie secrete distincte`)
+      }
+    }
+  }
 }
 
 export function isAllowed(email: string): boolean {

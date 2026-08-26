@@ -70,6 +70,17 @@ import { apiFetch } from '../lib/transport'
 import { productConfig } from '../lib/productConfig'
 import { scopedClientKey } from '../lib/clientState'
 import { trustedTradingMessage } from '../lib/tradingBridge'
+import {
+  constructorCiText,
+  constructorHasVerifiedLiveResult,
+  constructorJobsFromSnapshot,
+  constructorPersistentEventsText,
+  isConstructorContinuity,
+  isConstructorWorkCard,
+  type ConstructorContinuity,
+  type ConstructorJobStatus,
+  type ConstructorWorkCard,
+} from '../lib/constructorContract'
 
 // linia aia pui butoanele astea") ────────────────────────────────────────────
 // Un rând mic de becuri (unul per AI) în bara de admin, în locul lăsat liber de
@@ -625,7 +636,8 @@ function MonitorPagina({
 
 interface BuildLiveJob {
   id: number
-  status: string
+  status: ConstructorJobStatus
+  stage: string
   order: string
 
   cerutDe?: string
@@ -633,41 +645,33 @@ interface BuildLiveJob {
   ci?: string | null
   prUrl: string | null
   attempts: number
-  updatedAt?: string
+  updatedAt: string
 
   pct?: number | null
-  continuity?: {
-    progress?: {
-      percent: number | null
-      currentStage: string | null
-      resolved: boolean
-      source: 'constructor_activity_events' | 'unavailable'
-    }
-    activity?: Array<{
-      id: string
-      label: string
-      state: 'completed' | 'current' | 'recovery' | 'resolved'
-      at: string
-      percent: number | null
-    }>
-  }
-  workCard?: {
-    id: string
-    canonicalLink: string
-    acceptanceCriteria: string[]
-    contextLinks: string[]
-    actor: string | null
-    currentStep: string | null
-    heartbeatAt: string | null
-    plan: Array<{ key: string; label: string; state: 'completed' | 'current' | 'pending' }>
-    decisions: string[]
-    approvals: string[]
-    risks: string[]
-    dependencies: string[]
-    escalationCondition: string
-    evidence: { prUrl: string | null; ci: string | null; commit: string | null; liveVersion: string | null; eventCount: number }
-    closure: { resolved: boolean; closedAt: string | null }
-  } | null
+  continuity?: ConstructorContinuity
+  workCard?: ConstructorWorkCard | null
+}
+
+const isBuildLiveJob = (input: unknown): input is BuildLiveJob => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false
+  const value = input as Record<string, unknown>
+  return Number.isSafeInteger(value.id)
+    && Number(value.id) > 0
+    && ['queued', 'running', 'done', 'failed', 'cancelled'].includes(String(value.status ?? ''))
+    && typeof value.stage === 'string'
+    && typeof value.order === 'string'
+    && (value.cerutDe === undefined || typeof value.cerutDe === 'string')
+    && (value.progress === null || typeof value.progress === 'string')
+    && (value.ci === undefined || value.ci === null || typeof value.ci === 'string')
+    && (value.prUrl === null || typeof value.prUrl === 'string')
+    && Number.isSafeInteger(value.attempts)
+    && Number(value.attempts) >= 0
+    && typeof value.updatedAt === 'string'
+    && Number.isFinite(Date.parse(value.updatedAt))
+    && (value.pct === undefined || value.pct === null || (typeof value.pct === 'number'
+      && Number.isFinite(value.pct) && value.pct >= 0 && value.pct <= 100))
+    && (value.continuity === undefined || isConstructorContinuity(value.continuity))
+    && (value.workCard === undefined || value.workCard === null || isConstructorWorkCard(value.workCard))
 }
 
 const buildLabel = (status: string): string => {
@@ -677,44 +681,50 @@ const buildLabel = (status: string): string => {
     running: t.buildRunning,
     done: t.buildDone,
     failed: t.buildFailed,
+    cancelled: t.buildCancelled,
   }
   return map[status] ?? status
 }
 function BuildSurface({ zoom }: { zoom: number }) {
   const [jobs, setJobs] = useState<BuildLiveJob[]>([])
   const [note, setNote] = useState('')
-  const [loaded, setLoaded] = useState(false)
+  const [readState, setReadState] = useState<'loading' | 'ready' | 'error'>('loading')
 
   const [opresc, setOpresc] = useState<ReadonlySet<number>>(new Set())
-  const opreste = async (id: number): Promise<void> => {
-    if (opresc.has(id)) return
+  const oprescRef = useRef(new Set<number>())
+  const opreste = async (job: BuildLiveJob): Promise<void> => {
+    const id = job.id
+    if (oprescRef.current.has(id)) return
     if (
       !window.confirm(uiStrings().buildStopConfirm.replace('{n}', String(id)))
     )
       return
-    setOpresc((s) => new Set(s).add(id))
+    oprescRef.current.add(id)
+    setOpresc(new Set(oprescRef.current))
     try {
       const r = await apiFetch(`/api/admin/constructor/${id}/anuleaza`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
       })
-      if (r.ok) {
+      const body = await r.json().catch(() => null) as { ok?: boolean } | null
+      if (r.ok && body?.ok === true) {
         setJobs((js) =>
           js.map((j) =>
             j.id === id
-              ? { ...j, status: 'failed', progress: 'anulat de owner' }
+              ? { ...j, status: 'cancelled', progress: 'cancelled_by_admin' }
               : j,
           ),
         )
+      } else {
+        setNote(uiStrings().buildUnavailable)
       }
     } catch {
-      /* pollul următor reîncearcă */
+      setNote(uiStrings().buildNoServer)
     } finally {
-      setOpresc((s) => {
-        const n = new Set(s)
-        n.delete(id)
-        return n
-      })
+      oprescRef.current.delete(id)
+      setOpresc(new Set(oprescRef.current))
     }
   }
   useEffect(() => {
@@ -728,23 +738,32 @@ function BuildSurface({ zoom }: { zoom: number }) {
         if (!alive) return
         if (r.status === 401) {
           setNote(uiStrings().sessionExpired)
-          setJobs([])
+          setReadState('error')
         } else if (r.status === 403) {
           setNote(uiStrings().buildOnlyAdmin)
-          setJobs([])
+          setReadState('error')
         } else if (!r.ok) {
           setNote(uiStrings().buildUnavailable)
+          setReadState('error')
         } else {
-          const j = (await r.json()) as { jobs?: BuildLiveJob[] }
+          const snapshotJobs = constructorJobsFromSnapshot<BuildLiveJob>(
+            await r.json(),
+            isBuildLiveJob,
+          )
           if (!alive) return
-          setNote('')
-          setJobs(Array.isArray(j.jobs) ? j.jobs : [])
+          if (snapshotJobs === null) {
+            setNote(uiStrings().buildUnavailable)
+            setReadState('error')
+          } else {
+            setNote('')
+            setJobs(snapshotJobs)
+            setReadState('ready')
+          }
         }
-        setLoaded(true)
       } catch {
         if (alive) {
           setNote(uiStrings().buildNoServer)
-          setLoaded(true)
+          setReadState('error')
         }
       } finally {
         if (alive) timer = window.setTimeout(() => void tick(), 2500)
@@ -762,16 +781,18 @@ function BuildSurface({ zoom }: { zoom: number }) {
       style={{ fontSize: `${zoom}em` }}
     >
       <div className="build-head">{uiStrings().buildHead}</div>
-      {!loaded ? (
+      {readState === 'loading' ? (
         <p className="build-empty">{uiStrings().buildLoading}</p>
       ) : note ? (
         <p className="build-empty">{note}</p>
+      ) : readState === 'error' ? (
+        <p className="build-empty">{uiStrings().buildUnavailable}</p>
       ) : jobs.length === 0 ? (
         <p className="build-empty">{uiStrings().buildEmpty}</p>
       ) : (
         <ul className="build-list">
           {jobs.map((j) => (
-            <li key={j.id} className={`build-item build-${j.status}`}>
+            <li key={j.id} className={`build-item build-${j.status === 'done' && !constructorHasVerifiedLiveResult(j.status, j.continuity) ? 'unverified' : j.status}`}>
               <div className="build-row">
                 {/* THE QUOTA PAUSE, VISIBLE (D6): a postponed order stays „running” in
                 the database — correct, it's not lost — but on screen it looked identical
@@ -782,31 +803,47 @@ function BuildSurface({ zoom }: { zoom: number }) {
                     {uiStrings().buildThrottled}
                   </span>
                 ) : (
-                  <span className={`build-badge build-badge-${j.status}`}>
-                    {buildLabel(j.status)}
+                  <span className={`build-badge build-badge-${j.status === 'done' && !constructorHasVerifiedLiveResult(j.status, j.continuity) ? 'unverified' : j.status}`}>
+                    {j.status === 'done' && !constructorHasVerifiedLiveResult(j.status, j.continuity)
+                      ? uiStrings().buildDoneUnverified
+                      : buildLabel(j.status)}
                   </span>
                 )}
                 {/* The INDEPENDENT verification's verdict (Stage 6): „Gata” proven by CI. */}
-                {j.ci === 'verde' ? (
+                {j.ci === 'green' ? (
                   <span
                     className="build-ci build-ci-ok"
                     title={uiStrings().buildCiOk}
                   >
                     CI ✓
                   </span>
-                ) : j.ci === 'roșu' ? (
+                ) : j.ci === 'pr_checks_green' ? (
+                  <span
+                    className="build-ci build-ci-wait"
+                    title="Verificările PR sunt verzi; push CI și artefactul release nu sunt încă dovedite"
+                  >
+                    PR ✓
+                  </span>
+                ) : j.ci === 'red' ? (
                   <span
                     className="build-ci build-ci-bad"
                     title={uiStrings().buildCiFailed}
                   >
                     CI ✗
                   </span>
-                ) : j.ci === 'în curs' ? (
+                ) : j.ci === 'in_progress' ? (
                   <span
                     className="build-ci build-ci-wait"
                     title={uiStrings().buildCiRunning}
                   >
                     CI…
+                  </span>
+                ) : j.ci === 'local_gates' ? (
+                  <span
+                    className="build-ci build-ci-wait"
+                    title="Porțile locale au trecut; verificările independente GitHub urmează."
+                  >
+                    porți locale ✓
                   </span>
                 ) : null}
                 <span className="build-order">
@@ -819,11 +856,13 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   </span>
                 )}
 
-                {(j.status === 'queued' || j.status === 'running') && (
+                {((j.status === 'queued' && j.stage === 'queued')
+                  || (j.status === 'running'
+                    && ['claimed', 'accepted', 'working'].includes(j.stage))) && (
                   <button
                     type="button"
                     className="build-stop"
-                    onClick={() => void opreste(j.id)}
+                    onClick={() => void opreste(j)}
                     disabled={opresc.has(j.id)}
                     aria-label={uiStrings().buildStop}
                     title={uiStrings().buildStop}
@@ -844,7 +883,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
                     <div>Acceptare: {j.workCard.acceptanceCriteria.join(' · ')}</div>
                     <div>Plan: {j.workCard.plan.map((step) => `${step.label} [${step.state}]`).join(' · ')}</div>
                     {j.workCard.contextLinks.map((link) => <div key={link}><a href={link} target="_blank" rel="noreferrer">Sursa</a></div>)}
-                    <div>Dovezi: {j.workCard.evidence.eventCount} evenimente{j.workCard.evidence.prUrl ? ' · PR atasat' : ''}{j.workCard.evidence.ci ? ` · CI ${j.workCard.evidence.ci}` : ''}</div>
+                    <div>Dovezi: evenimente {constructorPersistentEventsText(j.workCard.progress, j.workCard.evidence.eventCount)}{j.workCard.evidence.prUrl ? ' · PR atasat' : ''}{constructorCiText(j.workCard.evidence.ci) ? ` · ${constructorCiText(j.workCard.evidence.ci)}` : ''}</div>
                     {j.workCard.risks.length > 0 && <div>Riscuri: {j.workCard.risks.join(' · ')}</div>}
                     {j.workCard.dependencies.length > 0 && <div>Dependente: {j.workCard.dependencies.join(' · ')}</div>}
                     <div>Escaladare: {j.workCard.escalationCondition}</div>
@@ -855,6 +894,8 @@ function BuildSurface({ zoom }: { zoom: number }) {
                 <div className="build-fail">
                   ✗ Eșuat{j.progress ? ` — ${j.progress}` : ''}
                 </div>
+              ) : j.status === 'cancelled' ? (
+                <div className="build-progress">■ {uiStrings().buildCancelled}</div>
               ) : (
                 <>
                   {typeof j.pct === 'number' && (
@@ -888,7 +929,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   )}
                 </>
               )}
-              {j.progress && j.status !== 'failed' ? (
+              {j.progress && j.status !== 'failed' && j.status !== 'cancelled' ? (
                 <div className="build-progress">
                   {j.status === 'running' && (
                     <span className="build-spin" aria-hidden>

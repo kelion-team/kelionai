@@ -49,11 +49,11 @@ export function problemeGlobaleCache(): ProblemaKelion[] {
 /** Poza PROASPĂTĂ (așteaptă citirea) — pentru panoul de admin, unde ownerul vrea
  *  starea de ACUM, nu una veche de cache. Actualizează și cache-ul. */
 export async function problemeGlobaleAcum(): Promise<ProblemaKelion[]> {
-  return computeaza()
+  return computeaza(true)
 }
 
 /** Reconstruiește poza defectelor din surse reale. */
-async function computeaza(): Promise<ProblemaKelion[]> {
+async function computeaza(requireReadableQueue = false): Promise<ProblemaKelion[]> {
   const out: ProblemaKelion[] = []
   // Erori de server: nivel error+ (50) din jurnalul pino in-memory.
   for (const e of recentLogs(50, 15)) {
@@ -61,10 +61,14 @@ async function computeaza(): Promise<ProblemaKelion[]> {
     if (!t) continue
     out.push({ sursa: 'server', text: t, ...explicaEroare(t) })
   }
-  // Ordine de build eșuate (constructorul) — best-effort, nu blochează restul.
-  const jobs = await listBuildJobs(15)
-    .then((j) => j ?? [])
-    .catch(() => [])
+  // Creierul folosește cache-ul best-effort; panoul Admin cere însă o poză
+  // atomică. Acolo, coada necitibilă invalidează răspunsul în loc să fie
+  // „zero ordine eșuate”.
+  const jobsRead = await listBuildJobs(15).catch(() => null)
+  if (requireReadableQueue && jobsRead === null) {
+    throw new Error('constructor_queue_unreadable')
+  }
+  const jobs = jobsRead ?? []
   for (const j of jobs.filter((x) => x.status === 'failed')) {
     out.push({
       sursa: 'ordin',
