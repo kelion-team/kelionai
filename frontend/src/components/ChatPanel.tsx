@@ -1839,6 +1839,9 @@ export default function ChatPanel({
   }, [])
 
   const micManualOffRef = useRef(true)
+  // Doar clickul manual armează prima rostire fără wake-word; retry-ul poate
+  // păstra intenția cel mult 30s, apoi orice reconectare rămâne ambientală.
+  const micStartExplicitPanaLaRef = useRef(0)
   const micDoritaInainteApelRef = useRef(false)
   const apelActivRef = useRef(false)
   const micStartingRef = useRef(false)
@@ -2125,6 +2128,7 @@ export default function ChatPanel({
       }
 
       const vl = await deschideVocalLive({
+        explicitStart: Date.now() < micStartExplicitPanaLaRef.current,
         onState: setLivePhase,
         onGata: () => {
           if (generatie !== vlGeneratieRef.current) return
@@ -2179,6 +2183,7 @@ export default function ChatPanel({
         return
       }
 
+      micStartExplicitPanaLaRef.current = 0
       vlRef.current = vl
       setFluxMicVersiune((v) => v + 1)
       registerLiveFocus({
@@ -2228,6 +2233,7 @@ export default function ChatPanel({
     // exclusiv clientul OpenAI Realtime.
     if (micStartingRef.current || vlRef.current) {
       micManualOffRef.current = true
+      micStartExplicitPanaLaRef.current = 0
       vlGeneratieRef.current++
       micStartingRef.current = false
       unregisterLiveFocus()
@@ -2240,6 +2246,7 @@ export default function ChatPanel({
       return
     }
     micManualOffRef.current = false
+    micStartExplicitPanaLaRef.current = Date.now() + 30_000
     micTerminalAckedRef.current = false
     voceAiureaRef.current = false
     void ensureMicRef.current()
