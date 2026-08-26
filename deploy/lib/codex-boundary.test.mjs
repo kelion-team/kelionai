@@ -68,6 +68,14 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
 })
 
+test('imaginea de porți include runtime-urile cerute de testele de publicare', () => {
+  const dockerfile = read('Dockerfile.gates')
+  const gates = read('deploy/gates/run-gates.sh')
+
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git python3/)
+  assert.match(gates, /deploy\/lib\/constructor-publication\.test\.mjs/)
+})
+
 test('controlul Constructorului arhivează numai intrările versionate, cu preflight fail-closed', () => {
   const workflow = read('.github/workflows/vps-run.yml')
 
