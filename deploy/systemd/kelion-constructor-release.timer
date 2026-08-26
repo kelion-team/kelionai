@@ -1,5 +1,8 @@
 [Unit]
 Description=Poll merged Constructor jobs for approved release dispatch
+After=kelion-runtime-config-recovery.service
+ConditionPathExists=/run/kelion/runtime-config-recovery.ready
+ConditionPathExists=!/run/kelion/constructor-activation.pending
 
 [Timer]
 OnBootSec=4min

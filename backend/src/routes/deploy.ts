@@ -35,7 +35,10 @@ function deployState(job: BuildJob | null): DeployState {
     ? job.constructorStage as typeof STAGES[number]
     : job.status === 'queued' ? 'queued' : 'working'
   const stageIndex = STAGES.indexOf(stage)
-  const completed = job.status === 'done' && stage === 'deployed' && Boolean(job.commit && job.liveVersion)
+  const completed = job.status === 'done'
+    && stage === 'deployed'
+    && /^[0-9a-f]{40}$/.test(job.commit ?? '')
+    && job.liveVersion === job.commit
   const failed = job.status === 'failed' || job.status === 'cancelled'
   return {
     status: completed ? 'success' : failed ? 'failed' : 'running',

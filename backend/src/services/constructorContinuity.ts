@@ -3,6 +3,7 @@ export type ConstructorContinuityState =
   | 'running'
   | 'recovering'
   | 'waiting_external'
+  | 'waiting_manual'
   | 'completed'
   | 'cancelled'
 
@@ -10,6 +11,7 @@ export interface ConstructorContinuityJob {
   status: string
   constructorStage?: string | null
   progress?: string | null
+  log?: string | null
   attempts?: number
   commit?: string | null
   liveVersion?: string | null
@@ -21,7 +23,7 @@ export interface ConstructorContinuity {
   message: string
   nextAction: string | null
   retry: {
-    mode: 'automatic'
+    mode: 'automatic' | 'manual'
     attempts: number
   }
   finalProof: {
@@ -37,18 +39,27 @@ export function constructorContinuity(
 ): ConstructorContinuity {
   const checkpoint = job.constructorStage ?? job.status
   const progress = job.progress ?? ''
-  const cancelled = job.status === 'failed' && /anulat/i.test(progress)
+  const cancelled = job.status === 'cancelled'
+    || (job.status === 'failed' && /anulat/i.test(progress))
   const complete = job.status === 'done'
     && checkpoint === 'deployed'
-    && Boolean(job.commit)
-    && Boolean(job.liveVersion)
-  const waitingExternal = progress === 'external_action_required'
-  const incidentStatus = typeof incident === 'object' && incident !== null && 'status' in incident
-    ? String(incident.status)
+    && /^[0-9a-f]{40}$/.test(job.commit ?? '')
+    && job.liveVersion === job.commit
+  const incidentState = typeof incident === 'object' && incident !== null && 'state' in incident
+    ? String(incident.state)
     : null
-  const recovering = !cancelled && !complete && (
-    job.status === 'failed'
-    || incidentStatus === 'open'
+  const incidentNextAction = typeof incident === 'object' && incident !== null && 'nextAction' in incident
+    ? String(incident.nextAction)
+    : null
+  const pipelineExternalAction = job.log === 'branch_protection_invalid'
+    ? 'Corectează protecția ramurii master conform politicii Constructor; publisherul va relua automat.'
+    : job.log === 'github_auth_required'
+      ? 'Reautorizează credentiala GitHub limitată a publisherului; jobul va continua automat.'
+      : null
+  const waitingExternal = progress === 'external_action_required' || incidentState === 'blocked'
+  const waitingManual = job.status === 'failed' && !waitingExternal
+  const recovering = !cancelled && !complete && !waitingManual && (
+    ['open', 'diagnosing', 'repairing', 'verifying'].includes(incidentState ?? '')
     || /retry|recover|reluare|recovery/i.test(progress)
   )
 
@@ -64,7 +75,13 @@ export function constructorContinuity(
   } else if (waitingExternal) {
     state = 'waiting_external'
     message = 'Fluxul asteapta o autorizare externa si se va relua automat dupa confirmare.'
-    nextAction = 'Finalizeaza autorizarea externa indicata in starea workerului.'
+    nextAction = incidentNextAction
+      ?? pipelineExternalAction
+      ?? 'Finalizează autorizarea externă indicată în starea workerului.'
+  } else if (waitingManual) {
+    state = 'waiting_manual'
+    message = 'Rezultatul terminal vechi nu se reia automat; este necesară comanda explicită Reia.'
+    nextAction = 'Folosește Reia numai după verificarea cauzei și a cererii curente.'
   } else if (recovering) {
     state = 'recovering'
     message = 'Constructorul recupereaza automat ultima tranzitie confirmata.'
@@ -81,7 +98,7 @@ export function constructorContinuity(
     checkpoint,
     message,
     nextAction,
-    retry: { mode: 'automatic', attempts: job.attempts ?? 0 },
+    retry: { mode: waitingManual || cancelled ? 'manual' : 'automatic', attempts: job.attempts ?? 0 },
     finalProof: {
       complete,
       commit: job.commit ?? null,

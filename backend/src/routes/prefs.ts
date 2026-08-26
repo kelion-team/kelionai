@@ -63,8 +63,13 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
   // The gestures state (the disabled list) — PUBLIC, so that ANY user's
   // avatar doesn't play the gestures removed by Adrian. Not sensitive
   // (cosmetic behaviour).
-  app.get('/api/gestures/state', async (_req, reply) => {
-    return reply.send({ disabled: await getDisabledGestures() })
+  app.get('/api/gestures/state', async (req, reply) => {
+    try {
+      return reply.send({ disabled: await getDisabledGestures() })
+    } catch (error) {
+      req.log.error({ err: error }, 'public gesture state unreadable')
+      return reply.code(503).send({ error: 'gesture_state_unreadable' })
+    }
   })
 
   app.get('/api/prefs', async (req, reply) => {

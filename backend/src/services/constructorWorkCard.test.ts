@@ -16,6 +16,7 @@ describe('Constructor canonical work card', () => {
     }, {
       progress: { percent: 25, completed: 2, total: 8, currentStage: 'Executie', resolved: false, source: 'constructor_activity_events' },
       activity: [{ id: '1', eventKey: 'working', stage: 'working', label: 'Executie', state: 'current', at: '2026-08-25T20:00:00.000Z', percent: 25 }],
+      eventCount: 1,
     }, {
       acceptanceCriteria: ['Rezultat verificat'],
       contextLinks: ['https://example.invalid/spec'],
@@ -42,5 +43,36 @@ describe('Constructor canonical work card', () => {
     })
     expect(card.plan.map((step) => step.state)).toEqual(['pending', 'current', 'pending'])
     expect(card.evidence.eventCount).toBe(1)
+  })
+
+  it('closes an explicitly cancelled card without fabricating a deploy result', () => {
+    const card = projectConstructorWorkCard({
+      id: 43,
+      orderText: 'Cerere anulată',
+      status: 'cancelled',
+      constructorStage: 'cancelled',
+      progress: 'cancelled_by_admin',
+      updatedAt: '2026-08-25T20:00:00.000Z',
+    }, {
+      progress: { percent: 25, completed: 2, total: 8, currentStage: null, resolved: false, source: 'constructor_activity_events' },
+      activity: [{ id: '2', eventKey: 'cancelled', stage: null, label: 'Anulată', state: 'resolved', at: '2026-08-25T20:00:00.000Z', percent: 25 }],
+      eventCount: 1,
+    }, {
+      acceptanceCriteria: [],
+      contextLinks: [],
+      decisions: [],
+      approvals: [],
+      risks: [],
+      dependencies: [],
+      escalationCondition: 'Nicio escaladare',
+    }, [
+      { key: 'queued', sequence: 0, label: 'Acceptată' },
+      { key: 'deployed', sequence: 1, label: 'Live' },
+    ])
+    expect(card.closure).toEqual({
+      resolved: true,
+      closedAt: '2026-08-25T20:00:00.000Z',
+    })
+    expect(card.finalResult).toBeNull()
   })
 })

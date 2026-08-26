@@ -1,0 +1,15 @@
+[Unit]
+Description=Recover an interrupted Kelion runtime configuration cutover
+Wants=docker.service
+After=local-fs.target docker.service
+Before=kelion-constructor-sync.service kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service
+
+[Service]
+Type=oneshot
+Environment=KELION_RECOVERY_BOOT=1
+ExecStart=/root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml
+RemainAfterExit=yes
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

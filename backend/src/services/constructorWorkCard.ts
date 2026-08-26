@@ -79,7 +79,9 @@ export function projectConstructorWorkCard(
   const reached = new Set(observation.activity.flatMap((event) => event.stage ? [event.stage] : []))
   const currentKey = job.constructorStage ?? job.status
   const resolved = observation.progress.resolved
-  const closed = resolved || (job.status === 'failed' && /anulat/i.test(job.progress ?? ''))
+  const closed = resolved
+    || job.status === 'cancelled'
+    || (job.status === 'failed' && /anulat/i.test(job.progress ?? ''))
   return {
     id: `constructor:${job.id}`,
     canonicalLink: `#constructor-work-card-${job.id}`,
@@ -109,7 +111,7 @@ export function projectConstructorWorkCard(
       ci: job.ci ?? null,
       commit: job.commit ?? null,
       liveVersion: job.liveVersion ?? null,
-      eventCount: observation.activity.length,
+      eventCount: observation.eventCount,
     },
     risks: metadata.risks,
     dependencies: metadata.dependencies,
@@ -145,7 +147,7 @@ const strings = (value: unknown): string[] => Array.isArray(value)
 export async function constructorWorkCardsForJobs(
   jobs: readonly ConstructorWorkCardJob[],
   observations: ReadonlyMap<number, ConstructorObservabilityView>,
-): Promise<Map<number, ConstructorWorkCardView>> {
+): Promise<Map<number, ConstructorWorkCardView> | null> {
   const result = new Map<number, ConstructorWorkCardView>()
   if (jobs.length === 0) return result
   try {
@@ -163,6 +165,7 @@ export async function constructorWorkCardsForJobs(
       ),
     ])
     const cards = new Map(cardsResult.rows.map((row) => [Number(row.job_id), row]))
+    if (cards.size !== jobs.length) return null
     const stages = stagesResult.rows.map((row) => ({
       key: row.activity_key,
       sequence: Number(row.sequence_no),
@@ -183,7 +186,7 @@ export async function constructorWorkCardsForJobs(
       }, stages))
     }
   } catch {
-    return result
+    return null
   }
   return result
 }

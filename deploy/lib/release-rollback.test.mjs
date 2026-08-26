@@ -310,6 +310,7 @@ test('lock-ul de publicare este normalizat prin FD fără symlink sau hardlink',
 test('rollback-ul managed restaurează markerul chiar dacă vechiul proces s-a auto-oprit', () => {
   const restart = body('restart_previous_slot')
   const rollback = body('rollback_switch')
+  const publish = body('publish_candidate_active_marker')
   const managedBranch = rollback.slice(
     rollback.indexOf('  if [ "$active_slot" = blue ]'),
     rollback.indexOf('  else'),
@@ -318,7 +319,13 @@ test('rollback-ul managed restaurează markerul chiar dacă vechiul proces s-a a
   assert.ok(restart.indexOf('restore_release_marker') < restart.indexOf('ensure_containers_running'))
   assert.match(managedBranch, /restart_previous_slot/)
   assert.doesNotMatch(managedBranch, /active_runtime_stopped/)
-  assert.match(deploy, /mv "\$temporary_active" "\$RELEASE_STATE_ROOT\/active"/)
+  ordered(publish, [
+    ['faza pregătită', 'write_constructor_deploy_quiesce_journal active-prepared'],
+    ['fsync marker temporar', 'fsync_release_artifact "$temporary_active" file'],
+    ['publicarea markerului', 'mv -f -- "$temporary_active" "$RELEASE_STATE_ROOT/active"'],
+    ['fsync director marker', 'fsync_release_artifact "$RELEASE_STATE_ROOT" directory'],
+    ['faza publicată', 'write_constructor_deploy_quiesce_journal active-published'],
+  ])
 })
 
 test('rollback-ul primului cutover reface markerul legacy chiar dacă runtime-ul rulează', () => {
@@ -406,9 +413,10 @@ printf '%s\\n' "$calls"
 })
 
 test('după expunerea posibilă a candidatului rollback-ul rămâne fail-closed', () => {
-  const managedPoint = deploy.indexOf('\n  mark_point_of_no_return\n')
-  const exposeCandidate = deploy.indexOf('\nmv "$temporary_upstream" "$UPSTREAM_FILE"\n', managedPoint)
-  const activateCandidate = deploy.indexOf('\nmv "$temporary_active" "$RELEASE_STATE_ROOT/active"\n', exposeCandidate)
+  const prepared = deploy.lastIndexOf('\nwrite_constructor_deploy_quiesce_journal active-prepared \\')
+  const exposeCandidate = deploy.indexOf('\npublish_target_proxy_files_from_intent \\', prepared)
+  const managedPoint = deploy.lastIndexOf('\n  mark_point_of_no_return\n', exposeCandidate)
+  const activateCandidate = deploy.indexOf('\npublish_candidate_active_marker \\', exposeCandidate)
   const restore = body('restore_database_if_required')
   const rollback = body('rollback_switch')
   const exitHandler = body('on_release_exit')
@@ -419,18 +427,17 @@ test('după expunerea posibilă a candidatului rollback-ul rămâne fail-closed'
   assert.ok(rollback.indexOf('point_of_no_return') < rollback.indexOf('stop_candidate_runtime'))
   assert.ok(exitHandler.indexOf('point_of_no_return') < exitHandler.indexOf('rollback_switch'))
   const postPointBranch = exitHandler.slice(
-    exitHandler.indexOf('    if [ "$point_of_no_return" = 1 ]'),
-    exitHandler.indexOf('    else'),
+    exitHandler.indexOf('    elif [ "$point_of_no_return" = 1 ]; then'),
+    exitHandler.indexOf('    else', exitHandler.indexOf('    elif [ "$point_of_no_return" = 1 ]; then')),
   )
   assert.doesNotMatch(postPointBranch, /stop_candidate_runtime|restore_database_if_required|restart_legacy_runtime|rollback_switch/)
   assert.match(postPointBranch, /recover_schedule_after_point_of_no_return/)
   assert.match(deploy, /point-of-no-return depășit; restore-ul automat ar putea pierde scrieri/)
   assert.match(exitHandler, /eșec după point-of-no-return; candidatul, DB și proxy-ul rămân nemodificate/)
 
-  const legacyProxyStart = deploy.indexOf(' up -d --no-build --wait --wait-timeout 90')
+  const legacyProxyStart = deploy.indexOf('"$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up -d --no-build --wait --wait-timeout 90', exposeCandidate)
   const legacyPoint = deploy.lastIndexOf('\n    mark_point_of_no_return\n', legacyProxyStart)
-  const upstreamWrite = deploy.indexOf('\nmv "$temporary_upstream" "$UPSTREAM_FILE"\n')
-  assert.ok(legacyPoint > upstreamWrite && legacyProxyStart > legacyPoint)
+  assert.ok(legacyPoint > exposeCandidate && legacyProxyStart > legacyPoint)
 })
 
 test('recovery-ul distructiv persistă faza și ignoră semnale repetate', () => {
@@ -454,7 +461,9 @@ test('recovery-ul distructiv persistă faza și ignoră semnale repetate', () =>
   ])
   assert.ok(beforeMigrator >= 0 && migrator > beforeMigrator && migrated > migrator)
   assert.ok(markPoint.indexOf('point_of_no_return=1') < markPoint.indexOf('write_recovery_journal point-of-no-return'))
-  assert.ok(deploy.indexOf('\n  mark_point_of_no_return\n') < deploy.indexOf('\nmv "$temporary_upstream" "$UPSTREAM_FILE"\n'))
+  const proxyPublish = deploy.lastIndexOf('\npublish_target_proxy_files_from_intent \\')
+  const managedPoint = deploy.lastIndexOf('\n  mark_point_of_no_return\n', proxyPublish)
+  assert.ok(managedPoint >= 0 && managedPoint < proxyPublish)
   assert.ok(rollback.indexOf('write_recovery_journal rolled-back') < rollback.indexOf('recovery_armed=0'))
   assert.ok(rollback.indexOf('clear_recovery_journal') < rollback.indexOf('recovery_armed=0'))
   assert.ok(exitHandler.indexOf("trap '' HUP INT TERM") < exitHandler.indexOf('rollback_switch'))
@@ -484,16 +493,28 @@ test('stackul vechi rămâne recuperabil și este oprit idempotent', () => {
   assert.doesNotMatch(deploy, /docker\s+(?:image|volume)\s+rm[^\n]*(?:kelionai-app|omniroute|kelionai-coqui)/)
 
   const smoke = deploy.indexOf("[ \"$public_ok\" = 1 ] || die 'smoke-ul public")
-  const normalStop = deploy.lastIndexOf('\nstop_active_runtime\n')
+  const normalStop = deploy.lastIndexOf('\n  stop_active_runtime\n')
   assert.ok(smoke >= 0 && normalStop > smoke)
+  const legacyRetire = deploy.lastIndexOf('\n  retire_legacy_generation_from_deploy_journal \\', smoke)
+  const activeMarker = deploy.indexOf('\npublish_candidate_active_marker \\', legacyRetire)
+  assert.ok(legacyRetire >= 0 && activeMarker > legacyRetire,
+    'writerul legacy trebuie retras persistent înainte de markerul candidat')
 })
 
 test('dovada backupului rămâne disponibilă până când release-ul este comis', () => {
-  const releaseRecord = deploy.indexOf('mv "$record" "$RUNTIME_ROOT/last-release.json"')
-  assert.ok(releaseRecord >= 0)
-  const finalization = deploy.slice(releaseRecord)
+  const writer = body('write_release_completion_record')
+  ordered(writer, [
+    ['recordul release-ului', 'mv -f -- "$record" "$RUNTIME_ROOT/last-release.json"'],
+    ['sincronizarea directorului', 'fsync_release_artifact "$RUNTIME_ROOT" directory'],
+  ])
+
+  const finalCall = deploy.lastIndexOf('\nwrite_release_completion_record "$release_completed_slot"')
+  assert.ok(finalCall >= 0)
+  const finalization = deploy.slice(finalCall)
   ordered(finalization, [
-    ['recordul release-ului', 'mv "$record" "$RUNTIME_ROOT/last-release.json"'],
+    ['recordul release-ului', 'write_release_completion_record "$release_completed_slot"'],
+    ['reconcilierea Constructor', 'restore_constructor_after_release'],
+    ['ledgerul final', 'write_release_request_ledger success'],
     ['dezarmarea recovery', 'recovery_armed=0'],
     ['eliminarea trap-ului', 'trap - HUP INT TERM EXIT'],
     ['ștergerea dovezii', 'rm -f -- "$PROOF_FILE"'],

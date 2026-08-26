@@ -1,4 +1,5 @@
 name: build-release-images
+run-name: build-release-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}
 
 on:
   workflow_run:

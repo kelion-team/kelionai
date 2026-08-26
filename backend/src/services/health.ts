@@ -4,7 +4,7 @@ import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } fr
 import { openaiHealth } from './openaiResponses.js'
 import { stareDispecer } from './dispecer.js'
 import { probaBrowserulMainilor } from './browser.js'
-import { getCodexWorkerStatus } from './codexWorker.js'
+import { getConstructorChainStatus } from './constructorChainStatus.js'
 import { GITHUB_API, ghToken } from './githubApi.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
@@ -114,22 +114,38 @@ export async function systemHealth(): Promise<string> {
 
   // 3. Failed build orders (the constructor).
   try {
-    // null = coada nu s-a putut citi (semnalat separat de db_moarta, mai jos).
+    // null = query-ul cozii/migrarea nu poate fi citită. SELECT 1 de mai jos
+    // dovedește doar conectivitatea, deci nu are voie să transforme asta în
+    // listă goală și într-un health fals-verde.
     // Fereastră SCURTĂ (Adrian, 4 aug: „ce pică și nu mai e de actualitate să
     // nu mai rămână"): doar eșecurile din ultimele 3h — cele vechi, deja
     // parcate de autonomie, se sting singure din audit, nu se adună toată
     // noaptea.
-    const jobs = (await listBuildJobs(10)) ?? []
-    const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 3 * 3600_000)
-    if (failed.length)
+    const jobs = await listBuildJobs(10)
+    if (jobs === null) {
       problems.push({
-        id: 'constructor_esuat',
-        grav: 'mediu',
-        desc: `${failed.length} ordine de construcție eșuate: ${failed.map((j) => `#${j.id}`).join(', ')}`,
-        reparabil: 'vezi constructor_status + jurnalul din Admin→Constructor; repune ordinul reformulat cu build_software',
+        id: 'constructor_queue_unreadable',
+        grav: 'critic',
+        desc: 'Coada durabilă Constructor nu poate fi citită, deși baza poate încă răspunde la SELECT 1.',
+        reparabil: 'verifică migrarea build_jobs și query-ul listBuildJobs; nu declara lanțul sănătos până când coada este lizibilă',
       })
+    } else {
+      const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 3 * 3600_000)
+      if (failed.length)
+        problems.push({
+          id: 'constructor_esuat',
+          grav: 'mediu',
+          desc: `${failed.length} ordine de construcție eșuate: ${failed.map((j) => `#${j.id}`).join(', ')}`,
+          reparabil: 'vezi constructor_status + jurnalul din Admin→Constructor; repune ordinul reformulat cu build_software',
+        })
+    }
   } catch {
-    /* dead DB — caught below */
+    problems.push({
+      id: 'constructor_queue_unreadable',
+      grav: 'critic',
+      desc: 'Citirea cozii durabile Constructor a eșuat.',
+      reparabil: 'verifică migrarea build_jobs și query-ul listBuildJobs; nu declara lanțul sănătos până când coada este lizibilă',
+    })
   }
 
   // 4. The database + the client-error wave.
@@ -285,15 +301,17 @@ export async function systemHealth(): Promise<string> {
     /* proba însăși a crăpat — nu inventăm nici viu, nici mort */
   }
 
-  const codex = await getCodexWorkerStatus()
-  const codexReady = codex.worker.state === 'ready'
-  info.constructorCodex = codexReady ? `Codex worker ${codex.status ?? 'ready'}` : `Codex worker ${codex.worker.state}`
-  if (!codexReady) {
+  const constructor = await getConstructorChainStatus()
+  const constructorReady = constructor.state === 'ready' || constructor.state === 'busy'
+  info.constructorCodex = constructorReady
+    ? `Lanț Constructor ${constructor.state}: worker + publisher + release`
+    : `Lanț Constructor ${constructor.state}: ${constructor.reason}`
+  if (!constructorReady) {
     problems.push({
-      id: 'codex_worker_offline',
+      id: 'constructor_chain_unavailable',
       grav: 'critic',
-      desc: 'Workerul Codex separat nu a trimis un heartbeat recent de stare ready; ordinele rămân în coadă.',
-      reparabil: 'rulează `codex login` numai în workerul separat și verifică semnarea cozii',
+      desc: `Fluxul Constructor complet nu este disponibil: ${constructor.reason}. Un worker verde nu dovedește publicarea sau release-ul.`,
+      reparabil: 'verifică separat heartbeatul și configurația workerului, publisherului și releaserului raportate de panoul Constructor',
     })
   }
 

@@ -70,6 +70,19 @@ export function previewGesture(clip: string): void {
   }
 }
 
+export function canonicalDisabledGestures(disabled: readonly string[]): string[] {
+  return [...new Set(disabled.map((clip) => clip.slice(0, 40)))].slice(0, 200)
+}
+
+export function parseDisabledGesturesResponse(value: unknown): string[] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const disabled = (value as { disabled?: unknown }).disabled
+  if (!Array.isArray(disabled) || !disabled.every((clip): clip is string => typeof clip === 'string')) return null
+  const canonical = canonicalDisabledGestures(disabled)
+  if (canonical.length !== disabled.length || canonical.some((clip, index) => clip !== disabled[index])) return null
+  return canonical
+}
+
 // The gesture state (the disabled list) — read by the avatar so it doesn't
 // play what's removed. Cached on window so AvatarModel sees it without
 // depending on the admin.
@@ -80,23 +93,31 @@ export async function fetchDisabledGestures(): Promise<string[] | null> {
   try {
     const r = await apiFetch('/api/gestures/state', { credentials: 'include' })
     if (!r.ok) return null
-    const j = (await r.json()) as { disabled?: string[] }
-    return Array.isArray(j.disabled) ? j.disabled : []
+    return parseDisabledGesturesResponse(await r.json())
   } catch {
     return null
   }
 }
 
-export async function saveDisabledGestures(disabled: string[]): Promise<boolean> {
+export async function saveDisabledGesturesCanonical(disabled: string[]): Promise<string[] | null> {
   try {
+    const canonical = canonicalDisabledGestures(disabled)
     const r = await apiFetch('/api/admin/gestures', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ disabled }),
+      body: JSON.stringify({ disabled: canonical }),
     })
-    return r.ok
+    if (!r.ok) return null
+    const response: unknown = await r.json()
+    if (!response || typeof response !== 'object' || Array.isArray(response) || (response as { ok?: unknown }).ok !== true) {
+      return null
+    }
+    const echoed = parseDisabledGesturesResponse(response)
+    return echoed !== null && echoed.length === canonical.length && echoed.every((clip, index) => clip === canonical[index])
+      ? echoed
+      : null
   } catch {
-    return false
+    return null
   }
 }

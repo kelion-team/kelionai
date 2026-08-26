@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
-import { loadKv, saveKv } from '../db.js'
+import { dbEnabled, loadKv, saveKvStrict } from '../db.js'
 export { canonicalJson, verifyCodexWorkerRequest } from './constructorServiceAuth.js'
 
 const STATUS_KEY = 'codex_worker_status_v1'
 const HEARTBEAT_FRESH_MS = 5 * 60_000
 
 export type CodexWorkerState = 'offline' | 'setup_required' | 'ready' | 'busy' | 'degraded'
+export type CodexWorkerPublicState = CodexWorkerState | 'unknown'
 
 interface StoredWorkerStatus {
   status: CodexWorkerState
@@ -14,6 +15,48 @@ interface StoredWorkerStatus {
   taskUrl?: string
   detail?: string
   internalCostUsdMicros?: number
+}
+
+export function parseStoredCodexWorkerStatus(raw: string): StoredWorkerStatus | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const value = parsed as Record<string, unknown>
+  const allowed = new Set(['status', 'at', 'taskUrl', 'detail', 'internalCostUsdMicros'])
+  if (Object.keys(value).some((key) => !allowed.has(key))) return null
+  if (!['offline', 'setup_required', 'ready', 'busy', 'degraded'].includes(String(value.status ?? ''))) return null
+  if (typeof value.at !== 'string') return null
+  const at = Date.parse(value.at)
+  if (!Number.isFinite(at) || new Date(at).toISOString() !== value.at) return null
+  if (value.taskUrl !== undefined && typeof value.taskUrl !== 'string') return null
+  if (value.detail !== undefined && typeof value.detail !== 'string') return null
+  if (value.internalCostUsdMicros !== undefined && (
+    typeof value.internalCostUsdMicros !== 'number'
+    || !Number.isSafeInteger(value.internalCostUsdMicros)
+    || value.internalCostUsdMicros < 0
+  )) return null
+  return value as unknown as StoredWorkerStatus
+}
+
+export function projectCodexWorkerState(input: {
+  readable: boolean
+  configured: boolean
+  storedStatus: CodexWorkerState | null
+  heartbeatAt: string | null
+  now: number
+}): CodexWorkerPublicState {
+  if (!input.readable) return 'unknown'
+  if (!input.configured || input.storedStatus === 'setup_required') return 'setup_required'
+  const at = input.heartbeatAt ? Date.parse(input.heartbeatAt) : Number.NaN
+  const fresh = Number.isFinite(at)
+    && input.now - at >= 0
+    && input.now - at <= HEARTBEAT_FRESH_MS
+  if (!fresh) return 'offline'
+  return input.storedStatus ?? 'offline'
 }
 
 function officialCodexUrl(raw: string): string | null {
@@ -53,35 +96,38 @@ export async function recordCodexWorkerStatus(input: {
       ? { internalCostUsdMicros: Number(input.internalCostUsdMicros) }
       : {}),
   }
-  await saveKv(STATUS_KEY, JSON.stringify(stored))
+  await saveKvStrict(STATUS_KEY, JSON.stringify(stored))
 }
 
 export async function getCodexWorkerStatus(now = Date.now()): Promise<{
-  worker: { state: 'ready' | 'offline' | 'setup_required' | 'unknown'; lastHeartbeat: string | null }
+  worker: { state: CodexWorkerPublicState; lastHeartbeat: string | null }
   setupInstructions: string | null
   taskUrl: string | null
   status: string | null
   internalCostUsd: number | null
 }> {
   let stored: StoredWorkerStatus | null = null
-  let readable = true
+  let readable = dbEnabled()
   try {
     const raw = await loadKv(STATUS_KEY)
-    if (raw) stored = JSON.parse(raw) as StoredWorkerStatus
+    if (raw) {
+      stored = parseStoredCodexWorkerStatus(raw)
+      if (!stored) readable = false
+    }
   } catch {
     stored = null
     readable = false
   }
+  const configured = config.codexWorker.enabled && config.codexWorker.secret.length >= 32
+  const state = projectCodexWorkerState({
+    readable,
+    configured,
+    storedStatus: stored?.status ?? null,
+    heartbeatAt: stored?.at ?? null,
+    now,
+  })
   const at = stored ? Date.parse(stored.at) : Number.NaN
   const fresh = Number.isFinite(at) && now - at >= 0 && now - at <= HEARTBEAT_FRESH_MS
-  const configured = config.codexWorker.enabled && config.codexWorker.secret.length >= 32
-  const state = !readable
-    ? 'unknown'
-    : !configured || stored?.status === 'setup_required'
-      ? 'setup_required'
-      : fresh && stored && ['ready', 'busy', 'degraded'].includes(stored.status)
-        ? 'ready'
-        : 'offline'
   return {
     worker: { state, lastHeartbeat: stored?.at ?? null },
     setupInstructions: state === 'setup_required'

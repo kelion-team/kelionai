@@ -28,6 +28,7 @@ services:
       CODEX_WORKER_SECRET_FILE: /run/secrets/codex-worker-secret
       CONSTRUCTOR_PUBLISHER_SECRET_FILE: /run/secrets/constructor-publisher-secret
       CONSTRUCTOR_RELEASE_SECRET_FILE: /run/secrets/constructor-release-secret
+      GITHUB_RELEASE_OAUTH_TOKEN_FILE: /run/secrets/github-release-oauth-token
       BROWSER_WORKER_SOCKET: /run/kelion-browser-api/browser.sock
       BROWSER_WORKER_SECRET_FILE: /run/secrets/browser-worker-secret
       CONVERTER_WORKER_SOCKET: /run/kelion-converter-api/converter.sock
@@ -98,6 +99,10 @@ services:
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/constructor-release-secret
         target: /run/secrets/constructor-release-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/github-release-oauth-token
+        target: /run/secrets/github-release-oauth-token
         read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/browser-worker-secret

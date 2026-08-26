@@ -63,9 +63,32 @@ describe('Constructor observability', () => {
       { id: 7, status: 'running', constructorStage: 'deployed' }, catalog, [deployed],
     ).progress.percent).toBeLessThan(100)
     expect(projectConstructorObservability(
-      { id: 7, status: 'done', constructorStage: 'deployed', commit: 'a'.repeat(40), liveVersion: 'v1' },
+      { id: 7, status: 'done', constructorStage: 'deployed', commit: 'a'.repeat(40), liveVersion: 'a'.repeat(40) },
       catalog,
       [deployed],
     ).progress.percent).toBe(100)
+  })
+
+  it('keeps the durable total and highest stage while returning only a recent window', () => {
+    const view = projectConstructorObservability(
+      { id: 7, status: 'running', constructorStage: 'working' },
+      catalog,
+      [event('9', 'automatic_retry', 'queued', null)],
+      { eventCount: 10_000, highestSequence: 40 },
+    )
+    expect(view.eventCount).toBe(10_000)
+    expect(view.activity).toHaveLength(1)
+    expect(view.progress.percent).toBe(99)
+  })
+
+  it('marks an unreadable or incomplete catalog unavailable instead of projecting factual zero progress', () => {
+    const view = projectConstructorObservability(
+      { id: 7, status: 'running', constructorStage: 'working' },
+      [],
+      [],
+    )
+    expect(view.progress.source).toBe('unavailable')
+    expect(view.progress.percent).toBeNull()
+    expect(view.progress.resolved).toBe(false)
   })
 })

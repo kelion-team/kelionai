@@ -531,20 +531,16 @@ export interface ClientErrorGroup {
  *  it's exactly a violation of the "single, no duplicates" principle — plus a
  *  route that touched the database directly, bypassing this layer. Now: a
  *  single source, here. */
-export async function listClientErrorGroups(hours = 48, limit = 30): Promise<ClientErrorGroup[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<ClientErrorGroup>(
-      `SELECT max(created_at)::text AS created_at, account_id::text AS account_ref, left(message, 200) AS message, count(*)::text AS n
-       FROM client_errors WHERE created_at > now() - ($1 || ' hours')::interval
-       GROUP BY account_id, left(message, 200)
-       ORDER BY max(created_at) DESC LIMIT $2`,
-      [Math.max(1, Math.min(720, hours)), Math.max(1, Math.min(200, limit))],
-    )
-    return r.rows
-  } catch {
-    return []
-  }
+export async function listClientErrorGroupsStrict(hours = 48, limit = 30): Promise<ClientErrorGroup[]> {
+  if (!dbEnabled()) throw new Error('client_errors_store_unavailable')
+  const r = await getPool().query<ClientErrorGroup>(
+    `SELECT max(created_at)::text AS created_at, account_id::text AS account_ref, left(message, 200) AS message, count(*)::text AS n
+     FROM client_errors WHERE created_at > now() - ($1 || ' hours')::interval
+     GROUP BY account_id, left(message, 200)
+     ORDER BY max(created_at) DESC LIMIT $2`,
+    [Math.max(1, Math.min(720, hours)), Math.max(1, Math.min(200, limit))],
+  )
+  return r.rows
 }
 
 // SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to collect errors that
@@ -1414,8 +1410,8 @@ export async function marcheazaContactEmailat(id: number): Promise<void> {
   }
 }
 
-export async function listContactMessages(n = 100): Promise<ContactMessage[]> {
-  if (!dbEnabled()) return []
+export async function listContactMessages(n = 100): Promise<ContactMessage[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<ContactMessage>(
       `SELECT id, name, email, subject, message, department, lang, emailed, created_at::text
@@ -1424,7 +1420,7 @@ export async function listContactMessages(n = 100): Promise<ContactMessage[]> {
     )
     return r.rows
   } catch {
-    return []
+    return null
   }
 }
 
@@ -1566,7 +1562,7 @@ export async function eraseUserAccount(
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`erasure:${key}`])
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`constructor-account:${key}`])
     await client.query(
       `INSERT INTO erasure_requests
          (id, erasure_id, status, backup_purge_after, retention_until, deleted_categories, retained_records, provider_revocation)
@@ -1582,16 +1578,56 @@ export async function eraseUserAccount(
       ],
     )
 
-    // Cancel side effects first, then remove user-authored operational data.
+    // Serialize against recordWorkerHandoff(), which locks the same build row
+    // before inserting constructor_pipeline.  The cancellation UPDATE then runs
+    // in a fresh READ COMMITTED statement snapshot: either erasure owns the row
+    // first and handoff observes the cancelled job, or a committed handoff is
+    // visible to the NOT EXISTS predicate below.
     await client.query(
-      `DELETE FROM constructor_incidents
-        WHERE job_id IN (SELECT id FROM build_jobs WHERE lower(ordered_by) = $1)`,
+      `SELECT id FROM build_jobs
+        WHERE lower(ordered_by)=$1
+        ORDER BY id
+        FOR UPDATE`,
+      [key],
+    )
+
+    // O execuție poate fi anulată numai înainte de handoff. Din momentul în
+    // care există ledgerul Constructor, publisherul/release-ul trebuie să-și
+    // poată termina reconcilierea chiar dacă identitatea contului este ștearsă.
+    await client.query(
+      `UPDATE build_jobs b
+          SET status='cancelled', constructor_stage='cancelled', codex_task_id=NULL,
+              progress='cancelled_by_account_erasure', progress_at=now(), updated_at=now()
+        WHERE lower(b.ordered_by)=$1
+          AND (b.status='queued' OR (b.status='running' AND b.constructor_stage IN ('claimed','accepted','working')))
+          AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id)`,
+      [key],
+    )
+    await client.query(
+      `DELETE FROM constructor_incidents ci
+        WHERE ci.job_id IN (
+          SELECT b.id FROM build_jobs b
+           WHERE lower(b.ordered_by)=$1
+             AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id)
+        )`,
+      [key],
+    )
+    await client.query(
+      `UPDATE constructor_incidents ci
+          SET cause_summary='[erased operational incident]', evidence='[erased]',
+              next_action='Continue the durable Constructor reconciliation.',
+              verification=NULL, lesson=NULL, strategy=NULL, strategy_action_fingerprint=NULL,
+              strategy_evidence_fingerprint=NULL, updated_at=now()
+        WHERE ci.job_id IN (
+          SELECT b.id FROM build_jobs b
+          JOIN constructor_pipeline p ON p.job_id=b.id
+          WHERE lower(b.ordered_by)=$1
+        )`,
       [key],
     )
     await client.query(
       `UPDATE build_jobs
-          SET status = CASE WHEN status IN ('queued','claimed','running') THEN 'cancelled' ELSE status END,
-              ordered_by = $2,
+          SET ordered_by = $2,
               order_text = '[erased]',
               log = NULL,
               progress = NULL,
@@ -1797,6 +1833,12 @@ export async function consumeLoginToken(tokenHash: string, purpose: 'magic' | 'r
 
 export async function saveKv(key: string, value: string): Promise<void> {
   if (!dbEnabled()) return
+  await saveKvStrict(key, value)
+}
+
+/** Variantă fail-closed pentru heartbeaturi și alte ACK-uri de control. */
+export async function saveKvStrict(key: string, value: string): Promise<void> {
+  if (!dbEnabled()) throw new Error('db_unavailable')
   await getPool().query(
     `INSERT INTO kv_state (key, value, updated_at) VALUES ($1,$2,now())
      ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`,
@@ -1835,19 +1877,37 @@ export async function consumeKv(key: string): Promise<string | null> {
 // 13 Jul: admin panel with a checkbox per gesture). We store ONLY the disabled
 // list (default: all active). The brain reads the list and avoids the gestures
 // checked OFF.
-export async function getDisabledGestures(): Promise<string[]> {
-  const raw = await loadKv('gesture_disabled')
-  if (!raw) return []
-  try {
-    const a: unknown = JSON.parse(raw)
-    return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
+export function canonicalDisabledGestures(list: readonly string[]): string[] {
+  return [...new Set(list.map((x) => x.slice(0, 40)))].slice(0, 200)
 }
-export async function setDisabledGestures(list: string[]): Promise<void> {
-  const clean = [...new Set(list.filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)))].slice(0, 200)
-  await saveKv('gesture_disabled', JSON.stringify(clean))
+
+export async function getDisabledGestures(): Promise<string[]> {
+  // An absent key is the only valid representation of the default (all active).
+  // A missing database, failed query or corrupt row must never be projected as [].
+  if (!dbEnabled()) throw new Error('gesture_store_unavailable')
+  const raw = await loadKv('gesture_disabled')
+  if (raw === null) return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('gesture_state_invalid')
+  }
+  if (!Array.isArray(parsed) || !parsed.every((x): x is string => typeof x === 'string')) {
+    throw new Error('gesture_state_invalid')
+  }
+  const canonical = canonicalDisabledGestures(parsed)
+  if (canonical.length !== parsed.length || canonical.some((value, index) => value !== parsed[index])) {
+    throw new Error('gesture_state_invalid')
+  }
+  return canonical
+}
+
+export async function setDisabledGestures(list: string[]): Promise<string[]> {
+  const canonical = canonicalDisabledGestures(list)
+  await saveKvStrict('gesture_disabled', JSON.stringify(canonical))
+  return canonical
 }
 
 // ── Shared memory: the common notebook both sides read + write ──
@@ -4485,8 +4545,8 @@ export async function setInboundReplied(uid: string, reply: string, lang: string
 }
 
 /** Recent inbound emails + their replies, newest first (admin panel). */
-export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
-  if (!dbEnabled()) return []
+export async function listInboundEmails(limit = 50): Promise<InboundEmail[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<InboundEmail>(
       `SELECT id, uid, from_addr, from_name, subject, body, reply, replied, lang, received_at
@@ -4495,7 +4555,7 @@ export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
     )
     return r.rows
   } catch {
-    return []
+    return null
   }
 }
 
@@ -4749,6 +4809,16 @@ export interface BuildJob {
   constructorStage: string
   commit: string | null
   liveVersion: string | null
+  /** Momentul persistat înainte de care workerul nu reia automat jobul. */
+  retryNotBefore: string | null
+  /** Generația implementării curente. Evenimentele ciclurilor anterioare
+   * rămân auditabile, dar nu contribuie la progresul curent. */
+  executionCycle: number
+  archived: boolean
+  /** Server-authoritative destructive capability for the current snapshot. */
+  deletable: boolean
+  /** Static ledger guard; duplicate-active checks still run at mutation time. */
+  retryable: boolean
   createdAt: string
   updatedAt: string
 }
@@ -4771,6 +4841,12 @@ interface BuildJobDbRow {
   constructor_stage?: string | null
   commit_sha?: string | null
   live_version?: string | null
+  retry_not_before?: Date | string | null
+  erasure_request_id?: string | null
+  execution_cycle?: number
+  arhivat: boolean
+  deletable?: boolean
+  retryable?: boolean
   created_at: Date
   updated_at: Date
 }
@@ -4794,6 +4870,13 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     constructorStage: r.constructor_stage ?? 'queued',
     commit: r.commit_sha ?? null,
     liveVersion: r.live_version ?? null,
+    retryNotBefore: r.retry_not_before
+      ? new Date(r.retry_not_before).toISOString()
+      : null,
+    executionCycle: Number(r.execution_cycle ?? 0),
+    archived: r.arhivat === true,
+    deletable: r.deletable === true,
+    retryable: r.retryable === true,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -4857,33 +4940,68 @@ export function seamanaOrdinele(a: string, b: string): boolean {
 // → NU se naște al doilea; se întoarce id-ul celui viu (depunerea e
 // idempotentă, apelantul află că ordinul EXISTĂ). Un ordin încheiat (done/
 // failed) NU blochează — „reia"-ul deliberat al ownerului rămâne posibil.
-export async function createBuildJob(orderedBy: string, orderText: string): Promise<number> {
-  if (!dbEnabled()) return 0
+export interface CreateBuildJobResult {
+  id: number
+  created: boolean
+  status: BuildJob['status']
+}
+
+export async function createBuildJob(orderedBy: string, orderText: string): Promise<CreateBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  const accountKey = userKey(orderedBy)
+  if (!accountKey) throw new Error('constructor_identity_invalid')
+  const client = await conexiuneDb()
   try {
-    const vii = await getPool().query<{ id: string | number; order_text: string }>(
-      `SELECT id, order_text FROM build_jobs WHERE status IN ('queued','running') ORDER BY id DESC LIMIT 200`,
+    await client.query('BEGIN')
+    // Aceeași frontieră per cont este luată și de ștergerea GDPR. După lock,
+    // sesiunea autentificată trebuie să existe încă: dacă erasure-ul a câștigat
+    // cursa, DELETE-ul sesiunii este deja vizibil și niciun ordin cu PII nu mai
+    // poate fi inserat după receiptul de ștergere.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`constructor-account:${accountKey}`])
+    // Intake-ul Constructor are debit redus și cere unicitate, nu throughput de
+    // mii de inserări. Lock-ul tranzacțional închide cursa SELECT -> INSERT între
+    // două submituri simultane, inclusiv pentru reformulări cu amprente diferite.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('constructor:create-build-job'))")
+    const identity = await client.query<{ active: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM auth_sessions
+          WHERE lower(email)=$1 AND revoked_at IS NULL AND expires_at > now()
+       ) AS active`,
+      [accountKey],
+    )
+    if (identity.rows[0]?.active !== true) throw new Error('constructor_identity_erased_or_inactive')
+    const vii = await client.query<{ id: string | number; order_text: string; status: BuildJob['status'] }>(
+      `SELECT id, order_text, status FROM build_jobs
+        WHERE status IN ('queued','running') ORDER BY id DESC`,
     )
     const amp = amprentaOrdin(orderText)
     const dublura = vii.rows.find((rand) => amprentaOrdin(rand.order_text) === amp)
     if (dublura) {
       console.error(`[ORDINE] dublură refuzată: ordinul #${dublura.id} e VIU cu aceeași amprentă — nu se naște al doilea (depus de ${orderedBy})`)
-      return Number(dublura.id)
+      await client.query('COMMIT')
+      return { id: Number(dublura.id), created: false, status: dublura.status }
     }
     // Același SUBIECT în alte cuvinte (16 aug, tripleta #334/#335/#338):
     const geaman = vii.rows.find((rand) => seamanaOrdinele(rand.order_text, orderText))
     if (geaman) {
       console.error(`[ORDINE] același subiect refuzat: ordinul #${geaman.id} e VIU pe aceeași temă (cuvinte comune peste prag) — nu se naște al doilea (depus de ${orderedBy})`)
-      return Number(geaman.id)
+      await client.query('COMMIT')
+      return { id: Number(geaman.id), created: false, status: geaman.status }
     }
-  } catch {
-    /* citirea dublurilor a picat → mai bine un ordin posibil-dublat decât
-       niciunul: crearea de mai jos rămâne. */
+    const r = await client.query<{ id: string | number }>(
+      'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
+      [accountKey, orderText],
+    )
+    await client.query('COMMIT')
+    const id = Number(r.rows[0]?.id ?? 0)
+    if (!id) throw new Error('constructor_create_missing_id')
+    return { id, created: true, status: 'queued' }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
   }
-  const r = await getPool().query<{ id: string | number }>(
-    'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
-    [orderedBy.toLowerCase(), orderText],
-  )
-  return Number(r.rows[0]?.id ?? 0)
 }
 
 /** Câte ordine sunt ACTIVE (în coadă sau în lucru) de la un depunător anume.
@@ -5081,6 +5199,30 @@ export async function getConstructorIncidentForJob(jobId: number): Promise<Const
   }
 }
 
+/** Citește ultima escaladare pentru un lot de joburi într-o singură interogare.
+ * `null` înseamnă registru necitibil; valorile `null` din Map înseamnă absență
+ * măsurată și nu sunt confundate cu o eroare de DB. */
+export async function getConstructorIncidentsForJobs(
+  jobIds: readonly number[],
+): Promise<Map<number, ConstructorIncident | null> | null> {
+  if (!dbEnabled()) return null
+  const ids = [...new Set(jobIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+  const result = new Map<number, ConstructorIncident | null>(ids.map((id) => [id, null]))
+  if (ids.length === 0) return result
+  try {
+    const rows = await getPool().query<ConstructorIncidentDbRow>(
+      `SELECT DISTINCT ON (job_id) * FROM constructor_incidents
+        WHERE job_id = ANY($1::bigint[])
+        ORDER BY job_id, updated_at DESC, id DESC`,
+      [ids],
+    )
+    for (const row of rows.rows) result.set(Number(row.job_id), rowToConstructorIncident(row))
+    return result
+  } catch {
+    return null
+  }
+}
+
 export async function updateConstructorIncident(
   id: number,
   fields: {
@@ -5159,7 +5301,7 @@ async function advanceIncidentAfterSuccess(
   )
   const row = current.rows[0]
   if (!row) return
-  if (fields.ci !== 'verde') {
+  if (fields.ci !== 'green') {
     await client.query(
       `UPDATE constructor_incidents SET state='verifying',
          next_action='Obține verdict CI verde pe o mașină curată; done fără CI verde nu închide incidentul.',
@@ -5190,95 +5332,93 @@ async function advanceIncidentAfterSuccess(
 // pe VPS (un singur worker odată) apără oricum de dubla-execuție.
 const MIN_JOB_BLOCAT = 15
 
-// The worker takes ONE order: the oldest "queued", or a stuck "running"
-// (>15 min silent — the agent was killed by timeout). Over 2 attempts → failed,
-// so an impossible order doesn't block the queue forever.
-export async function claimNextBuildJob(codexTaskId?: string): Promise<BuildJob | null> {
-  if (!dbEnabled()) return null
-  // ÎNTÂI, IZOLAT: abandonarea joburilor blocate + jurnalul incidentelor, în
-  // tranzacția LOR, BEST-EFFORT. E DESPRINSĂ de preluare pe o cauză MĂSURATĂ în
-  // Postgres: orice query care aruncă (schemă de incident stricată, constrângere,
-  // upsert întors gol) AVORTEAZĂ toată tranzacția — iar înainte abandonarea +
-  // `upsertConstructorIncident` rulau în ACEEAȘI tranzacție cu preluarea, deci un
-  // singur incident care pica rostogolea ÎNTREG claim-ul → `null` la FIECARE tur →
-  // coada rămânea neatinsă la nesfârșit („ordine în coadă dar nu se apucă nimeni").
-  // Acum bookkeeping-ul de incidente NU mai poate înfometa coada: dacă pică, se
-  // loghează și preluarea merge mai departe.
-  await abandoneazaJoburileBlocate().catch((e) => {
-    console.error('[constructor] abandonare/incidente a picat (nefatal pentru preluare):', e instanceof Error ? e.message : e)
-  })
-  // APOI: preluarea propriu-zisă, în tranzacția ei — niciodată blocată de
-  // bookkeeping-ul de mai sus.
+function constructorRetrySeconds(name: string, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? '', 10)
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback
+}
+
+// Politica de retry aparține runtime-ului, nu interfeței. Valorile implicite
+// sunt fallback-uri sigure și pot fi schimbate fără rebuild.
+const CONSTRUCTOR_RETRY_BASE_SECONDS = constructorRetrySeconds('CONSTRUCTOR_RETRY_BASE_SECONDS', 60, 5, 3600)
+const CONSTRUCTOR_RETRY_MAX_SECONDS = constructorRetrySeconds('CONSTRUCTOR_RETRY_MAX_SECONDS', 1800, 30, 86_400)
+const CONSTRUCTOR_EXTERNAL_RETRY_SECONDS = constructorRetrySeconds('CONSTRUCTOR_EXTERNAL_RETRY_SECONDS', 900, 60, 86_400)
+
+function constructorRetryDelay(attempts: number, external: boolean): number {
+  if (external) return CONSTRUCTOR_EXTERNAL_RETRY_SECONDS
+  const exponent = Math.min(10, Math.max(0, attempts - 1))
+  return Math.min(CONSTRUCTOR_RETRY_MAX_SECONDS, CONSTRUCTOR_RETRY_BASE_SECONDS * (2 ** exponent))
+}
+
+// Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
+// la dovada live. Joburile tăcute sunt repuse separat de watchdog; claim-ul nu
+// revendică niciodată un `running` și nu oprește fluxul la un număr de încercări.
+export type ClaimNextBuildJobResult =
+  | { state: 'claimed'; job: BuildJob }
+  | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
+
+export async function claimNextBuildJob(codexTaskId?: string): Promise<ClaimNextBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  await deblocheazaJoburileClaimate()
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
+    // Serializarea este globală fiindcă ordinea următoare trebuie bazată pe
+    // masterul produs de cea anterioară, nu pe un vârf devenit stale în paralel.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('constructor:claim-build-job'))")
     const r = await client.query<BuildJobDbRow>(
-      `UPDATE build_jobs SET status='running', attempts = attempts + 1,
-         codex_task_id=COALESCE($1, codex_task_id), constructor_stage='claimed', updated_at = now()
+       `UPDATE build_jobs SET status='running', attempts = attempts + 1,
+          codex_task_id=$1, constructor_stage='claimed', retry_not_before=NULL,
+          progress=CASE WHEN progress='external_action_required'
+            THEN 'external_probe_started' ELSE 'worker_claimed' END,
+          progress_at=now(), updated_at = now()
        WHERE id = (
-         SELECT id FROM build_jobs
-         WHERE (status='queued'
-                 -- Un job deja legat de un worker separat nu se revendică a doua
-                 -- oară doar fiindcă progresul a întârziat.
-                 OR (status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND codex_task_id IS NULL))
-           AND COALESCE(log,'') NOT LIKE '%[P27: eroare PERMANENT%'
-         ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+         SELECT candidate.id FROM build_jobs candidate
+         WHERE candidate.status='queued'
+           AND candidate.arhivat=false
+           AND (candidate.retry_not_before IS NULL OR candidate.retry_not_before <= now())
+           AND NOT EXISTS (SELECT 1 FROM build_jobs active WHERE active.status='running')
+         ORDER BY candidate.created_at LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
        )
        RETURNING *`,
       [codexTaskId?.slice(0, 200) || null],
     )
-    await client.query('COMMIT')
-    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
-  } catch {
-    await client.query('ROLLBACK').catch(() => {})
-    return null
-  } finally {
-    client.release()
-  }
-}
-
-// Abandonează joburile 'running' blocate (≥3 încercări, tăcute peste pragul de
-// blocaj) și le trece pe 'failed', deschizând câte un incident pentru fiecare.
-// FIECARE incident e izolat cu SAVEPOINT: un upsert care aruncă NU mai avortează
-// abandonarea celorlalte — și, fiindcă rulează în tranzacția asta separată, nici
-// preluarea din `claimNextBuildJob`. Best-effort prin construcție.
-async function abandoneazaJoburileBlocate(): Promise<void> {
-  if (!dbEnabled()) return
-  const client = await conexiuneDb()
-  try {
-    await client.query('BEGIN')
-    const abandoned = await client.query<{
-      id: string | number
-      order_text: string
-      log: string | null
-      progress: string | null
-      attempts: number
-    }>(
-      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
-       WHERE status='running' AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes' AND attempts >= 3
-       RETURNING id, order_text, log, progress, attempts`,
-    )
-    for (const row of abandoned.rows) {
-      await client.query('SAVEPOINT incident')
-      try {
-        await upsertConstructorIncident(client, {
-          id: Number(row.id),
-          orderText: row.order_text,
-          log: row.log ?? '[abandoned: 3 attempts exhausted]',
-          progress: row.progress ?? '',
-          attempts: row.attempts,
-        })
-        await client.query('RELEASE SAVEPOINT incident')
-      } catch (e) {
-        // Un incident care pică nu blochează abandonarea (status='failed' rămâne)
-        // și nici preluarea următoare — ne întoarcem la savepoint și mergem mai departe.
-        await client.query('ROLLBACK TO SAVEPOINT incident').catch(() => {})
-        console.error(`[constructor] incident job ${row.id} a picat (izolat):`, e instanceof Error ? e.message : e)
+    if (r.rows[0]) {
+      // Un probe programat după backoff nu mai este descris ca „așteaptă
+      // extern” în timp ce workerul lucrează efectiv.
+      await client.query(
+        `UPDATE constructor_incidents
+            SET state='repairing', stage='worker_probe',
+                evidence=left(evidence || E'\\n[automatic_probe_started_after_backoff]', 4000),
+                next_action='Workerul verifică din nou condiția externă; rezultatul probei va decide următorul backoff.',
+                verification=NULL, closed_at=NULL, updated_at=now()
+          WHERE job_id=$1 AND state='blocked'`,
+        [r.rows[0].id],
+      )
+    }
+    let result: ClaimNextBuildJobResult
+    if (r.rows[0]) {
+      result = { state: 'claimed', job: rowToBuildJob(r.rows[0]) }
+    } else {
+      // Un UPDATE fără rând poate însemna fie coadă goală/backoff, fie
+      // faptul că un job este deja running. Contractul workerului nu le poate
+      // comprima într-un 204: după un claim COMMIT al cărui răspuns s-a pierdut,
+      // acel 204 ar suprascrie degraded cu un heartbeat ready fals. Măsurăm
+      // motivul în aceeași tranzacție și sub același advisory lock.
+      const active = await client.query<{ active: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM build_jobs WHERE status='running') AS active",
+      )
+      result = {
+        state: active.rows[0]?.active === true ? 'pipeline_active' : 'no_claimable_job',
+        job: null,
       }
     }
     await client.query('COMMIT')
-  } catch {
+    return result
+  } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
+    throw error
   } finally {
     client.release()
   }
@@ -5292,26 +5432,29 @@ async function abandoneazaJoburileBlocate(): Promise<void> {
 // (lucrătorul a trecut jobul pe 'running' apoi a murit fix după claim → nimeni nu mai
 // atinge jobul → „Preluat · 0%" pe veci). În plus `abandoneazaJoburileBlocate` cere
 // attempts≥3, deci un job claimat O DATĂ (attempts=1) de un lucrător mort nu se
-// abandonează niciodată singur. Watchdog-ul ăsta rulează pe TIMER-ul APP-ului (bucla de
+// abandona niciodată singur. Watchdog-ul ăsta rulează pe TIMER-ul APP-ului (bucla de
 // autonomie), NU pe pulsul lucrătorului: repune în coadă joburile 'running' tăcute
-// (inclusiv attempts=1) — un lucrător viu/repornit le reia imediat — și, după 3 claim-uri
-// sterile, le trece pe 'failed' cu motiv onest. Coada nu mai rămâne blocată la „Preluat".
+// (inclusiv attempts=1), cu backoff persistat; nicio limită de încercări nu îl
+// transformă într-un terminal fals. Coada nu mai rămâne blocată la „Preluat".
 export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; abandonate: number }> {
-  if (!dbEnabled()) return { repuse: 0, abandonate: 0 }
-  try {
-    const requeue = await getPool().query(
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  const requeue = await getPool().query(
       `UPDATE build_jobs SET status='queued', constructor_stage='queued',
+         execution_cycle=execution_cycle + 1,
          codex_task_id=NULL, progress='worker_retry_scheduled',
+         retry_not_before=now()
+           + LEAST(
+               $2::double precision,
+               $1::double precision * power(2::double precision, LEAST(10, GREATEST(0, attempts - 1)))
+             ) * interval '1 second',
          log = COALESCE(log,'') || E'\\n[watchdog: executia tacuta a fost repusa automat in coada]',
          progress_at=now(), updated_at=now()
        WHERE status='running'
          AND constructor_stage IN ('claimed','accepted','working')
          AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'`,
-    )
-    return { repuse: requeue.rowCount ?? 0, abandonate: 0 }
-  } catch {
-    return { repuse: 0, abandonate: 0 }
-  }
+      [CONSTRUCTOR_RETRY_BASE_SECONDS, CONSTRUCTOR_RETRY_MAX_SECONDS],
+  )
+  return { repuse: requeue.rowCount ?? 0, abandonate: 0 }
 }
 // ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
 // fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
@@ -5340,14 +5483,15 @@ export async function reportBuildJob(
 ): Promise<void> {
   if (!dbEnabled()) return
   let log = (fields.log ?? '').slice(-20000)
-  let inghetat = ''
+  let externalActionRequired = false
   if (fields.status === 'failed') {
     const verdict = eEroarePermanenta(log)
     if (verdict && !log.includes(MARCAJ_P27)) {
       log = `${log}\n${MARCAJ_P27} — ${verdict}; reîncercarea NU ajută]`.slice(-20000)
-      // attempts=99 = înghețat: plasa de „stale-running" și vindecătorii nu-l
-      // mai reiau niciodată singuri; contorul real rămâne în log.
-      inghetat = ', attempts = 99'
+      // Contorul rămâne factual. O dependență externă este reprezentată prin
+      // checkpoint/incident, niciodată printr-o valoare-sentinelă care arată ca
+      // un număr real de încercări și poate bloca definitiv reconcilierea.
+      externalActionRequired = true
       // RAPORTAT LA KELION (legea P27): golul intră în triajul lui + panoul —
       // fire-and-forget, iar EȘECUL raportării se strigă (un raport mut nu e raport).
       void (async () => {
@@ -5368,7 +5512,9 @@ export async function reportBuildJob(
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
          tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
-         updated_at = now()${inghetat} WHERE id = $1 RETURNING *`,
+         progress = CASE WHEN $10 THEN 'external_action_required' ELSE progress END,
+         progress_at = CASE WHEN $10 THEN now() ELSE progress_at END,
+         updated_at = now() WHERE id = $1 RETURNING *`,
       [
         id,
         fields.status,
@@ -5379,6 +5525,7 @@ export async function reportBuildJob(
         fields.ci ?? null,
         fields.brain ?? null,
         fields.costUsd ?? null,
+        externalActionRequired,
       ],
     )
     const row = updated.rows[0]
@@ -5416,13 +5563,135 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
     // Exclude ARHIVATELE (K9): ordinele vechi terminate nu mai încarcă panoul,
     // dar rămân în DB (recuperabile), nu se pierd.
     const r = await getPool().query<BuildJobDbRow>(
-      'SELECT * FROM build_jobs WHERE arhivat = false ORDER BY created_at DESC LIMIT $1',
+      `SELECT b.*,
+              (b.status IN ('done','failed','cancelled')
+                AND b.constructor_stage <> 'deployed'
+                AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id)
+              ) AS deletable,
+              (b.status IN ('failed','cancelled')
+                AND b.erasure_request_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id)
+              ) AS retryable
+         FROM build_jobs b WHERE b.arhivat = false
+        ORDER BY CASE WHEN status='running' THEN 0 WHEN status='queued' THEN 1 ELSE 2 END,
+                 CASE WHEN status IN ('done','failed','cancelled') THEN updated_at ELSE created_at END DESC,
+                 id DESC
+        LIMIT $1`,
       [limit],
     )
     return r.rows.map(rowToBuildJob)
   } catch {
     return null
   }
+}
+
+/** Arhiva este recuperabilă numai prin această listare explicită; nu este
+ * amestecată cu munca activă și nu poate fi confundată cu o coadă goală. */
+export interface ArchivedBuildJobsCursor {
+  updatedAt: string
+  id: number
+}
+
+export interface ArchivedBuildJobsPage {
+  jobs: BuildJob[]
+  nextCursor: ArchivedBuildJobsCursor | null
+}
+
+const ARCHIVE_CURSOR_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/
+
+export function isArchivedBuildJobsCursorTimestamp(value: string): boolean {
+  return ARCHIVE_CURSOR_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value))
+}
+
+export async function listArchivedBuildJobs(
+  limit = 40,
+  cursor?: ArchivedBuildJobsCursor,
+): Promise<ArchivedBuildJobsPage> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)))
+  const hasCursor = cursor !== undefined
+  if (hasCursor && (
+    !Number.isSafeInteger(cursor.id)
+    || cursor.id <= 0
+    || !isArchivedBuildJobsCursorTimestamp(cursor.updatedAt)
+  )) throw new Error('constructor_archive_cursor_invalid')
+  const result = await getPool().query<BuildJobDbRow & { updated_at_cursor: string }>(
+    `SELECT b.*,
+            to_char(b.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_cursor
+       FROM build_jobs b WHERE b.arhivat=true
+      ${hasCursor ? 'AND (updated_at, id) < ($2::timestamptz, $3::bigint)' : ''}
+      ORDER BY b.updated_at DESC, b.id DESC LIMIT $1`,
+    hasCursor
+      ? [safeLimit + 1, cursor.updatedAt, cursor.id]
+      : [safeLimit + 1],
+  )
+  const hasMore = result.rows.length > safeLimit
+  const visible = result.rows.slice(0, safeLimit)
+  const last = visible.at(-1)
+  return {
+    jobs: visible.map(rowToBuildJob),
+    nextCursor: hasMore && last
+      ? { updatedAt: last.updated_at_cursor, id: Number(last.id) }
+      : null,
+  }
+}
+
+export type RestoreBuildJobResult =
+  | { ok: true; job: BuildJob }
+  | { ok: false; error: 'not_found' | 'stale_state' | 'not_restorable' }
+
+export async function restoreArchivedBuildJob(
+  id: number,
+  expected: BuildJobMutationExpectation,
+): Promise<RestoreBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isSafeInteger(id) || id <= 0) return { ok: false, error: 'not_found' }
+  const client = await conexiuneDb()
+  try {
+    await client.query('BEGIN')
+    const selected = await client.query<BuildJobDbRow>(
+      'SELECT * FROM build_jobs WHERE id=$1 FOR UPDATE',
+      [id],
+    )
+    const current = selected.rows[0]
+    if (!current) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_found' }
+    }
+    if (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'stale_state' }
+    }
+    if (!current.arhivat || !['done', 'failed', 'cancelled'].includes(current.status)) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_restorable' }
+    }
+    const updated = await client.query<BuildJobDbRow>(
+      'UPDATE build_jobs SET arhivat=false, updated_at=now() WHERE id=$1 RETURNING *',
+      [id],
+    )
+    await client.query('COMMIT')
+    return updated.rows[0]
+      ? { ok: true, job: rowToBuildJob(updated.rows[0]) }
+      : { ok: false, error: 'not_found' }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+/** Lookup țintit pentru acțiuni Admin; absența este null, iar o citire DB
+ * eșuată aruncă și nu poate fi prezentată drept „job inexistent”. */
+export async function getBuildJobById(id: number): Promise<BuildJob | null> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  const result = await getPool().query<BuildJobDbRow>(
+    'SELECT * FROM build_jobs WHERE id=$1 AND arhivat=false',
+    [id],
+  )
+  return result.rows[0] ? rowToBuildJob(result.rows[0]) : null
 }
 
 /** Cât a cheltuit constructorul AZI — suma `cost_usd` MĂSURATĂ a joburilor de
@@ -5480,30 +5749,27 @@ export async function cheltuitAziConstructor(): Promise<number> {
  *  clipa în care merge-ul e CONFIRMAT pe GitHub — nu la timerul de o zi.
  *  `true` doar dacă rândul chiar s-a schimbat (măsurat, nu presupus). */
 export async function arhiveazaBuildJob(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
-  try {
-    const r = await getPool().query('UPDATE build_jobs SET arhivat = true WHERE id = $1 AND arhivat = false', [id])
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
-  }
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isInteger(id) || id <= 0) return false
+  const r = await getPool().query(
+    `UPDATE build_jobs SET arhivat=true, updated_at=now()
+      WHERE id=$1 AND arhivat=false AND status IN ('done','failed','cancelled')`,
+    [id],
+  )
+  return (r.rowCount ?? 0) > 0
 }
 
 export async function arhiveazaBuildJobsVechi(zile = 1): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const z = Math.max(1, Math.min(90, Math.round(zile) || 1))
-    const r = await getPool().query(
-      `UPDATE build_jobs SET arhivat = true
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  const z = Math.max(1, Math.min(90, Math.round(zile) || 1))
+  const r = await getPool().query(
+      `UPDATE build_jobs SET arhivat=true, updated_at=now()
         WHERE arhivat = false
           AND status IN ('done','failed','cancelled')
           AND updated_at < now() - ($1 || ' days')::interval`,
       [z],
-    )
-    return r.rowCount ?? 0
-  } catch {
-    return 0
-  }
+  )
+  return r.rowCount ?? 0
 }
 
 // LIVE PROGRESS (Stage 4): writes the builder's current step. ONLY on active
@@ -5524,7 +5790,28 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
 export type CodexBuildEvent =
   | { event: 'accepted'; progress?: string }
   | { event: 'progress'; progress: string }
-  | { event: 'failed'; progress?: string; log: string }
+  | { event: 'failed'; progress?: string; code: CodexWorkerFailureCode }
+
+export const CODEX_WORKER_FAILURE_CODES = [
+  'provider_auth',
+  'provider_credit',
+  'execution_timeout',
+  'test_failure',
+  'quality_gate_failure',
+  'no_changes',
+  'brain_unavailable',
+  'codex_exec_failed',
+  'worker_internal_failure',
+] as const
+export type CodexWorkerFailureCode = typeof CODEX_WORKER_FAILURE_CODES[number]
+
+export function isCodexWorkerFailureCode(value: string): value is CodexWorkerFailureCode {
+  return (CODEX_WORKER_FAILURE_CODES as readonly string[]).includes(value)
+}
+
+function codexWorkerFailureEvidence(code: CodexWorkerFailureCode): string {
+  return `worker_failure:${code}`
+}
 
 const CODEx_STAGE_ORDER: Record<string, number> = {
   claimed: 1,
@@ -5542,7 +5829,7 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
-    const current = await client.query<BuildJobDbRow>('SELECT * FROM build_jobs WHERE id=$1 FOR UPDATE', [id])
+    const current = await client.query<BuildJobDbRow>('SELECT * FROM build_jobs WHERE id=$1 AND arhivat=false FOR UPDATE', [id])
     const row = current.rows[0]
     if (!row || row.codex_task_id !== taskId || row.status !== 'running') {
       await client.query('ROLLBACK')
@@ -5565,24 +5852,48 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
     }
     const progress = (input.progress ?? target).trim().slice(0, 500)
     const failed = input.event === 'failed'
+    const failureEvidence = failed ? codexWorkerFailureEvidence(input.code) : null
+    const analysis = failed ? classifyConstructorFailure(failureEvidence!, progress) : null
+    const external = analysis?.state === 'blocked'
+    const retryDelay = failed ? constructorRetryDelay(Number(row.attempts), external) : 0
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
          status=CASE WHEN $3 THEN 'queued' ELSE status END,
+         execution_cycle=execution_cycle + CASE WHEN $3 THEN 1 ELSE 0 END,
          constructor_stage=CASE WHEN $3 THEN 'queued' ELSE $2 END,
          codex_task_id=CASE WHEN $3 THEN NULL ELSE codex_task_id END,
-         progress=CASE WHEN $3 THEN 'worker_retry_scheduled' ELSE $4 END,
+         progress=CASE WHEN $3 THEN $6 ELSE $4 END,
+         retry_not_before=CASE WHEN $3 THEN now() + ($7::text || ' seconds')::interval ELSE retry_not_before END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
          brain='codex-worker',
          updated_at=now()
        WHERE id=$1 RETURNING *`,
-      [id, target, failed, progress, failed ? input.log.slice(-20_000) : null],
+      [
+        id,
+        target,
+        failed,
+        progress,
+        failureEvidence,
+        external ? 'external_action_required' : 'worker_retry_scheduled',
+        retryDelay,
+      ],
     )
+    const failedRow = updated.rows[0]
+    if (failed && failedRow) {
+      await upsertConstructorIncident(client, {
+        id: Number(failedRow.id),
+        orderText: failedRow.order_text,
+        log: failedRow.log ?? '[worker failure contained no log]',
+        progress: failedRow.progress ?? '',
+        attempts: Number(failedRow.attempts),
+      })
+    }
     await client.query('COMMIT')
     return updated.rows[0] ? rowToBuildJob(updated.rows[0]) : null
-  } catch {
+  } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined)
-    return null
+    throw error
   } finally {
     client.release()
   }
@@ -5621,13 +5932,14 @@ export async function getOldestRunningBuildJob(): Promise<BuildJob | null> {
 // "recently finished", the panel would delete the job at the very moment it
 // becomes "Done"/"Failed" — exactly the state Adrian wants to SEE. Active
 // first, then by how recently they moved; a few, as many as fit on screen.
-export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
-  if (!dbEnabled()) return []
+export async function listMonitorBuildJobs(): Promise<BuildJob[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<BuildJobDbRow>(
       `SELECT * FROM build_jobs
-         WHERE status IN ('queued','running')
-            OR (status IN ('done','failed') AND updated_at > now() - interval '10 minutes')
+         WHERE arhivat=false
+           AND (status IN ('queued','running')
+             OR (status IN ('done','failed','cancelled') AND updated_at > now() - interval '10 minutes'))
        ORDER BY
          CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
          COALESCE(progress_at, updated_at, created_at) DESC
@@ -5635,7 +5947,7 @@ export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
     )
     return r.rows.map(rowToBuildJob)
   } catch {
-    return []
+    return null
   }
 }
 
@@ -5646,14 +5958,66 @@ export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
 // terminate), să reia (opțional cu textul reformulat = „modifică"), și să
 // anuleze unul în curs. Toate ADMIN-only, expuse prin unealta `constructor_manage`.
 
-/** Șterge DEFINITIV un ordin după id. `true` dacă a existat și s-a șters. */
-export async function deleteBuildJob(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+export interface BuildJobMutationExpectation {
+  status: BuildJob['status']
+  updatedAt: string
+}
+
+export type DeleteBuildJobResult =
+  | { ok: true }
+  | { ok: false; error: 'not_found' | 'not_deletable' | 'stale_state' }
+
+/** Șterge DEFINITIV numai un rezultat terminal. Erorile DB sunt excepții și nu
+ * pot fi prezentate drept conflict de stare. */
+export async function deleteBuildJob(
+  id: number,
+  expected?: BuildJobMutationExpectation,
+): Promise<DeleteBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'not_found' }
+  const client = await conexiuneDb()
   try {
-    const r = await getPool().query('DELETE FROM build_jobs WHERE id=$1', [id])
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
+    await client.query('BEGIN')
+    const selected = await client.query<{
+      status: BuildJob['status']
+      updated_at: Date
+      constructor_stage: string
+      has_pipeline_receipt: boolean
+    }>(
+      `SELECT b.status, b.updated_at, b.constructor_stage,
+              EXISTS(SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id) AS has_pipeline_receipt
+         FROM build_jobs b WHERE b.id=$1 AND b.arhivat=false FOR UPDATE OF b`,
+      [id],
+    )
+    const current = selected.rows[0]
+    if (!current) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_found' }
+    }
+    if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'stale_state' }
+    }
+    if (!['failed', 'done', 'cancelled'].includes(current.status)) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_deletable' }
+    }
+    // Ledgerul merge/CI/build/deploy este dovadă operațională, nu decor de UI.
+    // Un rezultat cu receipts se poate ascunde numai prin arhivare recuperabilă.
+    if (current.has_pipeline_receipt || current.constructor_stage === 'deployed') {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_deletable' }
+    }
+    const removed = await client.query('DELETE FROM build_jobs WHERE id=$1', [id])
+    await client.query('COMMIT')
+    return (removed.rowCount ?? 0) === 1
+      ? { ok: true }
+      : { ok: false, error: 'not_found' }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -5672,10 +6036,19 @@ export async function deleteBuildJob(id: number): Promise<boolean> {
 // ordine șterse." ca rezultat măsurat, deși ștergerea nu rulase deloc (zeroul
 // fals interzis de regula #1). null = eșec (ruta răspunde 500); 0 rămâne
 // posibil DOAR ca număr real de rânduri șterse.
-export async function deleteBuildJobsByScope(
+export interface BuildJobDeletionSnapshot extends BuildJobMutationExpectation {
+  id: number
+}
+
+export type ArchiveBuildJobsResult =
+  | { ok: true; archived: number }
+  | { ok: false; error: 'stale_state' }
+
+export async function archiveBuildJobsByScope(
   scope: 'failed' | 'done' | 'failed_done' | 'all',
-): Promise<number | null> {
-  if (!dbEnabled()) return null
+  expected: readonly BuildJobDeletionSnapshot[],
+): Promise<ArchiveBuildJobsResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   // Stările de ISTORIC pe scope. Ordinele VII (queued/running) lipsesc din TOATE —
   // niciun grup nu le poate atinge, nici măcar 'all'.
   const stariCurente: Record<typeof scope, string[]> = {
@@ -5684,11 +6057,48 @@ export async function deleteBuildJobsByScope(
     failed_done: ['failed', 'done', 'cancelled'],
     all: ['failed', 'done', 'cancelled'], // „tot" = tot ISTORICUL, nu munca vie
   }
+  const ids = expected.map((item) => item.id)
+  if (new Set(ids).size !== ids.length || expected.length > 40) return { ok: false, error: 'stale_state' }
+  if (expected.length === 0) return { ok: true, archived: 0 }
+  const client = await conexiuneDb()
   try {
-    const r = await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stariCurente[scope]])
-    return r.rowCount ?? 0
-  } catch {
-    return null
+    await client.query('BEGIN')
+    const selected = await client.query<{
+      id: string | number
+      status: BuildJob['status']
+      updated_at: Date
+      arhivat: boolean
+    }>(
+      'SELECT id, status, updated_at, arhivat FROM build_jobs WHERE id = ANY($1::bigint[]) FOR UPDATE',
+      [ids],
+    )
+    const current = new Map(selected.rows.map((row) => [Number(row.id), row]))
+    const allowed = new Set(stariCurente[scope])
+    const matches = expected.every((item) => {
+      const row = current.get(item.id)
+      return row
+        && row.arhivat === false
+        && row.status === item.status
+        && allowed.has(row.status)
+        && row.updated_at.toISOString() === item.updatedAt
+    })
+    if (!matches || current.size !== expected.length) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'stale_state' }
+    }
+    const archived = await client.query(
+      `UPDATE build_jobs SET arhivat=true, updated_at=now()
+        WHERE id = ANY($1::bigint[]) AND arhivat=false AND status = ANY($2::text[])`,
+      [ids, stariCurente[scope]],
+    )
+    if ((archived.rowCount ?? 0) !== expected.length) throw new Error('constructor_bulk_archive_count_mismatch')
+    await client.query('COMMIT')
+    return { ok: true, archived: archived.rowCount ?? 0 }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -5696,49 +6106,100 @@ export async function deleteBuildJobsByScope(
  *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Întoarce
  *  jobul actualizat sau null.
  *
- *  ACCEPTĂ ȘI 'running' (Adrian, 5 aug: „dacă apăs reia reparația nu face nimic"
- *  — ordinul #94 era agățat în 'running', worker-ul lui murise, dar butonul
- *  „reia" chema retryBuildJob care ignora 'running' → 409 → buton mort). Când
- *  OMUL apasă reia, e o comandă explicită: „ăsta e blocat, repornește-l". Un
- *  worker cu adevărat viu ar fi trimis progres în ultimele 15 min; dacă totuși
- *  mai raportează după reluare, e cazul de graniță acceptat — ordinul rulează o
- *  dată, nu se pierde. Nu mai lăsăm un job mort să țină coada blocată. */
-export async function retryBuildJob(id: number, newOrderText?: string): Promise<BuildJob | null> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return null
+ *  Numai un rezultat terminal poate fi reluat explicit. Un job viu se recuperează
+ *  automat prin lease/watchdog; resetarea lui din Admin ar crea doi executori pe
+ *  aceeași cerere și ar putea muta înapoi un job deja publicat. */
+export type RetryBuildJobResult =
+  | { ok: true; job: BuildJob }
+  | { ok: false; error: 'not_retryable' | 'duplicate_active' | 'stale_state'; conflictJobId?: number }
+
+export async function retryBuildJob(
+  id: number,
+  newOrderText?: string,
+  expected?: BuildJobMutationExpectation,
+): Promise<RetryBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'not_retryable' }
   const text = (newOrderText ?? '').trim()
+  const client = await conexiuneDb()
   try {
-    const r = await getPool().query<BuildJobDbRow>(
-      `WITH candidate AS (
-         SELECT id FROM build_jobs
-          WHERE id=$1 AND status IN ('failed','done','queued','running','cancelled')
-            AND (
-              status <> 'failed'
-              OR NOT EXISTS (SELECT 1 FROM constructor_incidents WHERE job_id=build_jobs.id)
-              OR EXISTS (
-                SELECT 1 FROM constructor_incidents
-                 WHERE job_id=build_jobs.id AND state IN ('repairing','verifying')
-              )
-            )
-          FOR UPDATE
-       ), reset_pipeline AS (
-         DELETE FROM constructor_pipeline p USING candidate c
-          WHERE p.job_id=c.id
-       )
-       UPDATE build_jobs b
-          SET status='queued', attempts=0, codex_task_id=NULL,
-              constructor_stage='queued', ci=NULL, progress=NULL,
-              progress_at=NULL, branch=NULL, pr_url=NULL, commit_sha=NULL,
-              live_version=NULL, brain=NULL,
-              order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
-              log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
-              updated_at = now()
-         FROM candidate c WHERE b.id=c.id
-        RETURNING b.*`,
-      [id, text.slice(0, 4000)],
+    await client.query('BEGIN')
+    // Retry-ul trece prin aceeași ușă serializată ca un ordin nou; altfel două
+    // clickuri sau o reformulare pot activa același subiect în paralel.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('constructor:create-build-job'))")
+    const candidate = await client.query<BuildJobDbRow & { has_pipeline_receipt: boolean }>(
+      `SELECT b.*,
+              EXISTS(SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id) AS has_pipeline_receipt
+         FROM build_jobs b WHERE b.id=$1 AND b.arhivat=false FOR UPDATE OF b`,
+      [id],
     )
-    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
-  } catch {
-    return null
+    const current = candidate.rows[0]
+    if (!current) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_retryable' }
+    }
+    if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'stale_state' }
+    }
+    if (!['failed', 'cancelled'].includes(current.status) || current.erasure_request_id != null) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_retryable' }
+    }
+    // A pipeline row is an immutable publication/release ledger.  Retrying it
+    // as a fresh implementation would erase receipts and may duplicate an
+    // already-created PR, merge or deploy.  Such jobs need an explicit
+    // retirement transition, never a generic Admin reset.
+    if (current.has_pipeline_receipt) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_retryable' }
+    }
+    const finalOrder = (text || current.order_text).slice(0, 12_000)
+    const active = await client.query<{ id: string | number; order_text: string }>(
+      `SELECT id, order_text FROM build_jobs
+        WHERE id <> $1 AND status IN ('queued','running')
+        ORDER BY id DESC`,
+      [id],
+    )
+    const duplicate = active.rows.find((row) =>
+      amprentaOrdin(row.order_text) === amprentaOrdin(finalOrder)
+      || seamanaOrdinele(row.order_text, finalOrder),
+    )
+    if (duplicate) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'duplicate_active', conflictJobId: Number(duplicate.id) }
+    }
+    const updated = await client.query<BuildJobDbRow>(
+      `UPDATE build_jobs
+          SET status='queued', attempts=0, execution_cycle=execution_cycle + 1, codex_task_id=NULL,
+              constructor_stage='queued', ci=NULL, progress='owner_retry_scheduled',
+              progress_at=now(), branch=NULL, pr_url=NULL, commit_sha=NULL,
+              live_version=NULL, brain=NULL, retry_not_before=NULL,
+              order_text=$2,
+              log=COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
+              updated_at=now()
+        WHERE id=$1
+        RETURNING *`,
+      [id, finalOrder],
+    )
+    await client.query(
+      `UPDATE constructor_incidents
+          SET state='repairing', stage='owner_retry',
+              evidence=left(evidence || E'\\n[owner_retry_requested]', 4000),
+              next_action='Workerul reia același ordin; verificarea trebuie să avanseze până la dovada live.',
+              verification=NULL, closed_at=NULL, updated_at=now()
+        WHERE job_id=$1`,
+      [id],
+    )
+    await client.query('COMMIT')
+    const row = updated.rows[0]
+    if (!row) throw new Error('constructor_retry_update_missing')
+    return { ok: true, job: rowToBuildJob(row) }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -5749,20 +6210,68 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
 
 /** Anulează explicit un ordin în curs sau în coadă. `cancelled` este terminal,
  *  dar NU este eșec de execuție și nu deschide un incident fals. */
-export async function cancelBuildJob(id: number): Promise<boolean> {
-  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+export type CancelBuildJobResult =
+  | { ok: true }
+  | { ok: false; error: 'not_found' | 'past_boundary' | 'stale_state' }
+
+export async function cancelBuildJob(
+  id: number,
+  expected?: BuildJobMutationExpectation,
+): Promise<CancelBuildJobResult> {
+  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'not_found' }
+  const client = await conexiuneDb()
   try {
-    const r = await getPool().query(
-      `UPDATE build_jobs
-         SET status='cancelled',
-             log = COALESCE(log,'') || E'\\n[anulat de owner]',
-             updated_at = now()
-       WHERE id=$1 AND status IN ('queued','running')`,
+    await client.query('BEGIN')
+    const selected = await client.query<BuildJobDbRow>(
+      'SELECT * FROM build_jobs WHERE id=$1 AND arhivat=false FOR UPDATE',
       [id],
     )
-    return (r.rowCount ?? 0) > 0
-  } catch {
-    return false
+    const current = selected.rows[0]
+    if (!current) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'not_found' }
+    }
+    if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'stale_state' }
+    }
+    const r = await client.query(
+      `UPDATE build_jobs
+         SET status='cancelled',
+             constructor_stage='cancelled',
+             codex_task_id=NULL,
+             progress='cancelled_by_admin',
+             retry_not_before=NULL,
+             progress_at=now(),
+             log = COALESCE(log,'') || E'\\n[anulat de owner]',
+             updated_at = now()
+       WHERE id=$1
+         AND status IN ('queued','running')
+         AND constructor_stage IN ('queued','claimed','accepted','working')`,
+      [id],
+    )
+    if ((r.rowCount ?? 0) === 0) {
+      await client.query('COMMIT')
+      return { ok: false, error: 'past_boundary' }
+    }
+    await client.query(
+      `UPDATE constructor_incidents
+          SET state='closed', stage='cancelled',
+              verification='Ordin anulat explicit de administrator înainte de publicare.',
+              lesson=NULL,
+              next_action='Nicio acțiune automată; numai o reluare explicită poate redeschide ordinul.',
+              closed_at=now(), updated_at=now()
+        WHERE job_id=$1 AND state <> 'closed'`,
+      [id],
+    )
+    await client.query('COMMIT')
+    return { ok: true }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -5777,15 +6286,23 @@ export async function requeueMoneyFailedBuildJobs(): Promise<number> {
   try {
     const r = await getPool().query<{ id: string | number }>(
       `UPDATE build_jobs
-         SET status='queued', attempts=0,
+         SET status='queued', attempts=0, execution_cycle=execution_cycle + 1,
+             constructor_stage='queued', codex_task_id=NULL,
+             progress='worker_retry_scheduled', progress_at=now(), retry_not_before=NULL,
              log = COALESCE(log,'') || E'\\n[healer: requeued — it had failed on lack of credit, the pocket is full again]',
              updated_at = now()
        WHERE status='failed'
+         AND arhivat=false
+         AND erasure_request_id IS NULL
          AND updated_at > now() - interval '72 hours'
          AND log ~* '(402|requires more credits|insufficient credits)'
          AND log NOT LIKE '%[healer: requeued%'
-         AND log NOT LIKE '%[P27: eroare PERMANENT%'
-       RETURNING id`,
+         AND NOT EXISTS (
+           SELECT 1
+             FROM constructor_pipeline p
+            WHERE p.job_id = build_jobs.id
+         )
+        RETURNING id`,
     )
     return r.rowCount ?? 0
   } catch {

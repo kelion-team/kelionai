@@ -1049,6 +1049,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-item.build-running { border-left-color: #4aa3ff; }
 .build-item.build-queued { border-left-color: #b0b6c0; }
 .build-item.build-done { border-left-color: #57c98a; }
+.build-item.build-unverified { border-left-color: #d7a94b; }
 .build-item.build-failed { border-left-color: #ff7a7a; }
 /* BARA + FLUXUL PE ETAPE (Adrian, 12 aug: „tot fluxul, cu bari de la 0 la 100%,
    până la deploy"). Clase NOI (fără coliziune, verificat) — bara vizuală + chip-
@@ -1192,6 +1193,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-badge-running { background: color-mix(in srgb, #4aa3ff 22%, transparent); }
 .build-badge-queued { background: color-mix(in srgb, #b0b6c0 20%, transparent); }
 .build-badge-done { background: color-mix(in srgb, #57c98a 22%, transparent); }
+.build-badge-unverified { background: color-mix(in srgb, #d7a94b 22%, transparent); }
 .build-badge-failed { background: color-mix(in srgb, #ff7a7a 22%, transparent); }
 .build-ci {
   flex: none;

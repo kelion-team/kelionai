@@ -8,7 +8,7 @@
 // and workflow dispatches in memory, and records EVERY request (method, path,
 // body). That way a test can say not just "it worked", but "it asked for
 // EXACTLY this": a branch from master's tip, base64 content, a PR with base
-// master, a squash merge.
+// master, and the configured protected merge strategy.
 //
 // What it does NOT know THROWS 599 with the path in the body — a new route
 // can't slip unseen through a "green" test.

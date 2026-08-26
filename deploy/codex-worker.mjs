@@ -8,6 +8,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -32,6 +33,24 @@ const AUTH_HOME = resolve(process.env.CODEX_HOME ?? '/var/lib/kelion-codex-auth'
 const PROFILE_HOME = resolve(process.env.CODEX_WORKER_PROFILE_HOME ?? '/opt/kelion-codex/profile-home')
 const HANDOFF_READY = resolve(process.env.CODEX_HANDOFF_READY ?? '/var/lib/kelion-constructor-handoff/ready')
 const HANDOFF_ACK = resolve(HANDOFF_READY, '..', 'ack')
+const HANDOFF_RETIRED = resolve(HANDOFF_READY, '..', 'retired')
+
+class HandoffDurabilityUncertainError extends Error {
+  constructor(cause) {
+    super(`Durabilitatea handoff-ului materializat nu a putut fi confirmată: ${cause instanceof Error ? cause.message : String(cause)}`)
+    this.name = 'HandoffDurabilityUncertainError'
+    this.cause = cause
+  }
+}
+
+function fsyncPath(path) {
+  const descriptor = openSync(path, 'r')
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
+}
 const EXEC_ENABLED = process.env.CODEX_WORKER_EXEC_ENABLED === '1'
 const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const CODEX_VERSION = 'codex-cli 0.149.1'
@@ -49,9 +68,62 @@ const REQUIRED_LAYOUT = Object.freeze({
   podman: '/usr/bin/podman',
 })
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const RECOVERY_GUIDANCE = Object.freeze({
+  stale_base: 'Reexecută ordinul peste vârful master curent; nu reutiliza patch-ul sau baza anterioară.',
+  ci_failed: 'Versiunea anterioară a fost respinsă de un control CI obligatoriu. Auditează cauza probabilă și produce o remediere nouă, verificată complet.',
+  local_gate_failed: 'Revalidarea izolată a publisherului a respins versiunea anterioară. Reproduce toate porțile și repară orice diferență deterministă.',
+  pr_closed: 'PR-ul anterior a fost închis fără merge. Reexecută ordinul curat și produce un handoff nou, fără a reutiliza branch-ul anterior.',
+})
+const WORKER_FAILURE_CODES = new Set([
+  'provider_auth',
+  'provider_credit',
+  'execution_timeout',
+  'test_failure',
+  'quality_gate_failure',
+  'no_changes',
+  'brain_unavailable',
+  'codex_exec_failed',
+  'worker_internal_failure',
+])
 
 function fail(message) {
   throw new Error(message)
+}
+
+class WorkerApiError extends Error {
+  constructor(path, status, payload) {
+    super(`API worker ${path}: HTTP ${status}`)
+    this.name = 'WorkerApiError'
+    this.status = status
+    this.payload = payload
+  }
+}
+
+function privateLogTail(logPath, maxBytes = 128 * 1024) {
+  if (!logPath || !existsSync(logPath)) return ''
+  const raw = readFileSync(logPath, 'utf8')
+  return raw.slice(-maxBytes)
+}
+
+/** Clasifică local jurnalul privat și transmite serverului numai un cod dintr-un
+ * catalog fix. Niciun fragment de output (care poate conține secrete) nu iese
+ * din contul workerului. */
+function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
+  const source = `${privateLogTail(logPath)}\n${error instanceof Error ? error.message : ''}`
+  if (/credit balance is too low|requires more credits|insufficient.{0,30}credit|payment required|\b402\b/i.test(source)) return 'provider_credit'
+  if (/invalid x-api-key|authentication_error|api key not valid|not logged in|unauthorized|\b(?:401|403)\b.{0,80}(?:key|token|auth)/i.test(source)) return 'provider_auth'
+  if (result.timedOut || /timed out|timeout|timp.{0,20}depăș/i.test(source)) return 'execution_timeout'
+  if (/no changes|working tree clean|fără nicio modificare|nu ai scris nimic/i.test(source)) return 'no_changes'
+  if (/model.{0,80}(?:unavailable|invalid|refused)|provider.{0,80}(?:unavailable|error)|brain unavailable|răspuns gol/i.test(source)) return 'brain_unavailable'
+  if (phase === 'gate' && /(?:test|vitest|jest|pytest|assert).{0,120}(?:failed|failure|error|picat)/i.test(source)) return 'test_failure'
+  if (phase === 'gate') return 'quality_gate_failure'
+  if (phase === 'codex') return 'codex_exec_failed'
+  return 'worker_internal_failure'
+}
+
+function assertWorkerFailureCode(code) {
+  if (!WORKER_FAILURE_CODES.has(code)) fail('Cod de eroare worker necanonic')
+  return code
 }
 
 function assertLoopbackApi() {
@@ -222,7 +294,7 @@ async function post(secret, path, body) {
   })
   if (response.status === 204) return null
   const payload = await response.json().catch(() => null)
-  if (!response.ok) fail(`API worker ${path}: HTTP ${response.status}`)
+  if (!response.ok) throw new WorkerApiError(path, response.status, payload)
   return payload
 }
 
@@ -315,9 +387,19 @@ function publishHandoff(jobDir, input) {
     writeFileSync(join(staging, 'receipt.json'), receiptBytes, { flag: 'wx', mode: 0o440 })
     chmodSync(join(staging, 'patch.diff'), 0o440)
     chmodSync(join(staging, 'receipt.json'), 0o440)
+    fsyncPath(join(staging, 'patch.diff'))
+    fsyncPath(join(staging, 'receipt.json'))
+    fsyncPath(staging)
     renameSync(staging, target)
+    // The DB handoff event is allowed only after both file contents and the
+    // directory rename survive a power loss.  fsync both sides of the rename;
+    // the root sync also persists newly-created ready/staging entries.
+    fsyncPath(stagingRoot)
+    fsyncPath(HANDOFF_READY)
+    fsyncPath(handoffRoot)
   } catch (error) {
     if (existsSync(staging)) rmSync(staging, { recursive: true, force: true })
+    if (existsSync(target)) throw new HandoffDurabilityUncertainError(error)
     throw error
   }
   return { handoffId, baseCommit: input.baseCommit, patchSha256, gateReceiptSha256 }
@@ -329,25 +411,60 @@ function handoffAckPath(handoffId) {
   return path
 }
 
-function markHandoffRecorded(handoffId) {
+function markHandoffRecorded(handoffId, outcome = 'recorded') {
   mkdirSync(HANDOFF_ACK, { recursive: true, mode: 0o750 })
   const path = handoffAckPath(handoffId)
   if (existsSync(path)) return
-  writeFileSync(path, 'recorded\n', { flag: 'wx', mode: 0o440 })
+  if (!['recorded', 'stale'].includes(outcome)) fail('Verdict handoff local invalid')
+  writeFileSync(path, `${outcome}\n`, { flag: 'wx', mode: 0o440 })
   chmodSync(path, 0o440)
+}
+
+/** Publisherul mută atomic materialul confirmat într-un director de retenție;
+ * numai workerul care deține fișierele îl șterge recursiv. */
+function cleanupRetiredHandoffs() {
+  if (!existsSync(HANDOFF_RETIRED)) return 0
+  let removed = 0
+  for (const entry of readdirSync(HANDOFF_RETIRED, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !UUID.test(entry.name)) continue
+    const directory = resolve(HANDOFF_RETIRED, entry.name)
+    assertDescendant(HANDOFF_RETIRED, directory, 'Handoff retras')
+    rmSync(directory, { recursive: true, force: false })
+    removed += 1
+  }
+  return removed
+}
+
+function retireAcknowledgedHandoff(handoffId) {
+  if (!UUID.test(handoffId)) fail('Identificator handoff invalid la retragere')
+  const source = resolve(HANDOFF_READY, handoffId)
+  const target = resolve(HANDOFF_RETIRED, handoffId)
+  assertDescendant(HANDOFF_READY, source, 'Handoff de retras')
+  assertDescendant(HANDOFF_RETIRED, target, 'Destinație handoff retras')
+  if (!existsSync(source)) return false
+  if (existsSync(target)) fail('Coliziune în retenția handoff worker')
+  renameSync(source, target)
+  const ack = handoffAckPath(handoffId)
+  if (existsSync(ack)) unlinkSync(ack)
+  return true
 }
 
 /** Reia numai înscrierea DB a unui handoff deja materializat. Nu rerulează
  * promptul și nu produce un al doilea patch dacă răspunsul API s-a pierdut. */
 async function reconcilePendingHandoffs(secret) {
   if (!existsSync(HANDOFF_READY)) return 0
-  const pending = readdirSync(HANDOFF_READY, { withFileTypes: true })
+  const entries = readdirSync(HANDOFF_READY, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && UUID.test(entry.name))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .slice(0, 64)
+    .map((entry) => ({ entry, acknowledged: existsSync(handoffAckPath(entry.name)) }))
+    .sort((left, right) => left.entry.name.localeCompare(right.entry.name))
+  // Două loturi independente: un val de handoff-uri noi nu poate înfometa
+  // reconcilierea celor ACKed care au fost deja merged/retired în DB.
+  const pending = [
+    ...entries.filter((item) => !item.acknowledged).slice(0, 64),
+    ...entries.filter((item) => item.acknowledged).slice(0, 64),
+  ]
   let recovered = 0
-  for (const entry of pending) {
-    if (existsSync(handoffAckPath(entry.name))) continue
+  for (const { entry, acknowledged } of pending) {
     const directory = resolve(HANDOFF_READY, entry.name)
     assertDescendant(HANDOFF_READY, directory, 'Handoff de reconciliat')
     if (realpathSync(directory) !== directory) fail('Handoff-ul de reconciliat nu este canonic')
@@ -363,19 +480,36 @@ async function reconcilePendingHandoffs(secret) {
     if (receipt.handoffId !== entry.name || createHash('sha256').update(readFileSync(patchPath)).digest('hex') !== receipt.patchSha256) {
       fail('Handoff-ul pending nu corespunde receiptului')
     }
-    await reportEvent(secret, receipt.jobId, {
-      taskId: receipt.taskId,
-      event: 'gates_passed',
-      ci: 'green',
-      progress: 'Handoff-ul imuabil a fost reconciliat după întreruperea transportului',
-      handoffId: receipt.handoffId,
-      baseCommit: receipt.baseCommit,
-      patchSha256: receipt.patchSha256,
-      gateReceiptSha256: createHash('sha256').update(receiptBytes).digest('hex'),
-    })
-    markHandoffRecorded(receipt.handoffId)
-    recovered += 1
+    try {
+      const response = await reportEvent(secret, receipt.jobId, {
+        taskId: receipt.taskId,
+        event: 'gates_passed',
+        ci: 'local_gates',
+        progress: 'Handoff-ul imuabil a fost reconciliat după întreruperea transportului',
+        handoffId: receipt.handoffId,
+        baseCommit: receipt.baseCommit,
+        patchSha256: receipt.patchSha256,
+        gateReceiptSha256: createHash('sha256').update(receiptBytes).digest('hex'),
+      })
+      if (['merged', 'release_dispatched', 'deployed'].includes(String(response?.stage ?? ''))) {
+        if (retireAcknowledgedHandoff(receipt.handoffId)) recovered += 1
+      } else if (!acknowledged) {
+        markHandoffRecorded(receipt.handoffId)
+        recovered += 1
+      }
+    } catch (error) {
+      if (error instanceof WorkerApiError && error.status === 409 && error.payload?.error === 'stale_handoff') {
+        // Serverul a verificat tranzacțional că alt task/stadiu este canonic.
+        // Receiptul vechi nu mai poate fi consumat de publisher și este retras
+        // recuperabil înainte de ștergerea făcută de workerul proprietar.
+        if (retireAcknowledgedHandoff(receipt.handoffId)) recovered += 1
+      } else {
+        // 5xx/timeout rămân pending și vor fi reconciliate la următoarea tură.
+        throw error
+      }
+    }
   }
+  cleanupRetiredHandoffs()
   return recovered
 }
 
@@ -568,34 +702,59 @@ async function preflight() {
   return null
 }
 
-function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 30 * 60_000) {
+function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 30 * 60_000, signal = undefined) {
   return new Promise((done, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('Lease-ul jobului a fost pierdut'))
+      return
+    }
     const fd = openSync(logPath, 'a', 0o600)
     let settled = false
+    let killTimer = null
+    let timedOut = false
+    let aborted = false
     const child = spawn(command, args, {
       cwd,
       env,
       stdio: [stdin === null ? 'ignore' : 'pipe', fd, fd],
       windowsHide: true,
     })
-    const timer = setTimeout(() => {
-      if (settled) return
+    const terminate = () => {
+      if (settled || killTimer) return
       child.kill('SIGTERM')
-      setTimeout(() => child.kill('SIGKILL'), 2_000).unref()
-    }, timeoutMs)
+      killTimer = setTimeout(() => {
+        if (!settled) child.kill('SIGKILL')
+      }, 2_000)
+      killTimer.unref()
+    }
+    const onTimeout = () => {
+      timedOut = true
+      terminate()
+    }
+    const onAbort = () => {
+      aborted = true
+      terminate()
+    }
+    const timer = setTimeout(onTimeout, timeoutMs)
+    const cleanup = () => {
+      clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
+      signal?.removeEventListener('abort', onAbort)
+      closeSync(fd)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
     child.once('error', (error) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
-      closeSync(fd)
+      cleanup()
       reject(error)
     })
-    child.once('exit', (code, signal) => {
+    child.once('exit', (code, exitSignal) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
-      closeSync(fd)
-      done({ code: code ?? 1, signal })
+      cleanup()
+      done({ code: code ?? 1, signal: exitSignal, timedOut, aborted })
     })
     if (stdin !== null) {
       child.stdin.on('error', () => undefined)
@@ -612,26 +771,127 @@ async function heartbeat(secret, status, detail) {
   return post(secret, '/api/internal/codex/status', { status, ...(detail ? { detail } : {}) })
 }
 
+function strictWorkerClaimResponse(claimed) {
+  if (!claimed || typeof claimed !== 'object' || Array.isArray(claimed)) fail('Răspuns claim invalid')
+  if (Object.keys(claimed).some((key) => !['state', 'job'].includes(key))) fail('Răspuns claim invalid')
+  if (claimed.state === 'no_claimable_job' || claimed.state === 'pipeline_active') {
+    if (claimed.job !== null) fail('Răspuns claim invalid')
+    return { state: claimed.state, job: null }
+  }
+  if (claimed.state !== 'claimed' || !claimed.job || typeof claimed.job !== 'object' || Array.isArray(claimed.job)) {
+    fail('Răspuns claim invalid')
+  }
+  const job = claimed.job
+  const jobId = String(job?.jobId ?? '')
+  const taskId = String(job?.taskId ?? '')
+  const order = job?.order
+  const recoveryCode = job?.recoveryCode ?? null
+  if (
+    !/^[1-9]\d{0,18}$/.test(jobId)
+    || !/^codex-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)
+    || typeof order !== 'string'
+    || !order.trim()
+    || order.length > 20_000
+    || (recoveryCode !== null && !Object.hasOwn(RECOVERY_GUIDANCE, recoveryCode))
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(order)
+  ) fail('Răspuns claim invalid')
+  return { state: 'claimed', job: { jobId, taskId, order, recoveryCode } }
+}
+
+async function degradedWithoutMasking(secret, detail, reportHeartbeat = heartbeat) {
+  try {
+    await reportHeartbeat(secret, 'degraded', detail)
+  } catch {
+    // Heartbeatul este numai diagnosticul secundar. Eroarea canonică a
+    // reconcilierii/claimului/evenimentului trebuie să rămână cea aruncată.
+  }
+}
+
+/** Un worker nu este `ready` până când a reconciliat orice handoff durabil și
+ * a citit cu succes coada. Un claim valid devine `busy` înainte de primul
+ * eveniment, astfel încât un 5xx la `accepted` nu lasă un heartbeat verde
+ * peste un job deja trecut durabil în running. */
+async function prepareWorkerClaim(secret, dependencies = {}) {
+  const cleanup = dependencies.cleanup ?? cleanupRetiredHandoffs
+  const reconcile = dependencies.reconcile ?? reconcilePendingHandoffs
+  const claim = dependencies.claim ?? ((value) => post(value, '/api/internal/codex/jobs/claim', {}))
+  const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
+  try {
+    cleanup()
+    const recovered = await reconcile(secret)
+    const response = strictWorkerClaimResponse(await claim(secret))
+    if (response.state === 'no_claimable_job') {
+      await reportHeartbeat(
+        secret,
+        'ready',
+        recovered > 0
+          ? 'Handoff pending reconciliat; nu există ordin eligibil acum și workerul este pregătit'
+          : 'Worker pregătit; nu există ordin eligibil pentru claim acum',
+      )
+      return null
+    }
+    if (response.state === 'pipeline_active') {
+      await reportHeartbeat(secret, 'busy', 'Un ordin Constructor este deja running; workerul nu revendică un executor paralel')
+      return null
+    }
+    const job = response.job
+    await reportHeartbeat(secret, 'busy', 'Workerul a revendicat un ordin și îl pregătește în worktree-ul izolat')
+    return job
+  } catch (error) {
+    await degradedWithoutMasking(
+      secret,
+      'Workerul nu a putut reconcilia handoff-urile sau citi coada; niciun ordin nou nu poate porni sigur',
+      reportHeartbeat,
+    )
+    throw error
+  }
+}
+
+async function acceptWorkerClaim(secret, job, dependencies = {}) {
+  const report = dependencies.report ?? reportEvent
+  const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
+  try {
+    await report(secret, job.jobId, { taskId: job.taskId, event: 'accepted', progress: 'Ordin acceptat în worktree-ul izolat' })
+  } catch (error) {
+    await degradedWithoutMasking(
+      secret,
+      'Ordinul a fost revendicat, dar evenimentul accepted nu a putut fi persistat; watchdogul va reconcilia jobul',
+      reportHeartbeat,
+    )
+    throw error
+  }
+}
+
 function startJobLease(secret, jobId, taskId, progress) {
+  const controller = new AbortController()
   let stopped = false
   let running = Promise.resolve()
   let failure = null
   const renew = () => {
-    if (stopped) return
+    if (stopped || failure) return
     running = running.then(async () => {
       await reportEvent(secret, jobId, { taskId, event: 'progress', progress })
       await heartbeat(secret, 'busy', progress)
-    }).catch((error) => { failure = error })
+    }).catch((error) => {
+      failure = error
+      controller.abort(error)
+    })
   }
   renew()
   const timer = setInterval(renew, 45_000)
   timer.unref()
-  return async () => {
-    stopped = true
-    clearInterval(timer)
+  const assertHeld = async () => {
     await running
     if (failure) throw failure
   }
+  const stop = async () => {
+    stopped = true
+    clearInterval(timer)
+    await assertHeld()
+  }
+  stop.assert = assertHeld
+  stop.signal = controller.signal
+  return stop
 }
 
 async function runOnce() {
@@ -644,25 +904,14 @@ async function runOnce() {
     fail(problem)
   }
 
-  await heartbeat(secret, 'ready', 'Worker pregătit; push/merge/deploy sunt dezactivate')
-  const recovered = await reconcilePendingHandoffs(secret)
-  if (recovered > 0) await heartbeat(secret, 'ready', 'Handoff pending reconciliat; workerul poate continua coada')
-  const claimed = await post(secret, '/api/internal/codex/jobs/claim', {})
-  if (!claimed?.job) return
-  const { jobId, taskId, order } = claimed.job
-  if (
-    !/^[1-9]\d{0,18}$/.test(String(jobId))
-    || !/^codex-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(taskId))
-    || typeof order !== 'string'
-    || !order.trim()
-    || order.length > 20_000
-    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(order)
-  ) {
-    fail('Răspuns claim invalid')
-  }
+  const claimed = await prepareWorkerClaim(secret)
+  if (!claimed) return
+  const { jobId, taskId, order, recoveryCode } = claimed
+  const effectiveOrder = recoveryCode
+    ? `${order}\n\nContext de recuperare canonic: ${RECOVERY_GUIDANCE[recoveryCode]}`
+    : order
 
-  await reportEvent(secret, jobId, { taskId, event: 'accepted', progress: 'Ordin acceptat în worktree-ul izolat' })
-  await heartbeat(secret, 'busy', 'Codex editează local într-un worktree izolat')
+  await acceptWorkerClaim(secret, claimed)
   mkdirSync(JOBS, { recursive: true, mode: 0o700 })
   const jobStateDir = join(JOBS, `${taskId}-${jobId}`)
   const jobDir = join(jobStateDir, 'worktree')
@@ -670,6 +919,9 @@ async function runOnce() {
   assertDescendant(jobStateDir, jobDir, 'Worktree-ul jobului')
   if (existsSync(jobStateDir)) fail('Directorul jobului există deja; intervenție manuală necesară')
   let worktreeAdded = false
+  let logPath = null
+  let failureReported = false
+  let handoffMaterialized = false
   try {
     mkdirSync(jobStateDir, { recursive: false, mode: 0o700 })
     const added = spawnSync(
@@ -683,7 +935,7 @@ async function runOnce() {
     const expectedCommit = exactOutput('/usr/bin/git', ['rev-parse', 'origin/master^{commit}'], REPO, gitSupervisorEnv())
     if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== expectedCommit) fail('Worktree-ul nu corespunde exact origin/master')
     writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
-    const logPath = join(jobStateDir, 'worker.log')
+    logPath = join(jobStateDir, 'worker.log')
 
     const stopExecLease = startJobLease(secret, jobId, taskId, 'Codex editează local în sandbox fără rețea')
     let result
@@ -694,14 +946,17 @@ async function runOnce() {
         jobDir,
         logPath,
         codexParentEnv(),
-        order,
+        effectiveOrder,
         30 * 60_000,
+        stopExecLease.signal,
       )
     } finally {
       await stopExecLease()
     }
     if (result.code !== 0) {
-      await reportEvent(secret, jobId, { taskId, event: 'failed', log: `codex_exec_exit_${result.code}` })
+      const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'codex', result))
+      await reportEvent(secret, jobId, { taskId, event: 'failed', code })
+      failureReported = true
       await heartbeat(secret, 'degraded', 'Codex exec a eșuat; consultă jurnalul privat al worktree-ului')
       return
     }
@@ -717,27 +972,37 @@ async function runOnce() {
         podmanSupervisorEnv(),
         null,
         45 * 60_000,
+        stopGateLease.signal,
       )
     } finally {
       await stopGateLease()
     }
     if (gate.code !== 0) {
-      await reportEvent(secret, jobId, { taskId, event: 'failed', log: `gate_image_failed:exit_${gate.code}` })
+      const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'gate', gate))
+      await reportEvent(secret, jobId, { taskId, event: 'failed', code })
+      failureReported = true
       await heartbeat(secret, 'degraded', 'Imaginea offline de porți a eșuat; consultă jurnalul privat')
       return
     }
     const handoff = publishHandoff(jobDir, { jobId, taskId, baseCommit })
+    handoffMaterialized = true
     await reportEvent(secret, jobId, {
       taskId,
       event: 'gates_passed',
-      ci: 'green',
+      ci: 'local_gates',
       progress: 'Toate porțile locale sunt verzi; handoff-ul imuabil așteaptă publisherul separat',
       ...handoff,
     })
     markHandoffRecorded(handoff.handoffId)
-    await heartbeat(secret, 'degraded', 'Porțile sunt verzi; push/PR/merge/deploy rămân dezactivate')
+    // `ready` se publică numai la următoarea tură, după ce handoff-ul
+    // tocmai confirmat este reconciliat și claim-ul dovedește că nu există
+    // niciun ordin eligibil acum.
   } catch (error) {
-    await reportEvent(secret, jobId, { taskId, event: 'failed', log: 'worker_internal_failure' }).catch(() => undefined)
+    if (error instanceof HandoffDurabilityUncertainError) handoffMaterialized = true
+    if (!failureReported && !handoffMaterialized) {
+      const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'internal', {}, error))
+      await reportEvent(secret, jobId, { taskId, event: 'failed', code }).catch(() => undefined)
+    }
     throw error
   } finally {
     const removed = worktreeAdded ? gitResult(['worktree', 'remove', '--force', '--', jobDir], REPO) : null
@@ -750,7 +1015,7 @@ async function runOnce() {
   }
 }
 
-function selfTest() {
+async function selfTest() {
   const body = { z: 1, a: { y: true, x: null }, b: [2, 'q'] }
   const canonical = canonicalJson(body)
   if (canonical !== '{"a":{"x":null,"y":true},"b":[2,"q"],"z":1}') fail('canonicalJson diferă de contract')
@@ -793,6 +1058,141 @@ function selfTest() {
     passedAt: '2026-08-24T00:00:00.000Z',
   })
   if (receipt.kind !== 'kelion-constructor-handoff' || receipt.schema !== 1) fail('Receipt-ul handoff nu este canonic')
+  for (const code of WORKER_FAILURE_CODES) {
+    if (assertWorkerFailureCode(code) !== code) fail('Catalog worker failure inconsistent')
+  }
+  if (classifyWorkerFailure(null, 'gate', { timedOut: true }) !== 'execution_timeout') fail('Timeout worker neclasificat')
+
+  const claimedJob = {
+    jobId: '42',
+    taskId: 'codex-123e4567-e89b-42d3-a456-426614174000',
+    order: 'Remediază fluxul Constructor complet',
+    recoveryCode: null,
+  }
+  const emptyTrace = []
+  const empty = await prepareWorkerClaim('self-test-secret', {
+    cleanup: () => emptyTrace.push('cleanup'),
+    reconcile: async () => { emptyTrace.push('reconcile'); return 1 },
+    claim: async () => { emptyTrace.push('claim'); return { state: 'no_claimable_job', job: null } },
+    reportHeartbeat: async (_secret, status) => { emptyTrace.push(status) },
+  })
+  if (empty !== null || emptyTrace.join(',') !== 'cleanup,reconcile,claim,ready') {
+    fail('Workerul nu publică ready numai după reconciliere și lipsa unui ordin eligibil')
+  }
+
+  const busyTrace = []
+  const busy = await prepareWorkerClaim('self-test-secret', {
+    cleanup: () => busyTrace.push('cleanup'),
+    reconcile: async () => { busyTrace.push('reconcile'); return 0 },
+    claim: async () => { busyTrace.push('claim'); return { state: 'claimed', job: claimedJob } },
+    reportHeartbeat: async (_secret, status) => { busyTrace.push(status) },
+  })
+  if (busy?.jobId !== claimedJob.jobId || busyTrace.join(',') !== 'cleanup,reconcile,claim,busy') {
+    fail('Un claim valid nu devine busy imediat, fără heartbeat ready intermediar')
+  }
+
+  for (const phase of ['reconcile', 'claim']) {
+    const original = new Error(`self-test-${phase}`)
+    const trace = []
+    let observed = null
+    try {
+      await prepareWorkerClaim('self-test-secret', {
+        cleanup: () => trace.push('cleanup'),
+        reconcile: async () => {
+          trace.push('reconcile')
+          if (phase === 'reconcile') throw original
+          return 0
+        },
+        claim: async () => {
+          trace.push('claim')
+          throw original
+        },
+        reportHeartbeat: async (_secret, status) => { trace.push(status) },
+      })
+    } catch (error) {
+      observed = error
+    }
+    const expectedTrace = phase === 'reconcile'
+      ? 'cleanup,reconcile,degraded'
+      : 'cleanup,reconcile,claim,degraded'
+    if (observed !== original || trace.join(',') !== expectedTrace || trace.includes('ready')) {
+      fail(`Eșecul ${phase} nu păstrează eroarea originală și heartbeatul degraded`)
+    }
+  }
+
+  const committedTimeout = new Error('self-test-claim-response-timeout-after-commit')
+  const committedTrace = []
+  let committedObserved = null
+  try {
+    await prepareWorkerClaim('self-test-secret', {
+      cleanup: () => committedTrace.push('cleanup'),
+      reconcile: async () => { committedTrace.push('reconcile'); return 0 },
+      claim: async () => { committedTrace.push('claim-timeout'); throw committedTimeout },
+      reportHeartbeat: async (_secret, status) => { committedTrace.push(status) },
+    })
+  } catch (error) {
+    committedObserved = error
+  }
+  const afterCommittedTimeout = await prepareWorkerClaim('self-test-secret', {
+    cleanup: () => committedTrace.push('cleanup'),
+    reconcile: async () => { committedTrace.push('reconcile'); return 0 },
+    claim: async () => { committedTrace.push('claim-active'); return { state: 'pipeline_active', job: null } },
+    reportHeartbeat: async (_secret, status) => { committedTrace.push(status) },
+  })
+  if (
+    committedObserved !== committedTimeout
+    || afterCommittedTimeout !== null
+    || committedTrace.join(',') !== 'cleanup,reconcile,claim-timeout,degraded,cleanup,reconcile,claim-active,busy'
+    || committedTrace.includes('ready')
+  ) fail('Un claim COMMIT cu răspuns pierdut poate reveni fals la ready')
+
+  const acceptedFailure = new Error('self-test-accepted')
+  const acceptedTrace = []
+  let acceptedObserved = null
+  const acceptedClaim = await prepareWorkerClaim('self-test-secret', {
+    cleanup: () => acceptedTrace.push('cleanup'),
+    reconcile: async () => { acceptedTrace.push('reconcile'); return 0 },
+    claim: async () => { acceptedTrace.push('claim'); return { state: 'claimed', job: claimedJob } },
+    reportHeartbeat: async (_secret, status) => { acceptedTrace.push(status) },
+  })
+  try {
+    await acceptWorkerClaim('self-test-secret', acceptedClaim, {
+      report: async () => { acceptedTrace.push('accepted'); throw acceptedFailure },
+      reportHeartbeat: async (_secret, status) => { acceptedTrace.push(status) },
+    })
+  } catch (error) {
+    acceptedObserved = error
+  }
+  const afterAcceptedFailure = await prepareWorkerClaim('self-test-secret', {
+    cleanup: () => acceptedTrace.push('cleanup'),
+    reconcile: async () => { acceptedTrace.push('reconcile'); return 0 },
+    claim: async () => { acceptedTrace.push('claim-active'); return { state: 'pipeline_active', job: null } },
+    reportHeartbeat: async (_secret, status) => { acceptedTrace.push(status) },
+  })
+  if (
+    acceptedObserved !== acceptedFailure
+    || afterAcceptedFailure !== null
+    || acceptedTrace.join(',') !== 'cleanup,reconcile,claim,busy,accepted,degraded,cleanup,reconcile,claim-active,busy'
+    || acceptedTrace.includes('ready')
+  ) {
+    fail('Eșecul accepted este mascat sau lasă heartbeat ready peste jobul running')
+  }
+
+  const malformedTrace = []
+  let malformedRejected = false
+  try {
+    await prepareWorkerClaim('self-test-secret', {
+      cleanup: () => malformedTrace.push('cleanup'),
+      reconcile: async () => { malformedTrace.push('reconcile'); return 0 },
+      claim: async () => { malformedTrace.push('legacy-204'); return null },
+      reportHeartbeat: async (_secret, status) => { malformedTrace.push(status) },
+    })
+  } catch {
+    malformedRejected = true
+  }
+  if (!malformedRejected || malformedTrace.join(',') !== 'cleanup,reconcile,legacy-204,degraded') {
+    fail('Contractul claim ambiguu legacy nu este refuzat fail-closed')
+  }
   process.stdout.write('codex-worker self-test: TRECE\n')
 }
 
@@ -803,7 +1203,7 @@ async function preflightOnly() {
 }
 
 const mode = process.argv[2] ?? '--once'
-if (mode === '--self-test') selfTest()
+if (mode === '--self-test') await selfTest()
 else if (mode === '--preflight') await preflightOnly()
 else if (mode === '--once') await runOnce()
 else fail(`Mod necunoscut: ${mode}`)

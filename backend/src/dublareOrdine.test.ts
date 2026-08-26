@@ -66,7 +66,14 @@ describe('lacătul pe sursă: createBuildJob refuză dublurile', () => {
   it('dublura vie întoarce id-ul ordinului existent, nu creează al doilea', () => {
     const corp = db.slice(db.indexOf('export async function createBuildJob'))
     expect(corp).toContain('amprentaOrdin(orderText)')
-    expect(corp).toContain('return Number(dublura.id)')
+    expect(corp).toContain('return { id: Number(dublura.id), created: false, status: dublura.status }')
+  })
+
+  it('serializes SELECT plus INSERT and scans every live order', () => {
+    const corp = db.slice(db.indexOf('export async function createBuildJob'), db.indexOf('export interface ConstructorIncidentKnowledge'))
+    expect(corp).toContain("pg_advisory_xact_lock(hashtext('constructor:create-build-job'))")
+    expect(corp).not.toMatch(/WHERE status IN \('queued','running'\)[\s\S]{0,80}LIMIT 200/)
+    expect(corp).toContain("await client.query('ROLLBACK')")
   })
 
   it('ordinul verbatim al ownerului stă scris la ușă (să nu-l „optimizeze" nimeni)', () => {
@@ -99,11 +106,12 @@ describe('P27 — erorile PERMANENTE opresc reîncercarea din prima (proba la ru
   })
 })
 
-describe('P27 — lacătele pe sursă: mortul pe nume nu mai e reluat orbește și se raportează', () => {
-  it('reportBuildJob ștampilează verdictul și îngheață ordinul (attempts=99)', () => {
+describe('P27 — lacătele pe sursă: blocajul extern este factual și se raportează', () => {
+  it('reportBuildJob păstrează contorul real și marchează acțiunea externă fără sentinelă', () => {
     const corp = db.slice(db.indexOf('export async function reportBuildJob'))
     expect(corp).toContain('eEroarePermanenta(log)')
-    expect(corp).toContain("inghetat = ', attempts = 99'")
+    expect(corp).toContain("progress = CASE WHEN $10 THEN 'external_action_required'")
+    expect(corp).not.toContain('attempts = 99')
   })
 
   it('raportarea la Kelion: golul intră în triaj + panoul e anunțat, iar eșecul raportării se strigă', () => {
@@ -113,8 +121,9 @@ describe('P27 — lacătele pe sursă: mortul pe nume nu mai e reluat orbește �
     expect(corp).toContain('[P27] raportarea la Kelion a picat:')
   })
 
-  it('plasa stale-running și vindecătorul de pungă OCOLESC ordinele înghețate P27', () => {
-    expect(db.match(/NOT LIKE '%\[P27: eroare PERMANENT%'/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+  it('claim-ul nu ține blocat un retry explicit doar fiindcă jurnalul păstrează cauza P27', () => {
+    const claim = db.slice(db.indexOf('export async function claimNextBuildJob'), db.indexOf('export async function deblocheazaJoburileClaimate'))
+    expect(claim).not.toContain("NOT LIKE '%[P27: eroare PERMANENT%'")
   })
 
   it('„reia"-ul deliberat al ownerului rămâne posibil (retryBuildJob dezgheață cu attempts=0)', () => {

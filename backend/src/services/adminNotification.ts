@@ -53,8 +53,8 @@ export async function notifyAdmin(
 export async function getAdminNotifications(
   limit = 50,
   unreadOnly = false
-): Promise<AdminNotification[]> {
-  if (!dbEnabled()) return []
+): Promise<AdminNotification[] | null> {
+  if (!dbEnabled()) return null
   const pool = getPool()
 
   let query = `SELECT id, type, title, message, payload, read, created_at as "createdAt" FROM admin_notifications`
@@ -67,7 +67,7 @@ export async function getAdminNotifications(
     const res = await pool.query(query, [limit])
     return res.rows
   } catch {
-    return []
+    return null
   }
 }
 

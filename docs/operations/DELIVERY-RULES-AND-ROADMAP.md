@@ -72,10 +72,13 @@ chatul trebuie sa proiecteze aceleasi checkpointuri ordonate:
 
 Fiecare checkpoint are timestamp, actor, stare, legatura canonica si ultima
 dovada. Lease-ul si heartbeatul detecteaza stagnarea. Timeoutul nu marcheaza
-succes: reia aceeasi cerere idempotent, cu buget limitat de retry. Dupa
-epuizarea bugetului, cererea ramane `blocat` cu o cauza, responsabil, actiune
-ceruta ownerului/operatorului si termen de recontrol. Retry-ul nu creeaza o
-cerere duplicata si nu pierde dovezile anterioare.
+succes: reia aceeasi cerere idempotent, pe un termen/backoff persistat. Numarul
+de incercari este diagnostic si nu devine plafon terminal pentru o eroare
+recuperabila. Numai o autoritate externa reala poate pune cererea in asteptare,
+cu o singura actiune explicita; dupa restabilirea autoritatii, aceeasi cerere se
+reia automat. Retry-ul nu creeaza o cerere duplicata si nu pierde dovezile
+anterioare. Receiptul `local_gates` confirma numai portile locale/offline;
+rezultatul GitHub `ci=green` este un checkpoint independent si ulterior.
 
 Rollbackul este parte a traseului, nu o nota ulterioara. Pentru fiecare release
 se pastreaza candidatul, point-of-no-return, artefactul anterior eligibil si

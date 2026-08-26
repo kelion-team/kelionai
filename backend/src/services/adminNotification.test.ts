@@ -72,13 +72,13 @@ describe('adminNotification service', () => {
     await notifyAdmin('voce', 'Test 2', 'Mesaj 2')
 
     const list = await getAdminNotifications()
-    expect(list.length).toBe(2)
+    expect(list).toHaveLength(2)
 
     const marked = await markAdminNotificationRead(1)
     expect(marked).toBe(true)
 
     const unread = await getAdminNotifications(50, true)
-    expect(unread.length).toBe(1)
-    expect(unread[0].title).toBe('Test 2')
+    expect(unread).toHaveLength(1)
+    expect(unread?.[0]?.title).toBe('Test 2')
   })
 })

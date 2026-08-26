@@ -20,7 +20,7 @@ import {
   getDisabledGestures,
   setDisabledGestures,
   listBuildJobs,
-  listClientErrorGroups,
+  listClientErrorGroupsStrict,
   resetCostCounters,
   loadKv,
 } from '../db.js'
@@ -144,7 +144,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/inbound', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send({ emails: await listInboundEmails(50) })
+    const emails = await listInboundEmails(50)
+    if (emails === null) return reply.code(503).send({ error: 'inbound_unreadable' })
+    return reply.send({ emails })
   })
 
   // LIVE INBOX (Adrian, 10 Jul) — reads the REAL contact@kelionai.app mailbox
@@ -228,25 +230,38 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = cerAdmin(req, reply)
     if (!user) return
     const [healthRaw, jobs, clientErrors] = await Promise.all([
-      systemHealth().catch(() => '{}'),
-      // listBuildJobs întoarce null la eșec (auditul admin, 3 aug); aici e
-      // best-effort — auditul restului rămâne chiar dacă coada nu se citește.
-      listBuildJobs(12).then((j) => j ?? []).catch(() => []),
-      listClientErrorGroups(48, 30).catch(() => []),
+      systemHealth().catch(() => null),
+      // Auditul rămâne best-effort, dar o sursă ilizibilă nu devine niciodată
+      // lista goală „zero erori”. null este un rezultat vizibil și tipizat.
+      listBuildJobs(12).catch(() => null),
+      listClientErrorGroupsStrict(48, 30).catch(() => null),
     ])
-    let health: unknown = {}
-    try {
-      health = JSON.parse(healthRaw)
-    } catch {
-      /* health unavailable — the rest of the audit stays */
+    let health: Record<string, unknown> | null = null
+    if (healthRaw !== null) {
+      try {
+        const parsed = JSON.parse(healthRaw) as unknown
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          health = parsed as Record<string, unknown>
+        }
+      } catch {
+        /* health unavailable — the rest of the audit stays explicit */
+      }
     }
     return reply.send({
       health,
       serverErrors: recentLogs(40, 60),
       clientErrors,
-      failedJobs: jobs
-        .filter((j) => j.status === 'failed')
-        .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
+      sources: {
+        health: health === null ? 'unavailable' : 'ok',
+        serverErrors: 'ok',
+        clientErrors: clientErrors === null ? 'unavailable' : 'ok',
+        constructorQueue: jobs === null ? 'unavailable' : 'ok',
+      },
+      failedJobs: jobs === null
+        ? null
+        : jobs
+            .filter((j) => j.status === 'failed')
+            .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
     })
   })
 
@@ -259,10 +274,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/erori', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const [grupuriBrowser, sistem] = await Promise.all([
-      listClientErrorGroups(48, 40).catch(() => []),
-      problemeGlobaleAcum().catch(() => []),
-    ])
+    let grupuriBrowser: Awaited<ReturnType<typeof listClientErrorGroupsStrict>>
+    let sistem: Awaited<ReturnType<typeof problemeGlobaleAcum>>
+    try {
+      ;[grupuriBrowser, sistem] = await Promise.all([
+        listClientErrorGroupsStrict(48, 40),
+        problemeGlobaleAcum(),
+      ])
+    } catch {
+      return reply.code(503).send({ error: 'admin_errors_unreadable' })
+    }
     const browser = grupuriBrowser.map((g) => {
       const ex = explicaEroare(g.message)
       return {
@@ -286,7 +307,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { necitite?: string } }>('/api/admin/notificari', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send({ notificari: await getAdminNotifications(50, req.query?.necitite === '1') })
+    const notificari = await getAdminNotifications(50, req.query?.necitite === '1')
+    if (notificari === null) return reply.code(503).send({ error: 'notificari_necitite' })
+    return reply.send({ notificari })
   })
   app.post<{ Params: { id: string } }>('/api/admin/notificari/:id/citit', async (req, reply) => {
     const id = adminSiId(req, reply, req.params.id)
@@ -520,20 +543,46 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/gestures', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send({ disabled: await getDisabledGestures() })
+    try {
+      return reply.send({ disabled: await getDisabledGestures() })
+    } catch (error) {
+      req.log.error({ err: error }, 'admin gesture state unreadable')
+      return reply.code(503).send({ error: 'gesture_state_unreadable' })
+    }
   })
-  app.post<{ Body: { disabled?: string[] } }>('/api/admin/gestures', async (req, reply) => {
+  app.post<{ Body: unknown }>('/api/admin/gestures', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
-    await setDisabledGestures(list)
-    // Gesturile sunt o setare GLOBALĂ, dar de la 7 aug fiecare sesiune își ține
-    // lista în memorie (stareSesiune, TTL 10 min) ca să nu recitească DB-ul la
-    // fiecare tură. Fără linia asta, un gest debifat din panou ar fi rămas activ
-    // până la 10 minute pentru oricine e deja logat — exact tiparul „valoare
-    // veche servită după ce s-a schimbat". Uităm TOT: următoarea tură recitește.
-    uitaToateSesiunile()
-    return reply.send({ ok: true, disabled: await getDisabledGestures() })
+    const body = req.body
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 1 ||
+      !Object.prototype.hasOwnProperty.call(body, 'disabled')
+    ) {
+      return reply.code(400).send({ error: 'invalid_body' })
+    }
+    const list = (body as { disabled?: unknown }).disabled
+    if (!Array.isArray(list) || !list.every((value): value is string => typeof value === 'string')) {
+      return reply.code(400).send({ error: 'invalid_body' })
+    }
+    let canonical: string[]
+    try {
+      canonical = await setDisabledGestures(list)
+      // The write may already be committed even if the verification read below
+      // fails. Invalidate immediately so no session serves the old policy in
+      // that post-commit window; its next strict read will fail closed.
+      uitaToateSesiunile()
+      const persisted = await getDisabledGestures()
+      if (persisted.length !== canonical.length || persisted.some((value, index) => value !== canonical[index])) {
+        throw new Error('gesture_write_verification_failed')
+      }
+    } catch (error) {
+      req.log.error({ err: error }, 'admin gesture state unavailable')
+      return reply.code(503).send({ error: 'gesture_state_unavailable' })
+    }
+    return reply.send({ ok: true, disabled: canonical })
   })
 
   // Resetarea contoarelor afectează numai jurnalul intern de cost; wallet-ul și
@@ -662,7 +711,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/contact-messages', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send({ messages: await listContactMessages() })
+    const messages = await listContactMessages()
+    if (messages === null) return reply.code(503).send({ error: 'contact_messages_unreadable' })
+    return reply.send({ messages })
   })
 
   // ── AUTOVERIFICAREA INTELIGENTĂ (owner, 19 aug: „ceva inteligent bazat pe AI"

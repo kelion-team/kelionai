@@ -102,20 +102,17 @@ test('proxy-ul vede înlocuirile atomice printr-un singur mount de director', ()
 })
 
 test('deploy-ul reconciliază Compose înainte de validare și reload', () => {
-  const start = deploy.indexOf('export PUBLIC_APP_DOMAIN KELION_PROXY_CONFIG_ROOT=')
-  const end = deploy.indexOf('temporary_active=$(mktemp', start)
+  const start = deploy.lastIndexOf('\npublish_target_proxy_files_from_intent \\')
+  const end = deploy.indexOf('\nprepared_candidate_public_live_proof \\', start)
   const reconcile = deploy.slice(start, end)
   const composeUp = reconcile.indexOf('"$COMPOSE_BIN" -p kelion-proxy -f "$PROXY_COMPOSE_FILE" up')
   const validate = reconcile.indexOf('docker exec kelion-proxy caddy validate')
   const reload = reconcile.indexOf('docker exec kelion-proxy caddy reload')
 
   assert.ok(start >= 0 && end > start)
-  assert.match(
-    reconcile,
-    /if ! docker inspect[^\r\n]+kelion-proxy[^\r\n]+grep -qx true; then[\s\S]*?\r?\nfi\r?\n(?:#[^\r\n]*\r?\n)+"\$COMPOSE_BIN" -p kelion-proxy -f "\$PROXY_COMPOSE_FILE" up/,
-    'Compose up trebuie rulat în afara ramurii pentru proxy oprit',
-  )
   assert.equal((reconcile.match(/"\$COMPOSE_BIN"[^\r\n]+ up /g) ?? []).length, 1)
+  assert.ok(composeUp > reconcile.indexOf('publish_target_proxy_files_from_intent'),
+    'Compose up trebuie să urmeze publicarea durabilă a fișierelor target')
   assert.ok(validate > composeUp, 'validarea trebuie să urmeze reconcilierea mounturilor')
   assert.ok(reload > validate, 'reload-ul trebuie să urmeze validarea configurației vizibile')
 })
