@@ -23,7 +23,7 @@ const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.t
 describe('P20 — porțile de verdict ale rutei vocale (constatările critice)', () => {
   it('tura cu verdict NEDECIS nu se mai salvează fără numele măsurat (istoricul nu se otrăvește)', () => {
     // onTuraGata ȘI incheieTura: null + fără nume → nesalvat, cu jurnal
-    const aparitii = ruta.match(/verdictTura === null && !turaAdresata\(bufUser\.trim\(\)\)/g) ?? []
+    const aparitii = ruta.match(/verdictTura === null && (?:!startExplicit\.activa\(\) && )?!turaAdresata\(bufUser\.trim\(\)\)/g) ?? []
     expect(aparitii.length).toBeGreaterThanOrEqual(2)
     expect(ruta).toMatch(/tură nesalvată (?:la închidere )?\(tăcere corectă, fără nume\)/)
   })

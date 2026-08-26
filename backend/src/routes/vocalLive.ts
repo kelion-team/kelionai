@@ -846,7 +846,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // ale userului, otrăveau instrucțiunea sesiunii următoare (filtrul
       // anti-otravă lasă rândurile 'user' mereu) ȘI memoria de lungă durată.
       // Sub STRICT: fără nume măsurat, tura nu intră în istoric.
-      if (verdictTura === null && !turaAdresata(bufUser.trim())) {
+      if (verdictTura === null && !startExplicit.activa() && !turaAdresata(bufUser.trim())) {
         if (bufUser.trim() || bufKelion.trim()) {
           app.log.info(`[VOCE] tură nesalvată la închidere (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
         }
