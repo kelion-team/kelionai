@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-26T16:22:28Z`
+Actualizat: `2026-08-26T16:25:31Z`
 
 ## Current verified state
 
@@ -20,7 +20,8 @@ Actualizat: `2026-08-26T16:22:28Z`
 - Fișierele live `/root/kelion/secrets/github-release-oauth-token` și
   `/root/kelion/gate-secrets/github-ghcr-read-token` sunt absente. Configurile
   host-only Constructor sunt absente, iar autentificarea Codex rămâne necesară.
-- Remedierea locală este pe `codex/fix-runtime-contract-rollout`, worktree
+- Remedierea este în PR-ul protejat `#1395`, branch
+  `codex/fix-runtime-contract-rollout`, worktree
   `C:\Users\adria\.devin\kelionai-runtime-contract-fix`. Ea redenumește sursa
   Actions în `KELION_GITHUB_RELEASE_OAUTH_TOKEN`, clasifică întreaga schemă
   runtime/secrete și cere egalitate exactă între contract, payload și validator.
@@ -47,8 +48,8 @@ loginul Codex interactiv pe profilul host-only.
 
 ## Next ordered steps
 
-1. commit, push și PR protejat pentru remedierea contractului;
-2. așteaptă porțile obligatorii și integrează prin rebase numai pe verde;
+1. așteaptă porțile obligatorii ale PR-ului `#1395` și integrează prin rebase
+   numai pe verde;
 3. generează și salvează cele două credențiale ca environment secrets în
    `production`, apoi rulează un `vps-set-env` nou pe `master`;
 4. validează ACL-urile, configurația strictă, readiness și gate pull;
@@ -60,6 +61,7 @@ loginul Codex interactiv pe profilul host-only.
 ## Canonical links
 
 - Repo: <https://github.com/kelion-team/kelionai>
+- PR remediere contract: <https://github.com/kelion-team/kelionai/pull/1395>
 - Release corect eșuat sigur: <https://github.com/kelion-team/kelionai/actions/runs/32986552385>
 - Provisionare eșuată înainte de SSH: <https://github.com/kelion-team/kelionai/actions/runs/32986695615>
 - Rerun vechi retras: <https://github.com/kelion-team/kelionai/actions/runs/32977343950>
