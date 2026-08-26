@@ -419,15 +419,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     if (!esteAdminKelion(user.email)) return reply.code(403).send({ error: 'forbidden' })
     reply.header('Cache-Control', 'no-store')
-    return pulsVoce
-  })
-
-  app.get('/api/vocal-live/diagnostic', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    if (!esteAdminKelion(user.email)) return reply.code(403).send({ error: 'forbidden' })
-    reply.header('Cache-Control', 'no-store')
-    return diagnosticVocalLive()
+    return { ...pulsVoce, diagnostic: diagnosticVocalLive() }
   })
 
   app.get('/api/vocal-live/capability', async (req, reply) => {
@@ -1942,6 +1934,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             // TĂCUT corect pe vorbire neadresată — verdictul null nu înseamnă
             // „tura e bună". Fără numele măsurat, bălăriile urechii nu intră
             // nici în istoric, nici în memoria de lungă durată.
+            diagnosticVoce.lastSuppression = 'wake_word_required'
+            diagnosticVoce.lastEventAt = Date.now()
+            trimite({ type: 'status', code: 'response_suppressed', reason: diagnosticVoce.lastSuppression })
             if (bufUser.trim()) {
               app.log.info(`[VOCE] tură nesalvată (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
             }
