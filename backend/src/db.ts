@@ -5967,58 +5967,64 @@ export type DeleteBuildJobResult =
   | { ok: true }
   | { ok: false; error: 'not_found' | 'not_deletable' | 'stale_state' }
 
-/** Șterge DEFINITIV numai un rezultat terminal. Erorile DB sunt excepții și nu
- * pot fi prezentate drept conflict de stare. */
-export async function deleteBuildJob(
+type BuildJobLookupFailure = { ok: false; error: 'not_found' | 'stale_state' }
+type LockedBuildJobMutationRow = BuildJobDbRow & { has_pipeline_receipt: boolean }
+
+async function withLockedBuildJobMutation<T>(
   id: number,
-  expected?: BuildJobMutationExpectation,
-): Promise<DeleteBuildJobResult> {
+  expected: BuildJobMutationExpectation | undefined,
+  operation: (client: pg.PoolClient, current: LockedBuildJobMutationRow) => Promise<T>,
+): Promise<T | BuildJobLookupFailure> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'not_found' }
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
-    const selected = await client.query<{
-      status: BuildJob['status']
-      updated_at: Date
-      constructor_stage: string
-      has_pipeline_receipt: boolean
-    }>(
-      `SELECT b.status, b.updated_at, b.constructor_stage,
+    const selected = await client.query<LockedBuildJobMutationRow>(
+      `SELECT b.*,
               EXISTS(SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id) AS has_pipeline_receipt
          FROM build_jobs b WHERE b.id=$1 AND b.arhivat=false FOR UPDATE OF b`,
       [id],
     )
     const current = selected.rows[0]
+    let result: T | BuildJobLookupFailure
     if (!current) {
-      await client.query('COMMIT')
-      return { ok: false, error: 'not_found' }
+      result = { ok: false, error: 'not_found' }
+    } else if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
+      result = { ok: false, error: 'stale_state' }
+    } else {
+      result = await operation(client, current)
     }
-    if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
-      await client.query('COMMIT')
-      return { ok: false, error: 'stale_state' }
-    }
-    if (!['failed', 'done', 'cancelled'].includes(current.status)) {
-      await client.query('COMMIT')
-      return { ok: false, error: 'not_deletable' }
-    }
-    // Ledgerul merge/CI/build/deploy este dovadă operațională, nu decor de UI.
-    // Un rezultat cu receipts se poate ascunde numai prin arhivare recuperabilă.
-    if (current.has_pipeline_receipt || current.constructor_stage === 'deployed') {
-      await client.query('COMMIT')
-      return { ok: false, error: 'not_deletable' }
-    }
-    const removed = await client.query('DELETE FROM build_jobs WHERE id=$1', [id])
     await client.query('COMMIT')
-    return (removed.rowCount ?? 0) === 1
-      ? { ok: true }
-      : { ok: false, error: 'not_found' }
+    return result
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined)
     throw error
   } finally {
     client.release()
   }
+}
+
+/** Șterge DEFINITIV numai un rezultat terminal. Erorile DB sunt excepții și nu
+ * pot fi prezentate drept conflict de stare. */
+export async function deleteBuildJob(
+  id: number,
+  expected?: BuildJobMutationExpectation,
+): Promise<DeleteBuildJobResult> {
+  return withLockedBuildJobMutation<DeleteBuildJobResult>(id, expected, async (client, current) => {
+    if (!['failed', 'done', 'cancelled'].includes(current.status)) {
+      return { ok: false, error: 'not_deletable' }
+    }
+    // Ledgerul merge/CI/build/deploy este dovadă operațională, nu decor de UI.
+    // Un rezultat cu receipts se poate ascunde numai prin arhivare recuperabilă.
+    if (current.has_pipeline_receipt || current.constructor_stage === 'deployed') {
+      return { ok: false, error: 'not_deletable' }
+    }
+    const removed = await client.query('DELETE FROM build_jobs WHERE id=$1', [id])
+    return (removed.rowCount ?? 0) === 1
+      ? { ok: true }
+      : { ok: false, error: 'not_found' }
+  })
 }
 
 /** Ștergere în GRUP după stare. `scope`: 'failed' (doar eșuate), 'done' (doar
@@ -6218,24 +6224,7 @@ export async function cancelBuildJob(
   id: number,
   expected?: BuildJobMutationExpectation,
 ): Promise<CancelBuildJobResult> {
-  if (!dbEnabled()) throw new Error('constructor_db_unavailable')
-  if (!Number.isInteger(id) || id <= 0) return { ok: false, error: 'not_found' }
-  const client = await conexiuneDb()
-  try {
-    await client.query('BEGIN')
-    const selected = await client.query<BuildJobDbRow>(
-      'SELECT * FROM build_jobs WHERE id=$1 AND arhivat=false FOR UPDATE',
-      [id],
-    )
-    const current = selected.rows[0]
-    if (!current) {
-      await client.query('COMMIT')
-      return { ok: false, error: 'not_found' }
-    }
-    if (expected && (current.status !== expected.status || current.updated_at.toISOString() !== expected.updatedAt)) {
-      await client.query('COMMIT')
-      return { ok: false, error: 'stale_state' }
-    }
+  return withLockedBuildJobMutation<CancelBuildJobResult>(id, expected, async (client) => {
     const r = await client.query(
       `UPDATE build_jobs
          SET status='cancelled',
@@ -6252,7 +6241,6 @@ export async function cancelBuildJob(
       [id],
     )
     if ((r.rowCount ?? 0) === 0) {
-      await client.query('COMMIT')
       return { ok: false, error: 'past_boundary' }
     }
     await client.query(
@@ -6265,14 +6253,8 @@ export async function cancelBuildJob(
         WHERE job_id=$1 AND state <> 'closed'`,
       [id],
     )
-    await client.query('COMMIT')
     return { ok: true }
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined)
-    throw error
-  } finally {
-    client.release()
-  }
+  })
 }
 
 // AUTOMATIC HEALING OF ORDERS THAT FAILED ON MONEY (Adrian, 27 Jul: "why

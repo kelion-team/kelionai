@@ -704,17 +704,29 @@ async function lockReleaseLeaseOrCompleted(sql: ConstructorSql, jobId: number, t
   return locked.rows[0] ?? null
 }
 
-export async function recordReleaseTargetSelected(input: {
+interface ReleaseLeaseIdentity {
   jobId: number
   taskId: string
   leaseId: string
+}
+
+async function withLockedReleaseLease<T>(
+  input: ReleaseLeaseIdentity,
+  operation: (sql: ConstructorSql, row: PipelineRow | null) => Promise<T>,
+): Promise<T> {
+  return withTransaction(async (sql) => {
+    const row = await lockReleaseLease(sql, input.jobId, input.taskId, input.leaseId)
+    return operation(sql, row)
+  })
+}
+
+export async function recordReleaseTargetSelected(input: ReleaseLeaseIdentity & {
   targetCommit: string
   receiptSha256: string
   previousTargetCommit: string | null
   previousReceiptSha256: string | null
 }): Promise<boolean> {
-  return withTransaction(async (sql) => {
-    const row = await lockReleaseLease(sql, input.jobId, input.taskId, input.leaseId)
+  return withLockedReleaseLease(input, async (sql, row) => {
     if (!row || row.status !== 'running' || !['merged', 'release_dispatched'].includes(row.constructor_stage)) return false
     if (row.release_target_sha) {
       if (
@@ -776,18 +788,14 @@ export async function recordReleaseTargetSelected(input: {
 
 /** Leagă determinist push-CI de buildul și artefactul născute din exact acel
  * run. Abia acest receipt permite eticheta factuală `green`. */
-export async function recordReleaseCandidateVerified(input: {
-  jobId: number
-  taskId: string
-  leaseId: string
+export async function recordReleaseCandidateVerified(input: ReleaseLeaseIdentity & {
   targetCommit: string
   ciRunId: number
   buildRunId: number
   artifactId: number
   receiptSha256: string
 }): Promise<boolean> {
-  return withTransaction(async (sql) => {
-    const row = await lockReleaseLease(sql, input.jobId, input.taskId, input.leaseId)
+  return withLockedReleaseLease(input, async (sql, row) => {
     if (!row || row.status !== 'running' || !['merged', 'release_dispatched'].includes(row.constructor_stage)) return false
     if (row.release_target_sha !== input.targetCommit || !row.release_target_receipt_sha256) return false
     if (row.release_candidate_receipt_sha256) {

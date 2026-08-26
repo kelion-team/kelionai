@@ -1087,6 +1087,35 @@ export default function AdminPanel({
     pendingBuildMutationRef.current.delete(id)
     setPendingBuildMutations(new Set(pendingBuildMutationRef.current))
   }
+  const submitBuildMutation = (
+    job: BuildJobRow,
+    action: 'anuleaza' | 'reia',
+    successMessage: string,
+    staleMessage: string,
+    failureMessage: string,
+  ): void => {
+    void apiFetch(`/api/admin/constructor/${job.id}/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
+    })
+      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
+      .then(({ httpOk, body }) => {
+        setBuildMsg(
+          httpOk && adminMutationAcknowledged(body)
+            ? successMessage
+            : adminContractText(body, 'error') === 'stale_job_state'
+              ? staleMessage
+              : failureMessage,
+        )
+      })
+      .catch(() => setBuildMsg(failureMessage))
+      .finally(() => {
+        endBuildMutation(job.id)
+        refreshBuildJobs()
+      })
+  }
   const deleteBuildOrder = (job: BuildJobRow): void => {
     if (!window.confirm(A.confirmDeleteBuildOrder(job.id)) || !beginBuildMutation(job.id)) return
     const query = new URLSearchParams({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt })
@@ -1109,21 +1138,13 @@ export default function AdminPanel({
 
   const cancelBuildOrder = (job: BuildJobRow): void => {
     if (!window.confirm(A.confirmStopBuildOrder(job.id)) || !beginBuildMutation(job.id)) return
-    void apiFetch(`/api/admin/constructor/${job.id}/anuleaza`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
-    })
-      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
-      .then(({ httpOk, body }) => {
-        setBuildMsg(httpOk && adminMutationAcknowledged(body) ? A.orderStopped(job.id) : adminContractText(body, 'error') === 'stale_job_state' ? 'Starea ordinului s-a schimbat; oprirea nu a fost aplicată.' : A.orderStopFailed)
-      })
-      .catch(() => setBuildMsg(A.orderStopFailed))
-      .finally(() => {
-        endBuildMutation(job.id)
-        refreshBuildJobs()
-      })
+    submitBuildMutation(
+      job,
+      'anuleaza',
+      A.orderStopped(job.id),
+      'Starea ordinului s-a schimbat; oprirea nu a fost aplicată.',
+      A.orderStopFailed,
+    )
   }
   const cleanBuildOrders = (): void => {
     if (!window.confirm(A.confirmClearFailedJobs)) return
@@ -1156,21 +1177,13 @@ export default function AdminPanel({
   }
   const retryBuildOrder = (job: BuildJobRow): void => {
     if (!beginBuildMutation(job.id)) return
-    void apiFetch(`/api/admin/constructor/${job.id}/reia`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ expectedStatus: job.status, expectedUpdatedAt: job.updatedAt }),
-    })
-      .then(async (response) => ({ httpOk: response.ok, body: await response.json().catch(() => null) as unknown }))
-      .then(({ httpOk, body }) => {
-        setBuildMsg(httpOk && adminMutationAcknowledged(body) ? A.orderResumed(job.id) : adminContractText(body, 'error') === 'stale_job_state' ? 'Starea ordinului s-a schimbat; reluarea nu a fost aplicată.' : A.orderResumeFailed)
-      })
-      .catch(() => setBuildMsg(A.orderResumeFailed))
-      .finally(() => {
-        endBuildMutation(job.id)
-        refreshBuildJobs()
-      })
+    submitBuildMutation(
+      job,
+      'reia',
+      A.orderResumed(job.id),
+      'Starea ordinului s-a schimbat; reluarea nu a fost aplicată.',
+      A.orderResumeFailed,
+    )
   }
 
   const loadBuildArchive = (cursor: BuildArchiveCursor | null = null, append = false): void => {
