@@ -1251,9 +1251,38 @@ fi
   || die 'unitatea recovery runtime din bundle lipsește'
 install -d -o root -g root -m 0755 "$ROOT/bin"
 install -d -o root -g 10050 -m 0750 "$ROOT/config"
-systemd-analyze verify "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service"
-install_recovery_artifact "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" root root 0500 \
-  || die 'helperul persistent de recovery nu a putut fi instalat atomic'
+recovery_helper_bootstrapped=0
+recovery_helper_bootstrap_identity=''
+if [ -e "$ROOT/bin/runtime-config-cutover.sh" ] || [ -L "$ROOT/bin/runtime-config-cutover.sh" ]; then
+  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500:1' ] \
+    || die 'helperul persistent de recovery existent este nesigur'
+else
+  install_recovery_artifact "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" root root 0500 \
+    || die 'helperul persistent de recovery nu a putut fi pregătit pentru verificarea unității'
+  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500:1' ] \
+    && cmp -s -- "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+    || die 'helperul pregătit pentru verificarea unității diferă de bundle'
+  recovery_helper_bootstrap_identity=$(stat -Lc '%d:%i' "$ROOT/bin/runtime-config-cutover.sh")
+  recovery_helper_bootstrapped=1
+fi
+if ! systemd-analyze verify "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service"; then
+  if [ "$recovery_helper_bootstrapped" = 1 ]; then
+    [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+      && [ "$recovery_helper_bootstrap_identity" = "$(stat -Lc '%d:%i' "$ROOT/bin/runtime-config-cutover.sh")" ] \
+      && cmp -s -- "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+      || die 'helperul bootstrap nu poate fi retras sigur după verificarea eșuată'
+    rm -f -- "$ROOT/bin/runtime-config-cutover.sh"
+    fsync_release_artifact "$ROOT/bin" directory \
+      || die 'retragerea helperului bootstrap nu a putut fi sincronizată durabil'
+  fi
+  die 'unitatea recovery runtime din bundle este invalidă'
+fi
+if [ "$recovery_helper_bootstrapped" = 0 ]; then
+  install_recovery_artifact "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" root root 0500 \
+    || die 'helperul persistent de recovery nu a putut fi instalat atomic'
+fi
 install_recovery_artifact "$COMPOSE_FILE" "$ROOT/config/compose.production.yml" root root 0444 \
   || die 'compose-ul persistent de recovery nu a putut fi instalat atomic'
 install_recovery_artifact "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service" \
