@@ -86,6 +86,9 @@ export function asteaptaDeschidereaSocket(
 }
 
 export interface VocalLiveOpts {
+  /** Armat numai de clickul manual pe microfon. Serverul îl consumă o singură
+   * dată; reconectările automate nu trebuie să-l trimită. */
+  explicitStart?: boolean
   /** Starea transportului/conversației, pentru indicatorul persistent din UI. */
   onState?(state: VocalLiveState): void
   /** Sesiunea e deschisă și modelul e gata să asculte. */
@@ -661,6 +664,17 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // Microfonul pornește DUPĂ ce socketul e deschis: altfel primele cadre s-ar
   // pierde în gol și primele cuvinte ale omului ar dispărea.
   await asteaptaDeschidereaSocket(ws, () => {
+      // WebSocket-ul este CONNECTING până la onopen; trimiterea mai devreme
+      // aruncă InvalidStateError și pierde armarea clicului explicit.
+      if (opts.explicitStart) {
+        try {
+          ws.send(JSON.stringify({ type: 'explicit_start' }))
+        } catch (e) {
+          urcaEroarea(`explicit_start a eșuat: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
+          inchide()
+          return
+        }
+      }
       // Ancora realității pleacă PRIMA, chiar la deschidere — serverul o
       // așteaptă puțin înainte să construiască instrucțiunea sesiunii.
       trimiteCoords()

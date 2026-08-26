@@ -232,14 +232,22 @@ export async function verifyKeys(): Promise<{
     return { primary: 'not_configured', reserve: 'not_configured', diag: { provider: 'openai' } }
   }
   let primary = 'fail'
+  let failureStatus: number | undefined
   try {
     const r = await brainChat(`${OPENAI_PREFIX}${config.openai.luna}`, [{ role: 'user', content: 'ping' }], [], {
-      maxTokens: 8,
-      reasoning: 'none',
+      // Modelele cu raționament pot consuma bugetul înainte să emită text;
+      // aceeași limită dovedită de verifyModels evită un „fail” fals la cheie.
+      maxTokens: 64,
     })
     primary = r.model ? 'ok' : 'fail'
-  } catch {
-    primary = 'fail'
+  } catch (error) {
+    const match = /\bopenai\s+([45]\d{2})\b/i.exec(error instanceof Error ? error.message : String(error))
+    failureStatus = match ? Number(match[1]) : undefined
+    primary = failureStatus ? `fail_${failureStatus}` : 'fail'
   }
-  return { primary, reserve: primary, diag: { provider: 'openai' } }
+  return {
+    primary,
+    reserve: primary,
+    diag: { provider: 'openai', ...(failureStatus ? { status: failureStatus } : {}) },
+  }
 }

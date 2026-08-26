@@ -7,7 +7,7 @@ import {
   interpreteazaCadru,
   oraLocalaText,
 } from './services/vocalLive.js'
-import { cadreVedereLive, capacitateVocalLive, unelteleSesiuniiLive } from './routes/vocalLive.js'
+import { cadreVedereLive, capacitateVocalLive, cheieIdempotentaTuraVocala, creeazaPoartaStartExplicit, dateDinEvenimentSse, unelteleSesiuniiLive } from './routes/vocalLive.js'
 import { inputImageBlock, parseInputImageDataUrl } from './services/inputImage.js'
 
 describe('OpenAI Realtime — session.update', () => {
@@ -52,6 +52,44 @@ describe('OpenAI Realtime — session.update', () => {
     expect(message.session.tools).toEqual([
       { type: 'function', name: 'cauta', description: 'Caută', parameters: { type: 'object', properties: {} } },
     ])
+  })
+})
+
+describe('ușa vocală spre /api/chat', () => {
+  it('înlătură metadatele SSE și păstrează numai liniile data', () => {
+    expect(dateDinEvenimentSse('id: 42\r\ndata: \u001f{"executie":{"pas":"caută"}}\u001f\r\ndata: text\r\n')).toBe(
+      '\u001f{"executie":{"pas":"caută"}}\u001f\ntext',
+    )
+    expect(dateDinEvenimentSse(': keep-alive\n\n')).toBe('')
+  })
+
+  it('transformă ID-urile opace OpenAI într-un UUID stabil și distinct pe rundă', () => {
+    const prima = cheieIdempotentaTuraVocala('call_abc-123')
+    const repetata = cheieIdempotentaTuraVocala('call_abc-123')
+    const triere = cheieIdempotentaTuraVocala('call_abc-123:triage:1')
+    expect(prima).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(repetata).toBe(prima)
+    expect(triere).not.toBe(prima)
+  })
+
+  it('armează clickul o singură dată, îl consumă și nu armează o reconectare nouă', () => {
+    let acum = 1_000
+    const click = creeazaPoartaStartExplicit(() => acum)
+    expect(click.activa()).toBe(false)
+    expect(click.armeaza()).toBe(true)
+    expect(click.activa()).toBe(true)
+    expect(click.incepeTura()).toBe(true)
+    acum += 30_001
+    expect(click.activa()).toBe(true)
+    click.consuma()
+    expect(click.activa()).toBe(false)
+    expect(click.armeaza()).toBe(false)
+
+    const reconectare = creeazaPoartaStartExplicit(() => acum)
+    expect(reconectare.activa()).toBe(false)
+    expect(reconectare.armeaza()).toBe(true)
+    acum += 30_001
+    expect(reconectare.activa()).toBe(false)
   })
 })
 
