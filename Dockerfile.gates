@@ -27,7 +27,7 @@ RUN apt-get update \
 
 FROM ${NODE_IMAGE} AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash git \
+    && apt-get install -y --no-install-recommends bash git python3 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/kelion/locks /work /var/lib/kelion-codex/repo/.git
 COPY --from=dependencies /opt/kelion/backend/node_modules /opt/kelion/backend/node_modules
