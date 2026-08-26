@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { config } from './config.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './services/adminTools.js'
@@ -191,6 +192,17 @@ describe('OpenAI Realtime — context și autorizare', () => {
 
   it('nu închide o conversație normală după o pauză de 20 de secunde', () => {
     expect(config.vocalLiveIdleTimeoutSeconds).toBeGreaterThan(20)
+  })
+
+  it('raportează suprimarea când modelul tace corect fără cuvântul de activare', () => {
+    const source = readFileSync(new URL('./routes/vocalLive.ts', import.meta.url), 'utf8')
+    const branchStart = source.indexOf("} else if (verdictTura === null && !turaAdresata(bufUser.trim())) {")
+    const branchEnd = source.indexOf('\n          } else {', branchStart)
+    expect(branchStart).toBeGreaterThan(-1)
+    expect(branchEnd).toBeGreaterThan(branchStart)
+    const silenceBranch = source.slice(branchStart, branchEnd)
+    expect(silenceBranch).toContain("code: 'response_suppressed'")
+    expect(silenceBranch).toContain("'wake_word_required'")
   })
 
   it('nu oferă utilizatorilor obișnuiți nicio unealtă globală/admin', async () => {
