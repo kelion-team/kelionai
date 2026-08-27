@@ -66,14 +66,50 @@ jobs:
             printf '%s\n' '(manifestul activ lipsește)'
           fi
           printf '%s\n' '=== separarea credentialelor GitHub (numai etichete) ==='
-          token_labels=(constructor-sync constructor-publisher constructor-release ghcr-read admin-oauth)
-          token_paths=(
+          constructor_labels=(constructor-sync constructor-publisher constructor-release)
+          constructor_paths=(
             /root/kelion/worker-secrets/github-worker-token
             /root/kelion/publisher-secrets/github-publisher-token
             /root/kelion/release-secrets/github-release-token
+          )
+          constructor_present=0
+          for token_path in "${constructor_paths[@]}"; do
+            if [ -e "$token_path" ] || [ -L "$token_path" ]; then
+              constructor_present=$((constructor_present + 1))
+            fi
+          done
+          case "$constructor_present" in
+            0)
+              token_labels=()
+              token_paths=()
+              token_gids=()
+              token_modes=()
+              printf '%s\n' TOKEN_IDENTITY_CONSTRUCTOR_ABSENT
+              ;;
+            3)
+              publisher_gid=$(getent group kelion-publisher | awk -F: 'NR == 1 { print $3 }')
+              release_gid=$(getent group kelion-release | awk -F: 'NR == 1 { print $3 }')
+              [[ "$publisher_gid" =~ ^[0-9]+$ ]] && [[ "$release_gid" =~ ^[0-9]+$ ]] || {
+                printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:group
+                exit 1
+              }
+              token_labels=("${constructor_labels[@]}")
+              token_paths=("${constructor_paths[@]}")
+              token_gids=(0 "$publisher_gid" "$release_gid")
+              token_modes=(440 440 440)
+              ;;
+            *)
+              printf 'TOKEN_IDENTITY_INVALID:constructor:partial:%s-of-3\n' "$constructor_present"
+              exit 1
+              ;;
+          esac
+          token_labels+=(ghcr-read admin-oauth)
+          token_paths+=(
             /root/kelion/gate-secrets/github-ghcr-read-token
             /root/kelion/secrets/github-release-oauth-token
           )
+          token_gids+=(0 10050)
+          token_modes+=(400 440)
           token_values=()
           for index in "${!token_paths[@]}"; do
             token_path=${token_paths[$index]}
@@ -81,16 +117,20 @@ jobs:
               printf 'TOKEN_IDENTITY_INVALID:%s:file\n' "${token_labels[$index]}"
               exit 1
             }
-            metadata=$(stat -c '%u:%a' -- "$token_path")
-            case "$metadata" in
-              0:400|0:440) ;;
-              *)
-                printf 'TOKEN_IDENTITY_INVALID:%s:acl\n' "${token_labels[$index]}"
-                exit 1
-                ;;
-            esac
+            metadata=$(stat -c '%u:%g:%a' -- "$token_path")
+            [ "$metadata" = "0:${token_gids[$index]}:${token_modes[$index]}" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:acl\n' "${token_labels[$index]}"
+              exit 1
+            }
             [ "$(wc -l < "$token_path")" -eq 1 ] || {
               printf 'TOKEN_IDENTITY_INVALID:%s:format\n' "${token_labels[$index]}"
+              exit 1
+            }
+            original_size=$(wc -c < "$token_path")
+            without_cr_size=$(tr -d '\015' < "$token_path" | wc -c)
+            without_nul_size=$(tr -d '\000' < "$token_path" | wc -c)
+            [ "$original_size" -eq "$without_cr_size" ] && [ "$original_size" -eq "$without_nul_size" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:control-byte\n' "${token_labels[$index]}"
               exit 1
             }
             token_value=$(sed -n '1p' -- "$token_path")
