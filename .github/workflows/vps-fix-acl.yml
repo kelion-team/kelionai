@@ -38,8 +38,8 @@ jobs:
               chown "$owner":"$group" "$p"
               chmod "$mode" "$p"
             }
-            fix /root/kelion/worker-secrets/github-worker-token root root 0400
-            fix /root/kelion/gate-secrets/github-ghcr-read-token root root 0400
+            fix /root/kelion/worker-secrets/github-worker-token root root 0440
+            fix /root/kelion/gate-secrets/github-ghcr-read-token root root 0440
             fix /root/kelion/secrets/github-release-oauth-token root 10050 0440
             if getent group kelion-publisher >/dev/null; then
               fix /root/kelion/publisher-secrets/github-publisher-token root "$(gid_of kelion-publisher)" 0440
