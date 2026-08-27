@@ -12,6 +12,9 @@ vi.mock('./config.js', () => ({
     adminEmail: 'admin@example.com',
     billing: { currency: 'GBP', policyVersion: 'billing-v1', creditMinor: 10 },
     privacy: { backupRetentionDays: 30, financialRetentionYears: 6 },
+    openai: { key: 'test-key' },
+    google: { clientId: 'test-id', clientSecret: 'test-secret' },
+    serperKey: 'test-serper',
   },
 }))
 

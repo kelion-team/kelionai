@@ -1507,10 +1507,22 @@ for name in "${secret_files[@]}"; do
   [ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || die "secret-file lipsă: $name"
   [ "$(stat -c '%u:%g:%a' "$path")" = '0:10050:440' ] || die "ACL invalid pentru secret-file $name"
 done
-[ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
-  && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
-  || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
-case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in sk-proj-*) ;; *) die 'cheia OpenAI runtime nu este project-scoped' ;; esac
+constructor_release_enabled=$(config_value CONSTRUCTOR_RELEASE_ENABLED)
+if [ "$constructor_release_enabled" = 1 ]; then
+  [ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
+    && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
+    || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
+else
+  case "$(sed -n '1p' "$SECRET_ROOT/github-release-oauth-token")" in
+    disabled-placeholder-*) ;;
+    *) die 'github-release-oauth-token trebuie să fie o credentială dedicată validă' ;;
+  esac
+fi
+case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in
+  sk-proj-*) ;;
+  disabled-placeholder-*) ;;  # Mod abonament ChatGPT Pro — fără cheie API
+  *) die 'cheia OpenAI runtime nu este project-scoped' ;;
+esac
 [ ! -e "$SECRET_ROOT/openai-admin-key" ] || die 'cheia OpenAI admin nu poate exista în secret root-ul aplicației'
 for name in revolut-merchant-secret-key revolut-webhook-signing-secret; do
   path=$SECRET_ROOT/$name
@@ -3027,6 +3039,7 @@ constructor_gate_matches_candidate() {
   fi
   [ "$config_count" = 3 ] || return 1
   expected_checks=$(config_value CONSTRUCTOR_REQUIRED_CHECKS)
+  release_expected_checks='verify,container-isolation'
   for path in "$worker_env" "$publisher_env" "$release_env"; do
     [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ] || return 1
   done
@@ -3037,7 +3050,7 @@ constructor_gate_matches_candidate() {
   [ "$(grep -c '^CONSTRUCTOR_REQUIRED_CHECKS=' "$publisher_env")" -eq 1 ] \
     && grep -qx "CONSTRUCTOR_REQUIRED_CHECKS=$expected_checks" "$publisher_env" || return 1
   [ "$(grep -c '^CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=' "$release_env")" -eq 1 ] \
-    && grep -qx "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$expected_checks" "$release_env" || return 1
+    && grep -qx "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$release_expected_checks" "$release_env" || return 1
   for index in "${!constructor_release_markers[@]}"; do
     if [ -f "${constructor_release_markers[$index]}" ]; then
       [ "$(grep -c "^${constructor_release_exec_flags[$index]}=1$" "${constructor_release_configs[$index]}")" -eq 1 ] \
@@ -3469,6 +3482,7 @@ refresh_constructor_gate() (
   [ "$(stat -c '%u:%g:%a' "$token_file")" = '0:0:400' ] \
     || die 'ACL invalid pentru credentiala GHCR read-only folosită la gate'
   required_checks=$(config_value CONSTRUCTOR_REQUIRED_CHECKS)
+  release_required_checks='verify,container-isolation'
 
   stop_constructor_units() {
     local unit
@@ -3623,7 +3637,7 @@ refresh_constructor_gate() (
   assert_constructor_env_value "${staged[0]}" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "${staged[1]}" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "${staged[1]}" CONSTRUCTOR_REQUIRED_CHECKS "$required_checks"
-  assert_constructor_env_value "${staged[2]}" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$required_checks"
+  assert_constructor_env_value "${staged[2]}" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$release_required_checks"
   # Publicăm jurnalul numai după ce helperul curent a validat allowlist-ul și
   # setul obligatoriu complet pentru fiecare rol. Un config legacy invalid nu
   # poate crea astfel un jurnal pe care recovery-ul însuși l-ar refuza.
@@ -3677,7 +3691,7 @@ refresh_constructor_gate() (
   assert_constructor_env_value "$worker_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "$publisher_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "$publisher_env" CONSTRUCTOR_REQUIRED_CHECKS "$required_checks"
-  assert_constructor_env_value "$release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$required_checks"
+  assert_constructor_env_value "$release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$release_required_checks"
   for path in "${targets[@]}"; do
     [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ] \
       || die "config Constructor invalid după commit: $path"

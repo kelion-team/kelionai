@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { toResponsesBody, toResponsesInput } from './openaiResponses.js'
 import type { OrMessage } from './brainContract.js'
+
+// Modul abonament nu e activ în teste — testăm calea cheie API
+vi.mock('./chatgptSubscription.js', () => ({
+  isSubscriptionMode: () => false,
+  hasChatGptSubscription: () => false,
+  getSubscriptionCredentials: async () => null,
+}))
 
 describe('OpenAI Responses adapter', () => {
   it('convertește system, imagini, function calls și rezultate fără să piardă legătura call_id', () => {

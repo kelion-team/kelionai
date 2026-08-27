@@ -110,6 +110,7 @@ import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { numeStrigat } from '../services/numeStrigat.js'
+import { isSubscriptionMode } from '../services/chatgptSubscription.js'
 import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
 import { alegeModelOrchestrator, plafonUnelteFurnizor } from '../services/chatModelPolicy.js'
 import { CTRL, conteazaCaVizibil, eCadruDeSuprafata } from '../services/chatFrames.js'
@@ -144,7 +145,7 @@ async function selectedBrainModel(
 ): Promise<{ model: string; heavy: boolean } | null> {
   const difficulty = taskDifficulty(text)
   const isOwner = roleFor(email) === 'admin'
-  if (!config.openai.key) return null
+  if (!config.openai.key && !isSubscriptionMode()) return null
   const heavy =
     needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
   const model = await alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))

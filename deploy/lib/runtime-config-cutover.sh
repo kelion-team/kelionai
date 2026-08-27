@@ -1283,16 +1283,28 @@ roll_forward_unit_transaction() {
   units_quiesced=0
 }
 
-effective_file() {
-  local wanted=$1 index
-  for index in "${!logical_names[@]}"; do
-    if [ "${logical_names[$index]}" = "$wanted" ]; then printf '%s' "${prepared[$index]}"; return 0; fi
-  done
-  map_logical "$wanted"
-  [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] || return 1
-  [ "$(stat -c '%u:%g:%a' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode" ] || return 1
-  validate_secret_file "$mapped_target" || return 1
-  printf '%s' "$mapped_target"
+resolve_validated_candidate() {
+  local output_name=$1 wanted=$2 candidate previous_restart_required=$restart_required
+  if grep -Fxq -- "$wanted" "$stage_root/manifest"; then
+    candidate=$stage_root/files/$wanted
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul validat a dispărut după manifest: $wanted"
+    validate_secret_file "$candidate" \
+      || die "candidatul din manifest nu mai este valid: $wanted"
+  else
+    map_logical "$wanted"
+    # Rezolvarea unei valori live este read-only. map_logical setează și
+    # restart_required pentru mutațiile app/runtime; verificarea distinctness
+    # nu are voie să transforme un cutover parțial într-un restart backend.
+    restart_required=$previous_restart_required
+    candidate=$mapped_target
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul nu este în manifest și lipsește live: $wanted"
+    [ "$(stat -c '%u:%g:%a' "$candidate")" = "$mapped_owner:$mapped_group:$mapped_mode" ] \
+      || die "candidatul live are ACL invalid: $wanted"
+    validate_secret_file "$candidate" || die "candidatul live este invalid: $wanted"
+  fi
+  printf -v "$output_name" '%s' "$candidate"
 }
 
 assert_pairwise_distinct() {
@@ -1300,7 +1312,7 @@ assert_pairwise_distinct() {
   local -a values=()
   local logical file value existing
   for logical in "$@"; do
-    file=$(effective_file "$logical") || die "$label lipsesc sau au ACL invalid: $logical"
+    resolve_validated_candidate file "$logical"
     value=$(sed -n '1p' "$file")
     [ "${#value}" -ge 32 ] || die "$label conține o valoare prea scurtă"
     for existing in "${values[@]:-}"; do [ "$value" != "$existing" ] || die "$label trebuie să fie distincte"; done

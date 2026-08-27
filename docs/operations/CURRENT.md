@@ -1,97 +1,123 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-25T22:01:26Z`
+Actualizat: `2026-08-27T07:30:00Z`
 
 ## Current verified state
 
 - Repo: `kelion-team/kelionai`.
-- `origin/master`: `7072263bdfb738953e6fefa67e5acf8b4fc15414`, verificat direct prin
-  referința Git remote.
-- Live: `b8e7a33`, verificat prin `/api/version` la ora actualizării.
-- Readiness live: `ready=true`; `config`, `database`, `migrations`,
-  `browserWorker` și `converterWorker` sunt `true`; candidatul și efectele
-  laterale sunt active.
-- Ultimul release live confirmat este runul GitHub Actions `32900123878` pentru
-  `b8e7a33`.
-- Buildul semnat pentru `7072263bdfb738953e6fefa67e5acf8b4fc15414` a fost
-  finalizat cu succes în runul `32902537746`; acest fapt nu înseamnă că SHA-ul
-  este live.
-- Ultima configurare Constructor, run `32903385898`, a trecut remedierea ACL a
-  cheii private, apoi a eșuat la înregistrarea cheii publice de semnare GitHub.
-- Ultimul status Constructor, run `32903648228`, a confirmat cele trei timere
-  inactive, cele trei servicii dezactivate și `codex-auth=required`.
-- Live Voice nu este acceptată: captarea microfonului funcționează, dar sesiunea
-  OpenAI Live cade după captare și clientul intră în fallback de dictare.
-- Becul Admin `OpenAI 1/2` înseamnă un furnizor roșu din cele două rânduri
-  OpenAI/căutare. Cauza fină a OpenAI roșu nu este încă dovedită din sesiunea
-  Admin; nu este declarată automat drept lipsă de credit.
-- Worktree-ul activ este
-  `C:\Users\adria\AppData\Local\Temp\kelionai-pr1383`, branch
-  `codex/release-train-policy-pr1383`, cu implementarea nepublicată a fișei
-  persistente Constructor. Nu există încă un PR nou pentru această reconciliere.
-- Producția nu a fost modificată de lucrul din acest checkpoint.
+- `origin/master`: `5acdf3bc`, verificat prin `git fetch`.
+- Live: `baf00ae`, verificat prin `/api/version` (deploy pending).
+- Readiness live: `ready=true` (verificat prin `/readyz`).
+- PR #1396 (ChatGPT Pro subscription) merged pe master (`36315b40`).
+- PR #1397 (vps-set-env permite OPENAI_API_KEY gol) merged pe master (`5acdf3bc`).
+- Deploy pending: `runtime.env` pe VPS e staled; trebuie rulat `vps-set-env`
+  înainte de deploy pentru a actualiza câmpurile noi cerute de validator.
+
+## Arhitectura curentă (verificată în cod)
+
+- OpenAI Responses este singurul creier online. Modelele pot fi accesate fie
+  prin cheie API (`sk-proj-*`), fie prin abonamentul ChatGPT Pro ($200/lună)
+  folosind tokenul OAuth din `~/.codex/auth.json` și endpoint-ul
+  `chatgpt.com/backend-api/codex/responses`.
+- `isSubscriptionMode()` returnează true când `config.openai.key` e gol și
+  există `~/.codex/auth.json` cu `auth_mode=chatgpt`.
+- `vps-set-env.yml` acceptă acum `OPENAI_API_KEY` gol (generează placeholder
+  `disabled-placeholder-*`); `deploy.sh` acceptă și acest pattern.
+- Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
+- Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`). În mod abonament,
+  verificarea catalogului `/v1/models` este sărită (endpoint-ul Codex nu o servăște).
+- Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
+  și afișează starea. Flux: `queued → claimed → accepted → working →
+  gates_passed → pr_opened → merged → deployed`.
+- `backend/.env` local are secțiunea OpenAI completă (9 env-uri, goale).
+
+## Audit complet (27 aug 2026)
+
+### Porți AGENTS.md — rezultate
+
+| Poartă | Rezultat |
+|---|---|
+| `typecheck` | ✓ 0 erori |
+| `backend test` | ✓ 1332/1332 trec (200 suite-uri) |
+| `frontend build` | ✓ build reușit |
+| `frontend lint` | ✓ 0 erori |
+| `verifica-hardcodari` | ✓ 0 abateri |
+| `verifica-creier-unic` | ✓ 0 furnizori retrași |
+| `verifica-exporturi` | ✓ 0 cod mort |
+| `verifica-sintaxa` | ✓ curat |
+| `verifica-workflow-uri-sigure` | ✓ curat |
+| `identifica-teste-moarte` | ✓ 0 teste moarte |
+| `inventar-audit` | ✓ curat |
+| `jscpd` | ✓ 0 duplicate |
+
+### Chat local verificat
+
+- Backend pornește pe `:8080` cu env OpenAI local.
+- Auth prin bearer token (sesiune nativă în `auth_sessions`) — funcțional.
+- `POST /api/chat` cu `idempotencyKey` — SSE streaming, `heard`, `lang`,
+  răspuns. Cu cheie OpenAI falsă, răspunsul e mesajul de epuizare (corect).
+- Cu cheie OpenAI reală, chat-ul ar funcționa complet.
+
+### Flux Admin → Constructor → Deploy verificat
+
+- `POST /api/admin/constructor` — poartă de calitate + `createBuildJob`.
+- `GET /api/admin/constructor` — status + work cards + observability.
+- `POST /api/admin/constructor/release/action` — aprobă release.
+- Worker Codex: `/api/internal/constructor-publisher/jobs/claim`.
+- Deploy: `deploy.ts` citește `build_jobs` și expune `DeployState`.
+- Testele `constructorPipeline`, `constructorOrdineSterse`, `deploy` trec.
+
+### Migrații DB locale
+
+- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
+- `auth_sessions` și toate tabelele există.
+- Backup proof generat și verificat (protecție anti-distrugere funcțională).
+
+## Fixuri aplicate în sesiunea asta
+
+1. `backend/.env` — șters `GEMINI_API_KEY`, `JULES_API_KEY`, `LIVEKIT_*`;
+   adăugat secțiune OpenAI completă.
+2. `scripts/billing-check.cjs` — re-scris pe OpenAI Responses (folosea `geminiKey` inexistent).
+3. `scripts/listeaza-modelle-imagine.mjs` — re-scris pe catalog OpenAI.
+4. `scripts/ping-gemini.cjs` — șters (mort, referia `geminiKey` inexistent).
+5. `scripts/probe-live.mjs` — URL din `PUBLIC_APP_ORIGIN`/`FRONTEND_ORIGIN` env.
+6. `backend/src/agentiA2a.test.ts` — `https://kelionai.app` hardcodat → `config.publicOrigin`.
+7. `scripts/autovedere-screenshot*.png` — șterse (duplicate locale negit-tracked).
+8. Migrații DB locale rulate (27 migrații, DB recreat de la zero).
 
 ## Unfinished work
 
-- Activează publisherul, releaserul și workerul Constructor numai după ce
-  ambele credențiale externe sunt valide.
-- Reconciliază o singură dată implementarea fișei de lucru cu `origin/master`,
-  apoi rulează testele relevante și deschide un PR protejat.
-- Proiectează evenimentele persistente ale fișei în monitorul Kelyon și în
-  Admin, inclusiv progres real, heartbeat, cauză, acțiune automată și dovadă.
-- Transformă incidentul Live Voice într-un work item persistent, deduplicat și
-  observabil, cu clasificare, retry limitat, strategii distincte, fallback clar,
-  escaladare și test de regresie.
-- Dovedește bidirecțional Live Voice în clientul real; dictarea nu satisface
-  acest criteriu.
-- Rulează o cerere pilot benignă prin Admin -> Constructor -> worker -> PR ->
-  protected master -> artefact semnat -> release -> rezultat live.
-- Confirmă în client comportamentul de update/cache numai după următorul
-  release reușit.
-- Urmărește toate suprafețele Admin prin registrul canonic
-  [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md).
+- Deploy `16eecd83` la live (9 commit-uri ahead de `baf00ae`).
+- Configurare env OpenAI pe VPS (cheie project-scoped + modele validate).
+- Verificare E2E live: chat text + voce + vedere + admin + constructor.
+- `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` necesită scope `SSH signing keys: write`.
+- Profilul `kelion-codex` pe VPS trebuie să finalizeze `codex login` interactiv.
 
 ## Blockers / owner action
 
-Sunt necesare exact două acțiuni externe care nu pot fi executate sigur de
-aplicație:
-
-1. credentiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` trebuie
-   înlocuită sau actualizată cu permisiunea user-scoped
-   `SSH signing keys: write` (ori scope clasic `write:ssh_signing_key`);
-2. profilul `kelion-codex` de pe VPS trebuie să finalizeze loginul Codex
-   interactiv.
-
-Valorile credentialelor nu se introduc în acest document, browser, loguri,
-worker sau chat. După rezolvarea celor două acțiuni, același traseu trebuie să
-se reia automat; ownerul nu recreează cererea.
+1. Cheia OpenAI de runtime pe VPS trebuie să fie project-scoped.
+2. Modelele OpenAI pe VPS: `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+   `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL` — toate validate în catalog.
+3. Credențiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` — scope
+   `SSH signing keys: write`.
+4. `codex login` interactiv pe VPS pentru profilul `kelion-codex`.
 
 ## Next ordered steps
 
-1. păstrează implementarea locală a fișei de lucru într-un commit de siguranță;
-2. creează un singur release-train branch din `origin/master` și reconciliază
-   commitul o singură dată;
-3. completează vizibilitatea Admin/Stage și incidentul Live Voice fără progres
-   simulat;
-4. rulează testele țintite, build, lint, typecheck și verificarea migrației,
-   apoi persistă receiptul `local_gates`; acesta nu înseamnă CI GitHub verde;
-5. deschide PR, rezolvă review-ul și așteaptă toate checkurile obligatorii până
-   când rezultatul GitHub autoritativ este persistat separat ca `ci=green`;
-6. după acțiunile externe, rerulează configurarea oficială și confirmă
-   heartbeatul workerului;
-7. execută un singur E2E benign și păstrează linkurile/receipturile;
-8. îmbină și publică numai prin traseul protejat, apoi confirmă versiunea,
-   readiness, vocea și refresh-ul clientului.
+1. Configurează env OpenAI pe VPS (cheie + modele);
+2. Deploy `16eecd83` prin traseul protejat;
+3. Verifică live: `/api/version` = `16eecd83`, `/readyz` = true;
+4. Testează chat text live cu auth real;
+5. Testează voce live (OpenAI Realtime);
+6. Testează flux Admin → Constructor → PR → Deploy cu un ordin benign;
+7. Confirmă refresh client și cache update.
 
 ## Canonical links
 
 - Repo: <https://github.com/kelion-team/kelionai>
-- Ultimul release live verificat: <https://github.com/kelion-team/kelionai/actions/runs/32900123878>
-- Build semnat pentru master curent: <https://github.com/kelion-team/kelionai/actions/runs/32902537746>
-- Configurare Constructor eșuată: <https://github.com/kelion-team/kelionai/actions/runs/32903385898>
-- Status Constructor verificat: <https://github.com/kelion-team/kelionai/actions/runs/32903648228>
-- PR remediere ACL, îmbinat: <https://github.com/kelion-team/kelionai/pull/1388>
-- Contract de livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
+- Live: <https://kelionai.app>
+- Contract livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
 - Inventar Admin: [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md)
 
 ## Handoff pentru sesiunea următoare

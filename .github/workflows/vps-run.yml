@@ -13,6 +13,11 @@ on:
           - activate-worker-publisher
           - activate-release
           - constructor-status
+      auto_routed_to_master:
+        description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
+        required: false
+        default: false
+        type: boolean
       pilot_pr_number:
         description: PR-ul pilot creat de Constructor, obligatoriu la activate-release
         required: false
@@ -23,8 +28,8 @@ on:
         type: string
 
 permissions:
-  contents: read
   actions: read
+  contents: read
   packages: read
 
 concurrency:
@@ -32,7 +37,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  route-to-master:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Redirecționează automat pe master
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          PILOT_PR_NUMBER: ${{ inputs.pilot_pr_number }}
+          PILOT_MERGE_COMMIT: ${{ inputs.pilot_merge_commit }}
+        run: |
+          set -euo pipefail
+          gh workflow run "vps-run.yml" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref master \
+            -f operation="$OPERATION" \
+            -f auto_routed_to_master=true \
+            -f pilot_pr_number="$PILOT_PR_NUMBER" \
+            -f pilot_merge_commit="$PILOT_MERGE_COMMIT"
   control:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -44,7 +72,7 @@ jobs:
       CONSTRUCTOR_RETRY_BASE_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_BASE_SECONDS || '60' }}
       CONSTRUCTOR_RETRY_MAX_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_MAX_SECONDS || '1800' }}
       CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
-      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation' }}
+      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation,current-tree,merge-policy' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
@@ -606,7 +634,9 @@ jobs:
           KELION_GITHUB_REPOSITORY=$repository
           KELION_PUBLIC_APP_ORIGIN=$public_origin
           CONSTRUCTOR_RELEASE_WORKFLOW=deploy.yml
-          CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$constructor_required_checks
+          # Release-ul post-merge validează joburile CI publicate pe push;
+          # merge-policy/current-tree sunt porți PR și sunt verificate separat.
+          CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation
           EOF
           chmod 0600 "$cutover_stage/files/constructor-config.constructor-release.env"
           printf '%s\n' constructor-config.constructor-release.env >> "$cutover_stage/manifest"

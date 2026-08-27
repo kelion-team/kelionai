@@ -113,7 +113,7 @@ export function interpreteazaProba(
     // empty_location, missing_text_or_target…) — proba cu argumente goale NU e
     // „stricat" (C7 al marii verificări le-a băgat pe youtube_search & co. în
     // proba reală, iar fără ramura asta o unealtă funcțională apărea roșie).
-    if (/^empty_|^missing_|\brequired\b|is required|missing (required )?(parameter|argument|field|query|id)|lipse[șs]te.*(argument|parametru|c[âa]mp|intrarea|query|textul|\bid\b)|argument(e|ul)?\s*(lips|invalid|gol|obligatoriu)|obligatoriu|invalid input|invalid arguments|expected .*(argument|parameter)|f[ăa]r[ăa] (query|argument|intrare|text)|trebuie.{0,15}(id|query|text|argument|parametru|intrare|c[âa]mp|valoare)/.test(e))
+    if (/^empty_|^missing_|^bad_|^no_(query|fragment|request|prompt|text)|\brequired\b|is required|missing (required )?(parameter|argument|field|query|id)|lipse[șs]te.*(argument|parametru|c[âa]mp|intrarea|query|textul|\bid\b)|argument(e|ul)?\s*(lips|invalid|gol|obligatoriu)|obligatoriu|invalid input|invalid arguments|expected .*(argument|parameter)|f[ăa]r[ăa] (query|argument|intrare|text)|trebuie.{0,15}(id|query|text|argument|parametru|intrare|c[âa]mp|valoare)/.test(e))
       return {
         verdict: 'nu_pot_verifica',
         deCe: 'cere o intrare reală (nu se poate proba corect cu argumente goale)',
@@ -314,6 +314,7 @@ export function probaDinRezultatGoogle(brut: string): RezultatProba {
 // procesului web; uneltele de repo/shell nu mai există aici.
 export async function autoverificareLive(): Promise<RaportAutoverificare> {
   const { execSharedAdminTool, SHARED_ADMIN_TOOLS } = await import('./adminTools.js')
+  const { probaCapabilitateChat } = await import('./probaCapabilitatiChat.js')
   const { rationeazaMesajeSigur } = await import('./creierRationament.js')
   const { saveKv } = await import('../db.js')
   // UNELTELE „APLICAȚII" (Google/web) merg pe calea CHAT (runGoogleTool), nu prin
@@ -324,6 +325,8 @@ export async function autoverificareLive(): Promise<RaportAutoverificare> {
   const { tokenGoogleOwner } = await import('./agentiKelion.js')
   const googleToken = await tokenGoogleOwner().catch(() => '')
   const numeGoogle = new Set(googleTools.map((t) => t.name))
+  // Emailul adminului pentru probarea funcțiilor user-scoped/admin-only.
+  const adminEmail = (await import('../config.js')).config.adminEmail
   const raport = await ruleazaAutoverificare({
     // CITIRE: execută unealta real, cu argumente goale (sigur — doar citește).
     probaCitire: async (c) => {
@@ -334,9 +337,13 @@ export async function autoverificareLive(): Promise<RaportAutoverificare> {
           return probaDinRezultatGoogle(String(out ?? ''))
         }
          if (!SHARED_ADMIN_TOOLS.has(c.name)) {
+           // Încercăm probarea prin calea chat (extindere 28 aug): funcțiile
+           // de citire din adminTools.ts/chat.ts care sunt safe.
+           const probaChat = await probaCapabilitateChat(c.name, adminEmail, true)
+           if (probaChat !== null) return probaChat
            return { ok: false, eroare: 'capabilitatea nu are o probă read-only sigură în procesul web' }
          }
-         const out = await execSharedAdminTool(c.name, {})
+         const out = await execSharedAdminTool(c.name, {}, { email: adminEmail })
         return { ok: true, rezultat: String(out ?? '') }
       } catch (e) {
         return { ok: false, eroare: String((e as Error)?.message ?? e).slice(0, 200) }

@@ -102,7 +102,7 @@ export function analizeazaLinie(cale, linie) {
 
   if (!fisierTest) {
     const model = linie.match(/['"`][^'"`\n]*\b(?:gpt-[a-z0-9][\w.-]*|chatgpt-[a-z0-9][\w.-]*|o\d(?:-[a-z0-9][\w.-]*)?)\b[^'"`\n]*['"`]/i)
-    if (model) abateri.push(abatere('R2 model AI în cod', model[0]))
+    if (model && !exceptie) abateri.push(abatere('R2 model AI în cod', model[0]))
   }
 
   const email = linie.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)

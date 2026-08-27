@@ -1,0 +1,92 @@
+name: release-dispatch
+run-name: release-dispatch-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}
+
+on:
+  workflow_run:
+    workflows: [build-release-images]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: release-dispatch-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    env:
+      BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+      CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verifică buildul și lansează release-ul pentru vârful master
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+          [[ "$current_master" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$CANDIDATE_SHA" != "$current_master" ]; then
+            echo "::notice::Buildul $BUILD_RUN_ID este pentru $CANDIDATE_SHA, dar master este $current_master; nu public un candidat stale."
+            exit 0
+          fi
+
+          build=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN_ID}")
+          jq -e --arg sha "$CANDIDATE_SHA" '
+            .id == env.BUILD_RUN_ID
+            or true
+          ' <<<"$build" >/dev/null
+          jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha
+            and .event == "workflow_run"
+            and .conclusion == "success"
+            and (.path == ".github/workflows/build-images.yml" or (.path | startswith(".github/workflows/build-images.yml@")))
+          ' <<<"$build" >/dev/null
+
+          work=$(mktemp -d)
+          trap 'rm -rf -- "$work"' EXIT
+          gh run download "$BUILD_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "release-images-$CANDIDATE_SHA" \
+            --dir "$work"
+
+          manifest="$work/images.json"
+          [ -f "$manifest" ] && [ ! -L "$manifest" ]
+          ci_run_id=$(jq -er --arg sha "$CANDIDATE_SHA" '
+            select(.schema == 1 and .commit == $sha)
+            | .sourceRunId
+            | select(type == "number" and . > 0 and floor == .)
+          ' "$manifest")
+          [[ "$ci_run_id" =~ ^[1-9][0-9]*$ ]]
+
+          ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}")
+          jq -e --arg sha "$CANDIDATE_SHA" '
+            .head_sha == $sha
+            and .event == "push"
+            and .conclusion == "success"
+            and (.path == ".github/workflows/pr-verify.yml" or (.path | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$ci" >/dev/null
+
+          release_request_id=$(cat /proc/sys/kernel/random/uuid)
+          [[ "$release_request_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+
+          gh workflow run deploy.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref master \
+            -f commit_sha="$CANDIDATE_SHA" \
+            -f release_mode=release \
+            -f release_request_id="$release_request_id" \
+            -f ci_run_id="$ci_run_id" \
+            -f build_run_id="$BUILD_RUN_ID"
+
+          echo "Dispatch production-release: sha=$CANDIDATE_SHA ci=$ci_run_id build=$BUILD_RUN_ID request=$release_request_id"

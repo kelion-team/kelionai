@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { isSubscriptionMode } from './chatgptSubscription.js'
 
 export type TreaptaOpenAI = 'luna' | 'medium' | 'heavy'
 
@@ -108,26 +109,34 @@ export function motivCatalogOpenAI(): string {
   return cache?.eroare ?? ''
 }
 
-/** Modelul configurat pentru rol este folosit numai dacă cheia îl servește. */
+/** Modelul configurat pentru rol este folosit numai dacă cheia îl servește.
+ *  În modul abonament (fără cheie API), catalogul nu se poate verifica prin
+ *  /models, deci trustăm modelele configurate din .env. */
 export async function modelOpenAI(treapta: TreaptaOpenAI): Promise<string> {
   const model = idConfigurat(treapta)
   if (!model) return ''
+  // Modul abonament: fără catalog /models, trustăm config-ul
+  if (isSubscriptionMode()) return model
   const exista = (await catalogOpenAI()).includes(model)
   if (!exista) console.error(`[OpenAI] modelul configurat pentru ${treapta} nu există în catalog`)
   return exista ? model : ''
 }
 
-/** Scara stabilă Luna → Terra → Sol, filtrată prin catalogul live. */
+/** Scara stabilă Luna → Terra → Sol, filtrată prin catalogul live.
+ *  În modul abonament, trustăm config-ul (fără verificare catalog). */
 export async function scaraOpenAI(): Promise<string[]> {
-  const iduri = await catalogOpenAI()
-  return ([idConfigurat('luna'), idConfigurat('medium'), idConfigurat('heavy')])
+  const configurate = ([idConfigurat('luna'), idConfigurat('medium'), idConfigurat('heavy')])
     .filter((id, index, toate): id is string => Boolean(id)
-      && iduri.includes(id)
       && toate.indexOf(id) === index)
+  if (isSubscriptionMode()) return configurate
+  const iduri = await catalogOpenAI()
+  return configurate.filter((id) => iduri.includes(id))
 }
 
 export async function modelOpenAIExista(id: string): Promise<boolean> {
   const curat = String(id || '').trim().replace(/^openai\//i, '')
   if (!curat) return false
+  // Modul abonament: trustăm config-ul
+  if (isSubscriptionMode()) return true
   return (await catalogOpenAI()).includes(curat)
 }
