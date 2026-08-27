@@ -25,6 +25,7 @@ jobs:
   verify-delivery:
     runs-on: ubuntu-latest
     timeout-minutes: 125
+    environment: production
     permissions:
       actions: read
       checks: write
@@ -32,12 +33,13 @@ jobs:
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_VERIFIER_ADMIN_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
       PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
       RELEASE_VERIFIER_COMMIT: ${{ inputs.commit_sha }}
       RELEASE_VERIFIER_WAIT_MINUTES: ${{ vars.RELEASE_VERIFIER_WAIT_MINUTES || '90' }}
       RELEASE_VERIFIER_POLL_SECONDS: ${{ vars.RELEASE_VERIFIER_POLL_SECONDS || '55' }}
       RELEASE_VERIFIER_MONITOR_SECONDS: ${{ vars.RELEASE_VERIFIER_MONITOR_SECONDS || '120' }}
-      RELEASE_VERIFIER_MAX_API_CALLS: ${{ vars.RELEASE_VERIFIER_MAX_API_CALLS || '300' }}
+      RELEASE_VERIFIER_MAX_API_CALLS: ${{ vars.RELEASE_VERIFIER_MAX_API_CALLS || '900' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

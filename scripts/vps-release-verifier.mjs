@@ -4,33 +4,44 @@ import { evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, 
 
 const repository = process.env.GITHUB_REPOSITORY ?? ''
 const token = process.env.GH_TOKEN ?? ''
+const adminToken = process.env.RELEASE_VERIFIER_ADMIN_TOKEN ?? ''
 const origin = String(process.env.PUBLIC_APP_ORIGIN ?? '').replace(/\/$/, '')
 const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {}
 const pollSeconds = Math.min(60, Math.max(15, Number(process.env.RELEASE_VERIFIER_POLL_SECONDS) || 55))
 const waitMinutes = Math.min(120, Math.max(1, Number(process.env.RELEASE_VERIFIER_WAIT_MINUTES) || 90))
 const monitorSeconds = Math.min(600, Math.max(40, Number(process.env.RELEASE_VERIFIER_MONITOR_SECONDS) || 120))
-const maxCalls = Math.min(600, Math.max(40, Number(process.env.RELEASE_VERIFIER_MAX_API_CALLS) || 300))
+const maxCalls = Math.min(1800, Math.max(100, Number(process.env.RELEASE_VERIFIER_MAX_API_CALLS) || 900))
+const maxCriticalCalls = 256 // heartbeat la <=60s plus incident/finalizare în fereastra maximă de 120m
 const INCIDENT = '<!-- kelion-release-verifier-incident:v1 -->'
 const SHA = /^[0-9a-f]{40}$/
 const GITHUB_API_ORIGIN = 'https://api.github.com' // hardcod-permis: endpoint oficial imuabil al API-ului GitHub
 let calls = 0
+let criticalCalls = 0
 let checkRunId = null
 let started = Date.now()
 
-if (!repository.includes('/') || !token || !origin.startsWith('https://')) throw new Error('release verifier configuration missing')
+if (!repository.includes('/') || !token || !adminToken || !origin.startsWith('https://')) throw new Error('release verifier configuration missing')
 
-async function api(path, options = {}) {
-  calls += 1
-  if (calls > maxCalls) throw new Error('api_call_budget_exhausted')
+async function api(path, options = {}, credential = token, critical = false) {
+  if (critical) {
+    criticalCalls += 1
+    if (criticalCalls > maxCriticalCalls) throw new Error('critical_api_call_budget_exhausted')
+  } else {
+    calls += 1
+    if (calls > maxCalls) throw new Error('api_call_budget_exhausted')
+  }
   const response = await fetch(`${GITHUB_API_ORIGIN}${path}`, {
     ...options,
     signal: AbortSignal.timeout(20_000),
-    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...options.headers },
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${credential}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...options.headers },
   })
   const body = await response.text()
   if (!response.ok) throw new Error(`github_${response.status}:${body.slice(0, 300)}`)
   return body ? JSON.parse(body) : null
 }
+
+const criticalApi = (path, options = {}) => api(path, options, token, true)
+const administrationApi = (path, options = {}) => api(path, options, adminToken)
 
 const repoPath = `/repos/${repository}`
 
@@ -45,12 +56,12 @@ async function targetCommit() {
 }
 
 async function heartbeat(commit, phase, detail, conclusion = null) {
-  const output = { title: conclusion ? `Release ${conclusion}` : `Verificare release: ${phase}`, summary: `${detail}\n\nSHA: ${commit}\nElapsed: ${Math.floor((Date.now() - started) / 1000)}s\nAPI calls: ${calls}/${maxCalls}` }
+  const output = { title: conclusion ? `Release ${conclusion}` : `Verificare release: ${phase}`, summary: `${detail}\n\nSHA: ${commit}\nElapsed: ${Math.floor((Date.now() - started) / 1000)}s\nAPI calls: ${calls}/${maxCalls}; critical=${criticalCalls}/${maxCriticalCalls}` }
   if (!checkRunId) {
-    const created = await api(`${repoPath}/check-runs`, { method: 'POST', body: JSON.stringify({ name: 'release-verifier', head_sha: commit, status: conclusion ? 'completed' : 'in_progress', ...(conclusion ? { conclusion } : {}), started_at: new Date(started).toISOString(), output }) })
+    const created = await criticalApi(`${repoPath}/check-runs`, { method: 'POST', body: JSON.stringify({ name: 'release-verifier', head_sha: commit, status: conclusion ? 'completed' : 'in_progress', ...(conclusion ? { conclusion } : {}), started_at: new Date(started).toISOString(), output }) })
     checkRunId = created.id
   } else {
-    await api(`${repoPath}/check-runs/${checkRunId}`, { method: 'PATCH', body: JSON.stringify({ status: conclusion ? 'completed' : 'in_progress', ...(conclusion ? { conclusion, completed_at: new Date().toISOString() } : {}), output }) })
+    await criticalApi(`${repoPath}/check-runs/${checkRunId}`, { method: 'PATCH', body: JSON.stringify({ status: conclusion ? 'completed' : 'in_progress', ...(conclusion ? { conclusion, completed_at: new Date().toISOString() } : {}), output }) })
   }
   process.stdout.write(`[heartbeat] ${new Date().toISOString()} ${phase}: ${detail}\n`)
 }
@@ -58,10 +69,19 @@ async function heartbeat(commit, phase, detail, conclusion = null) {
 async function incident(commit, missing, evidence, error = null) {
   const title = `[Release verifier] ${commit.slice(0, 12)} unverified`
   const body = `${INCIDENT}\n## Release blocat\n\n- Commit: \`${commit}\`\n- Lipsuri: \`${missing.join(', ') || 'internal-error'}\`\n- Owner: \`Kelion release verifier -> L2 remediation\`\n- Deadline feedback: \`${new Date(Date.now() + 60_000).toISOString()}\`\n- Run corelat: \`${process.env.GITHUB_RUN_ID ?? 'unknown'}\`\n- Eroare: \`${String(error ?? 'none').replace(/[`\r\n]/g, ' ').slice(0, 400)}\`\n\n\`\`\`json\n${JSON.stringify(evidence).slice(0, 20_000)}\n\`\`\``
-  const issues = await api(`${repoPath}/issues?state=open&per_page=100`)
+  const issues = await criticalApi(`${repoPath}/issues?state=open&per_page=100`)
   const existing = issues.find((item) => item.title === title && item.body?.includes(INCIDENT))
-  if (existing) await api(`${repoPath}/issues/${existing.number}`, { method: 'PATCH', body: JSON.stringify({ body }) })
-  else await api(`${repoPath}/issues`, { method: 'POST', body: JSON.stringify({ title, body }) })
+  if (existing) await criticalApi(`${repoPath}/issues/${existing.number}`, { method: 'PATCH', body: JSON.stringify({ body }) })
+  else await criticalApi(`${repoPath}/issues`, { method: 'POST', body: JSON.stringify({ title, body }) })
+}
+
+async function closeIncident(commit, evidence) {
+  const title = `[Release verifier] ${commit.slice(0, 12)} unverified`
+  const issues = await criticalApi(`${repoPath}/issues?state=open&per_page=100`)
+  const existing = issues.find((item) => item.title === title && item.body?.includes(INCIDENT))
+  if (!existing) return
+  const resolution = `${existing.body}\n\n## Recuperare verificată\n\n- Run verifier: \`${process.env.GITHUB_RUN_ID ?? 'unknown'}\`\n- CI/build/deploy: \`${evidence.ci.id}/${evidence.build.id}/${evidence.deploy.id}\`\n- Confirmat la: \`${new Date().toISOString()}\``
+  await criticalApi(`${repoPath}/issues/${existing.number}`, { method: 'PATCH', body: JSON.stringify({ body: resolution, state: 'closed', state_reason: 'completed' }) })
 }
 
 async function runJobs(runId) {
@@ -70,7 +90,12 @@ async function runJobs(runId) {
 
 async function snapshot(commit) {
   const masterHead = (await api(`${repoPath}/git/ref/heads/master`)).object.sha
-  const protection = evaluateBranchProtection(await api(`${repoPath}/branches/master/protection`))
+  const [branchProtection, requiredSignatures, activeBranchRules] = await Promise.all([
+    administrationApi(`${repoPath}/branches/master/protection`),
+    administrationApi(`${repoPath}/branches/master/protection/required_signatures`),
+    administrationApi(`${repoPath}/rules/branches/master?per_page=100`),
+  ])
+  const protection = evaluateBranchProtection(branchProtection, requiredSignatures, activeBranchRules)
   const ciRuns = (await api(`${repoPath}/actions/workflows/pr-verify.yml/runs?head_sha=${commit}&event=push&per_page=20`)).workflow_runs
   let ci = ciRuns.find((run) => run.head_sha === commit && run.event === 'push' && run.conclusion === 'success') ?? ciRuns.find((run) => run.head_sha === commit)
   if (ci?.conclusion === 'success') {
@@ -87,10 +112,11 @@ async function snapshot(commit) {
     artifactVerified = artifacts.some((artifact) => artifact.name === `release-images-${commit}` && artifact.expired === false)
   }
   const deploys = (await api(`${repoPath}/actions/workflows/deploy.yml/runs?event=workflow_dispatch&per_page=100`)).workflow_runs
-  const deploy = deploys.find((run) => {
+  const matchingDeploys = deploys.filter((run) => {
     const identity = parseDeployTitle(run.display_title)
     return identity?.commit === commit && identity?.ciRunId === ci?.id && identity?.buildRunId === build?.id
   })
+  const deploy = matchingDeploys.sort((left, right) => Number(left.id) - Number(right.id))[0]
   const identity = parseDeployTitle(deploy?.display_title)
   let deployIdentityValid = Boolean(identity && deploy?.event === 'workflow_dispatch' && deploy?.head_branch === 'master')
   if (deploy?.conclusion === 'success') {
@@ -154,6 +180,7 @@ async function main() {
     process.exitCode = 1
     return
   }
+  await closeIncident(commit, evidence)
   await heartbeat(commit, 'delivered', `ci=${evidence.ci.id}; build=${evidence.build.id}; deploy=${evidence.deploy.id}; live=${commit}`, 'success')
 }
 
