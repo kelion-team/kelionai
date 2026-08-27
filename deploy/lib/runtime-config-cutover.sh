@@ -1285,13 +1285,17 @@ roll_forward_unit_transaction() {
 }
 
 resolve_validated_candidate() {
-  local output_name=$1 wanted=$2 candidate
+  local output_name=$1 wanted=$2 candidate previous_restart_required=$restart_required
   if [ -n "${validated_candidate[$wanted]:-}" ]; then
     candidate=${validated_candidate[$wanted]}
     [ -f "$candidate" ] && [ ! -L "$candidate" ] \
       || die "candidatul validat a dispărut după manifest: $wanted"
   else
     map_logical "$wanted"
+    # Rezolvarea unei valori live este read-only. map_logical setează și
+    # restart_required pentru mutațiile app/runtime; verificarea distinctness
+    # nu are voie să transforme un cutover parțial într-un restart backend.
+    restart_required=$previous_restart_required
     candidate=$mapped_target
     [ -f "$candidate" ] && [ ! -L "$candidate" ] \
       || die "candidatul nu este în manifest și lipsește live: $wanted"
