@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startLease } from './constructor-service-client.mjs'
@@ -15,6 +16,61 @@ const shellFunction = (source, name) => {
   assert.ok(end > start, `funcția shell ${name} nu poate fi extrasă`)
   return source.slice(start, end + 2)
 }
+
+test('selecția runtime folosește direct candidatul validat din manifest', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const resolver = shellFunction(cutover, 'resolve_validated_candidate')
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-cutover-candidate-'))
+  const files = join(sandbox, 'files')
+  mkdirSync(files)
+  const oauth = join(files, 'app-secret.github-release-oauth-token')
+  const ghcr = join(files, 'gate-secret.github-ghcr-read-token')
+  writeFileSync(oauth, `${'a'.repeat(40)}\n`, { mode: 0o600 })
+  writeFileSync(ghcr, `${'b'.repeat(40)}\n`, { mode: 0o600 })
+  const windowsBash = join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe')
+  const bash = process.platform === 'win32' && existsSync(windowsBash) ? windowsBash : 'bash'
+  const shellPath = (path) => process.platform === 'win32'
+    ? `/${path[0].toLowerCase()}${path.slice(2).replaceAll('\\', '/')}`
+    : path
+
+  const harness = `set -euo pipefail
+die() { printf '%s\\n' "$1" >&2; exit 41; }
+map_logical() { mapped_target=/missing/live/$1; mapped_owner=0; mapped_group=0; mapped_mode=600; restart_required=1; }
+validate_secret_file() { [ -s "$1" ]; }
+declare -A validated_candidate=()
+restart_required=0
+${resolver}
+validated_candidate[app-secret.github-release-oauth-token]=$1
+validated_candidate[gate-secret.github-ghcr-read-token]=$2
+resolve_validated_candidate selected app-secret.github-release-oauth-token
+[ "$selected" = "$1" ]
+resolve_validated_candidate selected gate-secret.github-ghcr-read-token
+[ "$selected" = "$2" ]`
+  const positive = spawnSync(bash, ['-c', harness, 'candidate-test', shellPath(oauth), shellPath(ghcr)], { encoding: 'utf8' })
+  assert.equal(positive.status, 0, positive.stderr)
+
+  const absent = spawnSync(bash, ['-c', `${harness.split('validated_candidate[app-secret.github-release-oauth-token]')[0]}
+resolve_validated_candidate selected app-secret.github-release-oauth-token`, 'candidate-test'], { encoding: 'utf8' })
+  assert.equal(absent.status, 41)
+  assert.match(absent.stderr, /nu este în manifest și lipsește live/)
+
+  const live = join(files, 'app-secret.live-fallback')
+  writeFileSync(live, `${'c'.repeat(40)}\n`, { mode: 0o600 })
+  const fallbackHarness = `${harness.split('validated_candidate[app-secret.github-release-oauth-token]')[0]}
+LIVE_FILE=$1
+map_logical() { mapped_target=$LIVE_FILE; mapped_owner=$(id -u); mapped_group=$(id -g); mapped_mode=$(stat -c '%a' "$LIVE_FILE"); restart_required=1; }
+resolve_validated_candidate selected app-secret.github-release-oauth-token
+[ "$selected" = "$1" ]
+[ "$restart_required" = 0 ]`
+  const fallback = spawnSync(bash, ['-c', fallbackHarness, 'candidate-test', shellPath(live)], { encoding: 'utf8' })
+  assert.equal(fallback.status, 0, fallback.stderr)
+
+  rmSync(oauth)
+  const removed = spawnSync(bash, ['-c', harness, 'candidate-test', shellPath(oauth), shellPath(ghcr)], { encoding: 'utf8' })
+  assert.equal(removed.status, 41)
+  assert.match(removed.stderr, /a dispărut după manifest/)
+  rmSync(sandbox, { recursive: true, force: true })
+})
 
 test('cele trei identități nu își pot împrumuta credentialele', () => {
   const worker = read('deploy/codex-worker.mjs')

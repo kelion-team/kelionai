@@ -561,6 +561,7 @@ constructor_configs=(
 declare -a logical_names=() targets=() owner_ids=() group_ids=() modes=()
 declare -a prepared=() backups=() backup_present=()
 declare -A seen_logical=()
+declare -A validated_candidate=()
 units_quiesced=0
 constructor_configured=0
 constructor_staged_unit_count=0
@@ -1283,22 +1284,26 @@ roll_forward_unit_transaction() {
   units_quiesced=0
 }
 
-effective_file() {
-  local wanted=$1 candidate
-  if [ "${seen_logical[$wanted]:-}" = 1 ]; then
-    candidate=$stage_root/files/$wanted
-    [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
-    # Fiecare intrare din manifest a trecut deja validate_secret_file înainte
-    # ca seen_logical să fie publicat. Folosim exact candidatul autentificat,
-    # fără a-l confunda cu temporarul de instalare ori cu o țintă live veche.
-    printf '%s' "$candidate"
-    return 0
+resolve_validated_candidate() {
+  local output_name=$1 wanted=$2 candidate previous_restart_required=$restart_required
+  if [ -n "${validated_candidate[$wanted]:-}" ]; then
+    candidate=${validated_candidate[$wanted]}
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul validat a dispărut după manifest: $wanted"
+  else
+    map_logical "$wanted"
+    # Rezolvarea unei valori live este read-only. map_logical setează și
+    # restart_required pentru mutațiile app/runtime; verificarea distinctness
+    # nu are voie să transforme un cutover parțial într-un restart backend.
+    restart_required=$previous_restart_required
+    candidate=$mapped_target
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul nu este în manifest și lipsește live: $wanted"
+    [ "$(stat -c '%u:%g:%a' "$candidate")" = "$mapped_owner:$mapped_group:$mapped_mode" ] \
+      || die "candidatul live are ACL invalid: $wanted"
+    validate_secret_file "$candidate" || die "candidatul live este invalid: $wanted"
   fi
-  map_logical "$wanted"
-  [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] || return 1
-  [ "$(stat -c '%u:%g:%a' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode" ] || return 1
-  validate_secret_file "$mapped_target" || return 1
-  printf '%s' "$mapped_target"
+  printf -v "$output_name" '%s' "$candidate"
 }
 
 assert_pairwise_distinct() {
@@ -1306,7 +1311,7 @@ assert_pairwise_distinct() {
   local -a values=()
   local logical file value existing
   for logical in "$@"; do
-    file=$(effective_file "$logical") || die "$label lipsesc sau au ACL invalid: $logical"
+    resolve_validated_candidate file "$logical"
     value=$(sed -n '1p' "$file")
     [ "${#value}" -ge 32 ] || die "$label conține o valoare prea scurtă"
     for existing in "${values[@]:-}"; do [ "$value" != "$existing" ] || die "$label trebuie să fie distincte"; done
@@ -2171,6 +2176,7 @@ for logical in "${manifest_entries[@]}"; do
     systemd-service.*) validate_constructor_service_unit "$source_file" "$logical" || die "service systemd invalid în staging: $logical" ;;
     *) validate_secret_file "$source_file" || die "secret invalid în staging: $logical" ;;
   esac
+  validated_candidate[$logical]=$source_file
   map_logical "$logical"
   logical_names+=("$logical")
   targets+=("$mapped_target")
