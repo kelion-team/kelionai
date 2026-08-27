@@ -33,9 +33,33 @@ jobs:
             exit 0
           fi
 
-          pr_number="${{ github.event.pull_request.number }}"
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
+          review_block_label=vps-auto-merge-review-block
+          scope_block_label=vps-auto-merge-invalid-scope
+          draft_block_label=vps-auto-merge-draft
+          pr_number="${{ github.event.pull_request.number }}"
           has_invalid=0
+
+          ensure_label() {
+            local label_name="$1"
+            local description="$2"
+            local color="$3"
+            if ! gh label list --search "$label_name" --json name --jq '.[].name' | grep -qx "$label_name"; then
+              gh label create "$label_name" --description "$description" --color "$color" >/dev/null
+            fi
+          }
+
+          ensure_label "$review_block_label" "PR blocked by unresolved review thread(s); auto-merge disabled." "f9d0c4"
+          ensure_label "$scope_block_label" "PR changes include files outside allowed VPS workflow scope for auto-merge." "bfd4f2"
+          ensure_label "$draft_block_label" "PR is in draft; auto-merge disabled until ready for review." "c5def5"
+
+          pr_payload=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number")
+          if [ "$(jq -r '.draft' <<<"$pr_payload")" = "true" ]; then
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$draft_block_label" --remove-label "$scope_block_label" --remove-label "$review_block_label"
+            gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+            echo "PR is draft; auto-merge disabled."
+            exit 0
+          fi
 
           files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" --paginate --jq '.[].filename')
           if [ -z "$files" ]; then
@@ -54,9 +78,25 @@ jobs:
             if [ "$allowed" -ne 1 ]; then
               has_invalid=1
               echo "Skip auto-merge: file outside allowed scope detected: $file"
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$scope_block_label" --remove-label "$review_block_label"
               exit 0
             fi
           done <<< "$files"
+
+          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$scope_block_label"
+
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          unresolved_threads=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
+            -F owner="$owner" -F name="$repo" -F number="$pr_number" \
+            --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
+          if [ -n "$unresolved_threads" ]; then
+            echo "Skipping auto-merge: unresolved review threads exist."
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$review_block_label" --remove-label "$draft_block_label"
+            gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+            exit 0
+          fi
+          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$review_block_label"
 
           if [ "$has_invalid" -eq 0 ]; then
             if gh pr merge "$pr_number" --auto --squash --repo "$GITHUB_REPOSITORY"; then
