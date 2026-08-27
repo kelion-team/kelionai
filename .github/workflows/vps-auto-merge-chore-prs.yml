@@ -69,6 +69,7 @@ jobs:
             "deploy/constructor-publisher.env.example",
             "deploy/kelionai.env.example",
             "deploy/lib/constructor-publication.test.mjs",
+            "deploy/lib/runtime-config-cutover.sh",
             "scripts/lib/vps-pr-remediation.mjs",
             "scripts/lib/vps-release-verification.mjs",
             "scripts/vps-pr-remediator.mjs",
