@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  actions: read
 
 jobs:
   monitor-vps-chore-prs:
@@ -22,7 +23,6 @@ jobs:
           set -euo pipefail
 
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
-          marker='🔎 [vps-auto-merge-watchdog]'
 
           prs=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100")
           if [ "$(jq length <<<"$prs")" -eq 0 ]; then
@@ -58,20 +58,17 @@ jobs:
             done <<< "$files"
             [ "$has_invalid" -eq 1 ] && continue
 
-            if [ "$merge_state" != "clean" ] || [ "$mergeable" != "true" ]; then
-              status="stuck"
-              reason="merge_state=$merge_state mergeable=$mergeable"
+            if [ "$merge_state" = "behind" ]; then
+              if gh pr update-branch "$pr" --repo "$GITHUB_REPOSITORY" --rebase; then
+                echo "PR $pr: branch updated automatically (behind)."
+              else
+                echo "PR $pr: could not update branch automatically."
+              fi
+            elif [ "$merge_state" != "clean" ] || [ "$mergeable" != "true" ]; then
+              echo "PR $pr blocked: merge_state=$merge_state mergeable=$mergeable"
+              continue
             else
-              status="ok"
-              reason="mergeable and clean"
-            fi
-
-            comments=$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${pr}/comments?per_page=100" | jq -r --arg marker "$marker" '.[] | select(.body | startswith($marker)) | .id')
-            if [ "$status" = "stuck" ] && [ -z "$comments" ]; then
-              gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body "${marker} PR este blocat pe auto-merge: ${reason}. Verifică protecțiile branch/required checks."
-            elif [ "$status" = "ok" ] && [ -n "$comments" ]; then
-              gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body "${marker} PR nu mai este blocat. mergeează automat când condițiile se normalizează."
-            else
-              echo "PR $pr: $status"
+              echo "PR $pr clean and mergeable; ensure auto-merge is active."
+              gh pr merge "$pr" --auto --squash --repo "$GITHUB_REPOSITORY" || true
             fi
           done

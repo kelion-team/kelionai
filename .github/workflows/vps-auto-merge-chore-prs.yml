@@ -54,7 +54,6 @@ jobs:
 
           if [ "$has_invalid" -eq 0 ]; then
             if gh pr merge "$pr_number" --auto --squash --repo "$GITHUB_REPOSITORY"; then
-              gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body "🔎 [vps-auto-merge-watchdog] auto-merge enabled for VPS chore PR."
               echo "Auto-merge enabled."
             else
               echo "Auto-merge could not be enabled now."
