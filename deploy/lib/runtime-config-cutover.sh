@@ -1284,9 +1284,15 @@ roll_forward_unit_transaction() {
 }
 
 effective_file() {
-  local wanted=$1 index
+  local wanted=$1 index candidate
   for index in "${!logical_names[@]}"; do
-    if [ "${logical_names[$index]}" = "$wanted" ]; then printf '%s' "${prepared[$index]}"; return 0; fi
+    if [ "${logical_names[$index]}" = "$wanted" ]; then
+      candidate=$stage_root/files/$wanted
+      [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+      validate_secret_file "$candidate" || return 1
+      printf '%s' "$candidate"
+      return 0
+    fi
   done
   map_logical "$wanted"
   [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] || return 1
