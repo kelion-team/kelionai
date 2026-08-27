@@ -1,4 +1,4 @@
-name: VPS PR eligibility
+name: Merge policy
 
 on:
   pull_request:
@@ -16,8 +16,8 @@ permissions:
   pull-requests: read
 
 jobs:
-  eligible-vps-scope:
-    name: VPS scope and unresolved conversations
+  merge-policy:
+    name: merge-policy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,22 +40,30 @@ jobs:
           [ "$(jq -r '.state' <<<"$pr")" = open ]
           [ "$(jq -r '.draft' <<<"$pr")" = false ]
           head_ref=$(jq -r '.head.ref' <<<"$pr")
-          [[ "$head_ref" == chore/* ]]
 
           allowed='[
             ".github/workflows/deploy.yml",
+            ".github/workflows/pr-verify.yml",
             ".github/workflows/vps-auto-merge-chore-prs.yml",
             ".github/workflows/vps-auto-merge-watchdog.yml",
             ".github/workflows/vps-diag.yml",
             ".github/workflows/vps-run.yml",
+            ".github/workflows/vps-release-verifier.yml",
             ".github/workflows/vps-set-env.yml",
             "scripts/lib/vps-pr-remediation.mjs",
+            "scripts/lib/vps-release-verification.mjs",
             "scripts/vps-pr-remediator.mjs",
             "scripts/vps-pr-remediator.test.mjs",
+            "scripts/vps-release-verifier.mjs",
+            "scripts/vps-release-verifier.test.mjs",
             "scripts/verifica-workflow-uri-sigure.mjs"
           ]'
           files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate --jq '.[].filename' | jq -R -s 'split("\n") | map(select(length > 0))')
-          jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+          is_vps=$(jq -r --argjson allowed "$allowed" 'any(.[]; . as $file | $allowed | index($file) != null)' <<<"$files")
+          if [ "$is_vps" = true ]; then
+            [[ "$head_ref" == chore/* ]]
+            jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+          fi
 
           owner=${GITHUB_REPOSITORY%%/*}
           repo=${GITHUB_REPOSITORY#*/}
@@ -73,4 +81,4 @@ jobs:
           [ "$(jq -r '.behind_by' <<<"$compare")" -eq 0 ]
           [ "$(jq -r '.mergeable' <<<"$pr")" != false ]
           [ "$(jq -r '.mergeable_state' <<<"$pr")" != dirty ]
-          echo "PR #$pr_number este eligibil: scope strict, sincronizat și fără conversații nerezolvate."
+          echo "PR #$pr_number este eligibil: merge-policy completă, sincronizat și fără conversații nerezolvate; vps=$is_vps."

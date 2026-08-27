@@ -71,6 +71,8 @@ jobs:
             scripts/verifica-contract-deploy.test.mjs \
             scripts/release-train-preflight.test.mjs \
             scripts/release-train-workflow.test.mjs \
+            scripts/vps-pr-remediator.test.mjs \
+            scripts/vps-release-verifier.test.mjs \
             ios/appstore-build.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
             deploy/lib/backup-schedule.test.mjs \

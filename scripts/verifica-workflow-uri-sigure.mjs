@@ -59,6 +59,10 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
       // complete înainte ca `contents: write` să fie folosit.
       || (caleNormala.endsWith('/vps-auto-merge-watchdog.yml')
         && ['actions', 'contents', 'issues', 'pull-requests'].includes(write))
+      // Verifierul independent nu modifică repo-ul sau producția: scrie numai
+      // verdictul GitHub verificabil și incidentul fail-closed.
+      || (caleNormala.endsWith('/vps-release-verifier.yml')
+        && ['checks', 'issues'].includes(write))
     if (write && !writeAprobat) {
       abatere(index, 'token-write', `permisiunea \`${write}: write\` nu este aprobată explicit pentru acest workflow.`)
     }

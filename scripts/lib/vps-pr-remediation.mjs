@@ -8,14 +8,19 @@ export const DEFAULT_FEEDBACK_TIMEOUT_MINUTES = 20
 
 export const MONITORED_FILES = Object.freeze([
   '.github/workflows/deploy.yml',
+  '.github/workflows/pr-verify.yml',
   '.github/workflows/vps-auto-merge-chore-prs.yml',
   '.github/workflows/vps-auto-merge-watchdog.yml',
   '.github/workflows/vps-diag.yml',
   '.github/workflows/vps-run.yml',
+  '.github/workflows/vps-release-verifier.yml',
   '.github/workflows/vps-set-env.yml',
   'scripts/lib/vps-pr-remediation.mjs',
+  'scripts/lib/vps-release-verification.mjs',
   'scripts/vps-pr-remediator.mjs',
   'scripts/vps-pr-remediator.test.mjs',
+  'scripts/vps-release-verifier.mjs',
+  'scripts/vps-release-verifier.test.mjs',
   'scripts/verifica-workflow-uri-sigure.mjs',
 ])
 
@@ -25,6 +30,7 @@ export const L2_WRITABLE_FILES = Object.freeze([
   '.github/workflows/vps-auto-merge-watchdog.yml',
   '.github/workflows/vps-diag.yml',
   '.github/workflows/vps-run.yml',
+  '.github/workflows/vps-release-verifier.yml',
   '.github/workflows/vps-set-env.yml',
 ])
 
