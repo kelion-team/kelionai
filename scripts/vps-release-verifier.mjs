@@ -12,6 +12,7 @@ const monitorSeconds = Math.min(600, Math.max(40, Number(process.env.RELEASE_VER
 const maxCalls = Math.min(600, Math.max(40, Number(process.env.RELEASE_VERIFIER_MAX_API_CALLS) || 300))
 const INCIDENT = '<!-- kelion-release-verifier-incident:v1 -->'
 const SHA = /^[0-9a-f]{40}$/
+const GITHUB_API_ORIGIN = 'https://api.github.com' // hardcod-permis: endpoint oficial imuabil al API-ului GitHub
 let calls = 0
 let checkRunId = null
 let started = Date.now()
@@ -21,7 +22,7 @@ if (!repository.includes('/') || !token || !origin.startsWith('https://')) throw
 async function api(path, options = {}) {
   calls += 1
   if (calls > maxCalls) throw new Error('api_call_budget_exhausted')
-  const response = await fetch(`https://api.github.com${path}`, {
+  const response = await fetch(`${GITHUB_API_ORIGIN}${path}`, {
     ...options,
     signal: AbortSignal.timeout(20_000),
     headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...options.headers },
