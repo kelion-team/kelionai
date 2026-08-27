@@ -38,7 +38,7 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
     const db = citeste('db.ts')
     expect(db).toMatch(/AS scutit/)
     expect(db).toMatch(/lower\(v\.user_email\)/)
-    const panou = citeste('../../frontend/src/components/AdminPanel.tsx')
+    const panou = citeste('../../frontend/src/components/admin/AdminUtilizatori.tsx')
     expect(panou).toMatch(/scutit — sold istoric/)
   })
 

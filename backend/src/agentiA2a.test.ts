@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { ROSTER, gasesteAgent, carteAgent } from './services/agentiKelion.js'
 import { extrageText } from './routes/a2a.js'
 import { CHEAMA_AGENT_TOOL } from './services/brainToolDefs.js'
+import { config } from './config.js'
 
 // ── AGENȚII A2A (4 aug 2026) ────────────────────────────────────────────────
 // Cei 33 de agenți trebuie să fie sursă unică (agentiKelion.ts) și să fie
@@ -42,7 +43,7 @@ describe('cartea A2A arată spre agentul viu', () => {
   it('url-ul cărții e chiar endpointul /api/a2a/<id>', () => {
     for (const a of ROSTER) {
       const card = carteAgent(a) as { url: string; name: string; skills: { id: string }[] }
-      expect(card.url).toBe(`https://kelionai.app/api/a2a/${a.id}`)
+      expect(card.url).toBe(`${config.publicOrigin}/api/a2a/${a.id}`)
       expect(card.name).toBe(a.nume)
       expect(card.skills[0].id).toBe(a.id)
     }

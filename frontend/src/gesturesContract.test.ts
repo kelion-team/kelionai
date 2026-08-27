@@ -95,7 +95,7 @@ describe('gesture save requires a canonical server echo', () => {
   })
 
   it('serializes Admin toggles and refetches truth after an ambiguous failure', () => {
-    const panel = fs.readFileSync(new URL('./components/AdminPanel.tsx', import.meta.url), 'utf8')
+    const panel = fs.readFileSync(new URL('./components/admin/AdminUtilizatori.tsx', import.meta.url), 'utf8')
     expect(panel).toContain('gestSavePendingRef.current) return')
     expect(panel).toContain('const persisted = await saveDisabledGesturesCanonical(next)')
     expect(panel).toContain('setGestOff(await fetchDisabledGestures())')

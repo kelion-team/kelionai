@@ -1,0 +1,24 @@
+Folosește abonamentul ChatGPT Pro ca creier — fără cheie API
+
+Kelion acum folosește tokenul OAuth din ~/.codex/auth.json pentru a apela
+endpoint-ul chatgpt.com/backend-api/codex, plătit din abonamentul ChatGPT
+Pro ($200/lună). Fără cheie API separată.
+
+- chatgptSubscription.ts: modul nou care citește auth.json, reîmprospătează
+  tokenul JWT când expiră și expune credențialele
+- openaiResponses.ts: în modul subscription folosește chatgpt.com/backend-api/codex
+  cu token OAuth + headere ChatGPT-Account-ID/originator/OpenAI-Beta
+- openaiModele.ts: sare peste verificarea catalogului /models în modul subscription
+- chat.ts: poarta selectedBrainModel permite modul subscription
+- index.ts: readiness check permite modul subscription
+- autodiagnostic.ts: acum detectează chei lipsă + probleme Constructor +
+  capabilități stricate din autoverificare
+- autoverificare.ts: recunoaște erorile bad_*/no_* ca „cere argument" nu „stricat"
+- probaCapabilitatiChat.ts: probează capabilități din calea chat
+- openaiResponses.ts: reasoning.effort nu se trimite pentru modele non-reasoning
+- shared.tsx: corectat greșeală de tastare servete→serveste
+- verifica-hardcodari.mjs: R2 verifică exceptia hardcod-permis (bug vechi)
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
