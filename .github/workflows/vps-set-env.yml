@@ -423,14 +423,19 @@ jobs:
             deploy/systemd/kelion-codex-worker.service \
             deploy/systemd/kelion-constructor-publisher.service \
             deploy/systemd/kelion-constructor-release.service | gzip -n > "$bundle"
-          tar -tzf "$bundle" | grep -qx 'deploy/compose.production.yml'
-          tar -tzf "$bundle" | grep -qx 'deploy/lib/runtime-config-cutover.sh'
-          tar -tzf "$bundle" | grep -qx 'deploy/systemd/kelion-runtime-config-recovery.service'
-          tar -tzf "$bundle" | grep -qx 'deploy/systemd/kelion-constructor-sync.service'
-          for unit in \
-            kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
-            kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service; do
-            tar -tzf "$bundle" | grep -qx "deploy/systemd/$unit"
+          tar -tzf "$bundle" > "$RUNNER_TEMP/bundle-entries"
+          for entry in \
+            'deploy/compose.production.yml' \
+            'deploy/lib/runtime-config-cutover.sh' \
+            'deploy/systemd/kelion-runtime-config-recovery.service' \
+            'deploy/systemd/kelion-constructor-sync.service' \
+            'deploy/systemd/kelion-codex-worker.timer' \
+            'deploy/systemd/kelion-constructor-publisher.timer' \
+            'deploy/systemd/kelion-constructor-release.timer' \
+            'deploy/systemd/kelion-codex-worker.service' \
+            'deploy/systemd/kelion-constructor-publisher.service' \
+            'deploy/systemd/kelion-constructor-release.service'; do
+            grep -qx "$entry" "$RUNNER_TEMP/bundle-entries"
           done
 
           bundle_commit=$(git rev-parse HEAD)
@@ -466,7 +471,8 @@ jobs:
             case "$work" in /root/kelion/runtime/provision.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
           trap cleanup_remote EXIT
-          if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
+          tar -tzf "$bundle" > /tmp/bundle-entries-before-extract
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/bundle-entries-before-extract; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
           [ -f "$work/deploy/compose.production.yml" ] && [ -f "$work/deploy/lib/runtime-config-cutover.sh" ]
           [ -f "$work/deploy/systemd/kelion-runtime-config-recovery.service" ]
