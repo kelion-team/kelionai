@@ -140,7 +140,11 @@ jobs:
           [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
           admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
           [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
-          case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          if [ -n "$OPENAI_API_KEY" ]; then
+            case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          else
+            OPENAI_API_KEY="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
           [ "${#SESSION_SECRET}" -ge 32 ]
           [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
           [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]

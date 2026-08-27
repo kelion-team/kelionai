@@ -1510,7 +1510,11 @@ done
 [ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
   && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
   || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
-case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in sk-proj-*) ;; *) die 'cheia OpenAI runtime nu este project-scoped' ;; esac
+case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in
+  sk-proj-*) ;;
+  disabled-placeholder-*) ;;  # Mod abonament ChatGPT Pro — fără cheie API
+  *) die 'cheia OpenAI runtime nu este project-scoped' ;;
+esac
 [ ! -e "$SECRET_ROOT/openai-admin-key" ] || die 'cheia OpenAI admin nu poate exista în secret root-ul aplicației'
 for name in revolut-merchant-secret-key revolut-webhook-signing-secret; do
   path=$SECRET_ROOT/$name
