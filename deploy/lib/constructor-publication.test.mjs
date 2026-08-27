@@ -30,6 +30,9 @@ test('remedierea ACL VPS păstrează valorile și aplică exact contractul canon
   assert.match(workflow, /github-release-oauth-token root 10050 0440/)
   assert.match(workflow, /github-publisher-token root "[$]publisher_group" 0440/)
   assert.match(workflow, /github-release-token root "[$]release_group" 0440/)
+  assert.match(workflow, /\[\[ "[$]group" =~ \^\[0-9\]\+[$] \]\]; then printf '%s\\n' "[$]group"/)
+  assert.match(workflow, /ACL_GROUP_MISSING:/)
+  assert.match(workflow, /ACL_CHECK:\$p/)
   assert.match(workflow, /stat -c '%u:%g:%a'/)
   assert.doesNotMatch(workflow, /openssl|rand -hex|printf[^\n]*> "[$]p"|if \[ ! -s/)
   assert.equal(existsSync(join(root, '.github/workflows/vps-seed-slots.yml')), false,
