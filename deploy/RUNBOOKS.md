@@ -17,9 +17,11 @@ sau ștergere recursivă.
 
 ## Provisionarea configului și secretelor
 
-1. Configurează repository variables pentru toate intrările non-secrete din
-   `config/runtime-contract.json` și repository secrets numai pentru intrările
-   din `secretFiles`.
+1. Configurează repository variables pentru toate intrările din
+   `requiredNonSecret` și repository secrets pentru toate intrările din
+   `secretFiles`, `hostProvisionedSecretFiles` și `workflowControlSecrets` din
+   `config/runtime-contract.json`. Intrările `generatedRuntime` sunt generate
+   canonic de workflow; nu le dubla drept variabile GitHub.
 2. Păstrează `CODEX_WORKER_ENABLED=0`, `PAYMENT_MODE=disabled` și
    `PUSH_ENABLED=0` până când fiecare capabilitate are verificarea proprie.
 3. Rulează manual `vps-set-env` în mediul aprobat. Workflow-ul validează
@@ -211,8 +213,8 @@ credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
 - tokenul de sync al workerului, tokenul publisher în
   `/root/kelion/publisher-secrets/github-publisher-token` și tokenul dispatcher
   în `/root/kelion/release-secrets/github-release-token`, root-owned și
-  expuse numai grupului serviciului prin mode `0440`. Tokenul separat
-  `packages:read` pentru gate rămâne root-only mode `0400` în
+  expuse numai grupului serviciului prin mode `0440`. PAT-ul classic separat,
+  cu scope exclusiv `read:packages`, pentru gate rămâne root-only mode `0400` în
   `/root/kelion/gate-secrets/github-ghcr-read-token`. Niciuna dintre aceste
   credentiale nu intră în runtime.env, compose sau containerul web;
 - tokenul OAuth de review al consolei Admin este un secret separat, montat
