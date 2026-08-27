@@ -65,6 +65,54 @@ jobs:
           else
             printf '%s\n' '(manifestul activ lipsește)'
           fi
+          printf '%s\n' '=== separarea credentialelor GitHub (numai etichete) ==='
+          token_labels=(constructor-sync constructor-publisher constructor-release ghcr-read admin-oauth)
+          token_paths=(
+            /root/kelion/worker-secrets/github-worker-token
+            /root/kelion/publisher-secrets/github-publisher-token
+            /root/kelion/release-secrets/github-release-token
+            /root/kelion/gate-secrets/github-ghcr-read-token
+            /root/kelion/secrets/github-release-oauth-token
+          )
+          token_values=()
+          for index in "${!token_paths[@]}"; do
+            token_path=${token_paths[$index]}
+            [ -f "$token_path" ] && [ ! -L "$token_path" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:file\n' "${token_labels[$index]}"
+              exit 1
+            }
+            metadata=$(stat -c '%u:%a' -- "$token_path")
+            case "$metadata" in
+              0:400|0:440) ;;
+              *)
+                printf 'TOKEN_IDENTITY_INVALID:%s:acl\n' "${token_labels[$index]}"
+                exit 1
+                ;;
+            esac
+            [ "$(wc -l < "$token_path")" -eq 1 ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:format\n' "${token_labels[$index]}"
+              exit 1
+            }
+            token_value=$(sed -n '1p' -- "$token_path")
+            [ "${#token_value}" -ge 20 ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:length\n' "${token_labels[$index]}"
+              exit 1
+            }
+            token_values+=("$token_value")
+          done
+          token_collision=0
+          for ((left = 0; left < ${#token_values[@]}; left++)); do
+            for ((right = left + 1; right < ${#token_values[@]}; right++)); do
+              if [ "${token_values[$left]}" = "${token_values[$right]}" ]; then
+                printf 'TOKEN_IDENTITY_COLLISION:%s:%s\n' "${token_labels[$left]}" "${token_labels[$right]}"
+                token_collision=1
+              fi
+            done
+          done
+          if [ "$token_collision" -ne 0 ]; then
+            exit 1
+          fi
+          printf '%s\n' TOKEN_IDENTITIES_DISTINCT
           printf '%s\n' '=== sănătate publică ==='
           for path in /livez /readyz /api/version; do
             code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 "$public_origin$path" || true)
