@@ -16,7 +16,14 @@ test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
 
   assert.match(identityBlock, /TOKEN_IDENTITY_COLLISION:%s:%s/)
   assert.match(identityBlock, /TOKEN_IDENTITIES_DISTINCT/)
-  assert.match(identityBlock, /constructor-sync constructor-publisher constructor-release ghcr-read admin-oauth/)
+  assert.match(identityBlock, /constructor_labels=\(constructor-sync constructor-publisher constructor-release\)/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_CONSTRUCTOR_ABSENT/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_INVALID:constructor:partial:%s-of-3/)
+  assert.match(identityBlock, /stat -c '%u:%g:%a'/)
+  assert.match(identityBlock, /token_gids=\(0 "\$publisher_gid" "\$release_gid"\)/)
+  assert.match(identityBlock, /token_gids\+=\(0 10050\)/)
+  assert.match(identityBlock, /without_cr_size=.*tr -d '\\015'/)
+  assert.match(identityBlock, /without_nul_size=.*tr -d '\\000'/)
   assert.doesNotMatch(identityBlock, /sha(?:1|256|512)sum|openssl|base64|token_value[^\n]*printf/)
 })
 
