@@ -12,6 +12,7 @@ import {
   appendAudit,
   assertL2DiffSafe,
   classifySnapshot,
+  ensureFeedbackDeadline,
   feedbackIsStale,
   formatStateComment,
   initialRemediationState,
@@ -552,9 +553,11 @@ async function followClosedTrackedPrs() {
     const runs = await api(`/repos/${repository}/actions/workflows/deploy.yml/runs?head_sha=${pr.merge_commit_sha}&per_page=20`)
     const release = runs.workflow_runs?.find((run) => run.event === 'workflow_dispatch')
     if (!release) {
-      state = withFeedbackDeadline(appendAudit({ ...state, phase: 'waiting_deploy', blocker: 'deploy_missing', cause: 'deploy_missing', nextAction: 'watch_release_evidence' }, 'merge_verified', `commit=${pr.merge_commit_sha}`), Date.now(), 60)
-      if (feedbackIsStale(state)) await terminal(pr.number, holder, state, 'deploy_missing', 'Nu există run production-release legat de commitul merged; deploy-ul nu este inventat sau pornit fără receipturile canonice.')
-      else await saveState(pr.number, holder, state)
+      if (state.phase !== 'waiting_deploy' || state.cause !== 'deploy_missing' || !state.feedbackDeadlineAt) {
+        state = ensureFeedbackDeadline(appendAudit({ ...state, phase: 'waiting_deploy', blocker: 'deploy_missing', cause: 'deploy_missing', nextAction: 'watch_release_evidence', nextExpectedResult: 'canonical_production_release_run', etaSeconds: 60 }, 'merge_verified', `commit=${pr.merge_commit_sha}`), Date.now(), feedbackMinutes)
+      }
+      if (feedbackIsStale(state)) await terminal(pr.number, holder, state, 'deploy_missing', 'Nu există run production-release legat de commitul merged în deadline; deploy-ul nu este inventat sau pornit fără receipturile canonice.')
+      else await saveState(pr.number, holder, appendAudit(state, 'deploy_evidence_poll', `commit=${pr.merge_commit_sha}; deadline=${state.feedbackDeadlineAt}`))
       continue
     }
     if (release.status !== 'completed') continue

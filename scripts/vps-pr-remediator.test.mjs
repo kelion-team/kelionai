@@ -5,6 +5,7 @@ import {
   appendAudit,
   assertL2DiffSafe,
   classifySnapshot,
+  ensureFeedbackDeadline,
   feedbackIsStale,
   formatStateComment,
   initialRemediationState,
@@ -36,6 +37,13 @@ test('timeoutul fără feedback devine stale, nu succes inventat', () => {
   assert.equal(remediationPolicy(waiting, 'checks_pending', 5 * 60_000).action, 'retry_l1')
   assert.equal(remediationPolicy({ ...waiting, l1Attempts: 2, l2Attempts: 0 }, 'checks_failed', 5 * 60_000).action, 'escalate_l2')
   assert.equal(remediationPolicy({ ...waiting, l1Attempts: 2, l2Attempts: 1 }, 'checks_failed', 5 * 60_000).action, 'incident')
+})
+
+test('polling-ul păstrează deadline-ul inițial și nu poate amâna escaladarea', () => {
+  const first = ensureFeedbackDeadline(initialRemediationState(identity), 1_000, 1)
+  const polled = ensureFeedbackDeadline(first, 50_000, 1)
+  assert.equal(polled.feedbackDeadlineAt, first.feedbackDeadlineAt)
+  assert.equal(feedbackIsStale(polled, 61_000), true)
 })
 
 test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
