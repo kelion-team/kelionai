@@ -132,6 +132,11 @@ export function withFeedbackDeadline(state, now = Date.now(), minutes = DEFAULT_
   return { ...state, feedbackDeadlineAt: iso(now + safeMinutes * 60_000) }
 }
 
+export function ensureFeedbackDeadline(state, now = Date.now(), minutes = DEFAULT_FEEDBACK_TIMEOUT_MINUTES) {
+  const existing = Date.parse(String(state.feedbackDeadlineAt ?? ''))
+  return Number.isFinite(existing) ? state : withFeedbackDeadline(state, now, minutes)
+}
+
 export function feedbackIsStale(state, now = Date.now()) {
   const deadline = Date.parse(String(state.feedbackDeadlineAt ?? ''))
   return Number.isFinite(deadline) && now >= deadline
