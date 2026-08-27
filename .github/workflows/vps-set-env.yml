@@ -1,17 +1,41 @@
 name: provision-production-secrets
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      auto_routed_to_master:
+        description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: production-release
   cancel-in-progress: false
 
 jobs:
+  route-to-master:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Redirecționează automat pe master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "vps-set-env.yml" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref master \
+            -f auto_routed_to_master=true
   provision:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production

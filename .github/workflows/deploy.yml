@@ -8,6 +8,11 @@ on:
         description: Commit integral din master, cu CI și imagini semnate
         required: true
         type: string
+      auto_routed_to_master:
+        description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
+        required: false
+        default: false
+        type: boolean
       release_mode:
         description: Release curent sau rollback la un artefact încă disponibil
         required: true
@@ -29,14 +34,37 @@ on:
         default: ''
         type: string
 
-permissions: {}
+permissions:
+  actions: write
 
 concurrency:
   group: production-release
   cancel-in-progress: false
 
 jobs:
+  route-to-master:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Redirecționează automat pe master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "deploy.yml" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref master \
+            -f commit_sha="${{ inputs.commit_sha }}" \
+            -f auto_routed_to_master=true \
+            -f release_mode="${{ inputs.release_mode }}" \
+            -f release_request_id="${{ inputs.release_request_id }}" \
+            -f ci_run_id="${{ inputs.ci_run_id }}" \
+            -f build_run_id="${{ inputs.build_run_id }}"
   idempotency:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -81,8 +109,8 @@ jobs:
           fi
 
   verify-candidate:
+    if: needs.idempotency.outputs.execute == 'true' && github.ref == 'refs/heads/master' && github.ref_name == 'master'
     needs: idempotency
-    if: needs.idempotency.outputs.execute == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -172,6 +200,7 @@ jobs:
           printf 'ci_run_id=%s\nbuild_run_id=%s\ncommit_sha=%s\n' "$ci_run_id" "$build_run_id" "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
   release:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     needs: verify-candidate
     runs-on: ubuntu-latest
     timeout-minutes: 90
