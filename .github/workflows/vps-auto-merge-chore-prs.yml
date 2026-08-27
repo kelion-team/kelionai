@@ -51,7 +51,8 @@ jobs:
             ".github/workflows/vps-set-env.yml",
             "scripts/lib/vps-pr-remediation.mjs",
             "scripts/vps-pr-remediator.mjs",
-            "scripts/vps-pr-remediator.test.mjs"
+            "scripts/vps-pr-remediator.test.mjs",
+            "scripts/verifica-workflow-uri-sigure.mjs"
           ]'
           files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate --jq '.[].filename' | jq -R -s 'split("\n") | map(select(length > 0))')
           jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
