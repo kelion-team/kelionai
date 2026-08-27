@@ -27,6 +27,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          labels=$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels" --jq '.[].name')
+          if echo "$labels" | grep -qx "vps-auto-merge-timeout"; then
+            echo "PR has timeout label; skip."
+            exit 0
+          fi
+
           pr_number="${{ github.event.pull_request.number }}"
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
           has_invalid=0
