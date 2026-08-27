@@ -48,6 +48,10 @@ test('polling-ul păstrează deadline-ul inițial și nu poate amâna escaladare
 
 test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['.github/workflows/vps-run.yml']), true)
+  assert.equal(isMonitoredScope(['.github/workflows/vps-fix-acl.yml']), true)
+  assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'removed' }]), true)
+  assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'added' }]), false)
+  assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'modified' }]), false)
   assert.equal(isMonitoredScope(['scripts/verifica-workflow-uri-sigure.mjs']), true)
   assert.equal(isMonitoredScope(['backend/src/index.ts']), false)
   assert.deepEqual(assertL2DiffSafe(['.github/workflows/vps-run.yml'], 100), ['.github/workflows/vps-run.yml'])

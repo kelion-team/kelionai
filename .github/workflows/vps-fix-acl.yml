@@ -1,12 +1,14 @@
 name: VPS Fix Secret ACLs
 
 on:
-  push:
-    branches: [ master, main ]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: vps-secret-acl-maintenance
+  cancel-in-progress: false
 
 jobs:
   fix:
@@ -22,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "$GITHUB_REF" = refs/heads/master ]
           umask 077
           key_file=$(mktemp); known_hosts=$(mktemp)
           trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
@@ -32,21 +35,22 @@ jobs:
               -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
               "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
             set -euo pipefail
-            gen() { openssl rand -hex 32; }
             gid_of() { getent group "$1" | awk -F: '{print $3}'; }
-            fix() { local p=$1 owner=$2 group=$3 mode=$4
-              if [ ! -s "$p" ]; then printf '%s\n' "$(gen)" > "$p"; fi
-              chown "$owner":"$group" "$p"; chmod "$mode" "$p"
+            fix() { local p=$1 owner=$2 group=$3 mode=$4 owner_id group_id
+              [ -f "$p" ] && [ ! -L "$p" ] && [ -s "$p" ]
+              [ "$(wc -l < "$p")" -eq 1 ]
+              owner_id=$(id -u "$owner")
+              group_id=$(gid_of "$group")
+              chown "$owner":"$group" "$p"
+              chmod "$mode" "$p"
+              [ "$(stat -c '%u:%g:%a' "$p")" = "$owner_id:$group_id:${mode#0}" ]
             }
-            fix /root/kelion/worker-secrets/github-worker-token root root 0400
+            publisher_group=$(gid_of kelion-publisher)
+            release_group=$(gid_of kelion-release)
+            fix /root/kelion/worker-secrets/github-worker-token root root 0440
             fix /root/kelion/gate-secrets/github-ghcr-read-token root root 0400
             fix /root/kelion/secrets/github-release-oauth-token root 10050 0440
-            if getent group kelion-publisher >/dev/null; then
-              fix /root/kelion/publisher-secrets/github-publisher-token root "$(gid_of kelion-publisher)" 0440
-            fi
-            if getent group kelion-release >/dev/null; then
-              fix /root/kelion/release-secrets/github-release-token root "$(gid_of kelion-release)" 0440
-            fi
+            fix /root/kelion/publisher-secrets/github-publisher-token root "$publisher_group" 0440
+            fix /root/kelion/release-secrets/github-release-token root "$release_group" 0440
             echo ACL_OK
           EOF
-
