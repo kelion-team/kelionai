@@ -9,14 +9,15 @@ on:
         default: false
         type: boolean
 
-permissions:
-  actions: write
+permissions: {}
 
 jobs:
   route-to-master:
     name: Redirect to master
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    permissions:
+      actions: write
     steps:
       - name: Redirect dispatch to master
         env:

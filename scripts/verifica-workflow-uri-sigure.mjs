@@ -52,6 +52,13 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
     const write = curata.match(/^\s{2}([A-Za-z-]+)\s*:\s*write\s*$/)?.[1]
     const writeAprobat = (caleNormala.endsWith('/sentinel.yml') && write === 'issues')
       || (caleNormala.endsWith('/build-images.yml') && ['packages', 'id-token'].includes(write))
+      // Watchdog-ul rulează numai din default branch (schedule/dispatch), nu
+      // execută cod dintr-un pull_request_target și are nevoie de aceste patru
+      // capabilități exacte: rerun/cancel, push fast-forward pe head, stare/incident
+      // și auto-merge/review threads. Scriptul L2 aplică allowlist de căi și porți
+      // complete înainte ca `contents: write` să fie folosit.
+      || (caleNormala.endsWith('/vps-auto-merge-watchdog.yml')
+        && ['actions', 'contents', 'issues', 'pull-requests'].includes(write))
     if (write && !writeAprobat) {
       abatere(index, 'token-write', `permisiunea \`${write}: write\` nu este aprobată explicit pentru acest workflow.`)
     }
