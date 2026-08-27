@@ -1,29 +1,36 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-27T04:10:00Z`
+Actualizat: `2026-08-27T07:30:00Z`
 
 ## Current verified state
 
 - Repo: `kelion-team/kelionai`.
-- `origin/master`: `16eecd83470e1ff27f2fce5d1cf6204975a6b4d5`, verificat prin `git fetch`.
-- Live: `baf00ae`, verificat prin `/api/version`.
+- `origin/master`: `5acdf3bc`, verificat prin `git fetch`.
+- Live: `baf00ae`, verificat prin `/api/version` (deploy pending).
 - Readiness live: `ready=true` (verificat prin `/readyz`).
-- 9 commit-uri `master` sunt ahead de live (`baf00ae..16eecd83`), nedeployate.
+- PR #1396 (ChatGPT Pro subscription) merged pe master (`36315b40`).
+- PR #1397 (vps-set-env permite OPENAI_API_KEY gol) merged pe master (`5acdf3bc`).
+- Deploy pending: `runtime.env` pe VPS e staled; trebuie rulat `vps-set-env`
+  înainte de deploy pentru a actualiza câmpurile noi cerute de validator.
 
 ## Arhitectura curentă (verificată în cod)
 
-- OpenAI Responses este singurul creier online. Gemini, Jules, Devin, LiveKit,
-  Coqui, OpenRouter și toate fallback-urile cloud sunt șterse din cod, config
-  și documentație activă. Poarta `verifica-creier-unic.mjs` confirmă 0 abateri.
+- OpenAI Responses este singurul creier online. Modelele pot fi accesate fie
+  prin cheie API (`sk-proj-*`), fie prin abonamentul ChatGPT Pro ($200/lună)
+  folosind tokenul OAuth din `~/.codex/auth.json` și endpoint-ul
+  `chatgpt.com/backend-api/codex/responses`.
+- `isSubscriptionMode()` returnează true când `config.openai.key` e gol și
+  există `~/.codex/auth.json` cu `auth_mode=chatgpt`.
+- `vps-set-env.yml` acceptă acum `OPENAI_API_KEY` gol (generează placeholder
+  `disabled-placeholder-*`); `deploy.sh` acceptă și acest pattern.
 - Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
 - Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
-  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`), validate prin catalogul
-  live `/v1/models`. Cheile project-scoped sunt refuzate pentru runtime.
+  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`). În mod abonament,
+  verificarea catalogului `/v1/models` este sărită (endpoint-ul Codex nu o servăște).
 - Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
   și afișează starea. Flux: `queued → claimed → accepted → working →
   gates_passed → pr_opened → merged → deployed`.
 - `backend/.env` local are secțiunea OpenAI completă (9 env-uri, goale).
-  Gemini, Jules și LiveKit au fost șterse din `.env`.
 
 ## Audit complet (27 aug 2026)
 

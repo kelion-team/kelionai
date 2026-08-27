@@ -1507,9 +1507,17 @@ for name in "${secret_files[@]}"; do
   [ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || die "secret-file lipsă: $name"
   [ "$(stat -c '%u:%g:%a' "$path")" = '0:10050:440' ] || die "ACL invalid pentru secret-file $name"
 done
-[ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
-  && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
-  || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
+constructor_release_enabled=$(config_value CONSTRUCTOR_RELEASE_ENABLED)
+if [ "$constructor_release_enabled" = 1 ]; then
+  [ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
+    && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
+    || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
+else
+  case "$(sed -n '1p' "$SECRET_ROOT/github-release-oauth-token")" in
+    disabled-placeholder-*) ;;
+    *) die 'github-release-oauth-token trebuie să fie o credentială dedicată validă' ;;
+  esac
+fi
 case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in
   sk-proj-*) ;;
   disabled-placeholder-*) ;;  # Mod abonament ChatGPT Pro — fără cheie API
