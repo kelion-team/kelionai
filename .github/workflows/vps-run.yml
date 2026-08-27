@@ -29,7 +29,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
   packages: read
 
 concurrency:
@@ -47,15 +46,18 @@ jobs:
       - name: Redirecționează automat pe master
         env:
           GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          PILOT_PR_NUMBER: ${{ inputs.pilot_pr_number }}
+          PILOT_MERGE_COMMIT: ${{ inputs.pilot_merge_commit }}
         run: |
           set -euo pipefail
           gh workflow run "vps-run.yml" \
             --repo "${GITHUB_REPOSITORY}" \
             --ref master \
-            -f operation="${{ inputs.operation }}" \
+            -f operation="$OPERATION" \
             -f auto_routed_to_master=true \
-            -f pilot_pr_number="${{ inputs.pilot_pr_number }}" \
-            -f pilot_merge_commit="${{ inputs.pilot_merge_commit }}"
+            -f pilot_pr_number="$PILOT_PR_NUMBER" \
+            -f pilot_merge_commit="$PILOT_MERGE_COMMIT"
   control:
     if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest

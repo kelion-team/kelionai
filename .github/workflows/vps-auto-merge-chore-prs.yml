@@ -1,186 +1,75 @@
-name: Auto-merge VPS chore PRs
+name: VPS PR eligibility
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    branches:
-      - master
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR VPS de reverificat după schimbarea unei conversații
+        required: true
+        type: string
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 jobs:
-  auto-merge-vps-chore-pr:
-    name: Enable auto-merge if only VPS workflow files changed
+  eligible-vps-scope:
+    name: VPS scope and unresolved conversations
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: ${{ startsWith(github.head_ref, 'chore/') }}
+    timeout-minutes: 10
     steps:
-      - name: Validate scope and enable auto-merge
+      - name: Validează identitatea, scope-ul și conversațiile
         env:
           GH_TOKEN: ${{ github.token }}
-          VPS_DECIDER: ${{ vars.VPS_DECIDER }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
-
-          labels=$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels" --jq '.[].name')
-          if echo "$labels" | grep -qx "vps-auto-merge-timeout"; then
-            echo "PR has timeout label; skip."
-            exit 0
-          fi
-
-          allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
-          review_block_label=vps-auto-merge-review-block
-          scope_block_label=vps-auto-merge-invalid-scope
-          draft_block_label=vps-auto-merge-draft
-          decision_label=vps-auto-merge-decision
-          pr_number="${{ github.event.pull_request.number }}"
-          has_invalid=0
-
-          decider="${VPS_DECIDER:-}"
-          decision_marker="<!-- vps-auto-merge-decision -->"
-
-          post_decision_comment() {
-            local pr_id="$1"
-            local reason="$2"
-            local next_steps="$3"
-            local body=$'<!-- vps-auto-merge-decision -->\n\n## VPS auto-merge decision point\n\n'
-            body+=$'Cauză blocaj: '"$reason"$'\n\n'
-            body+=$'Pași:\n'
-            body+="$next_steps"$'\n'
-            if [ -n "$decider" ]; then
-              body+=$'\nDecident: @'"$decider"$'\n'
-            fi
-            if gh api "/repos/${GITHUB_REPOSITORY}/issues/$pr_id/comments" --paginate --jq '.[] | .body' | grep -Fq "$decision_marker"; then
-              return 0
-            fi
-            gh pr comment "$pr_id" --repo "$GITHUB_REPOSITORY" --body "$body"
-            if [ -n "$decider" ]; then
-              normalized_decider="${decider#@}"
-              if gh api "/users/$normalized_decider" >/dev/null 2>&1; then
-                gh pr edit "$pr_id" --repo "$GITHUB_REPOSITORY" --add-reviewer "$normalized_decider"
-              fi
-            fi
-          }
-
-          auto_resolve_threads() {
-            local owner="$1"
-            local repo="$2"
-            local number="$3"
-            local unresolved
-            local unresolved_count=0
-            local failed_count=0
-
-            unresolved=$(gh api graphql \
-              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
-              -F owner="$owner" -F name="$repo" -F number="$number" \
-              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id')
-
-            if [ -z "$unresolved" ]; then
-              return 0
-            fi
-
-            while IFS= read -r thread_id; do
-              [ -z "$thread_id" ] && continue
-              unresolved_count=$((unresolved_count + 1))
-              if gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$thread_id" >/dev/null; then
-                echo "Resolved review thread $thread_id automatically."
-              else
-                failed_count=$((failed_count + 1))
-              fi
-            done <<< "$unresolved"
-
-            if [ "$unresolved_count" -gt 0 ] && [ "$failed_count" -eq 0 ]; then
-              return 0
-            fi
-            return 1
-          }
-
-          ensure_label() {
-            local label_name="$1"
-            local description="$2"
-            local color="$3"
-            if ! gh label list --search "$label_name" --json name --jq '.[].name' | grep -qx "$label_name"; then
-              gh label create "$label_name" --description "$description" --color "$color" >/dev/null
-            fi
-          }
-
-          ensure_label "$review_block_label" "PR blocked by unresolved review thread(s); auto-merge disabled." "f9d0c4"
-          ensure_label "$scope_block_label" "PR changes include files outside allowed VPS workflow scope for auto-merge." "bfd4f2"
-          ensure_label "$draft_block_label" "PR is in draft; auto-merge disabled until ready for review." "c5def5"
-          ensure_label "$decision_label" "PR requires human decision before auto-merge can continue." "fef2c0"
-
-          pr_payload=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number")
-          if [ "$(jq -r '.draft' <<<"$pr_payload")" = "true" ]; then
-            if gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"; then
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$draft_block_label" --remove-label "$review_block_label" || true
-              echo "PR was draft; automatically moved to ready_for_review."
-            else
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$draft_block_label" --remove-label "$scope_block_label" --remove-label "$review_block_label"
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              post_decision_comment "$pr_number" "PR-ul este în Draft." "1. Setare manuală a statutului Ready for review a eșuat.\n2. Verifică permisiunile de scriere pe repo.\n3. Rerulază evenimentul de PR."
-              echo "PR remains draft; auto-merge paused."
-              exit 0
-            fi
-          fi
-
-          files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" --paginate --jq '.[].filename')
-          if [ -z "$files" ]; then
-            echo "No files found; skip."
-            exit 0
-          fi
-
-          while IFS= read -r file; do
-            allowed=0
-            for p in $allowed_prefixes; do
-              if [ "$file" = "$p" ]; then
-                allowed=1
-                break
-              fi
-            done
-            if [ "$allowed" -ne 1 ]; then
-              has_invalid=1
-              echo "Skip auto-merge: file outside allowed scope detected: $file"
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$scope_block_label" --remove-label "$review_block_label"
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr_number" "PR-ul modifică fișiere în afara listei autorizate pentru auto-merge VPS." "1. Mută schimbările doar în workflow-urile VPS autorizate\n2. Verifică că PR-ul conține doar fișierele permise\n3. Reîncepe sincronizarea PR-ului."
-              exit 0
-            fi
-          done <<< "$files"
-
-          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$scope_block_label"
-
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          unresolved_threads=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
-            -F owner="$owner" -F name="$repo" -F number="$pr_number" \
-            --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
-          if [ -n "$unresolved_threads" ]; then
-            if auto_resolve_threads "$owner" "$repo" "$pr_number"; then
-              echo "All unresolved review threads resolved automatically for PR $pr_number."
-            else
-              echo "Retrying unresolved review threads failed for PR $pr_number."
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$review_block_label" --remove-label "$draft_block_label"
-              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr_number" "Există conversații de review nerezolvate (resolve conversation)." "1. Rezolvarea automată a eşuat.\n2. Verifică blocajul de permisiuni pe thread-uri.\n3. Încearcă din nou manual dacă e necesar."
-              gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              exit 0
-            fi
-          fi
-          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$review_block_label"
-
-          if [ "$has_invalid" -eq 0 ]; then
-            if gh pr merge "$pr_number" --auto --squash --repo "$GITHUB_REPOSITORY"; then
-              echo "Auto-merge enabled."
-            else
-              echo "Auto-merge could not be enabled now."
-            fi
+          if [ "$EVENT_NAME" = pull_request ]; then
+            pr_number=$EVENT_PR_NUMBER
           else
-            echo "Scope not eligible for auto-merge."
+            pr_number=$DISPATCH_PR_NUMBER
           fi
+          [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]
+          pr=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number")
+          [ "$(jq -r '.base.ref' <<<"$pr")" = master ]
+          [ "$(jq -r '.state' <<<"$pr")" = open ]
+          [ "$(jq -r '.draft' <<<"$pr")" = false ]
+          head_ref=$(jq -r '.head.ref' <<<"$pr")
+          [[ "$head_ref" == chore/* ]]
+
+          allowed='[
+            ".github/workflows/deploy.yml",
+            ".github/workflows/vps-auto-merge-chore-prs.yml",
+            ".github/workflows/vps-auto-merge-watchdog.yml",
+            ".github/workflows/vps-diag.yml",
+            ".github/workflows/vps-run.yml",
+            ".github/workflows/vps-set-env.yml",
+            "scripts/lib/vps-pr-remediation.mjs",
+            "scripts/vps-pr-remediator.mjs",
+            "scripts/vps-pr-remediator.test.mjs"
+          ]'
+          files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate --jq '.[].filename' | jq -R -s 'split("\n") | map(select(length > 0))')
+          jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+
+          owner=${GITHUB_REPOSITORY%%/*}
+          repo=${GITHUB_REPOSITORY#*/}
+          threads=$(gh api graphql \
+            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{id isResolved}}}}}' \
+            -F owner="$owner" -F name="$repo" -F number="$pr_number")
+          jq -e '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false' <<<"$threads" >/dev/null
+          unresolved=$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true)] | length' <<<"$threads")
+          if [ "$unresolved" -ne 0 ]; then
+            echo "::error::$unresolved conversații de review sunt nerezolvate; merge-ul rămâne blocat."
+            exit 1
+          fi
+
+          compare=$(gh api "/repos/${GITHUB_REPOSITORY}/compare/$(jq -r '.base.sha' <<<"$pr")...$(jq -r '.head.sha' <<<"$pr")")
+          [ "$(jq -r '.behind_by' <<<"$compare")" -eq 0 ]
+          [ "$(jq -r '.mergeable' <<<"$pr")" != false ]
+          [ "$(jq -r '.mergeable_state' <<<"$pr")" != dirty ]
+          echo "PR #$pr_number este eligibil: scope strict, sincronizat și fără conversații nerezolvate."

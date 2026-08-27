@@ -1,254 +1,42 @@
-name: VPS auto-merge watchdog
+name: VPS remediation watchdog
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
 
 permissions:
-  contents: read
+  actions: write
+  checks: read
+  contents: write
+  issues: write
   pull-requests: write
-  actions: read
+
+concurrency:
+  group: vps-remediation-watchdog
+  cancel-in-progress: false
 
 jobs:
-  monitor-vps-chore-prs:
-    name: Monitor blocked VPS chore PRs
+  remediate-and-track:
+    name: Track, retry twice, then escalate to L2
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 95
     steps:
-      - name: Track auto-merge status and flag blocks
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Rulează trackerul persistent și remediatorul fail-closed
         env:
           GH_TOKEN: ${{ github.token }}
-          VPS_DECIDER: ${{ vars.VPS_DECIDER }}
+          VPS_REMEDIATOR_CODEX_BIN: ${{ vars.VPS_REMEDIATOR_CODEX_BIN || 'codex' }}
+          VPS_REMEDIATOR_CODEX_HOME: ${{ vars.VPS_REMEDIATOR_CODEX_HOME }}
+          VPS_REMEDIATOR_FEEDBACK_MINUTES: ${{ vars.VPS_REMEDIATOR_FEEDBACK_MINUTES || '1' }}
+          VPS_REMEDIATOR_INSTALL_CODEX: ${{ vars.VPS_REMEDIATOR_INSTALL_CODEX || '1' }}
+          VPS_REMEDIATOR_LIVE_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
         run: |
           set -euo pipefail
-          timeout_seconds=86400
-          vps_review_threads_blocked=vps-auto-merge-review-block
-          vps_draft_blocked=vps-auto-merge-draft
-          vps_scope_invalid=vps-auto-merge-invalid-scope
-          vps_merge_conflict_block=vps-auto-merge-conflict
-          vps_merge_blocked=vps-auto-merge-blocked
-          decision_label=vps-auto-merge-decision
-          timeout_label=vps-auto-merge-timeout
-
-          allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
-
-          decider="${VPS_DECIDER:-}"
-          decision_marker='<!-- vps-auto-merge-decision -->'
-
-          ensure_timeout_label() {
-            if ! gh label list --search "$timeout_label" --json name --jq '.[].name' | grep -qx "$timeout_label"; then
-              gh label create "$timeout_label" --description "Auto-merge watchdog timeout reached; auto-merge stopped to avoid infinite loop." --color d73a4a >/dev/null
-            fi
-          }
-
-          ensure_label() {
-            local label_name="$1"
-            local description="$2"
-            local color="$3"
-            if ! gh label list --search "$label_name" --json name --jq '.[].name' | grep -qx "$label_name"; then
-              gh label create "$label_name" --description "$description" --color "$color" >/dev/null
-            fi
-          }
-
-          ensure_review_threads_label() {
-            if ! gh label list --search "$vps_review_threads_blocked" --json name --jq '.[].name' | grep -qx "$vps_review_threads_blocked"; then
-              gh label create "$vps_review_threads_blocked" --description "PR blocked by unresolved review thread(s); auto-merge disabled." --color f9d0c4 >/dev/null
-            fi
-          }
-
-          auto_resolve_threads() {
-            local owner="$1"
-            local repo="$2"
-            local number="$3"
-            local unresolved
-            local unresolved_count=0
-            local failed_count=0
-
-            unresolved=$(gh api graphql \
-              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
-              -F owner="$owner" -F name="$repo" -F number="$number" \
-              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id')
-
-            if [ -z "$unresolved" ]; then
-              return 0
-            fi
-
-            while IFS= read -r thread_id; do
-              [ -z "$thread_id" ] && continue
-              unresolved_count=$((unresolved_count + 1))
-              if gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$thread_id" >/dev/null; then
-                echo "Resolved review thread $thread_id automatically."
-              else
-                failed_count=$((failed_count + 1))
-              fi
-            done <<< "$unresolved"
-
-            if [ "$unresolved_count" -gt 0 ] && [ "$failed_count" -eq 0 ]; then
-              return 0
-            fi
-            return 1
-          }
-
-          post_decision_comment() {
-            local pr_id="$1"
-            local reason="$2"
-            local next_steps="$3"
-            local body=$'<!-- vps-auto-merge-decision -->\n\n## VPS auto-merge decision point\n\n'
-            body+=$'Cauză blocaj: '
-            body+="$reason"
-            body+=$'\n\nPași:\n'
-            body+="$next_steps"
-            body+=$'\n'
-            if [ -n "$decider" ]; then
-              body+=$'\nDecident: @'
-              body+="$decider"
-              body+=$'\n'
-            fi
-
-            if gh api "/repos/${GITHUB_REPOSITORY}/issues/$pr_id/comments" --paginate --jq '.[] | .body' | grep -Fq "$decision_marker"; then
-              return 0
-            fi
-
-            gh pr comment "$pr_id" --repo "$GITHUB_REPOSITORY" --body "$body"
-            if [ -n "$decider" ]; then
-              normalized_decider="${decider#@}"
-              if gh api "/users/$normalized_decider" >/dev/null 2>&1; then
-                gh pr edit "$pr_id" --repo "$GITHUB_REPOSITORY" --add-reviewer "$normalized_decider"
-              fi
-            fi
-          }
-
-          ensure_timeout_label
-          ensure_review_threads_label
-          ensure_label "$decision_label" "PR requires human decision before auto-merge can continue." "e99695"
-          ensure_label "$vps_draft_blocked" "PR is in draft while auto-merge is active; waiting for ready_for_review." "c5def5"
-          ensure_label "$vps_scope_invalid" "PR includes files outside allowed VPS workflow scope for auto-merge monitoring." "bfd4f2"
-          ensure_label "$vps_merge_conflict_block" "PR merge blocked by conflicts in GitHub merge checks." "fef2c0"
-          ensure_label "$vps_merge_blocked" "PR merge blocked by required checks/review state." "d4c5f9"
-
-          prs=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100")
-          if [ "$(jq length <<<"$prs")" -eq 0 ]; then
-            echo "No open PRs into master."
-            exit 0
-          fi
-
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-
-          for pr in $(jq -r '.[].number' <<<"$prs"); do
-            head_ref=$(jq -r --argjson p "$pr" '.[] | select(.number == $p) | .head.ref' <<<"$prs")
-            [[ "$head_ref" == chore/* ]] || continue
-
-            json=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr")
-            auto_merge=$(jq -r '.auto_merge != null' <<<"$json")
-            is_draft=$(jq -r '.draft' <<<"$json")
-            [ "$auto_merge" = "true" ] || continue
-
-            merge_state=$(jq -r '.mergeable_state' <<<"$json")
-            mergeable=$(jq -r '.mergeable' <<<"$json")
-            created_at=$(jq -r '.created_at' <<<"$json")
-            created_ts=$(date -d "$created_at" +%s)
-            now_ts=$(date +%s)
-            age_seconds=$(( now_ts - created_ts ))
-
-            files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename')
-            has_invalid=0
-            while IFS= read -r file; do
-              allowed=0
-              for p in $allowed_prefixes; do
-                if [ "$file" = "$p" ]; then
-                  allowed=1
-                  break
-                fi
-              done
-              if [ "$allowed" -ne 1 ]; then
-                has_invalid=1
-                break
-              fi
-            done <<< "$files"
-
-            if [ "$is_draft" = "true" ]; then
-              if gh pr ready "$pr" --repo "$GITHUB_REPOSITORY"; then
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_draft_blocked" || true
-                echo "PR $pr switched to ready_for_review automatically."
-              else
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_draft_blocked" --remove-label "$vps_review_threads_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" --add-label "$decision_label"
-                gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-                post_decision_comment "$pr" "PR-ul este în Draft." "1. Setare automată ready_for_review a eșuat.\n2. Verifică permisiunile de scriere pe PR.\n3. Watchdog-ul va încerca din nou automat."
-                echo "PR $pr is still draft; auto-merge paused."
-              fi
-              continue
-            else
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_draft_blocked"
-            fi
-
-            if [ "$age_seconds" -ge "$timeout_seconds" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --add-label "$timeout_label" --remove-label "$vps_scope_invalid" --remove-label "$vps_draft_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$decision_label"
-              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr" "PR-ul a atins timeout de auto-merge." "1. Verifică blocajul actual; de multe ori lipsește o aprobare/check.\n2. După rezolvare, șterge labelul de timeout.\n3. Forțează reîncercare automatizată."
-              echo "PR $pr reached timeout; auto-merge disabled."
-              continue
-            fi
-
-            if [ "$has_invalid" -eq 1 ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_scope_invalid" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block"
-              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr" "PR-ul include fișiere în afara listei autorizate pentru auto-merge." "1. Muta schimbările doar în workflow-urile VPS autorizate.\n2. Elimină fișierele suplimentare din PR."
-              echo "PR $pr has files outside allowed scope."
-              continue
-            else
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_scope_invalid"
-            fi
-
-            unresolved_threads=$(gh api graphql \
-              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
-              -F owner="$owner" -F name="$repo" -F number="$pr" \
-              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
-            if [ -n "$unresolved_threads" ]; then
-              echo "PR $pr has unresolved review threads: $unresolved_threads"
-              if auto_resolve_threads "$owner" "$repo" "$pr"; then
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --remove-label "$decision_label" --remove-label "$timeout_label" || true
-                echo "PR $pr review threads resolved automatically."
-              else
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block"
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-                post_decision_comment "$pr" "Există conversații de review nerezolvate." "1. Rezolvarea automată a eșuat.\n2. Încearcă din nou manual dacă thread-urile sunt protejate."
-                echo "PR $pr blocked by unresolved review threads; auto-merge paused."
-              fi
-              continue
-            else
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked"
-            fi
-
-            if [ "$merge_state" = "behind" ]; then
-              if gh pr update-branch "$pr" --repo "$GITHUB_REPOSITORY" --rebase; then
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block"
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$decision_label"
-                echo "PR $pr: branch updated automatically (behind)."
-              else
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_blocked"
-                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-                post_decision_comment "$pr" "Nu se poate actualiza automat branch-ul." "1. Actualizează manual branch-ul PR-ului.\n2. Rezolvă eventualele conflicte."
-                echo "PR $pr: could not update branch automatically."
-              fi
-            elif [ "$merge_state" = "dirty" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" --remove-label "$timeout_label"
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr" "PR blocat prin conflict de merge." "1. Rezolvă conflictul pe branch-ul PR.\n2. Reîncarcă schimbările."
-              echo "PR $pr blocked by merge conflicts."
-              continue
-            elif [ "$merge_state" != "clean" ] || [ "$mergeable" != "true" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$timeout_label"
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr" "PR blocat de starea merge/checks." $'1. Verifică verificările obligatorii sau aprobările.\n2. Elimină blocajele și lasă watchdog-ul să reîncerce.'
-              echo "PR $pr blocked: merge_state=$merge_state mergeable=$mergeable"
-              continue
-            else
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$decision_label"
-              echo "PR $pr clean and mergeable; ensure auto-merge is active."
-              gh pr merge "$pr" --auto --squash --repo "$GITHUB_REPOSITORY" || true
-            fi
+          for tick in 1 2 3 4 5; do
+            node scripts/vps-pr-remediator.mjs
+            [ "$tick" -eq 5 ] || sleep 55
           done

@@ -34,8 +34,7 @@ on:
         default: ''
         type: string
 
-permissions:
-  actions: write
+permissions: {}
 
 concurrency:
   group: production-release
@@ -52,17 +51,22 @@ jobs:
       - name: Redirecționează automat pe master
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: |
           set -euo pipefail
           gh workflow run "deploy.yml" \
             --repo "${GITHUB_REPOSITORY}" \
             --ref master \
-            -f commit_sha="${{ inputs.commit_sha }}" \
+            -f commit_sha="$COMMIT_SHA" \
             -f auto_routed_to_master=true \
-            -f release_mode="${{ inputs.release_mode }}" \
-            -f release_request_id="${{ inputs.release_request_id }}" \
-            -f ci_run_id="${{ inputs.ci_run_id }}" \
-            -f build_run_id="${{ inputs.build_run_id }}"
+            -f release_mode="$RELEASE_MODE" \
+            -f release_request_id="$RELEASE_REQUEST_ID" \
+            -f ci_run_id="$CI_RUN_ID" \
+            -f build_run_id="$BUILD_RUN_ID"
   idempotency:
     if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
