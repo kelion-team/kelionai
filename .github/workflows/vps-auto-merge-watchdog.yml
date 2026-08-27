@@ -21,8 +21,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          timeout_seconds=86400
+          timeout_label=vps-auto-merge-timeout
 
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
+
+          ensure_timeout_label() {
+            if ! gh label list --search "$timeout_label" --json name --jq '.[].name' | grep -qx "$timeout_label"; then
+              gh label create "$timeout_label" --description "Auto-merge watchdog timeout reached; auto-merge stopped to avoid infinite loop." --color d73a4a >/dev/null
+            fi
+          }
+
+          ensure_timeout_label
 
           prs=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100")
           if [ "$(jq length <<<"$prs")" -eq 0 ]; then
@@ -40,6 +50,10 @@ jobs:
 
             merge_state=$(jq -r '.mergeable_state' <<<"$json")
             mergeable=$(jq -r '.mergeable' <<<"$json")
+            created_at=$(jq -r '.created_at' <<<"$json")
+            created_ts=$(date -d "$created_at" +%s)
+            now_ts=$(date +%s)
+            age_seconds=$(( now_ts - created_ts ))
 
             files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr/files?per_page=100" --paginate --jq '.[].filename')
             has_invalid=0
@@ -57,6 +71,13 @@ jobs:
               fi
             done <<< "$files"
             [ "$has_invalid" -eq 1 ] && continue
+
+            if [ "$age_seconds" -ge "$timeout_seconds" ]; then
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$timeout_label" >/dev/null
+              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              echo "PR $pr reached timeout; auto-merge disabled."
+              continue
+            fi
 
             if [ "$merge_state" = "behind" ]; then
               if gh pr update-branch "$pr" --repo "$GITHUB_REPOSITORY" --rebase; then
