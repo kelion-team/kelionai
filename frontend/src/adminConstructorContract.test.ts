@@ -75,7 +75,7 @@ describe('Admin Constructor contracts fail closed', () => {
   })
 
   it('wires strict parsers into every previously false-positive UI branch', () => {
-    const panel = fs.readFileSync(new URL('./components/AdminPanel.tsx', import.meta.url), 'utf8')
+    const panel = fs.readFileSync(new URL('./components/admin/AdminProductie.tsx', import.meta.url), 'utf8')
     expect(panel).toContain('parseAdminConstructorSnapshot(await response.json())')
     expect(panel).toContain('parseAdminConstructorDiagnostic(await response.json())')
     expect(panel).toContain('parseAdminReleaseSnapshot(await response.json())')

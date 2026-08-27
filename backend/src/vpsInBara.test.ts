@@ -24,7 +24,9 @@ const sursa = (cale: string): string =>
 
 const bara = sursa('../../frontend/src/pages/Stage.tsx')
 // Cifrele VPS trăiesc acum în panoul de administrare (tabul „Sistem (VPS)").
-const panou = sursa('../../frontend/src/components/AdminPanel.tsx')
+// După refactorizarea AdminPanel în componente modulare, codul VPS e în
+// AdminOperatii.tsx (grupul „Operațiuni", tabul „sistem").
+const panou = sursa('../../frontend/src/components/admin/AdminOperatii.tsx')
 const ruta = sursa('./routes/admin.ts')
 const resurse = sursa('./services/resurse.ts')
 
