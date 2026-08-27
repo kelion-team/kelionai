@@ -57,6 +57,39 @@ jobs:
             fi
           }
 
+          auto_resolve_threads() {
+            local owner="$1"
+            local repo="$2"
+            local number="$3"
+            local unresolved
+            local unresolved_count=0
+            local failed_count=0
+
+            unresolved=$(gh api graphql \
+              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
+              -F owner="$owner" -F name="$repo" -F number="$number" \
+              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id')
+
+            if [ -z "$unresolved" ]; then
+              return 0
+            fi
+
+            while IFS= read -r thread_id; do
+              [ -z "$thread_id" ] && continue
+              unresolved_count=$((unresolved_count + 1))
+              if gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$thread_id" >/dev/null; then
+                echo "Resolved review thread $thread_id automatically."
+              else
+                failed_count=$((failed_count + 1))
+              fi
+            done <<< "$unresolved"
+
+            if [ "$unresolved_count" -gt 0 ] && [ "$failed_count" -eq 0 ]; then
+              return 0
+            fi
+            return 1
+          }
+
           post_decision_comment() {
             local pr_id="$1"
             local reason="$2"
@@ -136,10 +169,15 @@ jobs:
             done <<< "$files"
 
             if [ "$is_draft" = "true" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_draft_blocked" --remove-label "$vps_review_threads_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" --add-label "$decision_label"
-              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              post_decision_comment "$pr" "PR-ul este în Draft." "1. Scoate-l din Draft.\n2. Confirmă validitatea schimbărilor.\n3. Watchdog-ul va reporni automat verificarea."
-              echo "PR $pr is draft; auto-merge disabled."
+              if gh pr ready "$pr" --repo "$GITHUB_REPOSITORY"; then
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_draft_blocked" || true
+                echo "PR $pr switched to ready_for_review automatically."
+              else
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_draft_blocked" --remove-label "$vps_review_threads_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" --add-label "$decision_label"
+                gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+                post_decision_comment "$pr" "PR-ul este în Draft." "1. Setare automată ready_for_review a eșuat.\n2. Verifică permisiunile de scriere pe PR.\n3. Watchdog-ul va încerca din nou automat."
+                echo "PR $pr is still draft; auto-merge paused."
+              fi
               continue
             else
               gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_draft_blocked"
@@ -171,11 +209,15 @@ jobs:
               --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
             if [ -n "$unresolved_threads" ]; then
               echo "PR $pr has unresolved review threads: $unresolved_threads"
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block"
-              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-              post_decision_comment "$pr" "Există conversații de review nerezolvate." "1. Rezolvă manual fiecare conversație.\n2. Asigură-te că thread-urile sunt marcate ca resolved."
-              echo "PR $pr blocked by unresolved review threads; auto-merge disabled."
+              if auto_resolve_threads "$owner" "$repo" "$pr"; then
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --remove-label "$decision_label" --remove-label "$timeout_label" || true
+                echo "PR $pr review threads resolved automatically."
+              else
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block"
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
+                post_decision_comment "$pr" "Există conversații de review nerezolvate." "1. Rezolvarea automată a eșuat.\n2. Încearcă din nou manual dacă thread-urile sunt protejate."
+                echo "PR $pr blocked by unresolved review threads; auto-merge paused."
+              fi
               continue
             else
               gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked"

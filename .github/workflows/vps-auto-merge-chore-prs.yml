@@ -68,6 +68,39 @@ jobs:
             fi
           }
 
+          auto_resolve_threads() {
+            local owner="$1"
+            local repo="$2"
+            local number="$3"
+            local unresolved
+            local unresolved_count=0
+            local failed_count=0
+
+            unresolved=$(gh api graphql \
+              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
+              -F owner="$owner" -F name="$repo" -F number="$number" \
+              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id')
+
+            if [ -z "$unresolved" ]; then
+              return 0
+            fi
+
+            while IFS= read -r thread_id; do
+              [ -z "$thread_id" ] && continue
+              unresolved_count=$((unresolved_count + 1))
+              if gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$thread_id" >/dev/null; then
+                echo "Resolved review thread $thread_id automatically."
+              else
+                failed_count=$((failed_count + 1))
+              fi
+            done <<< "$unresolved"
+
+            if [ "$unresolved_count" -gt 0 ] && [ "$failed_count" -eq 0 ]; then
+              return 0
+            fi
+            return 1
+          }
+
           ensure_label() {
             local label_name="$1"
             local description="$2"
@@ -84,12 +117,17 @@ jobs:
 
           pr_payload=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number")
           if [ "$(jq -r '.draft' <<<"$pr_payload")" = "true" ]; then
-            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$draft_block_label" --remove-label "$scope_block_label" --remove-label "$review_block_label"
-            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-            gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-            post_decision_comment "$pr_number" "PR-ul este în Draft." "1. Scoate-l din Draft\n2. Dacă e valid, rerulează evenimentul de PR pentru a reactiva auto-merge."
-            echo "PR is draft; auto-merge disabled."
-            exit 0
+            if gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"; then
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$draft_block_label" --remove-label "$review_block_label" || true
+              echo "PR was draft; automatically moved to ready_for_review."
+            else
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$draft_block_label" --remove-label "$scope_block_label" --remove-label "$review_block_label"
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
+              gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              post_decision_comment "$pr_number" "PR-ul este în Draft." "1. Setare manuală a statutului Ready for review a eșuat.\n2. Verifică permisiunile de scriere pe repo.\n3. Rerulază evenimentul de PR."
+              echo "PR remains draft; auto-merge paused."
+              exit 0
+            fi
           fi
 
           files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" --paginate --jq '.[].filename')
@@ -124,12 +162,16 @@ jobs:
             -F owner="$owner" -F name="$repo" -F number="$pr_number" \
             --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
           if [ -n "$unresolved_threads" ]; then
-            echo "Skipping auto-merge: unresolved review threads exist."
-            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$review_block_label" --remove-label "$draft_block_label"
-            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
-            post_decision_comment "$pr_number" "Există conversații de review nerezolvate (resolve conversation)." "1. Închide thread-urile de review nerezolvate\n2. Confirmă din nou starea conversațiilor\n3. Workflow-ul de monitorizare va reporni auto-merge."
-            gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
-            exit 0
+            if auto_resolve_threads "$owner" "$repo" "$pr_number"; then
+              echo "All unresolved review threads resolved automatically for PR $pr_number."
+            else
+              echo "Retrying unresolved review threads failed for PR $pr_number."
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$review_block_label" --remove-label "$draft_block_label"
+              gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label "$decision_label"
+              post_decision_comment "$pr_number" "Există conversații de review nerezolvate (resolve conversation)." "1. Rezolvarea automată a eşuat.\n2. Verifică blocajul de permisiuni pe thread-uri.\n3. Încearcă din nou manual dacă e necesar."
+              gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              exit 0
+            fi
           fi
           gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --remove-label "$review_block_label"
 
