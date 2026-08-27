@@ -66,7 +66,7 @@ jobs:
       CONSTRUCTOR_RETRY_BASE_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_BASE_SECONDS || '60' }}
       CONSTRUCTOR_RETRY_MAX_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_MAX_SECONDS || '1800' }}
       CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
-      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation' }}
+      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation,current-tree,merge-policy' }}
       VISITOR_CHAT_TTL_SECONDS: ${{ vars.VISITOR_CHAT_TTL_SECONDS || '3600' }}
       VISITOR_ANALYTICS_RETENTION_DAYS: ${{ vars.VISITOR_ANALYTICS_RETENTION_DAYS || '7' }}
       SESSION_ABSOLUTE_TTL_SECONDS: ${{ vars.SESSION_ABSOLUTE_TTL_SECONDS }}
@@ -665,10 +665,10 @@ jobs:
               { print }
               END { if (!written) print "CONSTRUCTOR_REQUIRED_CHECKS=" checks }
             ' /root/kelion/config/constructor-publisher.env > "$cutover_stage/files/constructor-config.constructor-publisher.env"
-            awk -F= -v checks="$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "$cutover_stage/files/runtime.env")" '
+            awk -F= -v checks="verify,container-isolation" '
               $1 == "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS" { if (!written++) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks; next }
               { print }
-              END { if (!written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks }
+              END { if (!written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation" }
             ' /root/kelion/config/constructor-release.env > "$cutover_stage/files/constructor-config.constructor-release.env"
             for logical in constructor-config.codex-worker.env constructor-config.constructor-publisher.env constructor-config.constructor-release.env; do
               chmod 0600 "$cutover_stage/files/$logical"

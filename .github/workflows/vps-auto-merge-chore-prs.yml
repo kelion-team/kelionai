@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
   workflow_dispatch:
     inputs:
       pr_number:
@@ -27,9 +28,17 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = pull_request ]; then
+          if [ "$EVENT_NAME" = merge_group ]; then
+            [ "$MERGE_GROUP_BASE_REF" = refs/heads/master ]
+            [ "$MERGE_GROUP_HEAD_SHA" = "$GITHUB_SHA" ]
+            [[ "$GITHUB_REF" == refs/heads/gh-readonly-queue/master/* ]]
+            echo "Merge group $GITHUB_SHA este legat de master; politicile PR au fost verificate înainte de enqueue."
+            exit 0
+          elif [ "$EVENT_NAME" = pull_request ]; then
             pr_number=$EVENT_PR_NUMBER
           else
             pr_number=$DISPATCH_PR_NUMBER
@@ -44,12 +53,20 @@ jobs:
           allowed='[
             ".github/workflows/deploy.yml",
             ".github/workflows/pr-verify.yml",
+            ".github/workflows/secret-scan.yml",
             ".github/workflows/vps-auto-merge-chore-prs.yml",
             ".github/workflows/vps-auto-merge-watchdog.yml",
             ".github/workflows/vps-diag.yml",
             ".github/workflows/vps-run.yml",
             ".github/workflows/vps-release-verifier.yml",
             ".github/workflows/vps-set-env.yml",
+            "deploy/constructor-release.mjs",
+            "deploy/constructor-publisher.mjs",
+            "deploy/deploy.sh",
+            "deploy/constructor-release.env.example",
+            "deploy/constructor-publisher.env.example",
+            "deploy/kelionai.env.example",
+            "deploy/lib/constructor-publication.test.mjs",
             "scripts/lib/vps-pr-remediation.mjs",
             "scripts/lib/vps-release-verification.mjs",
             "scripts/vps-pr-remediator.mjs",

@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { RELEASE_QA_GATES, REQUIRED_MERGE_CHECKS, evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, matrixIsFailClosed, parseDeployTitle } from './lib/vps-release-verification.mjs'
+import { GITHUB_ACTIONS_APP_ID, RELEASE_QA_GATES, REQUIRED_MERGE_CHECKS, evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, matrixIsFailClosed, parseDeployTitle } from './lib/vps-release-verification.mjs'
 
 const sha = 'a'.repeat(40)
 const protection = {
-  required_status_checks: { strict: true, checks: REQUIRED_MERGE_CHECKS.map((context) => ({ context })) },
+  required_status_checks: { strict: true, contexts: REQUIRED_MERGE_CHECKS, checks: REQUIRED_MERGE_CHECKS.map((context) => ({ context, app_id: GITHUB_ACTIONS_APP_ID })) },
+  required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: true, require_code_owner_reviews: false, require_last_push_approval: false, dismissal_restrictions: null, bypass_pull_request_allowances: { users: [], teams: [], apps: [] } },
   required_conversation_resolution: { enabled: true },
   enforce_admins: { enabled: true },
+  required_linear_history: { enabled: true },
   allow_force_pushes: { enabled: false },
+  allow_deletions: { enabled: false },
+  restrictions: null,
 }
 const healthy = {
   version: { status: 200, body: { v: sha.slice(0, 7) } },
@@ -23,13 +27,13 @@ test('matricea QA are owner, deadline, dovadă și negative test fail-closed pen
 })
 
 test('protecția refuză fiecare lipsă critică, inclusiv merge-policy și admin bypass', () => {
-  assert.equal(evaluateBranchProtection(protection).ok, true)
+  assert.equal(evaluateBranchProtection(protection, { enabled: true }, []).ok, true)
   for (const context of REQUIRED_MERGE_CHECKS) {
     const changed = structuredClone(protection)
     changed.required_status_checks.checks = changed.required_status_checks.checks.filter((check) => check.context !== context)
-    assert.equal(evaluateBranchProtection(changed).ok, false)
+    assert.equal(evaluateBranchProtection(changed, { enabled: true }, []).ok, false)
   }
-  assert.equal(evaluateBranchProtection({ ...protection, enforce_admins: { enabled: false } }).ok, false)
+  assert.equal(evaluateBranchProtection({ ...protection, enforce_admins: { enabled: false } }, { enabled: true }, []).ok, false)
 })
 
 test('identitatea deployului este exactă și respinge SHA scurt sau receipt incomplet', () => {

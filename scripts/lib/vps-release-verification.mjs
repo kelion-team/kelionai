@@ -5,6 +5,8 @@ export const REQUIRED_MERGE_CHECKS = Object.freeze([
   'merge-policy',
 ])
 
+export const GITHUB_ACTIONS_APP_ID = 15368 // hardcod-permis: identificatorul public, stabil, al GitHub Actions
+
 export const RELEASE_QA_GATES = Object.freeze([
   ['master-routing', 'merge-policy', 60, 'workflow route test'],
   ['permissions-secrets', 'workflow-security', 60, 'least-privilege and redaction test'],
@@ -37,13 +39,41 @@ export function parseDeployTitle(title) {
   return { requestId: match[1], commit: match[2], ciRunId: Number(match[3]), buildRunId: Number(match[4]) }
 }
 
-export function evaluateBranchProtection(protection) {
-  const checks = new Set(protection?.required_status_checks?.checks?.map((check) => check.context) ?? [])
+function emptyNamedActorSet(value) {
+  if (value === null) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return ['users', 'teams', 'apps'].every((key) => Array.isArray(value[key]) && value[key].length === 0)
+}
+
+export function evaluateBranchProtection(protection, requiredSignatures, activeBranchRules = []) {
+  const configuredContexts = protection?.required_status_checks?.contexts
+  const configuredChecks = protection?.required_status_checks?.checks
+  const checks = new Set([
+    ...(Array.isArray(configuredContexts) ? configuredContexts : []),
+    ...(Array.isArray(configuredChecks) ? configuredChecks.map((check) => check?.context) : []),
+  ])
   const missing = REQUIRED_MERGE_CHECKS.filter((name) => !checks.has(name))
+  if (checks.size !== REQUIRED_MERGE_CHECKS.length) missing.push('exact-required-checks')
+  for (const name of REQUIRED_MERGE_CHECKS) {
+    const matching = Array.isArray(configuredChecks) ? configuredChecks.filter((check) => check?.context === name) : []
+    if (matching.length !== 1 || Number(matching[0]?.app_id) !== GITHUB_ACTIONS_APP_ID) missing.push(`trusted-app:${name}`)
+  }
   if (protection?.required_status_checks?.strict !== true) missing.push('strict-sync')
   if (protection?.required_conversation_resolution?.enabled !== true) missing.push('conversation-resolution')
   if (protection?.enforce_admins?.enabled !== true) missing.push('enforce-admins')
+  const reviews = protection?.required_pull_request_reviews
+  if (!Number.isSafeInteger(reviews?.required_approving_review_count) || reviews.required_approving_review_count < 1) missing.push('human-review')
+  if (reviews?.dismiss_stale_reviews !== true) missing.push('dismiss-stale-reviews')
+  if (reviews?.require_code_owner_reviews !== false) missing.push('code-owner-policy')
+  if (reviews?.require_last_push_approval !== false) missing.push('last-push-policy')
+  if (!emptyNamedActorSet(reviews?.dismissal_restrictions)) missing.push('review-dismissal-restrictions')
+  if (!emptyNamedActorSet(reviews?.bypass_pull_request_allowances)) missing.push('review-bypass')
+  if (protection?.required_linear_history?.enabled !== true) missing.push('linear-history')
+  if (requiredSignatures?.enabled !== true) missing.push('signed-commits')
+  if (!emptyNamedActorSet(protection?.restrictions)) missing.push('push-restrictions')
   if (protection?.allow_force_pushes?.enabled !== false) missing.push('force-push-disabled')
+  if (protection?.allow_deletions?.enabled !== false) missing.push('deletion-disabled')
+  if (!Array.isArray(activeBranchRules) || activeBranchRules.length !== 0) missing.push('unsupported-ruleset')
   return { ok: missing.length === 0, missing }
 }
 
