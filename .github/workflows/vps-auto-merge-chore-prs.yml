@@ -3,7 +3,9 @@ name: Merge policy
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, review_requested, review_request_removed]
+  # GitHub nu emite un event dedicat pentru rezolvarea unui review thread;
+  # watchdog-ul programat rămâne fallback-ul persistent pentru această tranziție.
   merge_group:
   workflow_dispatch:
     inputs:
