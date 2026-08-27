@@ -23,6 +23,10 @@ jobs:
           set -euo pipefail
           timeout_seconds=86400
           vps_review_threads_blocked=vps-auto-merge-review-block
+          vps_draft_blocked=vps-auto-merge-draft
+          vps_scope_invalid=vps-auto-merge-invalid-scope
+          vps_merge_conflict_block=vps-auto-merge-conflict
+          vps_merge_blocked=vps-auto-merge-blocked
           timeout_label=vps-auto-merge-timeout
 
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
@@ -30,6 +34,15 @@ jobs:
           ensure_timeout_label() {
             if ! gh label list --search "$timeout_label" --json name --jq '.[].name' | grep -qx "$timeout_label"; then
               gh label create "$timeout_label" --description "Auto-merge watchdog timeout reached; auto-merge stopped to avoid infinite loop." --color d73a4a >/dev/null
+            fi
+          }
+
+          ensure_label() {
+            local label_name="$1"
+            local description="$2"
+            local color="$3"
+            if ! gh label list --search "$label_name" --json name --jq '.[].name' | grep -qx "$label_name"; then
+              gh label create "$label_name" --description "$description" --color "$color" >/dev/null
             fi
           }
 
@@ -41,6 +54,10 @@ jobs:
 
           ensure_timeout_label
           ensure_review_threads_label
+          ensure_label "$vps_draft_blocked" "PR is in draft while auto-merge is active; waiting for ready_for_review." "c5def5"
+          ensure_label "$vps_scope_invalid" "PR includes files outside allowed VPS workflow scope for auto-merge monitoring." "bfd4f2"
+          ensure_label "$vps_merge_conflict_block" "PR merge blocked by conflicts in GitHub merge checks." "fef2c0"
+          ensure_label "$vps_merge_blocked" "PR merge blocked by required checks/review state." "d4c5f9"
 
           prs=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100")
           if [ "$(jq length <<<"$prs")" -eq 0 ]; then
@@ -57,6 +74,7 @@ jobs:
 
             json=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr")
             auto_merge=$(jq -r '.auto_merge != null' <<<"$json")
+            is_draft=$(jq -r '.draft' <<<"$json")
             [ "$auto_merge" = "true" ] || continue
 
             merge_state=$(jq -r '.mergeable_state' <<<"$json")
@@ -81,13 +99,30 @@ jobs:
                 break
               fi
             done <<< "$files"
-            [ "$has_invalid" -eq 1 ] && continue
+
+            if [ "$is_draft" = "true" ]; then
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_draft_blocked" --remove-label "$vps_review_threads_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" >/dev/null
+              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              echo "PR $pr is draft; auto-merge disabled."
+              continue
+            else
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_draft_blocked" >/dev/null
+            fi
 
             if [ "$age_seconds" -ge "$timeout_seconds" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --add-label "$timeout_label" >/dev/null
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --add-label "$timeout_label" --remove-label "$vps_scope_invalid" --remove-label "$vps_draft_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" >/dev/null
               gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
               echo "PR $pr reached timeout; auto-merge disabled."
               continue
+            fi
+
+            if [ "$has_invalid" -eq 1 ]; then
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_scope_invalid" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" >/dev/null
+              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              echo "PR $pr has files outside allowed scope."
+              continue
+            else
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_scope_invalid" >/dev/null
             fi
 
             unresolved_threads=$(gh api graphql \
@@ -96,22 +131,32 @@ jobs:
               --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
             if [ -n "$unresolved_threads" ]; then
               echo "PR $pr has unresolved review threads: $unresolved_threads"
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" >/dev/null
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" >/dev/null
               gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
               echo "PR $pr blocked by unresolved review threads; auto-merge disabled."
               continue
+            else
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" >/dev/null
             fi
 
             if [ "$merge_state" = "behind" ]; then
               if gh pr update-branch "$pr" --repo "$GITHUB_REPOSITORY" --rebase; then
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" >/dev/null
                 echo "PR $pr: branch updated automatically (behind)."
               else
+                gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_blocked" >/dev/null
                 echo "PR $pr: could not update branch automatically."
               fi
+            elif [ "$merge_state" = "dirty" ]; then
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_conflict_block" --remove-label "$vps_merge_blocked" --remove-label "$timeout_label" >/dev/null
+              echo "PR $pr blocked by merge conflicts."
+              continue
             elif [ "$merge_state" != "clean" ] || [ "$mergeable" != "true" ]; then
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --add-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" --remove-label "$timeout_label" >/dev/null
               echo "PR $pr blocked: merge_state=$merge_state mergeable=$mergeable"
               continue
             else
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_merge_blocked" --remove-label "$vps_merge_conflict_block" >/dev/null
               echo "PR $pr clean and mergeable; ensure auto-merge is active."
               gh pr merge "$pr" --auto --squash --repo "$GITHUB_REPOSITORY" || true
             fi
