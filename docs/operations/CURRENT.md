@@ -63,7 +63,7 @@ Actualizat: `2026-08-27T04:10:00Z`
 
 ### Migrații DB locale
 
-- 27 migrații aplicate pe DB local (`postgresql://postgres:postgres@localhost:5432/kelionai`).
+- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
 - `auth_sessions` și toate tabelele există.
 - Backup proof generat și verificat (protecție anti-distrugere funcțională).
 
