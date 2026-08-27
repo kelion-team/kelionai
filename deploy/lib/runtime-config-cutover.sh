@@ -1284,16 +1284,16 @@ roll_forward_unit_transaction() {
 }
 
 effective_file() {
-  local wanted=$1 index candidate
-  for index in "${!logical_names[@]}"; do
-    if [ "${logical_names[$index]}" = "$wanted" ]; then
-      candidate=$stage_root/files/$wanted
-      [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
-      validate_secret_file "$candidate" || return 1
-      printf '%s' "$candidate"
-      return 0
-    fi
-  done
+  local wanted=$1 candidate
+  if [ "${seen_logical[$wanted]:-}" = 1 ]; then
+    candidate=$stage_root/files/$wanted
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+    # Fiecare intrare din manifest a trecut deja validate_secret_file înainte
+    # ca seen_logical să fie publicat. Folosim exact candidatul autentificat,
+    # fără a-l confunda cu temporarul de instalare ori cu o țintă live veche.
+    printf '%s' "$candidate"
+    return 0
+  fi
   map_logical "$wanted"
   [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] || return 1
   [ "$(stat -c '%u:%g:%a' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode" ] || return 1
