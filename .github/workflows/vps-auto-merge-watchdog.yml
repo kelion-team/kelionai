@@ -22,6 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           timeout_seconds=86400
+          vps_review_threads_blocked=vps-auto-merge-review-block
           timeout_label=vps-auto-merge-timeout
 
           allowed_prefixes='.github/workflows/vps-run.yml .github/workflows/vps-set-env.yml .github/workflows/vps-diag.yml .github/workflows/deploy.yml'
@@ -32,13 +33,23 @@ jobs:
             fi
           }
 
+          ensure_review_threads_label() {
+            if ! gh label list --search "$vps_review_threads_blocked" --json name --jq '.[].name' | grep -qx "$vps_review_threads_blocked"; then
+              gh label create "$vps_review_threads_blocked" --description "PR blocked by unresolved review thread(s); auto-merge disabled." --color f9d0c4 >/dev/null
+            fi
+          }
+
           ensure_timeout_label
+          ensure_review_threads_label
 
           prs=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100")
           if [ "$(jq length <<<"$prs")" -eq 0 ]; then
             echo "No open PRs into master."
             exit 0
           fi
+
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
 
           for pr in $(jq -r '.[].number' <<<"$prs"); do
             head_ref=$(jq -r --argjson p "$pr" '.[] | select(.number == $p) | .head.ref' <<<"$prs")
@@ -73,9 +84,21 @@ jobs:
             [ "$has_invalid" -eq 1 ] && continue
 
             if [ "$age_seconds" -ge "$timeout_seconds" ]; then
-              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$timeout_label" >/dev/null
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$vps_review_threads_blocked" --add-label "$timeout_label" >/dev/null
               gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
               echo "PR $pr reached timeout; auto-merge disabled."
+              continue
+            fi
+
+            unresolved_threads=$(gh api graphql \
+              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved}}}}}' \
+              -F owner="$owner" -F name="$repo" -F number="$pr" \
+              --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true) | .id' | tr '\n' ' ')
+            if [ -n "$unresolved_threads" ]; then
+              echo "PR $pr has unresolved review threads: $unresolved_threads"
+              gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" --remove-label "$timeout_label" --add-label "$vps_review_threads_blocked" >/dev/null
+              gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --disable-automerge || true
+              echo "PR $pr blocked by unresolved review threads; auto-merge disabled."
               continue
             fi
 
