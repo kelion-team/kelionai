@@ -7,6 +7,19 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startLease } from './constructor-service-client.mjs'
 
+test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
+  const workflow = read('.github/workflows/vps-diag.yml')
+  const start = workflow.indexOf("=== separarea credentialelor GitHub (numai etichete) ===")
+  const end = workflow.indexOf("=== sănătate publică ===", start)
+  assert.ok(start >= 0 && end > start)
+  const identityBlock = workflow.slice(start, end)
+
+  assert.match(identityBlock, /TOKEN_IDENTITY_COLLISION:%s:%s/)
+  assert.match(identityBlock, /TOKEN_IDENTITIES_DISTINCT/)
+  assert.match(identityBlock, /constructor-sync constructor-publisher constructor-release ghcr-read admin-oauth/)
+  assert.doesNotMatch(identityBlock, /sha(?:1|256|512)sum|openssl|base64|token_value[^\n]*printf/)
+})
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (path) => readFileSync(join(root, path), 'utf8')
 const shellFunction = (source, name) => {
