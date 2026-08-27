@@ -1,0 +1,51 @@
+name: VPS Fix Secret ACLs
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Corecteaza ACL-urile secretelor pe VPS
+        run: |
+          set -euo pipefail
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
+            set -euo pipefail
+            gen() { openssl rand -hex 32; }
+            gid_of() { getent group "$1" | awk -F: '{print $3}'; }
+            fix() {
+              local p=$1 owner=$2 group=$3 mode=$4
+              if [ ! -s "$p" ]; then printf '%s\n' "$(gen)" > "$p"; fi
+              chown "$owner":"$group" "$p"
+              chmod "$mode" "$p"
+            }
+            fix /root/kelion/worker-secrets/github-worker-token root root 0400
+            fix /root/kelion/gate-secrets/github-ghcr-read-token root root 0400
+            fix /root/kelion/secrets/github-release-oauth-token root 10050 0440
+            if getent group kelion-publisher >/dev/null; then
+              fix /root/kelion/publisher-secrets/github-publisher-token root "$(gid_of kelion-publisher)" 0440
+            fi
+            if getent group kelion-release >/dev/null; then
+              fix /root/kelion/release-secrets/github-release-token root "$(gid_of kelion-release)" 0440
+            fi
+            echo ACL_OK
+          EOF
