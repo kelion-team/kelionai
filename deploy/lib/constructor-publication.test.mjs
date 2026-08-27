@@ -885,7 +885,7 @@ test('credentialele GitHub dedicate nu se amestecă între Admin, gate și ident
   assert.match(deploy, /token_file=\/root\/kelion\/gate-secrets\/github-ghcr-read-token/)
   assert.doesNotMatch(deploy, /token_file=\/root\/kelion\/publisher-secrets\/github-publisher-token/)
 
-  assert.match(provision, /GITHUB_RELEASE_OAUTH_TOKEN: [$][{][{] secrets\.GITHUB_RELEASE_OAUTH_TOKEN [}][}]/)
+  assert.match(provision, /GITHUB_RELEASE_OAUTH_TOKEN: [$][{][{] secrets\.RELEASE_GITHUB_TOKEN [}][}]/)
   assert.match(provision, /stage_value app-secret\.github-release-oauth-token "[$]oauth_token"/)
   assert.match(compose, /GITHUB_RELEASE_OAUTH_TOKEN_FILE: \/run\/secrets\/github-release-oauth-token/)
   assert.match(compose, /source: [$][{]KELION_SECRET_ROOT[^\n]*\/github-release-oauth-token[\s\S]*target: \/run\/secrets\/github-release-oauth-token/)
