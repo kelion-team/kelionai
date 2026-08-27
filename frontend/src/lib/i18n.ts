@@ -202,7 +202,9 @@ export interface Strings {
   buildQueued: string
   buildRunning: string
   buildDone: string
+  buildDoneUnverified: string
   buildFailed: string
+  buildCancelled: string
   buildOnlyAdmin: string
   /** Sesiunea a murit (401) — NU e o problemă de rol; omul trebuie doar să se
    *  logheze iar (9 aug: 403-ul mincinos îl făcea pe owner să creadă că nu mai
@@ -441,7 +443,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'Queued',
     buildRunning: 'Working',
     buildDone: 'Done',
+    buildDoneUnverified: 'Finished without live proof',
     buildFailed: 'Failed',
+    buildCancelled: 'Cancelled',
     buildOnlyAdmin: 'Only the admin can see the builder.',
     sessionExpired: 'Your session expired — sign in again.',
     buildUnavailable: 'The builder is unavailable right now.',
@@ -653,7 +657,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'În coadă',
     buildRunning: 'Lucrează',
     buildDone: 'Gata',
+    buildDoneUnverified: 'Terminat fără dovadă live',
     buildFailed: 'Eșuat',
+    buildCancelled: 'Anulat',
     buildOnlyAdmin: 'Doar adminul vede constructorul.',
     sessionExpired: 'Sesiunea a expirat — loghează-te din nou.',
     buildUnavailable: 'Constructor indisponibil momentan.',
@@ -834,7 +840,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'En cola',
     buildRunning: 'Trabajando',
     buildDone: 'Listo',
+    buildDoneUnverified: 'Terminado sin prueba en vivo',
     buildFailed: 'Fallido',
+    buildCancelled: 'Cancelado',
     buildOnlyAdmin: 'Solo el administrador puede ver el constructor.',
     sessionExpired: 'Tu sesión expiró — inicia sesión de nuevo.',
     buildUnavailable: 'El constructor no está disponible en este momento.',
@@ -996,7 +1004,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'En attente',
     buildRunning: 'En cours',
     buildDone: 'Terminé',
+    buildDoneUnverified: 'Terminé sans preuve en ligne',
     buildFailed: 'Échoué',
+    buildCancelled: 'Annulé',
     buildOnlyAdmin: 'Seul l’administrateur peut voir le constructeur.',
     sessionExpired: 'Votre session a expiré — reconnectez-vous.',
     buildUnavailable: 'Le constructeur est indisponible pour le moment.',
@@ -1158,7 +1168,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'In Warteschlange',
     buildRunning: 'Arbeitet',
     buildDone: 'Fertig',
+    buildDoneUnverified: 'Beendet ohne Live-Nachweis',
     buildFailed: 'Fehlgeschlagen',
+    buildCancelled: 'Abgebrochen',
     buildOnlyAdmin: 'Nur der Admin kann den Builder sehen.',
     sessionExpired: 'Deine Sitzung ist abgelaufen — melde dich neu an.',
     buildUnavailable: 'Der Builder ist derzeit nicht verfügbar.',
@@ -1320,7 +1332,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'In coda',
     buildRunning: 'In corso',
     buildDone: 'Fatto',
+    buildDoneUnverified: 'Terminato senza prova live',
     buildFailed: 'Fallito',
+    buildCancelled: 'Annullato',
     buildOnlyAdmin: 'Solo l’amministratore può vedere il builder.',
     sessionExpired: 'La sessione è scaduta — accedi di nuovo.',
     buildUnavailable: 'Il builder non è disponibile al momento.',
@@ -1482,7 +1496,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildQueued: 'Na fila',
     buildRunning: 'Trabalhando',
     buildDone: 'Concluído',
+    buildDoneUnverified: 'Concluído sem prova ao vivo',
     buildFailed: 'Falhou',
+    buildCancelled: 'Cancelado',
     buildOnlyAdmin: 'Apenas o administrador pode ver o construtor.',
     sessionExpired: 'A sessão expirou — inicie sessão novamente.',
     buildUnavailable: 'O construtor está indisponível no momento.',

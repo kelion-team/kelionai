@@ -13,6 +13,8 @@ interface DomainAuth {
   windowMs: number
 }
 
+export type ConstructorServiceAuthResult = 'authorized' | 'unauthorized' | 'store_unavailable'
+
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     const encoded = JSON.stringify(value)
@@ -64,9 +66,9 @@ export async function verifyConstructorServiceRequest(
   domain: ConstructorServiceDomain,
   now = Date.now(),
   consumeNonce: typeof consumeConstructorServiceNonce = consumeConstructorServiceNonce,
-): Promise<boolean> {
+): Promise<ConstructorServiceAuthResult> {
   const auth = authFor(domain)
-  if (!auth.enabled || auth.secret.length < 32) return false
+  if (!auth.enabled || auth.secret.length < 32) return 'unauthorized'
   const timestampRaw = String(req.headers[`${auth.headerPrefix}-timestamp`] ?? '')
   const nonce = String(req.headers[`${auth.headerPrefix}-nonce`] ?? '').toLowerCase()
   const signature = String(req.headers[`${auth.headerPrefix}-signature`] ?? '').toLowerCase()
@@ -74,32 +76,40 @@ export async function verifyConstructorServiceRequest(
     !/^\d{10}$/.test(timestampRaw)
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(nonce)
     || !/^v1=[0-9a-f]{64}$/.test(signature)
-  ) return false
+  ) return 'unauthorized'
   const timestampMs = Number(timestampRaw) * 1000
-  if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > auth.windowMs) return false
+  if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > auth.windowMs) return 'unauthorized'
   let encodedBody: string
   try {
     encodedBody = canonicalJson(req.body ?? null)
   } catch {
-    return false
+    return 'unauthorized'
   }
   const bodyHash = createHash('sha256').update(encodedBody).digest('hex')
   const payload = `${timestampRaw}\n${nonce}\n${req.method.toUpperCase()}\n${pathWithoutQuery(req)}\n${bodyHash}`
   const expected = `v1=${createHmac('sha256', auth.secret).update(payload).digest('hex')}`
   const left = Buffer.from(signature)
   const right = Buffer.from(expected)
-  if (left.length !== right.length || !timingSafeEqual(left, right)) return false
-  return consumeNonce(domain, nonce, new Date(now + auth.windowMs))
+  if (left.length !== right.length || !timingSafeEqual(left, right)) return 'unauthorized'
+  try {
+    // Nonce-ul trebuie să supraviețuiască întregii ferestre a timestampului
+    // semnat, inclusiv când ceasul semnatarului este înaintea serverului.
+    return await consumeNonce(domain, nonce, new Date(timestampMs + auth.windowMs + 1))
+      ? 'authorized'
+      : 'unauthorized'
+  } catch {
+    return 'store_unavailable'
+  }
 }
 
-export async function verifyCodexWorkerRequest(req: FastifyRequest, now = Date.now()): Promise<boolean> {
+export async function verifyCodexWorkerRequest(req: FastifyRequest, now = Date.now()): Promise<ConstructorServiceAuthResult> {
   return verifyConstructorServiceRequest(req, 'codex-worker', now)
 }
 
-export async function verifyPublisherRequest(req: FastifyRequest, now = Date.now()): Promise<boolean> {
+export async function verifyPublisherRequest(req: FastifyRequest, now = Date.now()): Promise<ConstructorServiceAuthResult> {
   return verifyConstructorServiceRequest(req, 'constructor-publisher', now)
 }
 
-export async function verifyReleaseRequest(req: FastifyRequest, now = Date.now()): Promise<boolean> {
+export async function verifyReleaseRequest(req: FastifyRequest, now = Date.now()): Promise<ConstructorServiceAuthResult> {
   return verifyConstructorServiceRequest(req, 'constructor-release', now)
 }

@@ -10,7 +10,7 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
   it('web-ul doar pune ordinul validat în DB și întoarce același jobId', () => {
     const route = cod('routes/constructor.ts')
     expect(route).toMatch(/evalueazaOrdin\(order\)[\s\S]{0,1000}createBuildJob\(user\.email, orderCuPlan\)/)
-    expect(route).toContain("jobId: String(id)")
+    expect(route).toContain('jobId: String(intake.id)')
     expect(route).not.toContain('/api/constructor/tool')
   })
 
@@ -37,6 +37,23 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
     expect(db).toContain('claimNextBuildJob(codexTaskId')
     expect(db).toContain('advanceCodexBuildJob')
     expect(db).toMatch(/codex_task_id=\$2/)
+    expect(db).toContain("pg_advisory_xact_lock(hashtext('constructor:claim-build-job'))")
+    expect(db).toContain('retry_not_before')
+    expect(db).not.toContain('[abandoned: 3 attempts exhausted]')
+    expect(route).toContain('recoveryCode')
+    expect(cod('../../deploy/codex-worker.mjs')).toContain('RECOVERY_GUIDANCE')
+  })
+
+  it('claim-ul distinge lipsa unui ordin eligibil de un pipeline deja running', () => {
+    const route = cod('routes/constructor.ts')
+    const db = cod('db.ts')
+    const worker = cod('../../deploy/codex-worker.mjs')
+    const claim = db.slice(db.indexOf('export async function claimNextBuildJob'), db.indexOf('export async function deblocheazaJoburileClaimate'))
+    expect(claim).toContain("state: active.rows[0]?.active === true ? 'pipeline_active' : 'no_claimable_job'")
+    expect(route).toMatch(/claim\.state !== 'claimed'[\s\S]*state: claim\.state, job: null/)
+    expect(worker).toMatch(/response\.state === 'no_claimable_job'[\s\S]*'ready'/)
+    expect(worker).toMatch(/response\.state === 'pipeline_active'[\s\S]*'busy'/)
+    expect(worker).not.toMatch(/if \(!claimed\?\.job\) return/)
   })
 
   it('worker, publisher și release au tranziții și identități separate', () => {
@@ -52,7 +69,10 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
     expect(pipeline).toMatch(/constructor_stage !== 'merged'/)
     expect(route).toContain('verifyPublisherRequest')
     expect(route).toContain('verifyReleaseRequest')
+    expect(route).toContain("req.body?.ci === 'local_gates'")
     expect(route).toMatch(/event === 'deployed'[\s\S]{0,700}liveVersion/)
+    expect(route).toMatch(/SHA40\.test\(liveVersion\)[\s\S]{0,120}liveVersion !== targetCommit/)
+    expect(pipeline).toMatch(/input\.liveVersion !== input\.targetCommit/)
   })
 
   it('rezultatul păstrează jobId, status, commit și liveVersion până în chat/panou', () => {

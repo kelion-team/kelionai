@@ -95,6 +95,11 @@ test('browserul nu are rută directă de egress, iar proxy-ul este singura punte
 test('CI inițializează starea release deținută de root prin sudo', () => {
   assert.match(
     prVerify,
+    /for name in [^\n]*github-release-oauth-token[^\n]*; do/,
+    'CI trebuie să creeze fiecare secret montat de aplicația reală',
+  )
+  assert.match(
+    prVerify,
     /sudo install -d -o root -g 10050 -m 2770[\s\S]*?\/tmp\/kelion-ci-runtime\/release-state/,
   )
   assert.match(

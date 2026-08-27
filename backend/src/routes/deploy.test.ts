@@ -79,12 +79,12 @@ describe('deploy progress is a read-only projection of durable Constructor jobs'
       constructorStage: 'deployed',
       progress: 'live verificat',
       commit: 'a'.repeat(40),
-      liveVersion: 'release-42',
+      liveVersion: 'a'.repeat(40),
     }])
     const app = Fastify()
     await app.register(deployRoutes)
     const response = await app.inject({ method: 'GET', url: '/api/deploy/progress', headers: { 'x-test-admin': 'yes' } })
-    expect(response.json().state).toMatchObject({ status: 'success', percent: 100, commit: 'a'.repeat(40), liveVersion: 'release-42' })
+    expect(response.json().state).toMatchObject({ status: 'success', percent: 100, commit: 'a'.repeat(40), liveVersion: 'a'.repeat(40) })
     await app.close()
   })
 })

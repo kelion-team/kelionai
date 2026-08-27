@@ -1049,6 +1049,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-item.build-running { border-left-color: #4aa3ff; }
 .build-item.build-queued { border-left-color: #b0b6c0; }
 .build-item.build-done { border-left-color: #57c98a; }
+.build-item.build-unverified { border-left-color: #d7a94b; }
 .build-item.build-failed { border-left-color: #ff7a7a; }
 /* BARA + FLUXUL PE ETAPE (Adrian, 12 aug: „tot fluxul, cu bari de la 0 la 100%,
    până la deploy"). Clase NOI (fără coliziune, verificat) — bara vizuală + chip-
@@ -1192,6 +1193,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .build-badge-running { background: color-mix(in srgb, #4aa3ff 22%, transparent); }
 .build-badge-queued { background: color-mix(in srgb, #b0b6c0 20%, transparent); }
 .build-badge-done { background: color-mix(in srgb, #57c98a 22%, transparent); }
+.build-badge-unverified { background: color-mix(in srgb, #d7a94b 22%, transparent); }
 .build-badge-failed { background: color-mix(in srgb, #ff7a7a 22%, transparent); }
 .build-ci {
   flex: none;
@@ -4094,3 +4096,265 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 .vps-cifra { font-size: 13px; font-variant-numeric: tabular-nums; }
 .vps-load { opacity: 0.7; }
 .vps-alarma { color: #e5484d; font-weight: 700; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADMIN PANEL v2 — restructured card-based layout
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The v2 panel uses a wider layout to accommodate the card grid. */
+.admin-panel-v2 {
+  width: min(96vw, 960px);
+  height: min(88vh, 720px);
+}
+
+/* Content area — scrollable, with consistent padding. */
+.admin-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Each tab renders its content inside .admin-tab-content. */
+.admin-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Card — the primary visual container ─────────────────────────────────── */
+.admin-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--text) 2.5%, transparent);
+}
+.admin-card-head {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  line-height: 1.45;
+}
+.admin-card-subhead {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+/* Row layout inside cards — used for lists, key-value pairs, forms. */
+.admin-card-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.admin-card-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── List row — a single item in a card list ─────────────────────────────── */
+.admin-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.admin-list-row:first-of-type {
+  border-top: none;
+}
+
+/* ── Form row — input + button on one line ───────────────────────────────── */
+.admin-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+/* ── Error rows ──────────────────────────────────────────────────────────── */
+.admin-err-row {
+  padding: 8px 0;
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
+}
+.admin-err-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.admin-err-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.admin-err-cat {
+  font-weight: 600;
+}
+.admin-err-sev {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.admin-err-what {
+  margin-top: 3px;
+}
+.admin-err-text {
+  margin-top: 2px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-word;
+  opacity: 0.8;
+}
+.admin-err-group {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* ── Autoverificare summary + list ───────────────────────────────────────── */
+.admin-av-summary {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+.admin-av-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-av-func {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+/* ── Notification rows ───────────────────────────────────────────────────── */
+.admin-notif-row {
+  padding: 8px 0;
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
+}
+.admin-notif-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.admin-notif-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: #4aa3ff;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.admin-notif-title {
+  font-weight: 600;
+}
+
+/* ── Constructor status box ──────────────────────────────────────────────── */
+.admin-constructor-status {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.admin-constructor-meta {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(136, 136, 136, 0.27);
+  border-radius: 8px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* ── Diagnostic box ──────────────────────────────────────────────────────── */
+.admin-diagnostic-box {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+.admin-diagnostic-box.warn {
+  border-color: rgba(208, 169, 32, 0.4);
+  background: rgba(208, 169, 32, 0.08);
+}
+.admin-diagnostic-box.crit {
+  border-color: rgba(193, 18, 31, 0.4);
+  background: rgba(193, 18, 31, 0.06);
+}
+.admin-diagnostic-verdict {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.admin-diagnostic-box.warn .admin-diagnostic-verdict { color: #8a6d1a; }
+.admin-diagnostic-box.crit .admin-diagnostic-verdict { color: #c1121f; }
+.admin-diagnostic-prob {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.admin-diagnostic-ce {
+  font-weight: 600;
+}
+
+/* ── Release box ─────────────────────────────────────────────────────────── */
+.admin-release-box {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(136, 136, 136, 0.27);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.admin-release-title {
+  font-weight: 700;
+}
+
+/* ── Archive box ─────────────────────────────────────────────────────────── */
+.admin-archive-box {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid rgba(136, 136, 136, 0.27);
+  border-radius: 8px;
+}
+
+/* ── Creier subcard ──────────────────────────────────────────────────────── */
+.admin-subcard {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.admin-subcard-title {
+  font-weight: 650;
+}
+
+/* ── Credit bar (top) ────────────────────────────────────────────────────── */
+.admin-credit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.admin-credit-label {
+  font-size: 13px;
+  opacity: 0.8;
+}

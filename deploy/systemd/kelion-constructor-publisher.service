@@ -1,8 +1,10 @@
 [Unit]
 Description=Kelion Constructor isolated GitHub publisher
-After=network-online.target
+After=network-online.target kelion-runtime-config-recovery.service
 Wants=network-online.target
 ConditionPathExists=/etc/kelion/constructor-publisher.enabled
+ConditionPathExists=/run/kelion/runtime-config-recovery.ready
+ConditionPathExists=!/run/kelion/constructor-activation.pending
 
 [Service]
 Type=oneshot
@@ -39,10 +41,9 @@ ProtectKernelLogs=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectSystem=strict
-ReadOnlyPaths=/var/lib/kelion-constructor-handoff
-ReadWritePaths=/var/lib/kelion-publisher /run/kelion-publisher
+ReadWritePaths=/var/lib/kelion-publisher/repo /var/lib/kelion-publisher/state /var/lib/kelion-publisher/.cache /var/lib/kelion-publisher/.config /var/lib/kelion-publisher/.local /var/lib/kelion-constructor-handoff /run/kelion-publisher
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RestrictNamespaces=user mount net pid ipc uts
+RestrictNamespaces=user mnt net pid ipc uts
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
@@ -51,8 +52,5 @@ AmbientCapabilities=
 SystemCallArchitectures=native
 MemoryMax=5G
 TasksMax=512
-TimeoutStartSec=90min
+TimeoutStartSec=120min
 KillMode=control-group
-
-[Install]
-WantedBy=multi-user.target

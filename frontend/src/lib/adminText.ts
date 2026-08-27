@@ -99,7 +99,7 @@ export interface AdminStrings {
   nothingDown: string
   // Dialogs, Alerts & Status Messages
   writeCompleteOrder: string
-  orderEnqueuedPaused: (id: number) => string
+  orderEnqueuedWaiting: (id: number) => string
   orderEnqueuedActive: (id: number) => string
   orderSendFailed: string
   confirmDeleteInboxMsg: (count: number) => string
@@ -209,7 +209,7 @@ const en: AdminStrings = {
   loadingAudit: 'Loading the audit…',
   nothingDown: 'Nothing is down right now: health is green, zero server errors, zero client errors, zero failed builds.',
   writeCompleteOrder: 'Write complete build order (what, where, how to verify).',
-  orderEnqueuedPaused: (id: number) => `Order #${id} queued — but autonomy is PAUSED: order waits until you restart autonomy in Money tab.`,
+  orderEnqueuedWaiting: (id: number) => `Order #${id} queued — the Constructor chain cannot start it now; it will wait without a guaranteed ETA until the chain is available.`,
   orderEnqueuedActive: (id: number) => `Order #${id} queued — worker picks it up within 2 mins; you will get an email with the PR.`,
   orderSendFailed: 'Could not send order — try again.',
   confirmDeleteInboxMsg: (count: number) => `Delete ${count === 1 ? 'selected message' : count + ' messages'} from inbox?`,
@@ -218,11 +218,11 @@ const en: AdminStrings = {
   confirmDeleteBuildOrder: (id: number) => `Permanently delete build order #${id}?`,
   orderDeleted: (id: number) => `Order #${id} deleted.`,
   orderDeleteFailed: 'Could not delete — try again.',
-  confirmStopBuildOrder: (id: number) => `Stop active order #${id}? (will mark as failed, worker will not continue)`,
-  orderStopped: (id: number) => `Order #${id} stopped.`,
+  confirmStopBuildOrder: (id: number) => `Cancel active order #${id}? (it will be recorded as cancelled and the worker will not continue)`,
+  orderStopped: (id: number) => `Order #${id} cancelled.`,
   orderStopFailed: 'Could not stop — try again.',
-  confirmClearFailedJobs: 'Clear all failed and completed orders from queue? (active orders remain)',
-  ordersCleaned: (count: number) => `Cleaned: ${count} orders deleted.`,
+  confirmClearFailedJobs: 'Archive the visible failed, cancelled and completed rows? (they remain recoverable; active orders remain)',
+  ordersCleaned: (count: number) => `Archived: ${count} visible orders.`,
   ordersCleanFailed: 'Could not clean queue — try again.',
   orderResumed: (id: number) => `Order #${id} re-queued.`,
   orderResumeFailed: 'Could not resume order — try again.',
@@ -314,7 +314,7 @@ const ro: AdminStrings = {
   loadingAudit: 'Se încarcă auditul…',
   nothingDown: 'Nimic căzut acum: sănătatea e verde, zero erori de server, zero erori de client, zero construcții eșuate.',
   writeCompleteOrder: 'Scrie ordinul complet (ce construiește, unde, cum verifici).',
-  orderEnqueuedPaused: (id: number) => `Ordin #${id} în coadă — dar autonomia e PE PAUZĂ: ordinul așteaptă (nu se pierde) până repornești autonomia din tabul Bani.`,
+  orderEnqueuedWaiting: (id: number) => `Ordin #${id} în coadă — lanțul Constructor nu îl poate porni acum; așteaptă fără termen garantat până când lanțul este disponibil.`,
   orderEnqueuedActive: (id: number) => `Ordin #${id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`,
   orderSendFailed: 'Nu s-a putut trimite — reîncearcă.',
   confirmDeleteInboxMsg: (count: number) => `Ștergi ${count === 1 ? 'mesajul selectat' : count + ' mesaje'} din inbox?`,
@@ -323,11 +323,11 @@ const ro: AdminStrings = {
   confirmDeleteBuildOrder: (id: number) => `Ștergi definitiv ordinul #${id}?`,
   orderDeleted: (id: number) => `Ordinul #${id} șters.`,
   orderDeleteFailed: 'Nu s-a putut șterge — reîncearcă.',
-  confirmStopBuildOrder: (id: number) => `Oprești ordinul #${id} aflat în lucru? (trece pe „eșuat", lucrătorul nu-l mai continuă)`,
-  orderStopped: (id: number) => `Ordinul #${id} oprit.`,
+  confirmStopBuildOrder: (id: number) => `Anulezi ordinul #${id} aflat în lucru? (este înregistrat ca „anulat”, iar lucrătorul nu-l mai continuă)`,
+  orderStopped: (id: number) => `Ordinul #${id} anulat.`,
   orderStopFailed: 'Nu s-a putut opri — reîncearcă.',
-  confirmClearFailedJobs: 'Ștergi din coadă toate ordinele eșuate și terminate? (rămân doar cele în curs)',
-  ordersCleaned: (count: number) => `Curățat: ${count} ordine șterse.`,
+  confirmClearFailedJobs: 'Arhivezi rândurile vizibile eșuate, anulate și terminate? (rămân recuperabile; ordinele active nu sunt atinse)',
+  ordersCleaned: (count: number) => `Arhivate: ${count} ordine vizibile.`,
   ordersCleanFailed: 'Nu s-a putut curăța — reîncearcă.',
   orderResumed: (id: number) => `Ordinul #${id} repus în coadă.`,
   orderResumeFailed: 'Nu s-a putut relua — reîncearcă.',

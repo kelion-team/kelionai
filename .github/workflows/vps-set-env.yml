@@ -1,16 +1,40 @@
 name: provision-production-secrets
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      auto_routed_to_master:
+        description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
+        required: false
+        default: false
+        type: boolean
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: production-release
   cancel-in-progress: false
 
 jobs:
+  route-to-master:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Redirecționează automat pe master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "vps-set-env.yml" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref master \
+            -f auto_routed_to_master=true
   provision:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -39,6 +63,10 @@ jobs:
       CODEX_WORKER_ENABLED: ${{ vars.CODEX_WORKER_ENABLED || '0' }}
       CONSTRUCTOR_PUBLISHER_ENABLED: ${{ vars.CONSTRUCTOR_PUBLISHER_ENABLED || '0' }}
       CONSTRUCTOR_RELEASE_ENABLED: ${{ vars.CONSTRUCTOR_RELEASE_ENABLED || '0' }}
+      CONSTRUCTOR_RETRY_BASE_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_BASE_SECONDS || '60' }}
+      CONSTRUCTOR_RETRY_MAX_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_MAX_SECONDS || '1800' }}
+      CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
+      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation,current-tree,merge-policy' }}
       VISITOR_CHAT_TTL_SECONDS: ${{ vars.VISITOR_CHAT_TTL_SECONDS || '3600' }}
       VISITOR_ANALYTICS_RETENTION_DAYS: ${{ vars.VISITOR_ANALYTICS_RETENTION_DAYS || '7' }}
       SESSION_ABSOLUTE_TTL_SECONDS: ${{ vars.SESSION_ABSOLUTE_TTL_SECONDS }}
@@ -85,15 +113,25 @@ jobs:
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
       CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
+      GITHUB_RELEASE_OAUTH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+      GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
       BROWSER_WORKER_SECRET: ${{ secrets.BROWSER_WORKER_SECRET }}
       CONVERTER_WORKER_SECRET: ${{ secrets.CONVERTER_WORKER_SECRET }}
       REVOLUT_MERCHANT_SECRET_KEY: ${{ secrets.REVOLUT_MERCHANT_SECRET_KEY }}
       REVOLUT_WEBHOOK_SIGNING_SECRET: ${{ secrets.REVOLUT_WEBHOOK_SIGNING_SECRET }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Scrie allowlist-ul fără restart sau deploy
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Aplică atomic allowlist-ul și secretele
         run: |
           set -euo pipefail
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           [ -n "$PUBLIC_APP_ORIGIN" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REDIRECT_URI" ]
           [ -n "$OPENAI_LUNA_MODEL" ] && [ -n "$OPENAI_MEDIUM_MODEL" ] && [ -n "$OPENAI_HEAVY_MODEL" ]
@@ -101,11 +139,35 @@ jobs:
           [ -n "$OPENAI_REALTIME_TRANSCRIPTION_MODEL" ] && [ -n "$OPENAI_CALL_TRANSCRIPTION_MODEL" ]
           [ -n "$OPENAI_TTS_MODEL" ] && [ -n "$OPENAI_IMAGE_MODEL" ] && [ -n "$OPENAI_VIDEO_MODEL" ]
           [ -n "$PRIVACY_POLICY_UPDATED" ] && [ -n "$DATA_CONTROLLER_NAME" ]
+          validate_single_line_env() {
+            local name=$1 maximum=$2
+            python3 - "$name" "$maximum" <<'PY'
+          import os
+          import sys
+
+          name, maximum = sys.argv[1], int(sys.argv[2])
+          value = os.environ.get(name)
+          if value is None or len(value.encode('utf-8')) > maximum:
+              raise SystemExit(f'{name} lipsește sau depășește limita')
+          if any(ord(character) < 32 or ord(character) == 127 for character in value):
+              raise SystemExit(f'{name} trebuie să fie o singură linie fără caractere de control')
+          PY
+          }
+          for name in PUBLIC_APP_ORIGIN ADMIN_EMAIL OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_SHUTDOWN_AT GOOGLE_CLIENT_ID GOOGLE_REDIRECT_URI GOOGLE_TOKEN_ENCRYPTION_KEY_ID CONSTRUCTOR_REQUIRED_CHECKS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS; do
+            validate_single_line_env "$name" 2048
+          done
+          for name in OPENAI_API_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
+            validate_single_line_env "$name" 8192
+          done
           [[ "$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" =~ ^[A-Za-z0-9_-]{1,32}$ ]]
           [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
           admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
           [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
-          case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          if [ -n "$OPENAI_API_KEY" ]; then
+            case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          else
+            OPENAI_API_KEY="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
           [ "${#SESSION_SECRET}" -ge 32 ]
           [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
           [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]
@@ -157,6 +219,30 @@ jobs:
           [[ "$CODEX_WORKER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_PUBLISHER_ENABLED" =~ ^[01]$ ]]
           [[ "$CONSTRUCTOR_RELEASE_ENABLED" =~ ^[01]$ ]]
+          validate_constructor_seconds() {
+            local name=$1 value=$2 minimum=$3 maximum=$4
+            if ! [[ "$value" =~ ^[1-9][0-9]{0,4}$ ]] || [ "$value" -lt "$minimum" ] || [ "$value" -gt "$maximum" ]; then
+              echo "::error::$name trebuie să fie între $minimum și $maximum secunde."
+              exit 1
+            fi
+          }
+          validate_constructor_seconds CONSTRUCTOR_RETRY_BASE_SECONDS "$CONSTRUCTOR_RETRY_BASE_SECONDS" 5 3600
+          validate_constructor_seconds CONSTRUCTOR_RETRY_MAX_SECONDS "$CONSTRUCTOR_RETRY_MAX_SECONDS" 30 86400
+          validate_constructor_seconds CONSTRUCTOR_EXTERNAL_RETRY_SECONDS "$CONSTRUCTOR_EXTERNAL_RETRY_SECONDS" 60 86400
+          [ "$CONSTRUCTOR_RETRY_BASE_SECONDS" -le "$CONSTRUCTOR_RETRY_MAX_SECONDS" ] || { echo '::error::CONSTRUCTOR_RETRY_BASE_SECONDS nu poate depăși CONSTRUCTOR_RETRY_MAX_SECONDS.'; exit 1; }
+          validate_constructor_checks() {
+            local value=$1 check
+            local -a checks=()
+            local -A seen=()
+            [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}(,[A-Za-z0-9][A-Za-z0-9._/-]{0,79}){1,15}$ ]] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS trebuie să conțină între 2 și 16 identificatori CI siguri.'; exit 1; }
+            IFS=',' read -r -a checks <<<"$value"
+            for check in "${checks[@]}"; do
+              [ -z "${seen[$check]:-}" ] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS conține duplicate.'; exit 1; }
+              seen[$check]=1
+            done
+            [ "${seen[verify]:-}" = 1 ] && [ "${seen[container-isolation]:-}" = 1 ] || { echo '::error::CONSTRUCTOR_REQUIRED_CHECKS trebuie să păstreze verify și container-isolation.'; exit 1; }
+          }
+          validate_constructor_checks "$CONSTRUCTOR_REQUIRED_CHECKS"
           if [ "$CONSTRUCTOR_PUBLISHER_ENABLED" = 1 ]; then
             [ "${#CONSTRUCTOR_PUBLISHER_SECRET}" -ge 32 ]
           else
@@ -166,6 +252,17 @@ jobs:
             [ "${#CONSTRUCTOR_RELEASE_SECRET}" -ge 32 ]
           else
             CONSTRUCTOR_RELEASE_SECRET="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
+          [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_PUBLISHER_SECRET" ]
+          [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
+          [ "$CONSTRUCTOR_PUBLISHER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
+          if [ "$CONSTRUCTOR_RELEASE_ENABLED" = 1 ]; then
+            [ "${#GITHUB_RELEASE_OAUTH_TOKEN}" -ge 32 ]
+            [ "${#GHCR_READ_TOKEN}" -ge 32 ]
+            [ "$GITHUB_RELEASE_OAUTH_TOKEN" != "$GHCR_READ_TOKEN" ]
+          else
+            GITHUB_RELEASE_OAUTH_TOKEN="disabled-placeholder-$(openssl rand -hex 32)"
+            GHCR_READ_TOKEN="disabled-placeholder-$(openssl rand -hex 32)"
           fi
           [[ "$VISITOR_CHAT_TTL_SECONDS" =~ ^[0-9]+$ ]]
           [[ "$VISITOR_ANALYTICS_RETENTION_DAYS" =~ ^[0-9]+$ ]]
@@ -208,64 +305,6 @@ jobs:
             *) exit 1 ;;
           esac
 
-          umask 077
-          key_file=$(mktemp)
-          known_hosts=$(mktemp)
-          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
-          trap cleanup EXIT
-          printf '%s\n' "$SSH_KEY" > "$key_file"
-          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
-          chmod 0600 "$key_file" "$known_hosts"
-          ssh_vps() {
-            ssh -i "$key_file" \
-              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
-              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
-              "$VPS_USER@$VPS_HOST" "$@"
-          }
-          # ':' nu face parte din alfabetul base64. Cu '=' ca separator, Bash
-          # poate elimina paddingul final '=' când face split prin IFS.
-          encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
-
-          {
-            encode openai-project-key "$OPENAI_API_KEY"
-            encode database-url "$DATABASE_URL"
-            encode session-secret "$SESSION_SECRET"
-            encode google-client-secret "$GOOGLE_CLIENT_SECRET"
-            encode google-token-encryption-key "$GOOGLE_TOKEN_ENCRYPTION_KEY"
-            encode codex-worker-secret "$CODEX_WORKER_SECRET"
-            encode constructor-publisher-secret "$CONSTRUCTOR_PUBLISHER_SECRET"
-            encode constructor-release-secret "$CONSTRUCTOR_RELEASE_SECRET"
-            encode browser-worker-secret "$BROWSER_WORKER_SECRET"
-            encode converter-worker-secret "$CONVERTER_WORKER_SECRET"
-            encode revolut-merchant-secret-key "$REVOLUT_MERCHANT_SECRET_KEY"
-            encode revolut-webhook-signing-secret "$REVOLUT_WEBHOOK_SIGNING_SECRET"
-            encode vapid-private-key "$VAPID_PRIVATE_KEY"
-          } | ssh_vps '
-            set -euo pipefail
-            umask 077
-            install -d -o root -g 10050 -m 0750 /root/kelion/secrets
-            if [ ! -s /root/kelion/secrets/migration-backup-proof-key ]; then
-              temporary_proof_key=$(mktemp /root/kelion/secrets/migration-backup-proof-key.XXXXXX)
-              openssl rand -hex 32 > "$temporary_proof_key"
-              chown root:10050 "$temporary_proof_key"
-              chmod 0440 "$temporary_proof_key"
-              mv "$temporary_proof_key" /root/kelion/secrets/migration-backup-proof-key
-            fi
-            while IFS=":" read -r name encoded; do
-              case "$name" in
-                openai-project-key|database-url|session-secret|google-client-secret|google-token-encryption-key|codex-worker-secret|constructor-publisher-secret|constructor-release-secret|browser-worker-secret|converter-worker-secret|revolut-merchant-secret-key|revolut-webhook-signing-secret|vapid-private-key) ;;
-                *) exit 1 ;;
-              esac
-              value=$(printf "%s" "$encoded" | base64 -d)
-              [ -n "$value" ] && [ "$(printf "%s" "$value" | wc -l)" -eq 0 ]
-              temporary=$(mktemp "/root/kelion/secrets/${name}.XXXXXX")
-              printf "%s\n" "$value" > "$temporary"
-              chown root:10050 "$temporary"
-              chmod 0440 "$temporary"
-              mv "$temporary" "/root/kelion/secrets/$name"
-            done
-          '
-
           env_payload=$(printf '%s\n' \
             'NODE_ENV=production' \
             'PORT=8080' \
@@ -297,6 +336,11 @@ jobs:
             'CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret' \
             "CONSTRUCTOR_RELEASE_ENABLED=$CONSTRUCTOR_RELEASE_ENABLED" \
             'CONSTRUCTOR_RELEASE_SECRET_FILE=/run/secrets/constructor-release-secret' \
+            'GITHUB_RELEASE_OAUTH_TOKEN_FILE=/run/secrets/github-release-oauth-token' \
+            "CONSTRUCTOR_RETRY_BASE_SECONDS=$CONSTRUCTOR_RETRY_BASE_SECONDS" \
+            "CONSTRUCTOR_RETRY_MAX_SECONDS=$CONSTRUCTOR_RETRY_MAX_SECONDS" \
+            "CONSTRUCTOR_EXTERNAL_RETRY_SECONDS=$CONSTRUCTOR_EXTERNAL_RETRY_SECONDS" \
+            "CONSTRUCTOR_REQUIRED_CHECKS=$CONSTRUCTOR_REQUIRED_CHECKS" \
             'BROWSER_WORKER_SOCKET=/run/kelion-browser-api/browser.sock' \
             'BROWSER_WORKER_SECRET_FILE=/run/secrets/browser-worker-secret' \
             'CONVERTER_WORKER_SOCKET=/run/kelion-converter-api/converter.sock' \
@@ -344,21 +388,294 @@ jobs:
             "REVOLUT_ORDER_EXPIRY=$REVOLUT_ORDER_EXPIRY" \
             "PUSH_MAX_SUBSCRIPTIONS=$PUSH_MAX_SUBSCRIPTIONS" \
             'GOOGLE_TTS_ENABLED=false' \
+            'GOOGLE_TTS_VOICE=Charon' \
             'SEARCH_ENABLED=false' \
             'MAIL_ENABLED=false' \
             'RELEASE_CANDIDATE_MODE=0')
+
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          payload=$(mktemp)
+          bundle=$(mktemp --suffix=.tar.gz)
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          remote_bundle="/root/kelion/runtime/runtime-cutover-bundle.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
+          remote_payload="/run/kelion-runtime-cutover.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          ssh_opts=()
+          cleanup() {
+            if [ "${#ssh_opts[@]}" -gt 0 ]; then
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f -- '$remote_bundle' '$remote_payload'" >/dev/null 2>&1 || true
+            fi
+            rm -f -- "$key_file" "$known_hosts" "$payload" "$bundle"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+
+          encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
           {
-            printf '%s' "$env_payload" | base64 -w0
-            printf '\n'
-          } | ssh_vps '
-            set -euo pipefail
-            umask 077
-            IFS= read -r encoded
-            install -d -o root -g 10050 -m 0750 /root/kelion/config
-            temporary=$(mktemp /root/kelion/config/runtime.env.XXXXXX)
-            printf "%s" "$encoded" | base64 -d > "$temporary"
-            chown root:10050 "$temporary"
-            chmod 0640 "$temporary"
-            mv "$temporary" /root/kelion/config/runtime.env
-            printf "%s\n" "runtime allowlist provisioned; no process restarted"
-          '
+            encode openai-project-key "$OPENAI_API_KEY"
+            encode database-url "$DATABASE_URL"
+            encode session-secret "$SESSION_SECRET"
+            encode google-client-secret "$GOOGLE_CLIENT_SECRET"
+            encode google-token-encryption-key "$GOOGLE_TOKEN_ENCRYPTION_KEY"
+            encode codex-worker-secret "$CODEX_WORKER_SECRET"
+            encode constructor-publisher-secret "$CONSTRUCTOR_PUBLISHER_SECRET"
+            encode constructor-release-secret "$CONSTRUCTOR_RELEASE_SECRET"
+            encode github-release-oauth-token "$GITHUB_RELEASE_OAUTH_TOKEN"
+            encode github-ghcr-read-token "$GHCR_READ_TOKEN"
+            encode browser-worker-secret "$BROWSER_WORKER_SECRET"
+            encode converter-worker-secret "$CONVERTER_WORKER_SECRET"
+            encode revolut-merchant-secret-key "$REVOLUT_MERCHANT_SECRET_KEY"
+            encode revolut-webhook-signing-secret "$REVOLUT_WEBHOOK_SIGNING_SECRET"
+            encode vapid-private-key "$VAPID_PRIVATE_KEY"
+            encode runtime-env "$env_payload"
+          } > "$payload"
+          git archive --format=tar HEAD \
+            deploy/compose.production.yml deploy/lib/runtime-config-cutover.sh \
+            deploy/systemd/kelion-runtime-config-recovery.service \
+            deploy/systemd/kelion-constructor-sync.service \
+            deploy/systemd/kelion-codex-worker.timer \
+            deploy/systemd/kelion-constructor-publisher.timer \
+            deploy/systemd/kelion-constructor-release.timer \
+            deploy/systemd/kelion-codex-worker.service \
+            deploy/systemd/kelion-constructor-publisher.service \
+            deploy/systemd/kelion-constructor-release.service | gzip -n > "$bundle"
+          tar -tzf "$bundle" > "$RUNNER_TEMP/bundle-entries"
+          for entry in \
+            'deploy/compose.production.yml' \
+            'deploy/lib/runtime-config-cutover.sh' \
+            'deploy/systemd/kelion-runtime-config-recovery.service' \
+            'deploy/systemd/kelion-constructor-sync.service' \
+            'deploy/systemd/kelion-codex-worker.timer' \
+            'deploy/systemd/kelion-constructor-publisher.timer' \
+            'deploy/systemd/kelion-constructor-release.timer' \
+            'deploy/systemd/kelion-codex-worker.service' \
+            'deploy/systemd/kelion-constructor-publisher.service' \
+            'deploy/systemd/kelion-constructor-release.service'; do
+            grep -qx "$entry" "$RUNNER_TEMP/bundle-entries"
+          done
+
+          bundle_commit=$(git rev-parse HEAD)
+          [ "$bundle_commit" = "$GITHUB_SHA" ]
+          latest_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+          [ "$bundle_commit" = "$latest_master" ] \
+            || { echo '::error::master a avansat înainte de primul mutator VPS; bundle-ul vechi este refuzat.'; exit 1; }
+          scp "${ssh_opts[@]}" "$bundle" "$VPS_USER@$VPS_HOST:$remote_bundle"
+          cleanup_unit="kelion-runtime-payload-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "systemd-run --quiet --unit='$cleanup_unit' --on-active=15m /usr/bin/rm -f -- '$remote_payload'; systemctl is-active --quiet '$cleanup_unit.timer'"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "umask 077; systemctl is-active --quiet '$cleanup_unit.timer'; [ ! -e '$remote_payload' ] && [ ! -L '$remote_payload' ]; cat > '$remote_payload'" < "$payload"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          bundle=$1
+          payload=$2
+          cleanup_unit=$3
+          [[ "$bundle" =~ ^/root/kelion/runtime/runtime-cutover-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
+          [[ "$payload" =~ ^/run/kelion-runtime-cutover\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
+          [[ "$cleanup_unit" =~ ^kelion-runtime-payload-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -f "$payload" ] && [ ! -L "$payload" ]
+          work=$(mktemp -d /root/kelion/runtime/provision.XXXXXX)
+          cutover_stage=''
+          cleanup_remote() {
+            rm -f -- "$bundle" "$payload"
+            systemctl stop "$cleanup_unit.timer" "$cleanup_unit.service" >/dev/null 2>&1 || true
+            systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || true
+            if [ -n "$cutover_stage" ]; then
+              if [[ "$cutover_stage" =~ ^/root/kelion/runtime/runtime-cutover\.[A-Za-z0-9]+$ ]]; then rm -rf -- "$cutover_stage"; fi
+            fi
+            case "$work" in /root/kelion/runtime/provision.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
+          }
+          trap cleanup_remote EXIT
+          tar -tzf "$bundle" > /tmp/bundle-entries-before-extract
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/bundle-entries-before-extract; then exit 1; fi
+          tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
+          [ -f "$work/deploy/compose.production.yml" ] && [ -f "$work/deploy/lib/runtime-config-cutover.sh" ]
+          [ -f "$work/deploy/systemd/kelion-runtime-config-recovery.service" ]
+          [ -f "$work/deploy/systemd/kelion-constructor-sync.service" ] && [ ! -L "$work/deploy/systemd/kelion-constructor-sync.service" ]
+          for unit in \
+            kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
+            kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service; do
+            [ -f "$work/deploy/systemd/$unit" ] && [ ! -L "$work/deploy/systemd/$unit" ]
+          done
+
+          exec 9>/root/kelion/publicare.lock
+          flock -n 9
+          export KELION_CUTOVER_LOCK_HELD=1
+          deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
+          if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
+            [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500' ]
+            [ -f /root/kelion/config/compose.production.yml ] && [ ! -L /root/kelion/config/compose.production.yml ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/config/compose.production.yml)" = '0:0:444' ]
+            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+              --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+            echo 'Deploy release quiesced este activ; rotația runtime rămâne blocată fail-closed' >&2
+            exit 1
+          fi
+          if [ -e /root/kelion/runtime/runtime-config-cutover.journal ] || [ -L /root/kelion/runtime/runtime-config-cutover.journal ] \
+            || [ -e /root/kelion/runtime/constructor-activation.journal ] || [ -L /root/kelion/runtime/constructor-activation.journal ] \
+            || [ -e /root/kelion/runtime/constructor-gate-refresh.journal ] || [ -L /root/kelion/runtime/constructor-gate-refresh.journal ]; then
+            [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500' ]
+            [ -f /root/kelion/config/compose.production.yml ] && [ ! -L /root/kelion/config/compose.production.yml ] \
+              && [ "$(stat -c '%u:%g:%a' /root/kelion/config/compose.production.yml)" = '0:0:444' ]
+            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+              --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+          fi
+          constructor_timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
+          constructor_services=(kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service)
+          unit_count=0
+          for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+            if systemctl cat "$unit" >/dev/null 2>&1; then unit_count=$((unit_count + 1)); fi
+          done
+          case "$unit_count" in
+            0|6) ;;
+            *) echo 'Set systemd Constructor parțial; rotația este refuzată' >&2; exit 1 ;;
+          esac
+          install_atomic() {
+            local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
+            temporary=$(mktemp "$target.install.XXXXXX")
+            install -o "$owner" -g "$group" -m "$mode" "$source" "$temporary"
+            sync -f "$temporary"
+            mv -f -- "$temporary" "$target"
+            sync -f "$(dirname -- "$target")"
+          }
+          install -d -o root -g root -m 0755 /root/kelion/bin
+          install -d -o root -g 10050 -m 0750 /root/kelion/config
+          install_atomic "$work/deploy/lib/runtime-config-cutover.sh" /root/kelion/bin/runtime-config-cutover.sh root root 0500
+          install_atomic "$work/deploy/compose.production.yml" /root/kelion/config/compose.production.yml root root 0444
+          if [ "$unit_count" -eq 6 ]; then
+            systemd_verify_help=$(systemd-analyze verify --help 2>&1)
+            grep -q -- '--recursive-errors=' <<<"$systemd_verify_help"
+            systemd-analyze verify --recursive-errors=yes \
+              "$work/deploy/systemd/kelion-runtime-config-recovery.service" \
+              "$work/deploy/systemd/kelion-constructor-sync.service" \
+              "$work/deploy/systemd/kelion-codex-worker.timer" \
+              "$work/deploy/systemd/kelion-constructor-publisher.timer" \
+              "$work/deploy/systemd/kelion-constructor-release.timer" \
+              "$work/deploy/systemd/kelion-codex-worker.service" \
+              "$work/deploy/systemd/kelion-constructor-publisher.service" \
+              "$work/deploy/systemd/kelion-constructor-release.service"
+            # Helperul publică mai întâi intentul unit-only, retrage+fsync stamp-ul
+            # și abia apoi oprește 6+sync. Nu există niciun pre-stop extern care
+            # să poată lăsa false-ready la un SIGKILL.
+            cutover_stage=$(mktemp -d /root/kelion/runtime/runtime-cutover.XXXXXX)
+            install -d -o root -g root -m 0700 "$cutover_stage/files"
+            : > "$cutover_stage/manifest"
+            chmod 0600 "$cutover_stage/manifest"
+            for unit in "${constructor_timers[@]}"; do
+              install -o root -g root -m 0600 "$work/deploy/systemd/$unit" "$cutover_stage/files/systemd-timer.$unit"
+              printf '%s\n' "systemd-timer.$unit" >> "$cutover_stage/manifest"
+            done
+            for unit in "${constructor_services[@]}"; do
+              install -o root -g root -m 0600 "$work/deploy/systemd/$unit" "$cutover_stage/files/systemd-service.$unit"
+              printf '%s\n' "systemd-service.$unit" >> "$cutover_stage/manifest"
+            done
+            KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+              "$cutover_stage" "$work/deploy/compose.production.yml" --leave-constructor-quiesced
+            cutover_stage=''
+          fi
+          install_atomic "$work/deploy/systemd/kelion-runtime-config-recovery.service" /etc/systemd/system/kelion-runtime-config-recovery.service root root 0444
+          if [ "$unit_count" -eq 6 ]; then
+            install_atomic "$work/deploy/systemd/kelion-constructor-sync.service" /etc/systemd/system/kelion-constructor-sync.service root root 0444
+          fi
+          systemctl daemon-reload
+          systemctl enable kelion-runtime-config-recovery.service >/dev/null
+          recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
+          recovery_wants_link=$recovery_wants_dir/kelion-runtime-config-recovery.service
+          [ -d "$recovery_wants_dir" ] && [ ! -L "$recovery_wants_dir" ]
+          [ -L "$recovery_wants_link" ] \
+            && [ "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ] \
+            && [ "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ]
+          sync -f "$recovery_wants_dir"
+          sync -f /etc/systemd/system
+          effective_units=(kelion-runtime-config-recovery.service)
+          if [ "$unit_count" -eq 6 ]; then effective_units+=(kelion-constructor-sync.service); fi
+          for unit in "${effective_units[@]}"; do
+            [ "$(systemctl show "$unit" --property=FragmentPath --value)" = "/etc/systemd/system/$unit" ]
+            [ -z "$(systemctl show "$unit" --property=DropInPaths --value)" ]
+            [ "$(systemctl show "$unit" --property=LoadState --value)" = loaded ]
+            [ "$(systemctl show "$unit" --property=NeedDaemonReload --value)" = no ]
+          done
+          systemctl is-enabled --quiet kelion-runtime-config-recovery.service
+          decode() {
+            local name=$1 encoded
+            [ "$(awk -F: -v wanted="$name" '$1 == wanted { count++ } END { print count + 0 }' "$payload")" -eq 1 ]
+            encoded=$(awk -F: -v wanted="$name" '$1 == wanted { print substr($0, index($0, ":") + 1) }' "$payload")
+            [ -n "$encoded" ]
+            printf '%s' "$encoded" | base64 -d
+          }
+          codex_secret=$(decode codex-worker-secret)
+          publisher_secret=$(decode constructor-publisher-secret)
+          release_secret=$(decode constructor-release-secret)
+          oauth_token=$(decode github-release-oauth-token)
+          ghcr_token=$(decode github-ghcr-read-token)
+          for value in "$codex_secret" "$publisher_secret" "$release_secret" "$oauth_token" "$ghcr_token"; do [ "${#value}" -ge 32 ]; done
+          [ "$codex_secret" != "$publisher_secret" ]
+          [ "$codex_secret" != "$release_secret" ]
+          [ "$publisher_secret" != "$release_secret" ]
+          [ "$oauth_token" != "$ghcr_token" ]
+
+          cutover_stage=$(mktemp -d /root/kelion/runtime/runtime-cutover.XXXXXX)
+          install -d -o root -g root -m 0700 "$cutover_stage/files"
+          : > "$cutover_stage/manifest"
+          stage_value() {
+            local logical=$1 value=$2
+            [[ "$logical" =~ ^[a-z0-9.-]+$ ]]
+            printf '%s\n' "$value" > "$cutover_stage/files/$logical"
+            chmod 0600 "$cutover_stage/files/$logical"
+            printf '%s\n' "$logical" >> "$cutover_stage/manifest"
+          }
+          for name in openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
+            stage_value "app-secret.$name" "$(decode "$name")"
+          done
+          stage_value app-secret.github-release-oauth-token "$oauth_token"
+          stage_value gate-secret.github-ghcr-read-token "$ghcr_token"
+          stage_value runtime.env "$(decode runtime-env)"
+          if [ ! -s /root/kelion/secrets/migration-backup-proof-key ]; then
+            stage_value app-secret.migration-backup-proof-key "$(openssl rand -hex 32)"
+          fi
+
+          config_count=0
+          for path in /root/kelion/config/codex-worker.env /root/kelion/config/constructor-publisher.env /root/kelion/config/constructor-release.env; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ]
+              config_count=$((config_count + 1))
+            fi
+          done
+          case "$config_count" in 0|3) ;; *) echo 'Config Constructor parțial' >&2; exit 1 ;; esac
+          for marker in /etc/kelion/codex-worker.enabled /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled; do
+            if [ -e "$marker" ] || [ -L "$marker" ]; then [ "$config_count" -eq 3 ]; fi
+          done
+          if grep -Eq '^(CODEX_WORKER_ENABLED|CONSTRUCTOR_PUBLISHER_ENABLED|CONSTRUCTOR_RELEASE_ENABLED)=1$' "$cutover_stage/files/runtime.env"; then
+            [ "$config_count" -eq 3 ]
+          fi
+          if [ "$config_count" -eq 3 ]; then
+            cp -- /root/kelion/config/codex-worker.env "$cutover_stage/files/constructor-config.codex-worker.env"
+            awk -F= -v checks="$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "$cutover_stage/files/runtime.env")" '
+              $1 == "CONSTRUCTOR_REQUIRED_CHECKS" { if (!written++) print "CONSTRUCTOR_REQUIRED_CHECKS=" checks; next }
+              { print }
+              END { if (!written) print "CONSTRUCTOR_REQUIRED_CHECKS=" checks }
+            ' /root/kelion/config/constructor-publisher.env > "$cutover_stage/files/constructor-config.constructor-publisher.env"
+            awk -F= -v checks="verify,container-isolation" '
+              $1 == "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS" { if (!written++) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks; next }
+              { print }
+              END { if (!written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation" }
+            ' /root/kelion/config/constructor-release.env > "$cutover_stage/files/constructor-config.constructor-release.env"
+            for logical in constructor-config.codex-worker.env constructor-config.constructor-publisher.env constructor-config.constructor-release.env; do
+              chmod 0600 "$cutover_stage/files/$logical"
+              printf '%s\n' "$logical" >> "$cutover_stage/manifest"
+            done
+          fi
+          KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" "$cutover_stage" "$work/deploy/compose.production.yml"
+          cutover_stage=''
+          printf '%s\n' 'runtime allowlist și secrete aplicate atomic; backendul activ a fost recreat și verificat'
+          REMOTE

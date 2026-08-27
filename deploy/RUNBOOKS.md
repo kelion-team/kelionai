@@ -17,14 +17,18 @@ sau ștergere recursivă.
 
 ## Provisionarea configului și secretelor
 
-1. Configurează repository variables pentru toate intrările non-secrete din
-   `config/runtime-contract.json` și repository secrets numai pentru intrările
-   din `secretFiles`.
+1. Configurează repository variables pentru toate intrările din
+   `requiredNonSecret` și repository secrets pentru toate intrările din
+   `secretFiles`, `hostProvisionedSecretFiles` și `workflowControlSecrets` din
+   `config/runtime-contract.json`. Intrările `generatedRuntime` sunt generate
+   canonic de workflow; nu le dubla drept variabile GitHub.
 2. Păstrează `CODEX_WORKER_ENABLED=0`, `PAYMENT_MODE=disabled` și
    `PUSH_ENABLED=0` până când fiecare capabilitate are verificarea proprie.
 3. Rulează manual `vps-set-env` în mediul aprobat. Workflow-ul validează
-   allowlistul, scrie atomic `runtime.env` și secret files, dar nu repornește și
-   nu publică nimic.
+   allowlistul, oprește cele șase unități Constructor, comite ca grup
+   `runtime.env`, secret files și copiile de config Constructor, apoi recreează
+   și verifică slotul backend activ înainte să reactiveze timer-ele. Operația nu
+   publică un commit nou, dar produce o scurtă fereastră de restart controlat.
 4. Verifică numai numele, ownerul și modurile fișierelor. Nu folosi `cat`,
    `docker inspect .Config.Env` sau shell tracing pe valori.
 
@@ -206,10 +210,16 @@ credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
 - HMAC-urile cozii în `/root/kelion/secrets`, provisionate prin contractul
   runtime. Fiecare serviciu primește numai HMAC-ul domeniului său prin
   `LoadCredential`;
-- tokenul publisher în
+- tokenul de sync al workerului, tokenul publisher în
   `/root/kelion/publisher-secrets/github-publisher-token` și tokenul dispatcher
-  în `/root/kelion/release-secrets/github-release-token`, root-owned mode
-  `0400`. Ele nu intră în runtime.env, compose sau containerul web.
+  în `/root/kelion/release-secrets/github-release-token`, root-owned și
+  expuse numai grupului serviciului prin mode `0440`. PAT-ul classic separat,
+  cu scope exclusiv `read:packages`, pentru gate rămâne root-only mode `0400` în
+  `/root/kelion/gate-secrets/github-ghcr-read-token`. Niciuna dintre aceste
+  credentiale nu intră în runtime.env, compose sau containerul web;
+- tokenul OAuth de review al consolei Admin este un secret separat, montat
+  exclusiv în backend la `/run/secrets/github-release-oauth-token`. Nu este
+  încărcat de worker, publisher sau dispatcher.
 - cheia ED25519 necriptată a identității automate de semnare exclusiv în
   `/root/kelion/publisher-secrets/github-publisher-signing-key`, root-owned mode
   `0400`. Înregistrează cheia publică drept **signing key** pe identitatea

@@ -31,7 +31,7 @@ describe('admin product contract', () => {
   })
 
   it('keeps Codex login in the private worker and never renders server setup secrets', () => {
-    const admin = source('components/AdminPanel.tsx')
+    const admin = source('components/admin/AdminProductie.tsx')
     expect(admin).toContain('codex login --device-auth')
     expect(admin).toContain('codex login')
     expect(admin).not.toContain('{codex.setupInstructions}')
@@ -42,7 +42,7 @@ describe('admin product contract', () => {
   })
 
   it('distinguishes active signed-webhook settlement from fail-closed setup state', () => {
-    const admin = source('components/AdminPanel.tsx')
+    const admin = source('components/admin/AdminBani.tsx')
     expect(admin).toContain("paymentCollection?.status === 'active'")
     expect(admin).toContain("'setup_required'")
     expect(admin).toContain('creditarea se face automat numai după webhook-ul')
@@ -50,7 +50,7 @@ describe('admin product contract', () => {
   })
 
   it('afișează numai scara automată OpenAI, fără ramuri custom retrase', () => {
-    const admin = source('components/AdminPanel.tsx')
+    const admin = source('components/admin/AdminProductie.tsx')
     const contract = source('lib/admin.ts')
     expect(admin).toContain('Provider: <b>OpenAI</b> · selecție automată')
     expect(admin).toContain('Catalog OpenAI: {creier.catalogEroare}')

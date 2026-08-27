@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
-import { fetchDisabledGestures } from '../lib/gestures'
+import { fetchDisabledGestures, GESTURE_CATALOG } from '../lib/gestures'
 
 // ── FACIAL EXPRESSIONS (ARKit blendshapes) — kept from the constructor's "avatar
 // v2.3" release (its good part: the face on morphs, allowed), while
@@ -226,7 +226,8 @@ export default function AvatarModel() {
   const armBones = useRef<Record<string, Bone | null>>({})
   // DISABLED GESTURES (Adrian, Jul 13): what Adrian unchecks in Admin → Gestures
   // does NOT play at all — neither automatically, nor on command. Refreshed periodically.
-  const disabledG = useRef<Set<string>>(new Set())
+  // Fail closed even before the first asynchronous policy read completes.
+  const disabledG = useRef<Set<string>>(new Set(GESTURE_CATALOG.map(({ clip }) => clip)))
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   // Hydration fix: fixed initial value, randomized in useEffect on the client.
   const blink = useRef({ t: 0, nextAt: 4, phase: 0, duration: 0.16 })
@@ -293,9 +294,11 @@ export default function AvatarModel() {
   // Ce gesturi a scos Adrian din Admin → Gesturi (public /api/gestures/state).
   // Reloaded every 30s, so panel changes take effect without a reload.
   useEffect(() => {
-    // null = citirea a picat (auditul admin, 3 aug) — păstrăm ultima listă
-    // bună; nu tratăm eșecul drept „totul e permis".
-    const load = (): void => void fetchDisabledGestures().then((l) => { if (l) disabledG.current = new Set(l) })
+    // null = politica nu poate fi demonstrată: blocăm întregul catalog. Asta
+    // acoperă și prima citire, când nu există încă o ultimă listă bună.
+    const load = (): void => void fetchDisabledGestures().then((list) => {
+      disabledG.current = new Set(list ?? GESTURE_CATALOG.map(({ clip }) => clip))
+    })
     load()
     const id = window.setInterval(load, 30_000)
     return () => window.clearInterval(id)

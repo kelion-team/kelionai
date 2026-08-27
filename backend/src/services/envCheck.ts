@@ -18,6 +18,7 @@
 // returned, whether present, and how many characters they have — just enough
 // to tell "missing" from "present but empty" or "present but truncated".
 import { config, ENV_ALIASES } from '../config.js'
+import { readFileSync, statSync } from 'node:fs'
 
 export interface EnvVarState {
   /** The EXACT name of the variable, as the code looks for it. */
@@ -59,6 +60,9 @@ const ASTEPTATE_BAZA: VariabilaAsteptata[] = [
   // o alarmă falsă care-l trimitea pe owner să seteze o cheie inutilă.)
   { alias: cuFisier(ENV_ALIASES.mailPass), name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
   { alias: cuFisier(ENV_ALIASES.codexWorkerSecret), name: 'CODEX_WORKER_SECRET', what: 'autentificarea HMAC a cozii Constructor', breaks: 'workerul separat nu poate revendica joburi' },
+  { alias: cuFisier(ENV_ALIASES.constructorPublisherSecret), name: 'CONSTRUCTOR_PUBLISHER_SECRET', what: 'autentificarea HMAC a publicării Constructor', breaks: 'publisherul separat nu poate prelua și publica handoff-uri' },
+  { alias: cuFisier(ENV_ALIASES.constructorReleaseSecret), name: 'CONSTRUCTOR_RELEASE_SECRET', what: 'autentificarea HMAC a release-ului Constructor', breaks: 'releaserul separat nu poate prelua și urmări deploy-uri' },
+  { alias: cuFisier(ENV_ALIASES.githubReleaseOAuthToken), name: 'GITHUB_RELEASE_OAUTH_TOKEN', what: 'verificarea GitHub din consola Admin', breaks: 'Admin nu poate valida protecția, aprobările și controalele release-ului' },
 ]
 
 function asteptate(): VariabilaAsteptata[] {
@@ -87,8 +91,36 @@ export function envCheck(): EnvVarState[] {
     // I look under ALL accepted names, not just the main one. A name
     // written differently is not a missing key — see the comment in config.ts.
     const nume = v.alias ?? [v.name]
-    const gasit = nume.find((n) => (process.env[n] ?? '').trim() !== '')
-    const raw = gasit != null ? process.env[gasit] : nume.map((n) => process.env[n]).find((x) => x != null)
+    let gasit: string | undefined
+    let raw: string | undefined
+    let primulPrezent: { name: string; value: string } | undefined
+    for (const numeAcceptat of nume) {
+      const envValue = process.env[numeAcceptat]
+      if (envValue == null) continue
+      let resolved = envValue
+      if (numeAcceptat.endsWith('_FILE')) {
+        try {
+          const secretPath = envValue.trim()
+          const stat = statSync(secretPath)
+          if (!secretPath || !stat.isFile() || stat.size > 65_536) throw new Error('secret_file_invalid')
+          resolved = readFileSync(secretPath, 'utf8')
+        } catch {
+          // Variabila există, dar secretul pe care îl indică nu este utilizabil.
+          // Raportăm prezent-gol, nu lungimea liniștitoare a căii.
+          resolved = ''
+        }
+      }
+      primulPrezent ??= { name: numeAcceptat, value: resolved }
+      if (resolved.trim() !== '') {
+        gasit = numeAcceptat
+        raw = resolved
+        break
+      }
+    }
+    if (raw == null && primulPrezent) {
+      gasit = primulPrezent.name
+      raw = primulPrezent.value
+    }
     return {
       name: v.name,
       what: v.what,

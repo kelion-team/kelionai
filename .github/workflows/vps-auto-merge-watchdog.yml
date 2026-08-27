@@ -1,0 +1,42 @@
+name: VPS remediation watchdog
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: vps-remediation-watchdog
+  cancel-in-progress: false
+
+jobs:
+  remediate-and-track:
+    name: Track, retry twice, then escalate to L2
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Rulează trackerul persistent și remediatorul fail-closed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VPS_REMEDIATOR_CODEX_BIN: ${{ vars.VPS_REMEDIATOR_CODEX_BIN || 'codex' }}
+          VPS_REMEDIATOR_CODEX_HOME: ${{ vars.VPS_REMEDIATOR_CODEX_HOME }}
+          VPS_REMEDIATOR_FEEDBACK_MINUTES: ${{ vars.VPS_REMEDIATOR_FEEDBACK_MINUTES || '1' }}
+          VPS_REMEDIATOR_INSTALL_CODEX: ${{ vars.VPS_REMEDIATOR_INSTALL_CODEX || '1' }}
+          VPS_REMEDIATOR_LIVE_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          for tick in 1 2 3 4 5; do
+            node scripts/vps-pr-remediator.mjs
+            [ "$tick" -eq 5 ] || sleep 55
+          done

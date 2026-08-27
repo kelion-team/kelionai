@@ -14,11 +14,14 @@ digest și semnate keyless. Publicarea este manuală, în mediul GitHub
 - `.github/workflows/pr-verify.yml`, `build-images.yml` și `deploy.yml`: lanțul
   CI, artefact și aprobare.
 
-`vps-set-env` scrie numai configul non-secret allowlisted în
-`/root/kelion/config/runtime.env` și fișierele de secrete individuale în
-`/root/kelion/secrets`. Directorul este `root:10050` mode `0750`, iar fișierele
-sunt `root:10050` mode `0440`. Containerul web nu primește un env legacy în
-bloc și nu montează repository-ul sau `/root/kelion`.
+`vps-set-env` stagează configul non-secret allowlisted și secretele individuale,
+oprește toate unitățile Constructor, apoi le comite ca o singură generație cu
+rollback verificat. Slotul activ este recreat din aceleași imagini fixate prin
+digest, astfel încât `env_file` și bind mounturile să fie reîncărcate înainte de
+reactivarea timerelor. Directorul aplicației este `root:10050` mode `0750`, iar
+fișierele sunt `root:10050` mode `0440`. Tokenul GHCR gate rămâne separat,
+root-only mode `0400`; tokenul OAuth Admin este montat numai în backend.
+Containerul web nu montează repository-ul sau `/root/kelion`.
 
 ## Fluxul unui release
 

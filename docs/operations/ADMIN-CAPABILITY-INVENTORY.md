@@ -57,7 +57,7 @@ iar rutele sunt în [`backend/src/routes/admin.ts`](../../backend/src/routes/adm
 | [ADM-005](#adm-005-inbox) | Inbox | `/inbound`, `/mailbox-live`, `/mailbox-delete`, `/contact-messages` | Verificat în cod; stările gol/eșec/neconfigurat sunt separate; live necunoscut | Folderele mail și limitele de citire trebuie documentate ca politică | Fără work card per mesaj/acțiune | IMAP, DB, mail config; receipt de delete/reply |
 | [ADM-006](#adm-006-gesturi) | Gesturi | `/gestures`, manifestul și preview-ul avatarului | Verificat în cod; aplicarea runtime end-to-end nu este probată | Timerele preview sunt cosmetice; catalogul trebuie să aibă un singur owner | Preview vizual, fără confirmare durabilă | Avatar/control frames; confirmare aplicată și test live |
 | [ADM-007](#adm-007-tokenuri) | Tokenuri | `/keys`, `/token-checks`, `/env-check` | Verificat în cod; status live necunoscut; parțial | Aliasurile de env sunt configurare backend, nu date UI | Diagnostic Admin, fără incident automat | Secret store, provider APIs; zero valori sensibile și work item la lipsă |
-| [ADM-008](#adm-008-constructor) | Constructor | `build_jobs`, activity events, rutele admin/internal și pipeline worker/publisher/release | Parțial și blocat extern; serviciile inactive | Copy-ul „max. 2 minute” și retry manual trebuie eliminate ca adevăr hardcodat | Stage are progres din stare persistată; fișa nouă nu este live și AdminPanel nu o proiectează complet | Token signing, Codex login, GitHub, CI, VPS, deploy |
+| [ADM-008](#adm-008-constructor) | Constructor | `build_jobs`, activity events, rutele admin/internal și pipeline worker/publisher/release | Parțial și blocat extern; serviciile inactive | Copy-ul „max. 2 minute”, plafonul terminal de încercări și retry-ul manual de rutină sunt interzise | Stage separă `local_gates` de CI GitHub și proiectează progresul persistent; fișa nouă nu este live și AdminPanel nu o proiectează complet | Token signing, Codex login, GitHub, CI, VPS, deploy |
 | [ADM-009](#adm-009-recuperare) | Recuperare | `/backups` și `/backups/restore` | Verificat în cod; restore live netestat | Confirmarea umană este justificată pentru mutația cu impact; progresul nu trebuie simulat | Rezultat în tab, fără timeline durabil | Backup store, DB, deploy; dry-run, receipt și rollback |
 | [ADM-010](#adm-010-sistem) | Sistem | `/audit`, `/registru-audit`, `/demos`, `/models`, `/autoverificare` | Parțial; probele există, dar nu formează o singură stare operațională | Cadentele de polling sunt constante UI; rezultatele trebuie să rămână server-backed | Vizibil în tab, fără card automat pentru toate abaterile | Health, DB, config, jobs; creare/deduplicare work item |
 | [ADM-011](#adm-011-erori) | Erori | `/erori`, `client_errors`, probleme server/job | Parțial; colectare reală, handoff absent/neverificat | Polling 20 s este doar refresh; severitatea/cauza trebuie să vină din autoritate | Listă vizibilă, fără progres de remediere | Client telemetry, autodiagnostic, Constructor |
@@ -134,8 +134,14 @@ Owner: Constructor pipeline. Stare: `blocat extern`.
 - [ ] Tokenul publisher are permisiunea minimă de signing și testul preflight trece.
 - [ ] Loginul Codex este valid; workerul raportează heartbeat/ready fără secret expus.
 - [ ] O cerere reală parcurge toate etapele cu procente/evenimente persistente.
-- [ ] Retry-urile au cauză clasificată, buget finit și strategie material diferită.
+- [ ] Retry-urile recuperabile au cauză clasificată, termen/backoff persistat și
+      se reiau automat fără plafon terminal intern; contorul rămâne diagnostic.
+- [ ] Numai o autoritate externă reală poate produce `waiting_external`, cu o
+      singură acțiune explicită și reluare automată după restabilirea readiness.
+- [ ] `local_gates` are receipt propriu și nu este prezentat ca CI GitHub verde.
 - [ ] PR, CI, master, artifact, deploy, live și rollback au link/SHA/receipt comune.
+- [ ] Anularea explicită persistă `cancelled` ca rezultat terminal rezolvat,
+      separat de eșec și fără a fabrica dovadă de deploy.
 
 ### ADM-009 Recuperare
 
@@ -158,7 +164,8 @@ Owner: platform health. Stare: `parțial`.
 Owner: observability. Stare: `parțial`.
 
 - [ ] Browser/server/job errors au fingerprint, cauză, severitate și first/last seen.
-- [ ] Erorile recuperabile pornesc remedierea limitată; cele epuizate escaladează.
+- [ ] Erorile recuperabile pornesc reluarea automată cu backoff persistat, fără
+      plafon terminal intern; numai autoritatea externă cere o acțiune umană.
 - [ ] Monitorul arată progresul remedierii și rezultatul, nu doar alerta.
 
 ### ADM-012 Notificări

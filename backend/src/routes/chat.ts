@@ -110,6 +110,7 @@ import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { numeStrigat } from '../services/numeStrigat.js'
+import { isSubscriptionMode } from '../services/chatgptSubscription.js'
 import { fazaTurei, permisaLaVorbire, UNELTE_VORBIRE } from '../services/fazeChat.js'
 import { alegeModelOrchestrator, plafonUnelteFurnizor } from '../services/chatModelPolicy.js'
 import { CTRL, conteazaCaVizibil, eCadruDeSuprafata } from '../services/chatFrames.js'
@@ -144,7 +145,7 @@ async function selectedBrainModel(
 ): Promise<{ model: string; heavy: boolean } | null> {
   const difficulty = taskDifficulty(text)
   const isOwner = roleFor(email) === 'admin'
-  if (!config.openai.key) return null
+  if (!config.openai.key && !isSubscriptionMode()) return null
   const heavy =
     needsVision || decideAdresarea || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
   const model = await alegeOpenAIModel(difficulty, isOwner && hasActionIntent(text))
@@ -1188,7 +1189,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             getMeserieActiva(user.email),
             // GESTURES disabled by Adrian from the admin panel — anything NOT
             // checked does NOT appear at all (Adrian, Jul 13).
-            getDisabledGestures().catch(() => [] as string[]),
+            // If the global policy cannot be read, suppress every semantic
+            // gesture rather than silently treating the policy as empty.
+            getDisabledGestures().catch(() => [...new Set(Object.values(GESTURE_TO_CLIP))]),
             getVoicePref(user.email).catch(() => null),
           ]).then(([speechLang, mId, gestures, vPref]) => {
             const stare = {
@@ -3851,8 +3854,13 @@ async function runTool(
       // pornește din gândirea creierului și raportează înapoi PR-ul în chat.
       const { planificaOrdinConstructor } = await import('../services/codexWorker.js')
       const orderCuPlan = await planificaOrdinConstructor(order)
-      const jobId = await createBuildJob(email, orderCuPlan)
-      if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+      let intake: Awaited<ReturnType<typeof createBuildJob>>
+      try {
+        intake = await createBuildJob(email, orderCuPlan)
+      } catch {
+        return JSON.stringify({ error: 'db_indisponibil' })
+      }
+      const jobId = intake.id
 
       // OPEN THE LIVE PANEL ON THE MONITOR (Stage 4b): from the moment it is
       // taken on, Adrian sees Received→step→Done/Failed on the monitor (the
@@ -3867,10 +3875,13 @@ async function runTool(
         ok: true,
         job: jobId,
         jobId: String(jobId),
-        status: 'queued',
+        status: intake.status,
+        deduplicated: !intake.created,
         commit: null,
         liveVersion: null,
-        message: `Am preluat cerința (ordin #${jobId}).`,
+        message: intake.created
+          ? `Am preluat cerința (ordin #${jobId}).`
+          : `Cerința este deja activă (ordin #${jobId}); nu am creat o dublură.`,
         speak_rule: 'Confirmă EXACT atât: „Am preluat cerința." — nimic în plus, fără „mă apuc/verific/execut", fără explicații despre lucrător/PR/email.',
       })
     }
@@ -3886,10 +3897,11 @@ async function runTool(
       // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
       // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
-      const { getConstructorIncidentForJob } = await import('../db.js')
+      const { getConstructorIncidentsForJobs } = await import('../db.js')
       const { constructorContinuity } = await import('../services/constructorContinuity.js')
       const diagnostic = await diagnosticConstructorViu(Date.now()).catch((e) => ({ error: String((e as Error)?.message ?? e).slice(0, 120) }))
-      const incidents = await Promise.all(jobs.map((job) => getConstructorIncidentForJob(job.id)))
+      const incidents = await getConstructorIncidentsForJobs(jobs.map((job) => job.id))
+      if (!incidents) return JSON.stringify({ error: 'registru_incidente_necitibil' })
       return JSON.stringify({
         constructor: config.codexWorker.enabled
           ? 'CODEX WORKER activ — autentificare ChatGPT separată de cheia OpenAI API'
@@ -3898,7 +3910,7 @@ async function runTool(
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,
         // verified by CI (green)" — not on the worker's word.
-        jobs: jobs.map((j, index) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt, continuity: constructorContinuity(j, incidents[index]) })),
+        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt, continuity: constructorContinuity(j, incidents.get(j.id)) })),
         diagnostic, // { sanatos, verdict, probleme[], masuratori } — DE CE (nu) repară
       })
     }

@@ -1,15 +1,35 @@
 name: vps-diag
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      auto_routed_to_master:
+        description: Internal guard to avoid infinite auto-routes
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
 jobs:
+  route-to-master:
+    name: Redirect to master
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    permissions:
+      actions: write
+    steps:
+      - name: Redirect dispatch to master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "vps-diag.yml" --repo "${GITHUB_REPOSITORY}" --ref master -f auto_routed_to_master=true
+
   diag:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     env:
       VPS_HOST: ${{ vars.VPS_HOST }}
       VPS_USER: ${{ vars.VPS_USER }}

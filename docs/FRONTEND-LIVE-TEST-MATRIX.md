@@ -31,7 +31,14 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 
 | Fișier | Responsabilitate |
 | --- | --- |
-| `AdminPanel.tsx` | panoul Google-admin, finanțe, utilizatori, constructor, worker Codex, recovery și diagnostic |
+| `AdminPanel.tsx` | panoul Google-admin — shell cu tab-uri, push telefon, peek gesturi |
+| `admin/shared.tsx` | componente comune admin: BecuriCredit, CreditAICard, ErrRow, RegistruAudit, ShareGrid |
+| `admin/adminHelpers.ts` | helper-e non-componente: fmtDur, aiLabel, groupByDay, rangVerdict, tipuri |
+| `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
+| `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
+| `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
+| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, Codex, modele OpenAI) |
+| `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |
 | `AvatarModel.tsx` | model, animații, lip-sync și micro-expresii comandate |
@@ -61,7 +68,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 - `prefs.ts`: preferințe user-scoped; `productConfig.ts`: config public generat din `config/product.json`; `manualPolicy.ts`: limbi/chrome și filtrare fail-closed a capitolelor admin; `publicText.ts`, `i18n.ts`, `adminText.ts`, `languages.ts`, `langList.ts`: text și limbă fără dubluri comerciale locale.
 - `conexiune.ts`, `retea.ts`, `latency.ts`, `watchdog.ts`, `energie.ts`, `usePolledJson.ts`, `updateCheck.ts`: conectivitate, măsurare și lifecycle PWA.
 - `billing.ts`, `praguri.ts`: penny integers, politică server-side, reminder și istoric strict.
-- `admin.ts`: contractele API admin; `deployProgress.ts`: contract unic pentru polling/SSE de release; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
+- `admin.ts`: contractele API admin; `adminConstructorContract.ts`: validarea strictă a snapshoturilor, diagnosticelor și confirmărilor Constructor din Admin; `constructorContract.ts`: stările și dovezile canonice comune panoului Admin și monitorului Stage; `deployProgress.ts`: contract unic pentru polling/SSE de release; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
 - `markdown.ts`: DOMPurify; `workspace.ts`: taskuri monitor, iframe allowlist și CSP playground; `tradingBridge.ts`: origin/source binding pentru iframe-ul Trading; `theme.ts`, `ceas.ts`, `wakelock.ts`, `notificari.ts`, `pushTelefon.ts`: utilitare UI/runtime.
 
 ### Biblioteci — chat, voce și senzori

@@ -3,6 +3,7 @@ import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
 import { mailEnabled, smtpTransport } from './mail.js'
 import { getSerperBalance } from './serperBalance.js'
+import { getConstructorChainStatus, type ConstructorChainLeg } from './constructorChainStatus.js'
 import { ImapFlow } from 'imapflow'
 
 export interface TokenCheck {
@@ -145,8 +146,106 @@ function checkGoogleTokenEncryption(): TokenCheck {
   return { name: 'GOOGLE_TOKEN_ENCRYPTION_KEY', status: 'ok', detail: `lungime ${length}`, requiredScope: 'criptare OAuth la repaus' }
 }
 
+async function checkGitHubReleaseOAuth(fetcher: typeof fetch = fetch): Promise<TokenCheck> {
+  const scope = 'GitHub repo exact: Pull requests write; Checks/Actions/Contents/Administration read'
+  const token = config.githubReleaseOAuthToken
+  const repository = config.githubRepo
+  if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    return { name: 'GitHub OAuth (Admin release)', status: 'not_configured', requiredScope: scope }
+  }
+  const headers = {
+    accept: 'application/vnd.github+json',
+    authorization: `Bearer ${token}`,
+    'x-github-api-version': '2022-11-28',
+  }
+  const request = async (path: string): Promise<Response> => {
+    const response = await timed(10_000, () => fetcher(`https://api.github.com${path}`, {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    }))
+    if (!response.ok) throw new Error(`github_http_${response.status}`)
+    return response
+  }
+  try {
+    const [userResponse, repoResponse] = await Promise.all([
+      request('/user'),
+      request(`/repos/${repository}`),
+    ])
+    const user = await userResponse.json() as { id?: unknown; login?: unknown }
+    const repo = await repoResponse.json() as {
+      full_name?: unknown
+      permissions?: { push?: unknown; maintain?: unknown; admin?: unknown }
+    }
+    const login = String(user.login ?? '')
+    const userId = Number(user.id)
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(login) || !Number.isSafeInteger(userId) || userId <= 0) {
+      throw new Error('github_identity_invalid')
+    }
+    if (String(repo.full_name ?? '').toLowerCase() !== repository.toLowerCase()
+      || !(repo.permissions?.push === true || repo.permissions?.maintain === true || repo.permissions?.admin === true)) {
+      throw new Error('github_repo_write_role_missing')
+    }
+    const encodedLogin = encodeURIComponent(login)
+    const probes = await Promise.all([
+      request(`/repos/${repository}/collaborators/${encodedLogin}/permission`),
+      request(`/repos/${repository}/branches/master/protection`),
+      request(`/repos/${repository}/actions/workflows/pr-verify.yml`),
+      request(`/repos/${repository}/contents/.github/workflows/pr-verify.yml?ref=master`),
+      request(`/repos/${repository}/commits/master/check-runs?per_page=1`),
+      request(`/repos/${repository}/pulls?state=open&per_page=1`),
+    ])
+    const permission = await probes[0].json() as { permission?: unknown; user?: { id?: unknown; login?: unknown } }
+    if (Number(permission.user?.id) !== userId
+      || String(permission.user?.login ?? '').toLowerCase() !== login.toLowerCase()
+      || !['write', 'maintain', 'admin'].includes(String(permission.permission ?? ''))) {
+      throw new Error('github_repo_permission_mismatch')
+    }
+    return {
+      name: 'GitHub OAuth (Admin release)',
+      status: 'ok',
+      detail: 'repo, rol write+, protecție, Actions, Contents, Checks și PR răspund live',
+      requiredScope: scope,
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    const statusCode = detail.match(/^github_http_(\d{3})$/)?.[1]
+    return {
+      name: 'GitHub OAuth (Admin release)',
+      status: statusCode ? `fail_${Number(statusCode)}` : 'fail',
+      detail,
+      requiredScope: scope,
+    }
+  }
+}
+
+function constructorLegCheck(name: string, secretName: string, leg: ConstructorChainLeg): TokenCheck {
+  const requiredScope = `${secretName} distinct (minimum 32 caractere) + heartbeat persistent sub 5 minute`
+  const detail = `${leg.state}${leg.lastHeartbeat ? ` · heartbeat ${leg.lastHeartbeat}` : ''}`
+  if (leg.state === 'setup_required') return { name, status: 'not_configured', detail, requiredScope }
+  if (leg.state === 'ready' || leg.state === 'busy') return { name, status: 'ok', detail, requiredScope }
+  return { name, status: 'fail', detail, requiredScope }
+}
+
+async function checkConstructorIdentities(): Promise<TokenCheck[]> {
+  try {
+    const chain = await timed(10_000, () => getConstructorChainStatus())
+    return [
+      constructorLegCheck('Constructor worker (HMAC + heartbeat)', 'CODEX_WORKER_SECRET_FILE', chain.legs.worker),
+      constructorLegCheck('Constructor publisher (HMAC + heartbeat)', 'CONSTRUCTOR_PUBLISHER_SECRET_FILE', chain.legs.publisher),
+      constructorLegCheck('Constructor release (HMAC + heartbeat)', 'CONSTRUCTOR_RELEASE_SECRET_FILE', chain.legs.release),
+    ]
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return [
+      { name: 'Constructor worker (HMAC + heartbeat)', status: 'fail', detail, requiredScope: 'CODEX_WORKER_SECRET_FILE + heartbeat persistent' },
+      { name: 'Constructor publisher (HMAC + heartbeat)', status: 'fail', detail, requiredScope: 'CONSTRUCTOR_PUBLISHER_SECRET_FILE + heartbeat persistent' },
+      { name: 'Constructor release (HMAC + heartbeat)', status: 'fail', detail, requiredScope: 'CONSTRUCTOR_RELEASE_SECRET_FILE + heartbeat persistent' },
+    ]
+  }
+}
+
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, serper, smtp, imap, db, googleOauth, session, googleTokenEncryption] = await Promise.all([
+  const [brain, serper, smtp, imap, db, googleOauth, session, googleTokenEncryption, githubRelease, constructor] = await Promise.all([
     checkBrainKeys(),
     checkSerper(),
     checkMailSmtp(),
@@ -155,6 +254,8 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     Promise.resolve(checkGoogleOAuth()),
     Promise.resolve(checkSessionSecret()),
     Promise.resolve(checkGoogleTokenEncryption()),
+    checkGitHubReleaseOAuth(),
+    checkConstructorIdentities(),
   ])
   return [
     ...brain,
@@ -165,5 +266,7 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     googleOauth,
     session,
     googleTokenEncryption,
+    githubRelease,
+    ...constructor,
   ]
 }

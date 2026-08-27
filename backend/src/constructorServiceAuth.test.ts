@@ -48,22 +48,40 @@ describe('Constructor HMAC identity domains', () => {
     const now = 1_787_536_800_000
     const consume = vi.fn(async () => true)
     const req = request('x-constructor-publisher', secrets.publisher, {}, now)
-    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now, consume)).resolves.toBe(true)
-    expect(consume).toHaveBeenCalledWith('constructor-publisher', '123e4567-e89b-42d3-a456-426614174000', new Date(now + 30_000))
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now, consume)).resolves.toBe('authorized')
+    expect(consume).toHaveBeenCalledWith('constructor-publisher', '123e4567-e89b-42d3-a456-426614174000', new Date(now + 30_001))
   })
 
   it('does not accept a publisher signature as release authority', async () => {
     const now = 1_787_536_800_000
     const req = request('x-constructor-publisher', secrets.publisher, {}, now)
     const consume = vi.fn(async () => true)
-    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-release', now, consume)).resolves.toBe(false)
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-release', now, consume)).resolves.toBe('unauthorized')
     expect(consume).not.toHaveBeenCalled()
   })
 
-  it('rejects stale requests and fails closed when nonce persistence fails', async () => {
+  it('separates stale/replay requests from an unavailable nonce store', async () => {
     const now = 1_787_536_800_000
     const req = request('x-constructor-publisher', secrets.publisher, {}, now)
-    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now + 31_000, vi.fn(async () => true))).resolves.toBe(false)
-    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now, vi.fn(async () => false))).resolves.toBe(false)
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now + 31_000, vi.fn(async () => true))).resolves.toBe('unauthorized')
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now, vi.fn(async () => false))).resolves.toBe('unauthorized')
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', now, vi.fn(async () => { throw new Error('db_down') }))).resolves.toBe('store_unavailable')
+  })
+
+  it('keeps a future-dated nonce until the signed acceptance window really ends', async () => {
+    const serverNow = 1_787_536_800_000
+    const signedAt = serverNow + 30_000
+    const req = request('x-constructor-publisher', secrets.publisher, {}, signedAt)
+    let observedNow = serverNow
+    let storedExpiry = 0
+    const consume = vi.fn(async (_domain: string, _nonce: string, expiresAt: Date) => {
+      if (storedExpiry > observedNow) return false
+      storedExpiry = expiresAt.getTime()
+      return true
+    })
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', observedNow, consume)).resolves.toBe('authorized')
+    observedNow = serverNow + 30_001
+    await expect(auth.verifyConstructorServiceRequest(req as never, 'constructor-publisher', observedNow, consume)).resolves.toBe('unauthorized')
+    expect(storedExpiry).toBe(signedAt + 30_001)
   })
 })

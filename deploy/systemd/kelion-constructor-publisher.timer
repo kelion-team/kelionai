@@ -1,5 +1,8 @@
 [Unit]
 Description=Poll immutable Constructor handoffs for publication
+After=kelion-runtime-config-recovery.service
+ConditionPathExists=/run/kelion/runtime-config-recovery.ready
+ConditionPathExists=!/run/kelion/constructor-activation.pending
 
 [Timer]
 OnBootSec=3min

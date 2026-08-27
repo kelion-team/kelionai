@@ -83,7 +83,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/invalid x-api-key|authentication_error|API key not valid|API_KEY_INVALID|\b(401|403)\b.*(key|token|auth)/i.test(log)) {
+  if (/worker_failure:provider_auth|invalid x-api-key|authentication_error|API key not valid|API_KEY_INVALID|\b(401|403)\b.*(key|token|auth)/i.test(log)) {
     return {
       ...base,
       causeCode: 'provider_auth',
@@ -92,7 +92,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'blocked',
     }
   }
-  if (/FĂRĂ CREDIT API|credit balance is too low|requires more credits|insufficient.*credit|payment required|\b402\b/i.test(log)) {
+  if (/worker_failure:provider_credit|FĂRĂ CREDIT API|credit balance is too low|requires more credits|insufficient.*credit|payment required|\b402\b/i.test(log)) {
     return {
       ...base,
       causeCode: 'provider_credit',
@@ -110,7 +110,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/(test|vitest|jest|pytest|assert)[^\n]{0,100}(failed|failure|picat|error)|\bfailed tests?\b/i.test(log)) {
+  if (/worker_failure:test_failure|(test|vitest|jest|pytest|assert)[^\n]{0,100}(failed|failure|picat|error)|\bfailed tests?\b/i.test(log)) {
     return {
       ...base,
       causeCode: 'test_failure',
@@ -119,7 +119,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/(build|compil|typecheck|tsc|lint|oxlint|eslint)[^\n]{0,100}(failed|failure|picat|error)|\bexit code [1-9]/i.test(log)) {
+  if (/worker_failure:quality_gate_failure|(build|compil|typecheck|tsc|lint|oxlint|eslint)[^\n]{0,100}(failed|failure|picat|error)|\bexit code [1-9]/i.test(log)) {
     return {
       ...base,
       causeCode: 'build_failure',
@@ -128,7 +128,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/fără nicio modificare|nu ai scris nimic|no changes|working tree clean|aSchimbat.?false/i.test(log)) {
+  if (/worker_failure:no_changes|fără nicio modificare|nu ai scris nimic|no changes|working tree clean|aSchimbat.?false/i.test(log)) {
     return {
       ...base,
       causeCode: 'no_changes',
@@ -137,7 +137,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/timeout|timed out|ETIMEDOUT|abandoned: 3 attempts exhausted|timp.*depăș/i.test(log)) {
+  if (/worker_failure:execution_timeout|timeout|timed out|ETIMEDOUT|abandoned: 3 attempts exhausted|timp.*depăș/i.test(log)) {
     return {
       ...base,
       causeCode: 'timeout',
@@ -146,7 +146,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/creier|brain|r[ăa]spuns gol|model (invalid|refuzat|nu)|provider.*(unavailable|error)|indisponibil/i.test(log)) {
+  if (/worker_failure:brain_unavailable|creier|brain|r[ăa]spuns gol|model (invalid|refuzat|nu)|provider.*(unavailable|error)|indisponibil/i.test(log)) {
     return {
       ...base,
       causeCode: 'brain_unavailable',

@@ -44,7 +44,7 @@ import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
 import { auzRoutes } from './routes/auz.js'
 import { deployRoutes } from './routes/deploy.js'
-import { cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, getPool, initDb, recordSimptomLive } from './db.js'
+import { arhiveazaBuildJobsVechi, cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, deblocheazaJoburileClaimate, getPool, initDb, recordSimptomLive } from './db.js'
 import { hydrateSession, trustedMutationOrigin } from './session.js'
 import { isOperationalHealthRequest } from './services/operationalHealth.js'
 import { makeLogTee, capturaConsole } from './services/logbuffer.js'
@@ -144,6 +144,7 @@ await app.register(rateLimit, {
       u === '/health' ||
       u === '/api/health' || // connectivity-recovery poll (ChatPanel) — never throttled
       u === '/api/version' || // polled every 45s by every client for the update routine
+      u === '/api/release-proof' || // dovada atomică a orchestratorului de release
       u === '/api/tts/status' // polled by frontend to decide which mouth to open
     )
   },
@@ -225,11 +226,11 @@ app.get('/livez', async () => ({ status: 'alive' }))
 // rămânea agățat pe un server VIU. Aceeași rută, sub ambele căi.
 app.get('/api/health', async () => ({ status: 'ok' }))
 
-app.get('/readyz', async (_req, reply) => {
+async function readinessSnapshot() {
   const requiredConfig = Boolean(
     config.adminEmail
     && config.publicOrigin
-    && config.openai.key
+    && (config.openai.key || isSubscriptionMode())
     && config.openai.luna
     && config.openai.medium
     && config.openai.heavy
@@ -278,7 +279,12 @@ app.get('/readyz', async (_req, reply) => {
       candidate: config.release.candidateMode,
       sideEffectsActive: releaseSideEffectsEnabled(),
     },
-  })
+  }
+}
+
+app.get('/readyz', async (_req, reply) => {
+  const snapshot = await readinessSnapshot()
+  return reply.code(snapshot.ready ? 200 : 503).send(snapshot)
 })
 
 // THE DEPLOY VERSION (Adrian, 10 Jul: "on every new deploy the watermark
@@ -286,11 +292,24 @@ app.get('/readyz', async (_req, reply) => {
 // commit sha through GIT_COMMIT_SHA; the frontend polls it and, when it
 // changes, does the clean reset to the latest version. The watermark displays
 // it — so it CHANGES on ANY publish, even if the interface wasn't touched.
-const DEPLOY_SHA = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
+const RAW_DEPLOY_COMMIT = String(process.env.GIT_COMMIT_SHA ?? '').toLowerCase()
+const DEPLOY_COMMIT = /^[0-9a-f]{40}$/.test(RAW_DEPLOY_COMMIT) ? RAW_DEPLOY_COMMIT : ''
+const DEPLOY_SHA = DEPLOY_COMMIT.slice(0, 7)
 const BOOT_AT = new Date().toISOString()
 // Without an injected sha, the boot moment IS the version: it changes on every
 // real publish.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
+app.get('/api/release-proof', async (_req, reply) => {
+  const snapshot = await readinessSnapshot()
+  const proved = snapshot.ready && snapshot.release.sideEffectsActive && DEPLOY_COMMIT.length === 40
+  reply.header('Cache-Control', 'no-store')
+  return reply.code(proved ? 200 : 503).send({
+    ready: snapshot.ready,
+    release: snapshot.release,
+    activeCommit: DEPLOY_COMMIT,
+  })
+})
+
 // AUTO-VERSIUNE (owner, 13 aug: „se incrementează singură la fiecare publicare,
 // +0.1"). Se calculează o dată la boot, din KV (vezi mai jos, după initDb) —
 // V0.0, V0.1, V0.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
@@ -423,11 +442,36 @@ try {
     void expireChatReplayResults().catch((error) => {
       app.log.warn({ error: curataTextJurnal(error, 160) }, 'chat replay result retention failed')
     })
+    const archiveCompletedConstructorJobs = async (): Promise<void> => {
+      const archived = await arhiveazaBuildJobsVechi(1)
+      if (archived > 0) app.log.info({ archived }, 'constructor terminal jobs archived')
+    }
+    void archiveCompletedConstructorJobs().catch((error) => {
+      app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor archive retention failed')
+    })
+    const constructorWatchdog = async (): Promise<void> => {
+      const result = await deblocheazaJoburileClaimate()
+      if (result.repuse > 0 || result.abandonate > 0) {
+        app.log.warn(result, 'constructor watchdog recovered stale jobs')
+      }
+    }
+    void constructorWatchdog().catch((error) => {
+      app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor watchdog failed')
+    })
+    const constructorWatchdogTimer = setInterval(() => {
+      void constructorWatchdog().catch((error) => {
+        app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor watchdog failed')
+      })
+    }, 60_000)
+    constructorWatchdogTimer.unref()
     const retentionTimer = setInterval(() => {
       void curataJurnaleVechi().catch(() => undefined)
       void cleanupExpiredAuthState().catch(() => undefined)
       void expireChatReplayResults().catch((error) => {
         app.log.warn({ error: curataTextJurnal(error, 160) }, 'chat replay result retention failed')
+      })
+      void archiveCompletedConstructorJobs().catch((error) => {
+        app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor archive retention failed')
       })
     }, 24 * 60 * 60 * 1000)
     retentionTimer.unref()
