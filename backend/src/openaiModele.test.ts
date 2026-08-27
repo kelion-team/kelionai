@@ -10,6 +10,13 @@ import {
   scaraOpenAI,
 } from './services/openaiModele.js'
 
+// Modul abonament ChatGPT nu e activ în teste — testăm calea cheie API
+vi.mock('./services/chatgptSubscription.js', () => ({
+  isSubscriptionMode: () => false,
+  hasChatGptSubscription: () => false,
+  getSubscriptionCredentials: async () => null,
+}))
+
 function raspunsCatalog(iduri: string[]): Response {
   return new Response(JSON.stringify({ data: iduri.map((id) => ({ id })) }), { status: 200 })
 }
