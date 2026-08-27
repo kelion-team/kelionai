@@ -16,6 +16,7 @@ export const MONITORED_FILES = Object.freeze([
   'scripts/lib/vps-pr-remediation.mjs',
   'scripts/vps-pr-remediator.mjs',
   'scripts/vps-pr-remediator.test.mjs',
+  'scripts/verifica-workflow-uri-sigure.mjs',
 ])
 
 export const L2_WRITABLE_FILES = Object.freeze([

@@ -40,6 +40,7 @@ test('timeoutul fără feedback devine stale, nu succes inventat', () => {
 
 test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['.github/workflows/vps-run.yml']), true)
+  assert.equal(isMonitoredScope(['scripts/verifica-workflow-uri-sigure.mjs']), true)
   assert.equal(isMonitoredScope(['backend/src/index.ts']), false)
   assert.deepEqual(assertL2DiffSafe(['.github/workflows/vps-run.yml'], 100), ['.github/workflows/vps-run.yml'])
   assert.throws(() => assertL2DiffSafe(['deploy/deploy.sh'], 100), /neautorizată/)
