@@ -561,7 +561,6 @@ constructor_configs=(
 declare -a logical_names=() targets=() owner_ids=() group_ids=() modes=()
 declare -a prepared=() backups=() backup_present=()
 declare -A seen_logical=()
-declare -A validated_candidate=()
 units_quiesced=0
 constructor_configured=0
 constructor_staged_unit_count=0
@@ -1286,10 +1285,12 @@ roll_forward_unit_transaction() {
 
 resolve_validated_candidate() {
   local output_name=$1 wanted=$2 candidate previous_restart_required=$restart_required
-  if [ -n "${validated_candidate[$wanted]:-}" ]; then
-    candidate=${validated_candidate[$wanted]}
+  if grep -Fxq -- "$wanted" "$stage_root/manifest"; then
+    candidate=$stage_root/files/$wanted
     [ -f "$candidate" ] && [ ! -L "$candidate" ] \
       || die "candidatul validat a dispărut după manifest: $wanted"
+    validate_secret_file "$candidate" \
+      || die "candidatul din manifest nu mai este valid: $wanted"
   else
     map_logical "$wanted"
     # Rezolvarea unei valori live este read-only. map_logical setează și
@@ -2176,7 +2177,6 @@ for logical in "${manifest_entries[@]}"; do
     systemd-service.*) validate_constructor_service_unit "$source_file" "$logical" || die "service systemd invalid în staging: $logical" ;;
     *) validate_secret_file "$source_file" || die "secret invalid în staging: $logical" ;;
   esac
-  validated_candidate[$logical]=$source_file
   map_logical "$logical"
   logical_names+=("$logical")
   targets+=("$mapped_target")
