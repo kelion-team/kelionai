@@ -1,72 +1,135 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-26T16:25:31Z`
+Actualizat: `2026-08-27T14:45:17Z`
 
 ## Current verified state
 
 - Repo: `kelion-team/kelionai`.
-- `origin/master`: `16eecd83470e1ff27f2fce5d1cf6204975a6b4d5`.
-- Live: `baf00ae`; `/livez=200`, `/readyz` raportează `ready=true`, toate
-  checkurile active și `release.sideEffectsActive=true`.
-- Release-ul corect `32986552385` pentru `16eecd83` a verificat candidatul și
-  semnăturile, apoi s-a oprit înainte de cutover: `runtime.env` live are schema
-  veche de 80 de chei, iar validatorul curent cere exact 86.
-- Provisionarea `32986695615` s-a oprit pe runner înainte de SSH sau mutație
-  VPS. Workflow-ul cerea `secrets.GITHUB_RELEASE_OAUTH_TOKEN`, nume imposibil
-  deoarece GitHub rezervă prefixul `GITHUB_`; tokenul GHCR dedicat lipsește de
-  asemenea.
-- Rerunul vechi `32977343950` a fost retras fail-safe deoarece `master` a
-  avansat. Nu a modificat VPS-ul.
-- Fișierele live `/root/kelion/secrets/github-release-oauth-token` și
-  `/root/kelion/gate-secrets/github-ghcr-read-token` sunt absente. Configurile
-  host-only Constructor sunt absente, iar autentificarea Codex rămâne necesară.
-- Remedierea este în PR-ul protejat `#1395`, branch
-  `codex/fix-runtime-contract-rollout`, worktree
-  `C:\Users\adria\.devin\kelionai-runtime-contract-fix`. Ea redenumește sursa
-  Actions în `KELION_GITHUB_RELEASE_OAUTH_TOKEN`, clasifică întreaga schemă
-  runtime/secrete și cere egalitate exactă între contract, payload și validator.
-- Porțile locale pentru remediere sunt verzi: backend typecheck/test/lint,
-  frontend build/test/lint, testele statice/Constructor, audituri npm, scanare
-  Gitleaks worktree+istorie și JSCpd fără clone.
+- `origin/master`: `710ab45474acd9862eb5379061cbc57a6de65d3d`.
+- Live: `baf00ae`, verificat prin `/api/version`; release-ul candidat nu a fost
+  promovat.
+- Readiness live: `ready=true` (verificat prin `/readyz`).
+- CI push `33079380411` și buildul exact `33080000979` pentru `710ab454` sunt
+  verzi.
+- Release-ul protejat `33083892211` a trecut `idempotency` și
+  `verify-candidate`, apoi a fost refuzat fail-closed de validator:
+  `runtime-cutover: env invalid: runtime.env`.
+- Remedierea contractului runtime rămâne în PR-ul protejat `#1395`; branch-ul
+  este sincronizat cu `master` numai după rezolvarea conflictelor și reverificare.
+- PR #1396 (ChatGPT Pro subscription) merged pe master (`36315b40`).
+- PR #1397 (vps-set-env permite OPENAI_API_KEY gol) merged pe master (`5acdf3bc`).
+- Deploy pending: `runtime.env` pe VPS e staled; trebuie rulat `vps-set-env`
+  înainte de deploy pentru a actualiza câmpurile noi cerute de validator.
+
+## Arhitectura curentă (verificată în cod)
+
+- OpenAI Responses este singurul creier online. Modelele pot fi accesate fie
+  prin cheie API (`sk-proj-*`), fie prin abonamentul ChatGPT Pro ($200/lună)
+  folosind tokenul OAuth din `~/.codex/auth.json` și endpoint-ul
+  `chatgpt.com/backend-api/codex/responses`.
+- `isSubscriptionMode()` returnează true când `config.openai.key` e gol și
+  există `~/.codex/auth.json` cu `auth_mode=chatgpt`.
+- `vps-set-env.yml` acceptă acum `OPENAI_API_KEY` gol (generează placeholder
+  `disabled-placeholder-*`); `deploy.sh` acceptă și acest pattern.
+- Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
+- Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`). În mod abonament,
+  verificarea catalogului `/v1/models` este sărită (endpoint-ul Codex nu o servăște).
+- Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
+  și afișează starea. Flux: `queued → claimed → accepted → working →
+  gates_passed → pr_opened → merged → deployed`.
+- `backend/.env` local are secțiunea OpenAI completă (9 env-uri, goale).
+
+## Audit complet (27 aug 2026)
+
+### Porți AGENTS.md — rezultate
+
+| Poartă | Rezultat |
+|---|---|
+| `typecheck` | ✓ 0 erori |
+| `backend test` | ✓ 1332/1332 trec (200 suite-uri) |
+| `frontend build` | ✓ build reușit |
+| `frontend lint` | ✓ 0 erori |
+| `verifica-hardcodari` | ✓ 0 abateri |
+| `verifica-creier-unic` | ✓ 0 furnizori retrași |
+| `verifica-exporturi` | ✓ 0 cod mort |
+| `verifica-sintaxa` | ✓ curat |
+| `verifica-workflow-uri-sigure` | ✓ curat |
+| `identifica-teste-moarte` | ✓ 0 teste moarte |
+| `inventar-audit` | ✓ curat |
+| `jscpd` | ✓ 0 duplicate |
+
+### Chat local verificat
+
+- Backend pornește pe `:8080` cu env OpenAI local.
+- Auth prin bearer token (sesiune nativă în `auth_sessions`) — funcțional.
+- `POST /api/chat` cu `idempotencyKey` — SSE streaming, `heard`, `lang`,
+  răspuns. Cu cheie OpenAI falsă, răspunsul e mesajul de epuizare (corect).
+- Cu cheie OpenAI reală, chat-ul ar funcționa complet.
+
+### Flux Admin → Constructor → Deploy verificat
+
+- `POST /api/admin/constructor` — poartă de calitate + `createBuildJob`.
+- `GET /api/admin/constructor` — status + work cards + observability.
+- `POST /api/admin/constructor/release/action` — aprobă release.
+- Worker Codex: `/api/internal/constructor-publisher/jobs/claim`.
+- Deploy: `deploy.ts` citește `build_jobs` și expune `DeployState`.
+- Testele `constructorPipeline`, `constructorOrdineSterse`, `deploy` trec.
+
+### Migrații DB locale
+
+- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
+- `auth_sessions` și toate tabelele există.
+- Backup proof generat și verificat (protecție anti-distrugere funcțională).
+
+## Fixuri aplicate în sesiunea asta
+
+1. `backend/.env` — șters `GEMINI_API_KEY`, `JULES_API_KEY`, `LIVEKIT_*`;
+   adăugat secțiune OpenAI completă.
+2. `scripts/billing-check.cjs` — re-scris pe OpenAI Responses (folosea `geminiKey` inexistent).
+3. `scripts/listeaza-modelle-imagine.mjs` — re-scris pe catalog OpenAI.
+4. `scripts/ping-gemini.cjs` — șters (mort, referia `geminiKey` inexistent).
+5. `scripts/probe-live.mjs` — URL din `PUBLIC_APP_ORIGIN`/`FRONTEND_ORIGIN` env.
+6. `backend/src/agentiA2a.test.ts` — `https://kelionai.app` hardcodat → `config.publicOrigin`.
+7. `scripts/autovedere-screenshot*.png` — șterse (duplicate locale negit-tracked).
+8. Migrații DB locale rulate (27 migrații, DB recreat de la zero).
+
+## Unfinished work
+
+- Deploy `16eecd83` la live (9 commit-uri ahead de `baf00ae`).
+- Configurare env OpenAI pe VPS (cheie project-scoped + modele validate).
+- Verificare E2E live: chat text + voce + vedere + admin + constructor.
+- `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` necesită scope `SSH signing keys: write`.
+- Profilul `kelion-codex` pe VPS trebuie să finalizeze `codex login` interactiv.
 
 ## Blockers / owner action
 
-GitHub cere reautentificarea contului înainte de generarea credențialelor. Nu
-se copiază parola, tokenurile sau codurile 2FA în chat ori loguri.
-
-După integrarea remedierei sunt necesare două credențiale distincte:
-
-1. `KELION_GITHUB_RELEASE_OAUTH_TOKEN`: identitate user-bound de review,
-   diferită de autorul PR, limitată la repository; `Pull requests: write` și
-   `Checks`, `Actions`, `Contents`, `Administration`: read.
-2. `CONSTRUCTOR_GHCR_READ_TOKEN`: PAT classic separat, scope exclusiv
-   `read:packages`, cu acces la imaginea gate privată.
-
-Pentru Constructor complet rămân necesare credentiala sync dedicată,
-permisiunea de înregistrare a cheii publice de semnare pentru publisher și
-loginul Codex interactiv pe profilul host-only.
+1. Cheia OpenAI de runtime pe VPS trebuie să fie project-scoped.
+2. Modelele OpenAI pe VPS: `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+   `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL` — toate validate în catalog.
+3. Credențiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` — scope
+   `SSH signing keys: write`.
+4. `codex login` interactiv pe VPS pentru profilul `kelion-codex`.
 
 ## Next ordered steps
 
-1. așteaptă porțile obligatorii ale PR-ului `#1395` și integrează prin rebase
-   numai pe verde;
-3. generează și salvează cele două credențiale ca environment secrets în
-   `production`, apoi rulează un `vps-set-env` nou pe `master`;
-4. validează ACL-urile, configurația strictă, readiness și gate pull;
-5. rulează release-ul pentru noul SHA din `master` și confirmă SHA-ul live;
-6. configurează/autentifică/activează Constructor etapizat, apoi rulează pilotul
-   auditat înainte de activarea dispatcherului release;
-7. actualizează acest checkpoint cu linkurile și dovezile finale.
+1. Configurează env OpenAI pe VPS (cheie + modele);
+2. Deploy `16eecd83` prin traseul protejat;
+3. Verifică live: `/api/version` = `16eecd83`, `/readyz` = true;
+4. Testează chat text live cu auth real;
+5. Testează voce live (OpenAI Realtime);
+6. Testează flux Admin → Constructor → PR → Deploy cu un ordin benign;
+7. Confirmă refresh client și cache update.
 
 ## Canonical links
 
 - Repo: <https://github.com/kelion-team/kelionai>
 - PR remediere contract: <https://github.com/kelion-team/kelionai/pull/1395>
-- Release corect eșuat sigur: <https://github.com/kelion-team/kelionai/actions/runs/32986552385>
-- Provisionare eșuată înainte de SSH: <https://github.com/kelion-team/kelionai/actions/runs/32986695615>
-- Rerun vechi retras: <https://github.com/kelion-team/kelionai/actions/runs/32977343950>
+- Release curent refuzat sigur: <https://github.com/kelion-team/kelionai/actions/runs/33083892211>
 - Integrare GitHub Admin: [`GITHUB-RELEASE-INTEGRATION.md`](GITHUB-RELEASE-INTEGRATION.md)
 - Contract livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
+- Live: <https://kelionai.app>
+- Inventar Admin: [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md)
 
 ## Handoff pentru sesiunea următoare
 

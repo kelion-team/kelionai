@@ -14,7 +14,7 @@ dedicată, exclusiv server-side.
    Validează tokenul pe toate endpointurile citite de integrare înainte de
    provisionare.
 3. Salvează tokenul ca environment secret `production` cu numele
-   `KELION_GITHUB_RELEASE_OAUTH_TOKEN`. Workflow-ul îl montează în container ca
+   `RELEASE_GITHUB_TOKEN`. Workflow-ul îl montează în container ca
    `GITHUB_RELEASE_OAUTH_TOKEN_FILE`. Nu folosi `GITHUB_TOKEN` al publisherului
    și nu expune tokenul în browser, worker, loguri sau chat.
 4. Deschide Admin → Constructor. Panoul arată PR-ul, verificările, review-ul,

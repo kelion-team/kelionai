@@ -78,7 +78,7 @@ describe('privacy frontend', () => {
   })
 
   it('nu afișează OAuth Codex inventat și păstrează numai profilul spectral user-scoped', () => {
-    const admin = sursa('components/AdminPanel.tsx')
+    const admin = sursa('components/admin/AdminProductie.tsx')
     const settings = sursa('components/CustomerSettings.tsx')
     const adminText = sursa('lib/adminText.ts')
     expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
@@ -91,7 +91,7 @@ describe('privacy frontend', () => {
 
   it('configurația OpenAI din Admin este numai pentru citire', () => {
     const adminApi = sursa('lib/admin.ts')
-    const admin = sursa('components/AdminPanel.tsx')
+    const admin = sursa('components/admin/AdminProductie.tsx')
     expect(adminApi).toContain("apiFetch('/api/admin/creier', { credentials: 'include' })")
     expect(adminApi).not.toMatch(/setCreier|apiFetch\('\/api\/admin\/creier',[\s\S]{0,120}method: 'POST'/)
     expect(admin).not.toMatch(/Salvează modelul OpenAI|\bsetCreier\b|modelSelect/)

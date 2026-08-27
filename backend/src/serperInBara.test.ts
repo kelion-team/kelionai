@@ -18,7 +18,8 @@ const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
 const bara = sursa('../../frontend/src/pages/Stage.tsx')
-const admin = sursa('../../frontend/src/components/AdminPanel.tsx')
+// După refactorizarea AdminPanel, CreditAICard trăiește în admin/shared.tsx.
+const admin = sursa('../../frontend/src/components/admin/shared.tsx')
 const ruta = sursa('./routes/admin.ts')
 
 describe('creditul Serper există și e alimentat (în admin)', () => {
@@ -51,7 +52,7 @@ describe('lipsa se arată ca lipsă, nu ca zero', () => {
   it('citirea eșuată SAU soldul lipsă dă „⚠", nu cifre', () => {
     // Acum: „⚠" și când citirea a picat (`live:false`) ȘI când `live:true` dar
     // fără `balance` (soldul lipsă ≠ cont gol) — nu mai apare niciun „Serper 0".
-    expect(admin).toMatch(/Serper\{' '\}\s*\{s\?\.live && typeof s\.balance === 'number' \? serperK\(s\.balance\) : '⚠'\}/)
+    expect(admin).toMatch(/Serper\s*\{s\?\.live && typeof s\.balance === 'number' \? serperK\(s\.balance\) : '⚠'\}/)
     expect(admin).toContain('citirea Serper a eșuat')
   })
 

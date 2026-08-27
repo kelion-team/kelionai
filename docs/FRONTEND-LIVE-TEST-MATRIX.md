@@ -31,7 +31,14 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 
 | Fișier | Responsabilitate |
 | --- | --- |
-| `AdminPanel.tsx` | panoul Google-admin, finanțe, utilizatori, constructor, worker Codex, recovery și diagnostic |
+| `AdminPanel.tsx` | panoul Google-admin — shell cu tab-uri, push telefon, peek gesturi |
+| `admin/shared.tsx` | componente comune admin: BecuriCredit, CreditAICard, ErrRow, RegistruAudit, ShareGrid |
+| `admin/adminHelpers.ts` | helper-e non-componente: fmtDur, aiLabel, groupByDay, rangVerdict, tipuri |
+| `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
+| `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
+| `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
+| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, Codex, modele OpenAI) |
+| `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |
 | `AvatarModel.tsx` | model, animații, lip-sync și micro-expresii comandate |

@@ -30,7 +30,7 @@ test('contractul declară exact schema runtime și toate intrările de control a
   const example = exampleRuntimeNames()
   assert.ok(expected.every((name) => example.has(name)))
   assert.deepEqual(contract.secretFiles.GITHUB_RELEASE_OAUTH_TOKEN, {
-    actionsSecret: 'KELION_GITHUB_RELEASE_OAUTH_TOKEN',
+    actionsSecret: 'RELEASE_GITHUB_TOKEN',
     file: 'github-release-oauth-token',
   })
   assert.deepEqual(contract.hostProvisionedSecretFiles.CONSTRUCTOR_GHCR_READ_TOKEN, {

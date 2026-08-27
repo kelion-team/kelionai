@@ -51,6 +51,7 @@ import { makeLogTee, capturaConsole } from './services/logbuffer.js'
 import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
+import { isSubscriptionMode } from './services/chatgptSubscription.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -229,7 +230,7 @@ async function readinessSnapshot() {
   const requiredConfig = Boolean(
     config.adminEmail
     && config.publicOrigin
-    && config.openai.key
+    && (config.openai.key || isSubscriptionMode())
     && config.openai.luna
     && config.openai.medium
     && config.openai.heavy

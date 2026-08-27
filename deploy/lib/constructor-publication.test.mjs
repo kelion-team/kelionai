@@ -348,7 +348,7 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
     CONSTRUCTOR_RETRY_BASE_SECONDS: '60',
     CONSTRUCTOR_RETRY_MAX_SECONDS: '1800',
     CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: '900',
-    CONSTRUCTOR_REQUIRED_CHECKS: 'verify,container-isolation',
+    CONSTRUCTOR_REQUIRED_CHECKS: 'verify,container-isolation,current-tree,merge-policy',
   }
 
   for (const [name, value] of Object.entries(defaults)) {
@@ -375,7 +375,7 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
   assert.match(control, /encode constructor-required-checks "[$]CONSTRUCTOR_REQUIRED_CHECKS"/)
   assert.match(control, /constructor_required_checks=[$][(]decode constructor-required-checks[)]/)
   assert.match(control, /CONSTRUCTOR_REQUIRED_CHECKS=[$]constructor_required_checks/)
-  assert.match(control, /CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=[$]constructor_required_checks/)
+  assert.match(control, /CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation/)
   assert.match(control, /replacement\["CONSTRUCTOR_RETRY_BASE_SECONDS"\] = retry_base/)
   assert.match(control, /replacement\["CONSTRUCTOR_RETRY_MAX_SECONDS"\] = retry_max/)
   assert.match(control, /replacement\["CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"\] = retry_external/)
@@ -388,13 +388,12 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
   assert.ok(refresh.indexOf('--validate-env-file') < refresh.indexOf('mv -f -- "$journal_temporary" "$gate_journal"'),
     'toate cele trei env-uri gate trebuie validate înainte de publicarea jurnalului')
   assert.match(refresh, /assert_constructor_env_value "[$]publisher_env" CONSTRUCTOR_REQUIRED_CHECKS "[$]required_checks"/)
-  assert.match(refresh, /assert_constructor_env_value "[$]release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "[$]required_checks"/)
+  assert.match(refresh, /assert_constructor_env_value "[$]release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "[$]release_required_checks"/)
   assert.match(refresh, /token_file=\/root\/kelion\/gate-secrets\/github-ghcr-read-token/)
   assert.match(refresh, /stat -c '%u:%g:%a' "[$]token_file"[)]" = '0:0:400'/)
   assert.match(deploy, /restore_constructor_after_release[\s\S]*systemctl is-enabled --quiet "[$]timer"[\s\S]*systemctl is-active --quiet "[$]timer"/)
   assert.doesNotMatch(refresh, /systemctl (?:stop|enable)[^\n]*[|][|] true/)
   assert.doesNotMatch(control, /^\s+CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation$/m)
-  assert.doesNotMatch(control, /^\s+CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation$/m)
 })
 
 test('systemd păstrează secret stores, userii și spool-ul separate', () => {
@@ -885,7 +884,7 @@ test('credentialele GitHub dedicate nu se amestecă între Admin, gate și ident
   assert.match(deploy, /token_file=\/root\/kelion\/gate-secrets\/github-ghcr-read-token/)
   assert.doesNotMatch(deploy, /token_file=\/root\/kelion\/publisher-secrets\/github-publisher-token/)
 
-  assert.match(provision, /GITHUB_RELEASE_OAUTH_TOKEN: [$][{][{] secrets\.KELION_GITHUB_RELEASE_OAUTH_TOKEN [}][}]/)
+  assert.match(provision, /GITHUB_RELEASE_OAUTH_TOKEN: [$][{][{] secrets\.RELEASE_GITHUB_TOKEN [}][}]/)
   assert.match(provision, /stage_value app-secret\.github-release-oauth-token "[$]oauth_token"/)
   assert.match(compose, /GITHUB_RELEASE_OAUTH_TOKEN_FILE: \/run\/secrets\/github-release-oauth-token/)
   assert.match(compose, /source: [$][{]KELION_SECRET_ROOT[^\n]*\/github-release-oauth-token[\s\S]*target: \/run\/secrets\/github-release-oauth-token/)

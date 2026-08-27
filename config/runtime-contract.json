@@ -83,7 +83,7 @@
     "CONVERTER_WORKER_SECRET": "converter-worker-secret",
     "DATABASE_URL": "database-url",
     "GITHUB_RELEASE_OAUTH_TOKEN": {
-      "actionsSecret": "KELION_GITHUB_RELEASE_OAUTH_TOKEN",
+      "actionsSecret": "RELEASE_GITHUB_TOKEN",
       "file": "github-release-oauth-token"
     },
     "GOOGLE_CLIENT_SECRET": "google-client-secret",
