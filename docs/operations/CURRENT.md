@@ -18,7 +18,7 @@ Actualizat: `2026-08-27T04:10:00Z`
 - Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
 - Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
   `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`), validate prin catalogul
-  live `/v1/models`. Cheile `sk-proj-` sunt refuzate pentru runtime.
+  live `/v1/models`. Cheile project-scoped sunt refuzate pentru runtime.
 - Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
   și afișează starea. Flux: `queued → claimed → accepted → working →
   gates_passed → pr_opened → merged → deployed`.
@@ -50,7 +50,7 @@ Actualizat: `2026-08-27T04:10:00Z`
 - Auth prin bearer token (sesiune nativă în `auth_sessions`) — funcțional.
 - `POST /api/chat` cu `idempotencyKey` — SSE streaming, `heard`, `lang`,
   răspuns. Cu cheie OpenAI falsă, răspunsul e mesajul de epuizare (corect).
-- Cu cheie OpenAI reală (`sk-proj-...`), chat-ul ar funcționa complet.
+- Cu cheie OpenAI reală, chat-ul ar funcționa complet.
 
 ### Flux Admin → Constructor → Deploy verificat
 
@@ -63,7 +63,7 @@ Actualizat: `2026-08-27T04:10:00Z`
 
 ### Migrații DB locale
 
-- 27 migrații aplicate pe DB local (`postgresql://postgres:postgres@localhost:5432/kelionai`).
+- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
 - `auth_sessions` și toate tabelele există.
 - Backup proof generat și verificat (protecție anti-distrugere funcțională).
 
@@ -82,14 +82,14 @@ Actualizat: `2026-08-27T04:10:00Z`
 ## Unfinished work
 
 - Deploy `16eecd83` la live (9 commit-uri ahead de `baf00ae`).
-- Configurare env OpenAI pe VPS (cheie `sk-proj-` + modele validate).
+- Configurare env OpenAI pe VPS (cheie project-scoped + modele validate).
 - Verificare E2E live: chat text + voce + vedere + admin + constructor.
 - `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` necesită scope `SSH signing keys: write`.
 - Profilul `kelion-codex` pe VPS trebuie să finalizeze `codex login` interactiv.
 
 ## Blockers / owner action
 
-1. Cheia OpenAI de runtime pe VPS trebuie să fie `sk-proj-...` (project-scoped).
+1. Cheia OpenAI de runtime pe VPS trebuie să fie project-scoped.
 2. Modelele OpenAI pe VPS: `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
    `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL` — toate validate în catalog.
 3. Credențiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` — scope
