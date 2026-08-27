@@ -17,6 +17,21 @@ const shellFunction = (source, name) => {
   return source.slice(start, end + 2)
 }
 
+test('remedierea ACL VPS păstrează valorile și aplică exact contractul canonic', () => {
+  const workflow = read('.github/workflows/vps-fix-acl.yml')
+  assert.match(workflow, /branches: \[ master \]/)
+  assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
+  assert.match(workflow, /\[ "[$]GITHUB_REF" = refs\/heads\/master \]/)
+  assert.match(workflow, /\[ -f "[$]p" \] && \[ ! -L "[$]p" \] && \[ -s "[$]p" \]/)
+  assert.match(workflow, /github-worker-token root root 0440/)
+  assert.match(workflow, /github-ghcr-read-token root root 0400/)
+  assert.match(workflow, /github-release-oauth-token root 10050 0440/)
+  assert.match(workflow, /github-publisher-token root "[$]publisher_group" 0440/)
+  assert.match(workflow, /github-release-token root "[$]release_group" 0440/)
+  assert.match(workflow, /stat -c '%u:%g:%a'/)
+  assert.doesNotMatch(workflow, /openssl|rand -hex|printf[^\n]*> "[$]p"|if \[ ! -s/)
+})
+
 test('selecția runtime folosește direct candidatul validat din manifest', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const resolver = shellFunction(cutover, 'resolve_validated_candidate')

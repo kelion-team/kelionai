@@ -59,6 +59,7 @@ jobs:
             ".github/workflows/vps-auto-merge-chore-prs.yml",
             ".github/workflows/vps-auto-merge-watchdog.yml",
             ".github/workflows/vps-diag.yml",
+            ".github/workflows/vps-fix-acl.yml",
             ".github/workflows/vps-run.yml",
             ".github/workflows/vps-release-verifier.yml",
             ".github/workflows/vps-set-env.yml",
