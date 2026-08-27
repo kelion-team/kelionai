@@ -19,8 +19,10 @@ const shellFunction = (source, name) => {
 
 test('remedierea ACL VPS păstrează valorile și aplică exact contractul canonic', () => {
   const workflow = read('.github/workflows/vps-fix-acl.yml')
-  assert.match(workflow, /branches: \[ master \]/)
-  assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
+  assert.doesNotMatch(workflow, /\bpush:/)
+  assert.match(workflow, /workflow_dispatch:/)
+  assert.match(workflow, /group: vps-secret-acl-maintenance[\s\S]*cancel-in-progress: false/)
+  assert.doesNotMatch(workflow, /group: production-release/)
   assert.match(workflow, /\[ "[$]GITHUB_REF" = refs\/heads\/master \]/)
   assert.match(workflow, /\[ -f "[$]p" \] && \[ ! -L "[$]p" \] && \[ -s "[$]p" \]/)
   assert.match(workflow, /github-worker-token root root 0440/)
@@ -30,6 +32,8 @@ test('remedierea ACL VPS păstrează valorile și aplică exact contractul canon
   assert.match(workflow, /github-release-token root "[$]release_group" 0440/)
   assert.match(workflow, /stat -c '%u:%g:%a'/)
   assert.doesNotMatch(workflow, /openssl|rand -hex|printf[^\n]*> "[$]p"|if \[ ! -s/)
+  assert.equal(existsSync(join(root, '.github/workflows/vps-seed-slots.yml')), false,
+    'workflow-ul concurent care genera și rescria secrete trebuie retras')
 })
 
 test('selecția runtime folosește direct candidatul validat din manifest', () => {

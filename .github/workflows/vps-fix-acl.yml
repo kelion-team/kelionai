@@ -1,15 +1,13 @@
 name: VPS Fix Secret ACLs
 
 on:
-  push:
-    branches: [ master ]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: production-release
+  group: vps-secret-acl-maintenance
   cancel-in-progress: false
 
 jobs:
