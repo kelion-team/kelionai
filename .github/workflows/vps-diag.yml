@@ -80,6 +80,26 @@ jobs:
           done
           case "$constructor_present" in
             0)
+              runtime_env=/root/kelion/config/runtime.env
+              [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] \
+                && grep -qx 'CODEX_WORKER_ENABLED=0' "$runtime_env" \
+                && grep -qx 'CONSTRUCTOR_PUBLISHER_ENABLED=0' "$runtime_env" \
+                && grep -qx 'CONSTRUCTOR_RELEASE_ENABLED=0' "$runtime_env" || {
+                  printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:runtime-enabled
+                  exit 1
+                }
+              for constructor_state_path in \
+                /root/kelion/config/codex-worker.env \
+                /root/kelion/config/constructor-publisher.env \
+                /root/kelion/config/constructor-release.env \
+                /etc/kelion/codex-worker.enabled \
+                /etc/kelion/constructor-publisher.enabled \
+                /etc/kelion/constructor-release.enabled; do
+                [ ! -e "$constructor_state_path" ] && [ ! -L "$constructor_state_path" ] || {
+                  printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:configured-without-token
+                  exit 1
+                }
+              done
               token_labels=()
               token_paths=()
               token_gids=()
@@ -134,10 +154,14 @@ jobs:
               exit 1
             }
             token_value=$(sed -n '1p' -- "$token_path")
-            [ "${#token_value}" -ge 20 ] || {
+            [ "${#token_value}" -ge 32 ] || {
               printf 'TOKEN_IDENTITY_INVALID:%s:length\n' "${token_labels[$index]}"
               exit 1
             }
+            if [[ "$token_value" = [[:space:]]* ]] || [[ "$token_value" = *[[:space:]] ]]; then
+              printf 'TOKEN_IDENTITY_INVALID:%s:marginal-whitespace\n' "${token_labels[$index]}"
+              exit 1
+            fi
             token_values+=("$token_value")
           done
           token_collision=0
