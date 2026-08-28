@@ -1074,6 +1074,19 @@ validate_live_constructor_units_quiesced() {
   validate_constructor_quiesce_barrier
 }
 
+wait_for_live_constructor_units_quiesced() {
+  local attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_live_constructor_units_quiesced; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    # systemctl daemon-reload este sincron, dar proprietățile efective pot fi
+    # observate tranzitoriu din generații diferite. Repetăm numai dovada
+    # read-only; niciun predicat și nicio mutație nu sunt relaxate.
+    sleep 0.25
+  done
+  return 1
+}
+
 validate_constructor_quiesce_barrier() {
   local unit state count=0
   [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
@@ -1198,43 +1211,17 @@ quiesce_constructor_units() {
   force_quiesce_constructor_units
 }
 
-force_quiesce_constructor_units() {
+validate_constructor_quiesce_postconditions() {
   local allow_partial=${1:-0} unit state failed=0 count=0
   case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
-  # Stamp-ul este capabilitatea de execuție a întregului lanț. Îl retragem și
-  # sincronizăm înainte de primul stop, astfel încât niciun SIGKILL să nu poată
-  # lăsa o stare false-ready cu numai o parte dintre unități oprite.
-  clear_runtime_ready_stamp || return 1
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-    if systemctl cat "$unit" >/dev/null 2>&1; then count=$((count + 1)); fi
-  done
-  if [ "$count" -ne 0 ] && [ "$count" -ne 6 ] && [ "$allow_partial" != 1 ]; then failed=1; fi
-  constructor_unit_count=$count
-  units_quiesced=1
-  for unit in "${constructor_timers[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    stop_and_disable_constructor_timer "$unit" || failed=1
-  done
-  for unit in "${constructor_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    stop_and_disable_constructor_service "$unit" || failed=1
-  done
-  for unit in "${constructor_auxiliary_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl stop "$unit" >/dev/null 2>&1 || :
-  done
-  systemctl daemon-reload || { report_quiesce_postcondition_failure systemd daemon-reload; failed=1; }
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}" "${constructor_auxiliary_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    count=$((count + 1))
     state=$(systemctl show "$unit" --property=ActiveState --value) \
       || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
     case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
-    case "$unit" in
-      kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
-      kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
-        validate_constructor_prepublication_unit_file_state "$unit" \
-          || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; } ;;
-    esac
+    validate_constructor_prepublication_unit_file_state "$unit" \
+      || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; }
     # La boot, un legacy WantedBy poate avea deja un start job care așteaptă
     # după Before=. Stop-ul sincron urmat de postcondiția fără job trebuie să-l
     # anuleze; altfel ar porni imediat după recovery-ul fail-closed.
@@ -1242,7 +1229,54 @@ force_quiesce_constructor_units() {
       report_quiesce_postcondition_failure "$unit" pending-job; failed=1
     fi
   done
+  if [ "$count" -ne 0 ] && [ "$count" -ne 6 ] && [ "$allow_partial" != 1 ]; then failed=1; fi
+  constructor_unit_count=$count
+  for unit in "${constructor_auxiliary_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
+  done
   [ "$failed" = 0 ]
+}
+
+wait_for_constructor_quiesce_postconditions() {
+  local allow_partial=${1:-0} attempt
+  case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_constructor_quiesce_postconditions "$allow_partial"; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
+force_quiesce_constructor_units() {
+  local allow_partial=${1:-0} unit
+  case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
+  # Stamp-ul este capabilitatea de execuție a întregului lanț. Îl retragem și
+  # sincronizăm înainte de primul stop, astfel încât niciun SIGKILL să nu poată
+  # lăsa o stare false-ready cu numai o parte dintre unități oprite.
+  clear_runtime_ready_stamp || return 1
+  units_quiesced=1
+  for unit in "${constructor_timers[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    stop_and_disable_constructor_timer "$unit"
+  done
+  for unit in "${constructor_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    stop_and_disable_constructor_service "$unit"
+  done
+  for unit in "${constructor_auxiliary_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    systemctl stop "$unit" >/dev/null 2>&1 || :
+  done
+  systemctl daemon-reload \
+    || { report_quiesce_postcondition_failure systemd daemon-reload; return 1; }
+  wait_for_constructor_quiesce_postconditions "$allow_partial"
 }
 
 start_constructor_unit() {
@@ -1363,7 +1397,7 @@ roll_forward_unit_transaction() {
     || { printf 'runtime-cutover: unit-roll-forward:daemon-reload\n' >&2; return 1; }
   force_quiesce_constructor_units \
     || { printf 'runtime-cutover: unit-roll-forward:post-quiesce\n' >&2; return 1; }
-  validate_live_constructor_units_quiesced \
+  wait_for_live_constructor_units_quiesced \
     || { printf 'runtime-cutover: unit-roll-forward:strict-live-unit-contract\n' >&2; return 1; }
   # Un forward unit-only nu publică niciodată capabilitatea de execuție. Markerul
   # pending obligă următoarea etapă mixtă să treacă schema runtime strictă.
@@ -1964,7 +1998,7 @@ recover_interrupted_cutover() {
     # Primul cutover mixt poate avea drept backup runtime.env din schema veche.
     # Rollbackul pre-commit este terminal numai în starea tranzitorie sigură:
     # unitățile noi exacte rămân oprite, stamp-ul absent și pending păstrat.
-    validate_live_constructor_units_quiesced \
+    wait_for_live_constructor_units_quiesced \
       || die 'rollbackul mixt pre-commit nu a păstrat unitățile exact quiesced'
     clear_journal || die 'jurnalul mixt rollback nu a putut fi șters pentru retry'
     recovery_in_progress=0
@@ -2081,7 +2115,7 @@ cleanup_cutover() {
               # Backupul runtime pre-migrare poate aparține allowlistului vechi.
               # Nu îl declarăm strict și nu republicăm stamp-ul; închidem
               # rollbackul quiesced ca următorul retry mixt să poată progresa.
-              if validate_live_constructor_units_quiesced; then
+              if wait_for_live_constructor_units_quiesced; then
                 units_quiesced=0
               else
                 cleanup_failed=1
@@ -2402,7 +2436,7 @@ if [ "$constructor_staged_unit_count" -eq 6 ]; then
     || die 'cele șase unități comise nu au putut fi dovedite inactive și dezactivate'
 fi
 if [ "$unit_only_transaction" = 1 ]; then
-  validate_live_constructor_units_quiesced \
+  wait_for_live_constructor_units_quiesced \
     || die 'setul unit-only comis nu este exact, inactiv și dezactivat'
 else
   validate_live_runtime_contract \

@@ -68,7 +68,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
   echo 'sursa instalării nu este repository-ul Kelion validat' >&2
   constructor_install_failure_line=$LINENO; exit 1
 }
-for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum stat sync systemctl systemd-analyze usermod; do
+for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod; do
   command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 # Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
@@ -890,6 +890,62 @@ stop_and_disable_constructor_service() {
   systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
 }
 
+validate_install_quiesce_postconditions() {
+  local expected_count=${1:-} unit state count=0
+  case "$expected_count" in 0|6) ;; *) return 1 ;; esac
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    count=$((count + 1))
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    validate_constructor_prepublication_unit_file_state "$unit" || return 1
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+  [ "$count" -eq "$expected_count" ] || return 1
+  for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+}
+
+wait_for_install_quiesce_postconditions() {
+  local expected_count=${1:-} attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_install_quiesce_postconditions "$expected_count"; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
+validate_published_systemd_postconditions() {
+  local unit state
+  for unit in \
+    kelion-runtime-config-recovery.service kelion-constructor-sync.service \
+    "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    validate_effective_installed_unit "$unit" || return 1
+  done
+  systemctl is-enabled --quiet kelion-runtime-config-recovery.service || return 1
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    validate_constructor_unit_file_state "$unit" || return 1
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+}
+
+wait_for_published_systemd_postconditions() {
+  local attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_published_systemd_postconditions; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
 retract_ready_stamp() {
   if [ ! -e "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ]; then return 0; fi
   [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
@@ -905,7 +961,7 @@ retract_ready_stamp() {
 }
 
 quiesce_before_install() {
-  local unit state count=0 failed=0
+  local unit count=0 failed=0
   retract_ready_stamp || failed=1
   for unit in "${constructor_timers[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
@@ -924,20 +980,8 @@ quiesce_before_install() {
   done
   systemctl daemon-reload || failed=1
   case "$count" in 0|6) ;; *) failed=1 ;; esac
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    validate_constructor_prepublication_unit_file_state "$unit" || failed=1
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
-  done
-  for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
-  done
-  [ "$failed" = 0 ]
+  [ "$failed" = 0 ] || return 1
+  wait_for_install_quiesce_postconditions "$count"
 }
 
 clear_install_transaction() {
@@ -973,7 +1017,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=162878a1d8442ecdd4ffca2e9828f34775cc6ea3971034f5b7e463d5230d5abe
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=d2806bad51ab301a4cc489fcd9976664e80ac5999789de45ff54556d97220c29
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
@@ -1169,25 +1213,13 @@ sync -f /etc/systemd/system
 
 set_constructor_install_phase published-validation
 for logical in "${install_logicals[@]}"; do validate_published_candidate "$logical"; done
-for unit in \
-  kelion-runtime-config-recovery.service kelion-constructor-sync.service \
-  "${constructor_timers[@]}" "${constructor_services[@]}"; do
-  validate_effective_installed_unit "$unit"
-done
-systemctl is-enabled --quiet kelion-runtime-config-recovery.service
 for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
 [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
 [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ "$(stat -c '%u:%g:%a' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600' ] \
   && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
-for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-  state=$(systemctl show "$unit" --property=ActiveState --value)
-  case "$state" in inactive|failed) ;; *) constructor_install_failure_line=$LINENO; exit 1 ;; esac
-  validate_constructor_unit_file_state "$unit" \
-    || { constructor_install_failure_line=$LINENO; exit 1; }
-  [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]
-done
+wait_for_published_systemd_postconditions
 
 set_constructor_install_phase commit
 clear_install_transaction

@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T14:46:50Z`
+Actualizat: `2026-08-28T15:29:51Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `90358096ac0fb4f8bc72d2e2d5d078dee10dce25` (PR `#1474`).
-  `pr-verify` `33179748579` și buildul OCI exact `33180175167` sunt verzi.
+- `origin/master` este `3511d9dfbc501344e8d1478d8a8431c44b4bfa52` (PR `#1476`).
+  CI master `33182470954` și buildul OCI exact `33182832152` sunt verzi.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -36,28 +36,51 @@ Actualizat: `2026-08-28T14:46:50Z`
   au eșuat identic într-o post-validare systemd după peste 30 de reload-uri.
   Jurnalul a rămas `prepared`; timerele sunt `disabled/inactive`, serviciile
   `static/inactive`, fără joburi, markere sau stamp ready. Aplicația este verde.
-- Remedierea curentă separă mutația de dovadă: stop + disable `--no-reload`
+- PR `#1476` separă mutația de dovadă: stop + disable `--no-reload`
   best-effort, un singur `daemon-reload`, apoi succes exclusiv prin
   UnitFileState/ActiveState/zero jobs. Etapele eșuate sunt etichetate non-secret.
-- Validări locale curente: `bash -n`, `git diff --check`, workflow safety,
-  hardcoding și `67/67` teste Constructor/deploy aplicabile sunt verzi.
+- Configurarea exactă pe `3511d9df`, runul `33183438759`, a trecut
+  `post-quiesce`, apoi a eșuat fail-closed în `recovery-preflight` la
+  `unit-roll-forward:strict-live-unit-contract`. Toate cele șase fișiere live
+  sunt byte-for-byte identice cu manifestul și candidatele; ulterior, fiecare
+  predicat strict systemd a trecut read-only. Între ultimul `daemon-reload` și
+  scanarea eșuată au fost aproximativ 659 ms, iar o scanare completă durează
+  peste o secundă: cauza este o observație systemd/D-Bus tranzitorie în timpul
+  scanării, nu un contract persistent greșit.
+- Release-ul manual `33184958383` pentru aceeași tuplă a validat CI, buildul și
+  imaginile, apoi s-a oprit fail-closed înainte de cutover: jurnalul persistent
+  de quiesce aparține configurării Constructor întrerupte, nu cererii de
+  release. Nu a fost deployată o versiune nouă; jurnalul nu trebuie preluat sau
+  șters de un release cu altă tuplă.
+- Remedierea curentă păstrează toate predicatele fail-closed și reîncearcă
+  bounded numai validatorii read-only (`12 × 0,25 s`); mutatorii și
+  `daemon-reload` rămân one-shot. Acceptă și actorul canonic
+  `github-actions[bot]` printr-un allowlist fără caractere de shell. Patchul
+  este pregătit pentru review prin PR protejat și nu este deployat.
 
 ## Următorul pas sigur
 
-1. Publică remedierea postcondițiilor systemd numai prin PR `chore/*`, fără bypass sau push în
-   master; cere toate check-urile verzi, merge și build OCI pentru SHA-ul exact.
-2. Rulează exact o operație `configure-constructor`; cere recovery, cutover,
-   credențiale distincte și status final verzi.
-3. Activează worker+publisher, execută un ordin pilot real cap-coadă și activează
-   release-ul numai cu PR-ul pilot merged și commitul exact.
+1. Publică remedierea postcondițiilor systemd numai prin PR `chore/*`, fără
+   bypass sau push în master; cere toate check-urile verzi, merge și build OCI
+   pentru SHA-ul exact.
+2. După merge, înainte de orice release de producție, rulează exact o operație
+   `configure-constructor`. Ea trebuie să consume jurnalul installer/runtime al
+   configurării întrerupte și să dovedească recovery, cutover, credențiale
+   distincte, zero joburi și status final verde.
+3. Abia după absența dovedită a jurnalelor, activează worker+publisher, execută
+   un ordin pilot real cap-coadă și permite release-ul numai cu PR-ul pilot
+   merged și commitul exact.
 
 ## Legături canonice
 
 - Recovery static + bootstrap b911: <https://github.com/kelion-team/kelionai/pull/1472>
 - Hotfix `noexec`: <https://github.com/kelion-team/kelionai/pull/1474>
-- Build OCI `90358096`: <https://github.com/kelion-team/kelionai/actions/runs/33180175167>
+- Contract systemd strict one-shot: <https://github.com/kelion-team/kelionai/pull/1476>
+- Build OCI `3511d9df`: <https://github.com/kelion-team/kelionai/actions/runs/33182832152>
 - Configure `noexec` fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33179065073>
 - Configure post-validare fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33180818900>
 - Retry controlat identic: <https://github.com/kelion-team/kelionai/actions/runs/33181409551>
+- Configure strict-contract fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33183438759>
+- Release manual blocat de jurnalul configurării: <https://github.com/kelion-team/kelionai/actions/runs/33184958383>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
