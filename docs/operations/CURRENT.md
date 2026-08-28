@@ -1,56 +1,47 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T05:41:00Z`
+Actualizat: `2026-08-28T11:12:00Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; branch implicit și singura țintă de producție:
   `master`.
-- `origin/master`: `5c04dcae4b360ee30effb51b60e133c612293b11`.
-- Live rulează încă versiunea sănătoasă `baf00aee68206ebdf259143fd9b71813fd6a5c02`
-  în slotul `green`; containerele aplicației și workerelor sunt healthy.
-- `vps-constructor-control` #794 și #796 au confirmat conexiunea SSH,
-  `codex-auth=ready`, `ready=true` și `sideEffectsActive=true` pentru generația
-  activă a aplicației.
-- Cele trei timere Constructor și markerii lor sunt inactive/dezactivate.
-  `sideEffectsActive` este markerul generației aplicației, nu starea timerelor.
-- Configurările Constructorului #795 și #798 au eșuat înainte de activare.
-  Diagnosticul read-only #118 a confirmat, fără valori, că starea VPS existentă conține
-  `TOKEN_IDENTITY_COLLISION:constructor-sync:constructor-publisher`.
-- Secretele furnizate runului #798 au trecut verificarea pairwise distinct de pe
-  runner. Artefactul OCI fixat la master a fost construit, probat și semnat în
-  build-ul #33144907325. Eșecul remote rămâne fără etichetă internă deoarece
-  aserțiunile instalatorului nu raportează încă faza și linia.
-- Statusul read-only #799 confirmă toate cele trei timere inactive și disabled,
-  `codex-auth=ready` și aplicația `ready=true`; nu există activare parțială.
+- `origin/master`: `6f0963895ebd5494e48df4ba2ef070e7add2c18f`.
+- Buildul OCI pentru acest SHA, inclusiv trust probe, semnare și publicare, este
+  verde în runul `33165092882` (6m50s).
+- Auditul read-only `audit-token-identity` `33164813105` a confirmat
+  `NO-COLLISION` pentru cele patru credențiale incoming din GitHub Actions față
+  de OAuth Admin live. Nu a modificat VPS-ul și nu a expus valori sau hashuri.
+- `configure-constructor` `33165537976` a eșuat fail-closed în faza
+  `unit-cutover`, linia telemetrică 842, înainte de activare. Cele trei timere
+  Constructor rămân oprite.
+- Cauza dovedită nu este rotația secretelor: installerul execută mai întâi un
+  cutover exclusiv al celor șase unități. Manifestul unit-only nu conține
+  credențialele incoming, iar helperul valida prematur setul live legacy. Abia
+  după instalarea unităților workflow-ul construiește tranzacția mixtă cu
+  valorile incoming deja validate pairwise.
+- Corecția locală introduce un opt-in limitat pentru amânarea porților numai în
+  cele două cutover-uri unit-only urmate obligatoriu de tranzacția mixtă
+  (`instaleaza-constructor.sh` și `vps-set-env.yml`). Deploy-ul release nu
+  primește opt-in-ul și continuă să valideze toate identitățile live.
+- Validări locale pentru corecție: `git diff --check` PASS, `bash -n` PASS pentru
+  helper și installer, `constructor-publication.test.mjs` 64/64 PASS. Testul
+  negativ dovedește că unit-only fără opt-in și orice cutover mixt execută toate
+  porțile, iar orice coliziune rămâne fail-closed.
 
 ## Următorul pas sigur
 
-1. Îmbină numai după porți verzi diagnosticul fail-closed al instalatorului,
-   limitat la fază, linie și cod de ieșire, fără comandă ori date sensibile.
-2. Rulează o singură operație `configure-constructor` pe `master` și remediază
-   exact aserțiunea raportată; nu repeta orb.
-3. Confirmă prin `vps-diag` că identitățile sunt distincte și prin
-   `constructor-status` că nimic nu s-a activat prematur.
-4. Activează `activate-worker-publisher`, verifică statusul, apoi folosește
-   `activate-release` numai cu un PR pilot merged și commitul exact cerut de
-   workflow.
+1. Publică schimbarea numai prin PR `chore/*`, cu toate checks și conversațiile
+   obligatorii verzi; fără push direct în `master` și fără bypass.
+2. După merge, cere un build verde pentru SHA-ul exact nou din `master`.
+3. Rulează o singură operație `configure-constructor`; tranzacția mixtă trebuie
+   să valideze candidații incoming înainte de commit și să consume bariera
+   unit-only numai după succes.
+4. Confirmă prin `constructor-status` că toate trei sunt încă inactive și
+   `ready:true`, apoi activează eșalonat worker+publisher și release-ul pilot.
 
 ## Legături canonice
 
-- Workflow status verde #794:
-  <https://github.com/kelion-team/kelionai/actions/runs/33143498133>
-- Configurare refuzată #795:
-  <https://github.com/kelion-team/kelionai/actions/runs/33143698760>
-- Status post-eșec #796:
-  <https://github.com/kelion-team/kelionai/actions/runs/33143743633>
-- Diagnostic read-only #117:
-  <https://github.com/kelion-team/kelionai/actions/runs/33143782462>
-- Build OCI semnat pentru master:
-  <https://github.com/kelion-team/kelionai/actions/runs/33144907325>
-- Configurare refuzată #798:
-  <https://github.com/kelion-team/kelionai/actions/runs/33145293484>
-- Diagnostic read-only #118:
-  <https://github.com/kelion-team/kelionai/actions/runs/33145400224>
-- Status fail-closed #799:
-  <https://github.com/kelion-team/kelionai/actions/runs/33145471701>
+- Audit identitate incoming: <https://github.com/kelion-team/kelionai/actions/runs/33164813105>
+- Build OCI verde pentru `6f096389`: <https://github.com/kelion-team/kelionai/actions/runs/33165092882>
+- Configure fail-closed la `unit-cutover`: <https://github.com/kelion-team/kelionai/actions/runs/33165537976>

@@ -1847,6 +1847,73 @@ test('migrarea unităților legacy este unit-only înaintea tranzacției runtime
   assert.ok(journal >= 0 && move > journal, 'jurnalul fsync trebuie să preceadă orice înlocuire de timer')
 })
 
+test('tranzacția unit-only amână porțile secretelor până la cutover-ul mixt cu candidații noi', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const provision = read('.github/workflows/vps-set-env.yml')
+  const deploy = read('deploy/deploy.sh')
+  const validator = shellFunction(cutover, 'validate_candidate_secret_separation')
+  const hmacGate = validator.indexOf("assert_pairwise_distinct 'HMAC-urile Constructor'")
+  const oauthGate = validator.indexOf("assert_pairwise_distinct 'credentialele OAuth Admin și GHCR'", hmacGate)
+  const githubGate = validator.indexOf("assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin'", oauthGate)
+  const mainStart = cutover.indexOf('mapfile -t manifest_entries')
+  const main = cutover.slice(mainStart)
+  const stateValidation = main.indexOf('\nvalidate_constructor_state\n')
+  const validatorCall = main.indexOf('\nvalidate_candidate_secret_separation\n')
+  const journal = main.indexOf('write_journal_phase prepared', validatorCall)
+  const mutation = main.indexOf('mutation_started=1', journal)
+  const firstMove = main.indexOf('mv -f -- "${prepared[$index]}"', mutation)
+
+  assert.ok(hmacGate >= 0 && oauthGate > hmacGate && githubGate > oauthGate,
+    'validatorul păstrează ordinea tuturor porților de identitate')
+  assert.ok(stateValidation >= 0 && validatorCall > stateValidation && journal > validatorCall
+    && mutation > journal && firstMove > mutation,
+  'validatorul strict trebuie apelat după selecția generației și înainte de jurnal sau commit')
+  assert.equal((main.match(/^validate_candidate_secret_separation$/gm) ?? []).length, 1)
+  assert.match(validator, /unit_only_transaction" = 1[^\n]*defer_secret_gates" = 1[\s\S]*return 0/)
+  assert.match(validator, /constructor_configured" -eq 3/)
+  assert.match(validator, /app-secret\.github-release-oauth-token/)
+  assert.match(validator, /gate-secret\.github-ghcr-read-token/)
+  assert.equal((installer.match(/KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1/g) ?? []).length, 1,
+    'installerul poate amâna porțile numai la singurul său cutover unit-only')
+  assert.equal((provision.match(/KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1/g) ?? []).length, 1,
+    'provisionarea poate amâna porțile numai la cutover-ul unit-only urmat de staging strict')
+  assert.doesNotMatch(deploy, /KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER/,
+    'deploy-ul release trebuie să valideze secretele live chiar în cutover-ul unit-only')
+
+  const harness = `set -euo pipefail
+${validator}
+calls=0
+force_collision=0
+assert_pairwise_distinct() {
+  calls=$((calls + 1))
+  if [ "$force_collision" = 1 ]; then return 73; fi
+}
+unit_only_transaction=1
+constructor_configured=3
+defer_secret_gates=1
+force_collision=1
+validate_candidate_secret_separation
+[ "$calls" = 0 ]
+calls=0
+defer_secret_gates=0
+force_collision=0
+validate_candidate_secret_separation
+[ "$calls" = 3 ]
+calls=0
+unit_only_transaction=0
+defer_secret_gates=1
+force_collision=0
+validate_candidate_secret_separation
+[ "$calls" = 3 ]
+calls=0
+force_collision=1
+if validate_candidate_secret_separation; then exit 91; fi
+[ "$calls" = 1 ]`
+  const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
 test('jurnalul durabil recuperează un SIGKILL între mutări înainte de backend și timere', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const recovery = cutover.indexOf('\nrecover_interrupted_cutover\n')
