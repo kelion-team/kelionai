@@ -14,6 +14,7 @@ on:
           - activate-release
           - constructor-status
           - diagnose-spool
+          - audit-token-identity
           - repair-spool-layout
       auto_routed_to_master:
         description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
@@ -1275,3 +1276,62 @@ jobs:
             exit "$rc_total"
           fi
           REMOTE
+
+      - name: Auditeaza identitatea tokenurilor (read-only)
+        if: inputs.operation == 'audit-token-identity'
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          phase='audit-token-identity'
+          on_err() {
+            local rc=$?
+            echo "{\"ok\":false,\"event\":\"audit_failure\",\"phase\":\"$phase\",\"line\":${LINENO},\"exit_code\":$rc,\"source_commit\":\"$SOURCE_COMMIT\"}" >&2
+            exit "$rc"
+          }
+          trap on_err ERR
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          for value in "$SYNC_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN" "$GHCR_READ_TOKEN"; do
+            [ -n "$value" ] && [ "${#value}" -ge 32 ]
+            [[ "$value" != [[:space:]]* && "$value" != *[[:space:]] ]]
+          done
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+
+          # Hash-urile incoming rămân exclusiv în memoria runner-ului. Tokenul
+          # live este citit ca prima linie, exact ca în runtime-config-cutover,
+          # astfel încât newline-ul fișierului să nu schimbe comparația.
+          h_sync=$(printf '%s' "$SYNC_GITHUB_TOKEN" | sha256sum | cut -d' ' -f1)
+          h_publisher=$(printf '%s' "$PUBLISHER_GITHUB_TOKEN" | sha256sum | cut -d' ' -f1)
+          h_release=$(printf '%s' "$RELEASE_GITHUB_TOKEN" | sha256sum | cut -d' ' -f1)
+          h_ghcr=$(printf '%s' "$GHCR_READ_TOKEN" | sha256sum | cut -d' ' -f1)
+          oauth_admin_hash=$(ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          oauth_admin_path=/root/kelion/secrets/github-release-oauth-token
+          [ -f "$oauth_admin_path" ] && [ ! -L "$oauth_admin_path" ]
+          [ "$(stat -c '%u:%g:%a' "$oauth_admin_path")" = '0:10050:440' ]
+          IFS= read -r oauth_admin_token < "$oauth_admin_path"
+          [ -n "$oauth_admin_token" ] && [ "${#oauth_admin_token}" -ge 32 ]
+          [[ "$oauth_admin_token" != [[:space:]]* && "$oauth_admin_token" != *[[:space:]] ]]
+          printf '%s' "$oauth_admin_token" | sha256sum | cut -d' ' -f1
+          oauth_admin_token=''
+          REMOTE
+          [ -n "$oauth_admin_hash" ] && [ "${#oauth_admin_hash}" -eq 64 ]
+
+          collision=0
+          if [ "$h_sync" = "$oauth_admin_hash" ]; then echo 'COLLISION: CONSTRUCTOR_SYNC_GITHUB_TOKEN'; collision=1; else echo 'DISTINCT: sync'; fi
+          if [ "$h_publisher" = "$oauth_admin_hash" ]; then echo 'COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN'; collision=1; else echo 'DISTINCT: publisher'; fi
+          if [ "$h_release" = "$oauth_admin_hash" ]; then echo 'COLLISION: VPS_GITHUB_TOKEN'; collision=1; else echo 'DISTINCT: release'; fi
+          if [ "$h_ghcr" = "$oauth_admin_hash" ]; then echo 'COLLISION: CONSTRUCTOR_GHCR_READ_TOKEN'; collision=1; else echo 'DISTINCT: ghcr-read'; fi
+          if [ "$collision" -ne 0 ]; then
+            echo 'AUDIT-VERDICT: COLLISION'
+            echo "{\"ok\":false,\"event\":\"audit_collision\",\"phase\":\"$phase\",\"source_commit\":\"$SOURCE_COMMIT\"}" >&2
+            exit 1
+          fi
+          echo 'AUDIT-VERDICT: NO-COLLISION'
+          echo "{\"ok\":true,\"event\":\"audit_complete\",\"phase\":\"$phase\",\"source_commit\":\"$SOURCE_COMMIT\"}"

@@ -468,6 +468,43 @@ test('diagnose-spool este o operație SSH strict read-only și fail-closed', () 
   assert.doesNotMatch(remote, /cat\s+[^-]/, 'diagnosticul nu trebuie să afișeze conținut raw')
 })
 
+test('audit-token-identity identifică doar numele coliziunii fără valori sau mutații VPS', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- audit-token-identity/)
+  const start = workflow.indexOf('      - name: Auditeaza identitatea tokenurilor (read-only)')
+  assert.ok(start >= 0, 'workflow-ul trebuie să declare auditul read-only al identității')
+  const nextStep = workflow.indexOf('\n      - name:', start + 1)
+  const audit = workflow.slice(start, nextStep < 0 ? workflow.length : nextStep)
+  assert.match(audit, /if: inputs\.operation == 'audit-token-identity'/)
+  assert.match(audit, /audit_failure[\s\S]*source_commit/)
+  assert.match(audit, /oauth_admin_path=\/root\/kelion\/secrets\/github-release-oauth-token/)
+  assert.match(audit, /IFS= read -r oauth_admin_token/)
+  assert.match(audit, /IFS= read -r oauth_admin_token[\s\S]*\[\[ "\$oauth_admin_token" != \[\[:space:\]\]\* && "\$oauth_admin_token" != \*\[\[:space:\]\] \]\][\s\S]*sha256sum/,
+    'auditul trebuie să respingă whitespace-ul marginal și în tokenul OAuth live')
+  assert.match(audit, /COLLISION: CONSTRUCTOR_SYNC_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: VPS_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: CONSTRUCTOR_GHCR_READ_TOKEN/)
+  assert.match(audit, /\[\[ "\$value" != \[\[:space:\]\]\* && "\$value" != \*\[\[:space:\]\] \]\]/,
+    'auditul trebuie să respingă whitespace-ul marginal înainte de hashing')
+  assert.match(audit, /"\$collision" -ne 0[\s\S]*AUDIT-VERDICT: COLLISION[\s\S]*audit_collision[\s\S]*exit 1/,
+    'o coliziune trebuie să închidă auditul fail-closed cu telemetrie de eșec')
+  assert.match(audit, /AUDIT-VERDICT: NO-COLLISION[\s\S]*audit_complete/)
+  assert.doesNotMatch(audit, /AUDIT-VERDICT: COLLISION[\s\S]*"ok":true/,
+    'ramura de coliziune nu poate raporta succes')
+  assert.doesNotMatch(audit, /echo\s+['"]?\$?(?:h_sync|h_publisher|h_release|h_ghcr|oauth_admin_hash)/,
+    'auditul nu trebuie să afișeze hashurile')
+  assert.doesNotMatch(audit, /set\s+-x/, 'auditul nu trebuie să activeze xtrace')
+
+  const remoteStart = audit.indexOf("<<'REMOTE'")
+  const remoteEnd = audit.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'auditul trebuie să aibă payload SSH delimitat')
+  const remote = audit.slice(remoteStart, remoteEnd)
+  assert.doesNotMatch(remote, /^\s*(?:sudo\s+)?(?:mkdir|chown|chmod|setfacl|rm|mv|tee|install|touch|cp|sed)\b/m,
+    'payload-ul VPS nu trebuie să invoce comenzi de mutație')
+  assert.doesNotMatch(remote, /(?:cat|head|tail)\s+/, 'auditul nu trebuie să afișeze conținutul secretului')
+})
+
 test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul oprit', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- repair-spool-layout/)
