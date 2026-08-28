@@ -488,14 +488,25 @@ jobs:
           install -d -o root -g root -m 0700 "$bootstrap"
           signing_key=/root/kelion/publisher-secrets/github-publisher-signing-key
           signing_dir=$(dirname -- "$signing_key")
+          canonical_signing_public() {
+            local key=$1 raw key_type key_blob ignored
+            raw=$(ssh-keygen -y -P '' -f "$key" 2>/dev/null) || return 1
+            [ "${#raw}" -ge 1 ] && [ "${#raw}" -le 32768 ] || return 1
+            [[ "$raw" != *$'\r'* && "$raw" != *$'\n'* ]] || return 1
+            [ "$(printf '%s\n' "$raw" | wc -l)" -eq 1 ] || return 1
+            IFS=' ' read -r key_type key_blob ignored <<<"$raw"
+            [ "$key_type" = ssh-ed25519 ] || return 1
+            [[ "$key_blob" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || return 1
+            printf '%s %s\n' "$key_type" "$key_blob"
+          }
           validate_signing_key() {
             local key=$1 public info
             [ -f "$key" ] && [ ! -L "$key" ] \
               && [ "$(stat -Lc '%u:%g:%a:%h' "$key")" = '0:0:400:1' ] || return 1
-            public=$(ssh-keygen -y -f "$key") || return 1
+            public=$(canonical_signing_public "$key") || return 1
             [[ "$public" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}$ ]] || return 1
-            info=$(ssh-keygen -lf "$key" -E sha256) || return 1
-            [[ "$info" =~ ^256\ SHA256:[A-Za-z0-9+/]{43}\ .+\ \(ED25519\)$ ]]
+            info=$(printf '%s\n' "$public" | LC_ALL=C ssh-keygen -lf - -E sha256 2>/dev/null) || return 1
+            [[ "$info" =~ ^256\ SHA256:[A-Za-z0-9+/]{43}\ no\ comment\ \(ED25519\)$ ]]
           }
           normalize_legacy_signing_key() {
             local key=$1 recovery_root candidate size
@@ -553,15 +564,19 @@ jobs:
             constructor_config_check='signing-key-validation'
             validate_signing_key "$signing_key"
           fi
-          signing_public=$(ssh-keygen -y -f "$signing_key")
-          signing_fingerprint=$(ssh-keygen -lf "$signing_key" -E sha256 | awk '{print $2}')
+          signing_public=$(canonical_signing_public "$signing_key")
+          signing_fingerprint=$(printf '%s\n' "$signing_public" | LC_ALL=C ssh-keygen -lf - -E sha256 | awk '{print $2}')
           [[ "$signing_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
           constructor_config_check='signing-key-registration'
           publisher_headers=$bootstrap/publisher-api.headers
           printf 'Authorization: Bearer %s\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\n' "$publisher_token" > "$publisher_headers"
           chown root:root "$publisher_headers"; chmod 0600 "$publisher_headers"
           existing_keys=$(curl --fail --silent --show-error --header "@$publisher_headers" https://api.github.com/user/ssh_signing_keys)
-          if ! jq -e --arg key "$signing_public" '.[] | select(.key == $key)' <<<"$existing_keys" >/dev/null; then
+          if ! jq -e --arg key "$signing_public" \
+              '[.[]?.key | select(type == "string") |
+                capture("^(?<type>ssh-ed25519)[ \\t]+(?<blob>[A-Za-z0-9+/]+={0,2})(?:[ \\t].*)?$")? |
+                "\(.type) \(.blob)"] | index($key) != null' \
+              <<<"$existing_keys" >/dev/null; then
             jq -n --arg title 'Kelion Constructor Publisher' --arg key "$signing_public" '{title:$title,key:$key}' |
               curl --fail --silent --show-error -X POST --header "@$publisher_headers" -H 'Content-Type: application/json' --data-binary @- https://api.github.com/user/ssh_signing_keys >/dev/null
           fi
