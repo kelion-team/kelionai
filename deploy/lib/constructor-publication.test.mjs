@@ -809,8 +809,8 @@ test('mapările subuid/subgid sunt validate strict și publicate atomic', () => 
   const installer = read('deploy/instaleaza-constructor.sh')
   const validator = shellFunction(installer, 'validate_subid_map')
   const ensure = shellFunction(installer, 'ensure_subids')
-  const durableQuiesce = installer.lastIndexOf('write_install_journal quiesced')
   const firstSubidCommit = installer.lastIndexOf('ensure_subids kelion-codex')
+  const durableQuiesce = installer.lastIndexOf('write_install_journal quiesced', firstSubidCommit)
   const secondSubidCommit = installer.lastIndexOf('ensure_subids kelion-publisher')
   assert.ok(durableQuiesce >= 0 && firstSubidCommit > durableQuiesce && secondSubidCommit > firstSubidCommit,
     'ambele mapări se publică numai după jurnalul quiesced, pentru recovery fail-closed între rename-uri')
@@ -1912,6 +1912,59 @@ if validate_candidate_secret_separation; then exit 91; fi
 [ "$calls" = 1 ]`
   const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
+test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de republicare', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const journalWriter = shellFunction(installer, 'write_install_journal')
+  const loader = shellFunction(installer, 'load_install_transaction')
+  const validator = shellFunction(installer, 'validate_superseded_install_root')
+  const cleanup = shellFunction(installer, 'remove_superseded_install_root')
+  const finalizer = shellFunction(installer, 'clear_install_transaction')
+  const supersede = shellFunction(installer, 'supersede_quiesced_install_transaction')
+  const main = installer.slice(installer.indexOf("install_root=''"))
+  const branch = main.slice(main.indexOf('if [ "$resume_different_source" = 1 ]'))
+  const switchJournal = supersede.indexOf('stage_install_transaction')
+  const durableQuiesced = supersede.indexOf('write_install_journal quiesced', switchJournal)
+  const journalUnlink = finalizer.indexOf('rm -f -- "$INSTALL_JOURNAL"')
+  const journalFsync = finalizer.indexOf('sync -f "$RUNTIME_ROOT"', journalUnlink)
+  const currentRootCleanup = finalizer.indexOf('rm -f -- "$install_root/files/$logical"', journalFsync)
+  const removeOld = finalizer.indexOf('remove_superseded_install_root', currentRootCleanup)
+
+  assert.match(journalWriter,
+    /supersededTransactionRoot[\s\S]*supersededManifestSha256[\s\S]*supersededSourceSha256[\s\S]*sync -f "[$]temporary"[\s\S]*mv -f -- "[$]temporary" "[$]INSTALL_JOURNAL"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.match(loader,
+    /has\("supersededTransactionRoot"\)[\s\S]*has\("supersededManifestSha256"\)[\s\S]*has\("supersededSourceSha256"\)[\s\S]*supersededTransactionRoot != \.transactionRoot[\s\S]*validate_superseded_install_root/)
+  assert.match(validator, /\[ -e "[$]root" \] \|\| \[ -L "[$]root" \] \|\| return 1/,
+    'un jurnal activ nu poate accepta dispariția rădăcinii supersedate')
+  assert.match(validator, /realpath -e[\s\S]*0:0:700[\s\S]*0:0:700/)
+  assert.match(validator, /root\/manifest[\s\S]*0:0:600[\s\S]*sha256sum[\s\S]*manifest_sha256/)
+  assert.match(validator, /candidate=[$]root\/files\/[$]logical[\s\S]*0:0:600[\s\S]*sha256sum[\s\S]*digest/)
+  assert.match(cleanup,
+    /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.ok(switchJournal >= 0 && durableQuiesced > switchJournal,
+    'intentul curent trebuie să devină durabil înainte să continue instalarea')
+  assert.ok(journalUnlink >= 0 && journalFsync > journalUnlink
+    && currentRootCleanup > journalFsync && removeOld > currentRootCleanup,
+  'niciun cleanup curent sau supersedat nu poate începe înainte ca absența jurnalului să fie durabilă')
+  assert.doesNotMatch(supersede, /clear_install_transaction|remove_superseded_install_root|runtime-config-cutover\.sh/,
+    'supersedarea nu poate crea o fereastră fără jurnal și nu poate executa helperul generației vechi')
+
+  const noRuntimeJournal = branch.indexOf('[ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ]')
+  const boundedSupersession = branch.indexOf('[ -z "$install_superseded_root" ]')
+  const noReady = branch.indexOf('[ ! -e "$READY_STAMP" ]', noRuntimeJournal)
+  const canonicalPending = branch.indexOf('[ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ]', noReady)
+  const exactOldArtifacts = branch.indexOf('validate_published_candidate "$logical"', canonicalPending)
+  const validOldUnits = branch.indexOf('verify_candidate_units', exactOldArtifacts)
+  const atomicSwitch = branch.indexOf('supersede_quiesced_install_transaction', validOldUnits)
+  const publishCurrent = main.indexOf('set_constructor_install_phase artifact-publication', main.indexOf('if [ "$resume_different_source" = 1 ]'))
+  assert.ok(boundedSupersession >= 0 && noRuntimeJournal > boundedSupersession
+    && noReady > noRuntimeJournal && canonicalPending > noReady
+    && exactOldArtifacts > canonicalPending && validOldUnits > exactOldArtifacts && atomicSwitch > validOldUnits,
+  'supersedarea repetată, orice jurnal runtime, ready, pending necanonic, artefact vechi diferit sau tuplă invalidă trebuie să refuze switch-ul')
+  assert.ok(publishCurrent > main.indexOf('supersede_quiesced_install_transaction', main.indexOf('if [ "$resume_different_source" = 1 ]')),
+    'candidații checkoutului curent pot fi publicați numai după switch-ul durabil al jurnalului')
+  assert.doesNotMatch(main, /Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent/)
 })
 
 test('jurnalul durabil recuperează un SIGKILL între mutări înainte de backend și timere', () => {
