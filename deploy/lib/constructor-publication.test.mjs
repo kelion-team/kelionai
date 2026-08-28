@@ -330,6 +330,24 @@ test('cheia privată de semnare rămâne root-only și ajunge la publisher numai
   assert.doesNotMatch(workflow, /chown root:kelion-publisher "[$]signing_key"|chmod 0440 "[$]signing_key"/)
 })
 
+test('metadata legacy a cheii de semnare este normalizată fără schimbarea materialului', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const normalization = workflow.indexOf('normalize_legacy_signing_key()')
+  const finalValidation = workflow.indexOf('constructor_config_check=\'signing-key-validation\'', normalization)
+  const registration = workflow.indexOf('constructor_config_check=\'signing-key-registration\'', finalValidation)
+  const section = workflow.slice(normalization, registration)
+
+  assert.ok(normalization >= 0 && finalValidation > normalization && registration > finalValidation)
+  assert.match(section, /\[ -f "[$]key" \] && \[ ! -L "[$]key" \]/)
+  assert.match(section, /stat -Lc '%u:%h' "[$]key"\)" = '0:1'/)
+  assert.match(section, /stat -Lc '%s' "[$]key"/)
+  assert.match(section, /install -o root -g root -m 0400 -- "[$]key" "[$]candidate"/)
+  assert.match(section, /validate_signing_key "[$]candidate"[\s\S]*cmp -s -- "[$]key" "[$]candidate"/)
+  assert.match(section, /sync -f "[$]candidate"[\s\S]*mv -f -- "[$]candidate" "[$]key"[\s\S]*sync -f "[$]signing_dir"[\s\S]*rmdir -- "[$]recovery_root"[\s\S]*sync -f "[$]signing_dir"/)
+  assert.match(section, /constructor_config_check='signing-key-normalization'[\s\S]*normalize_legacy_signing_key "[$]signing_key"[\s\S]*constructor_config_check='signing-key-validation'[\s\S]*validate_signing_key "[$]signing_key"/)
+  assert.doesNotMatch(section, /ssh-keygen[^\n]*-[Ct][^\n]*"[$]key"/)
+})
+
 test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout neverificat', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const installer = read('deploy/instaleaza-constructor.sh')
@@ -597,6 +615,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'runtime-journal-recovery',
     'secret-stage',
     'signing-key-layout',
+    'signing-key-normalization',
     'signing-key-publication',
     'signing-key-registration',
     'signing-key-validation',

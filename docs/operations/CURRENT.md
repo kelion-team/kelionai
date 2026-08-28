@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T17:03:24Z`
+Actualizat: `2026-08-28T19:51:43Z`
 
 ## Stare verificată
 
@@ -82,28 +82,28 @@ Actualizat: `2026-08-28T17:03:24Z`
 - Release-ul canonic `33192026959` pe `ccb4b425` a validat candidatul, apoi s-a
   oprit fail-closed înainte de cutover deoarece jurnalul persistent aparține
   configurării Constructor întrerupte. Nu a publicat și nu a activat release-ul.
-- Configurarea controlată unică `33192142478` a consumat jurnalul, a trecut
-  recovery, supersede, publicarea artefactelor și a celor șase unități,
-  `published-validation` și `commit`; installerul s-a încheiat cu succes.
-  Blocul SSH exterior a ieșit apoi cu codul `1`, înainte de cutoverul runtime și
-  fără niciun mesaj intermediar. Workflow-ul nu avea `ERR` trap sau checkpointuri
-  după installer, deci comanda exactă nu poate fi recuperată din log; `npm`,
-  predicatele cheii de semnare, bootstrapul repo și pull-urile rămân numai
-  candidați, nu cauze demonstrate.
-- Patchul curent adaugă exclusiv atribuire: fază și checkpoint din vocabular fix,
-  linia, exit code-ul și SHA-ul sursă. Nu afișează comanda, căi sau valori secrete
-  și nu schimbă nicio mutație ori niciun predicat fail-closed.
+- Configurarea controlată `33205355542` pe `aa330322` a confirmat că installerul
+  trece recovery, publicarea celor șase unități, `published-validation` și
+  `commit`. Telemetria post-installer a atribuit apoi exact eșecul:
+  `phase=post-installer`, `check=signing-key-validation`, `exit_code=1`.
+- CI `33193590693` și buildul OCI `33193943981` pentru `aa330322` sunt verzi.
+  Release-ul `33194500539` a fost refuzat înainte de cutover deoarece
+  `runtime.env` live nu trece încă validatorul canonic; nu a publicat versiunea.
+- Remedierea curentă păstrează materialul și fingerprintul cheii existente.
+  Pentru o cheie regulară, root-owned, fără hardlinkuri și cu mărime limitată,
+  construiește o copie `0400` root-only, validează ED25519 și egalitatea
+  byte-for-byte, apoi o publică atomic. O cheie invalidă, un symlink, un owner
+  străin sau un hardlink rămân refuzate fail-closed.
 
 ## Următorul pas sigur
 
-1. Publică atribuirea post-installer numai prin PR `chore/*`, fără bypass sau
-   push în master; cere toate check-urile verzi.
-2. Nu porni niciun release de producție. După merge, rulează o singură
-   configurare controlată și folosește eticheta exactă pentru o remediere minimă;
-   nu modifica speculativ `npm`, cheia, repo-urile sau pull-urile.
-3. Reia configurarea după remedierea dovedită. Activarea și release-ul rămân
-   blocate până la status verde, absența jurnalelor și verificarea finală a
-   workerului, publisherului și releaserului.
+1. Publică normalizarea cheii numai prin PR `chore/*`, fără bypass sau push în
+   master; cere toate check-urile verzi.
+2. Nu porni niciun release de producție. După merge și buildul OCI exact, rulează
+   o singură configurare controlată pe `master`.
+3. Activarea și release-ul rămân blocate până când configurarea este verde,
+   jurnalele sunt absente și statusul final confirmă workerul, publisherul și
+   releaserul dezactivate/ready conform etapei curente.
 
 ## Legături canonice
 
@@ -122,5 +122,7 @@ Actualizat: `2026-08-28T17:03:24Z`
 - Remediere scope Bash: <https://github.com/kelion-team/kelionai/pull/1482>
 - Release canonic blocat de jurnal: <https://github.com/kelion-team/kelionai/actions/runs/33192026959>
 - Configure post-installer neatribuit: <https://github.com/kelion-team/kelionai/actions/runs/33192142478>
+- Configure signing-key-validation atribuit: <https://github.com/kelion-team/kelionai/actions/runs/33205355542>
+- Release `aa330322` refuzat de contractul runtime: <https://github.com/kelion-team/kelionai/actions/runs/33194500539>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
