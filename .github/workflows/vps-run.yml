@@ -1084,10 +1084,21 @@ jobs:
           }
           trap on_err ERR
           echo "source_commit=$source_commit"
+          rc_total=0
           for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
             echo "--- $p"
             stat -c 'type=%F mode=%a owner=%U group=%G' "$p" 2>&1
-            getfacl -p "$p" 2>&1
+            if command -v getfacl >/dev/null 2>&1; then
+              if getfacl -p "$p" 2>&1; then
+                :
+              else
+                rc=$?
+                printf 'acl_read_error exit_code=%s path=%s\n' "$rc" "$p"
+                rc_total=$rc
+              fi
+            else
+              echo 'ACL_UNAVAILABLE=1 reason=getfacl_absent'
+            fi
           done
           echo '--- tree'
           find /var/lib/kelion-constructor-handoff -maxdepth 2 -printf '%y %m %u:%g %p -> %l\n' 2>&1
@@ -1098,5 +1109,9 @@ jobs:
             sha256sum "$activation_file"
           else
             echo 'absent'
+          fi
+          if [ "$rc_total" -ne 0 ]; then
+            echo "diagnostic_rc=$rc_total"
+            exit "$rc_total"
           fi
           REMOTE
