@@ -734,7 +734,9 @@ jobs:
           ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s -- "$OPERATION" "$pilot_commit" <<'REMOTE'
           set -euo pipefail
           operation=$1
-          pilot_commit=$2
+          # SSH nu păstrează întotdeauna argumentul final gol. Operațiile fără
+          # pilot trebuie să îl trateze explicit ca absent, nu ca eroare nounset.
+          pilot_commit=${2-}
           if [ "$operation" = activate-release ]; then
             [[ "$pilot_commit" =~ ^[0-9a-f]{40}$ ]]
           else
