@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T22:43:48Z`
+Actualizat: `2026-08-28T23:18:36Z`
 
 ## Stare verificată
 
@@ -125,16 +125,33 @@ Actualizat: `2026-08-28T22:43:48Z`
   protecțiile pentru tip, owner, hardlink, dimensiune și fingerprint și a fost
   integrat prin rebase după toate porțile verzi. Workflow-ul din `master` este
   byte-for-byte identic cu varianta validată local; CI master este verde.
+- PR `#1496` a mutat toate apelurile Podman rootless în runtime-ul accesibil
+  identității Constructor. CI `33218751472` și buildul OCI `33219033777` pentru
+  `645afe8d` sunt verzi; pull-urile worker și publisher au trecut pe VPS.
+- Release-ul canonic `33219478924` pentru aceeași tuplă a fost refuzat înainte
+  de cutover deoarece `runtime.env` live este încă legacy. Configurarea
+  `33219503435` a instalat Constructorul dezactivat și a ajuns la aplicarea
+  runtime, apoi a fost refuzată fail-closed: fișierul staged
+  `constructor-config.constructor-release.env` conținea două comentarii, iar
+  validatorul strict acceptă exclusiv linii `CHEIE=valoare`. Versiunea publică
+  a rămas `baf00ae` și endpointurile de sănătate sunt verzi.
+- Remedierea curentă mută explicația în afara heredoc-ului `.env` și corectează
+  și următorul blocaj determinist: contractul live trebuie să ceară egalitatea
+  runtime/publisher pentru porțile PR, dar release-ul post-merge trebuie să
+  rămână exact `verify,container-isolation`. Regresiile execută validatorul pe
+  fișierul generat și contractul separat al porților; pin-ul SHA-256 al helperului
+  compatibil de recovery este actualizat la bytes-ii noi.
 
 ## Următorul pas sigur
 
-1. Publică remedierea cwd Podman, regresia executabilă și acest checkpoint numai
-   prin PR `chore/*`, fără bypass sau push în `master`; cere toate check-urile.
+1. Publică remedierea heredoc-ului release, regresia executabilă și acest
+   checkpoint numai prin PR, fără bypass sau push direct în `master`; cere toate
+   check-urile protejate.
 2. După merge, cere CI și build OCI verzi pentru noul vârf `master`, apoi rulează
    o singură configurare controlată pe acel SHA și cere rezultat verde.
-3. Abia după configurarea verde, folosește tupla noului SHA și release-ul canonic
-   asociat; dovedește extern SHA-ul complet, readiness și side effects înainte
-   să marchezi deploy-ul reușit sau să închizi incidentele verifierului.
+3. Abia după configurarea verde, reia release-ul canonic al noii tuple; dovedește
+   extern SHA-ul complet, readiness și side effects înainte să marchezi deploy-ul
+   reușit sau să închizi incidentele verifierului.
 
 ## Legături canonice
 
@@ -167,5 +184,10 @@ Actualizat: `2026-08-28T22:43:48Z`
 - Build OCI `01d8522`: <https://github.com/kelion-team/kelionai/actions/runs/33217134821>
 - Release `01d8522` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33217596289>
 - Configurare cu cwd Podman invalid: <https://github.com/kelion-team/kelionai/actions/runs/33217617233>
+- Remediere cwd Podman: <https://github.com/kelion-team/kelionai/pull/1496>
+- CI master `645afe8d`: <https://github.com/kelion-team/kelionai/actions/runs/33218751472>
+- Build OCI `645afe8d`: <https://github.com/kelion-team/kelionai/actions/runs/33219033777>
+- Release `645afe8d` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33219478924>
+- Configurare cu comentarii în env-ul staged: <https://github.com/kelion-team/kelionai/actions/runs/33219503435>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>

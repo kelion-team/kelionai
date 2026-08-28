@@ -855,6 +855,12 @@ CONSTANTS
   fi
 }
 
+validate_constructor_checks_contract() {
+  local runtime_checks=$1 publisher_checks=$2 release_checks=$3
+  [ "$runtime_checks" = "$publisher_checks" ] \
+    && [ "$release_checks" = 'verify,container-isolation' ]
+}
+
 validate_constructor_timer_unit() {
   local file logical timer service
   file=$1
@@ -1028,7 +1034,7 @@ validate_live_runtime_contract() {
     runtime_checks=$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "$CONFIG_ROOT/runtime.env")
     publisher_checks=$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "${constructor_configs[1]}")
     release_checks=$(sed -n 's/^CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=//p' "${constructor_configs[2]}")
-    [ "$runtime_checks" = "$publisher_checks" ] && [ "$runtime_checks" = "$release_checks" ] || return 1
+    validate_constructor_checks_contract "$runtime_checks" "$publisher_checks" "$release_checks" || return 1
   fi
   for index in "${!constructor_markers[@]}"; do
     path=${constructor_markers[$index]}

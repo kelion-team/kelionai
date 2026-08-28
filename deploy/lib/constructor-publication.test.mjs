@@ -824,6 +824,64 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
   assert.doesNotMatch(control, /^\s+CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation$/m)
 })
 
+test('env-ul release generat de control trece validatorul runtime real', () => {
+  const control = read('.github/workflows/vps-run.yml')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const marker = '          cat > "$cutover_stage/files/constructor-config.constructor-release.env" <<EOF\n'
+  const start = control.indexOf(marker)
+  const end = control.indexOf('\n          EOF', start + marker.length)
+
+  assert.ok(start >= 0 && end > start, 'heredoc-ul constructor-release.env nu poate fi extras')
+  const template = control.slice(start + marker.length, end).replace(/^ {10}/gm, '')
+  const rendered = template
+    .replaceAll('$repository', 'kelion-team/kelionai')
+    .replaceAll('$public_origin', 'https://kelionai.app')
+  assert.doesNotMatch(rendered, /^\s*#/, 'fișierul env strict nu poate conține comentarii')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-constructor-release-env-'))
+  const envFile = join(sandbox, 'constructor-release.env')
+  try {
+    writeFileSync(envFile, `${rendered}\n`)
+    const validator = [
+      'set -euo pipefail',
+      shellFunction(cutover, 'validate_text_file_bytes'),
+      shellFunction(cutover, 'validate_env_file'),
+      'validate_env_file "$1" constructor-config.constructor-release.env',
+    ].join('\n')
+    const result = spawnSync(bashExecutable, ['-c', validator, 'validate-constructor-release-env', envFile], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, `validatorul runtime a respins env-ul generat: ${result.stderr}`)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test('contractul live separă porțile PR de porțile release post-merge', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const checksValidator = shellFunction(cutover, 'validate_constructor_checks_contract')
+  const command = `${checksValidator}\nvalidate_constructor_checks_contract "$1" "$2" "$3"`
+  const prChecks = 'verify,container-isolation,current-tree,merge-policy'
+  const releaseChecks = 'verify,container-isolation'
+  const run = (runtime, publisher, release) => spawnSync(
+    bashExecutable,
+    ['-c', command, 'validate-constructor-checks', runtime, publisher, release],
+    { cwd: root, encoding: 'utf8' },
+  )
+
+  assert.equal(run(prChecks, prChecks, releaseChecks).status, 0)
+  assert.notEqual(run(prChecks, releaseChecks, releaseChecks).status, 0,
+    'publisherul trebuie să păstreze toate porțile PR din runtime')
+  assert.notEqual(run(prChecks, prChecks, prChecks).status, 0,
+    'release-ul post-merge nu poate cere joburile exclusiv PR')
+
+  const liveContract = shellFunction(cutover, 'validate_live_runtime_contract')
+  assert.match(liveContract,
+    /validate_constructor_checks_contract "[$]runtime_checks" "[$]publisher_checks" "[$]release_checks"/)
+  assert.doesNotMatch(liveContract, /"[$]runtime_checks" = "[$]release_checks"/)
+})
+
 test('rescrierea runtime.env din control rulează cu AWK-ul de sistem', () => {
   const control = read('.github/workflows/vps-run.yml')
   const commandStart = control.indexOf('          awk -F= \\')
