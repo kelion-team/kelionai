@@ -87,6 +87,21 @@ validate_constructor_prepublication_unit_file_state() {
   esac
 }
 
+# Serviciile canonice sunt statice și `systemctl disable` întoarce non-zero
+# chiar dacă postcondiția sigură este deja satisfăcută. Oprim sincron serviciul,
+# încercăm să retragem orice symlink [Install] legacy, iar apelantul validează
+# apoi UnitFileState, ActiveState și absența joburilor. Codul de ieșire al
+# mutatorului nu poate înlocui acele postcondiții.
+stop_and_disable_constructor_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null || return 1
+  systemctl disable "$unit" >/dev/null 2>&1 || :
+}
+
 early_recover_only_barrier() {
   local unit state failed=0 ready_root=/run/kelion ready_stamp=/run/kelion/runtime-config-recovery.ready
   if [ -e "$ready_root" ] || [ -L "$ready_root" ]; then
@@ -111,7 +126,9 @@ early_recover_only_barrier() {
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     case "$unit" in
       kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null || failed=1 ;;
-      *) systemctl disable --now "$unit" >/dev/null || failed=1 ;;
+      *.timer) systemctl disable --now "$unit" >/dev/null || failed=1 ;;
+      *.service) stop_and_disable_constructor_service "$unit" || failed=1 ;;
+      *) failed=1 ;;
     esac
     state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
@@ -1175,7 +1192,7 @@ force_quiesce_constructor_units() {
   done
   for unit in "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl disable --now "$unit" >/dev/null || failed=1
+    stop_and_disable_constructor_service "$unit" || failed=1
   done
   for unit in "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
@@ -1185,6 +1202,11 @@ force_quiesce_constructor_units() {
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+    case "$unit" in
+      kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+      kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+        validate_constructor_prepublication_unit_file_state "$unit" || failed=1 ;;
+    esac
     # La boot, un legacy WantedBy poate avea deja un start job care așteaptă
     # după Before=. disable --now trebuie să-l anuleze sincron; altfel ar porni
     # imediat după ce recovery-ul fail-closed returnează.
@@ -1228,7 +1250,7 @@ restore_constructor_timers() {
   done
   if [ "$boot_recovery" = 0 ]; then
     for unit in "${constructor_services[@]}"; do
-      systemctl disable "$unit" >/dev/null || failed=1
+      stop_and_disable_constructor_service "$unit" || failed=1
       validate_constructor_unit_file_state "$unit" || failed=1
       state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
       case "$state" in inactive|failed) ;; *) failed=1 ;; esac

@@ -867,6 +867,19 @@ validate_constructor_prepublication_unit_file_state() {
   esac
 }
 
+stop_and_disable_constructor_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null || return 1
+  # Unitățile vechi pot avea [Install], cele canonice sunt statice. Retragem
+  # best-effort legăturile legacy și folosim numai postcondiția verificată mai
+  # jos ca autoritate pentru succes.
+  systemctl disable "$unit" >/dev/null 2>&1 || :
+}
+
 retract_ready_stamp() {
   if [ ! -e "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ]; then return 0; fi
   [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
@@ -893,7 +906,7 @@ quiesce_before_install() {
   for unit in "${constructor_services[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       count=$((count + 1))
-      systemctl disable --now "$unit" >/dev/null || failed=1
+      stop_and_disable_constructor_service "$unit" || failed=1
     fi
   done
   for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
@@ -930,22 +943,6 @@ clear_install_transaction() {
   sync -f "$RUNTIME_ROOT"
 }
 
-# Un jurnal runtime existent este consumat de helperul exact care l-a creat,
-# sub același lock, înainte ca acel helper să poată fi înlocuit.
-set_constructor_install_phase recovery-preflight
-if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
-  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ]
-  [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ]
-  KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" \
-    --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
-fi
-for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
-  [ ! -e "$journal" ] && [ ! -L "$journal" ] \
-    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; constructor_install_failure_line=$LINENO; exit 1; }
-done
-
 install_root=''
 install_request_id=''
 install_commit=''
@@ -958,6 +955,91 @@ install_previous_superseded_root=''
 install_previous_superseded_manifest_sha256=''
 install_previous_superseded_source_sha256=''
 resume_different_source=0
+
+# b911 a publicat serviciile canonice statice și jurnalul runtime `prepared`,
+# apoi helperul său a rămas blocat deoarece a tratat exit-ul `disable` pentru o
+# unitate statică drept eșec. Compatibilitatea este intenționat one-shot și
+# dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
+# copia de recovery trebuie să fie exact helperul auditat din acest bundle.
+readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=962962542addede737783b56aa04830057e5b6b1c6094d8bb2f78b05ea013eee
+
+recover_existing_runtime_journal() {
+  local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
+  local live_helper=$ROOT/bin/runtime-config-cutover.sh
+  local live_compose=$ROOT/config/compose.production.yml
+  local candidate_helper=$repo_root/deploy/lib/runtime-config-cutover.sh
+  local live_sha candidate_sha recovery_helper temporary='' status=0 cleanup_failed=0
+
+  [ -f "$runtime_journal" ] && [ ! -L "$runtime_journal" ] \
+    && [ "$(stat -c '%u:%g:%a' "$runtime_journal")" = '0:0:600' ] || return 1
+  [ -f "$live_helper" ] && [ ! -L "$live_helper" ] \
+    && [ "$(stat -c '%u:%g:%a' "$live_helper")" = '0:0:500' ] || return 1
+  [ -f "$live_compose" ] && [ ! -L "$live_compose" ] \
+    && [ "$(stat -c '%u:%g:%a' "$live_compose")" = '0:0:444' ] || return 1
+  live_sha=$(sha256sum "$live_helper" | awk '{print $1}') || return 1
+  recovery_helper=$live_helper
+
+  if [ "$live_sha" = "$LEGACY_STATIC_RUNTIME_HELPER_SHA256" ]; then
+    # Jurnalul installerului autentifică tranzacția b911, iar manifestul ei
+    # leagă helperul și compose-ul live de candidații root-only cu hash.
+    load_install_transaction || return 1
+    validate_published_candidate runtime-helper || return 1
+    validate_published_candidate compose-production || return 1
+    jq -e '
+      .schema == 1 and .phase == "prepared" and
+      (.transactionRoot | strings | test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$")) and
+      (keys == ["phase","schema","transactionRoot"])
+    ' "$runtime_journal" >/dev/null || return 1
+    [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
+    candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
+    [ "$candidate_sha" = "$COMPATIBLE_RUNTIME_HELPER_SHA256" ] || return 1
+
+    temporary=$(mktemp /run/kelion-runtime-recovery-helper.XXXXXX) || return 1
+    if ! install -o root -g root -m 0500 "$candidate_helper" "$temporary" \
+      || [ -L "$temporary" ] \
+      || [ "$(stat -c '%u:%g:%a' "$temporary")" != '0:0:500' ] \
+      || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$COMPATIBLE_RUNTIME_HELPER_SHA256" ] \
+      || ! sync -f "$temporary"; then
+      rm -f -- "$temporary" || true
+      return 1
+    fi
+    recovery_helper=$temporary
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id" \
+      KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
+      "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      status=0
+    else
+      status=$?
+    fi
+  elif KELION_CUTOVER_LOCK_HELD=1 \
+    "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [ -n "$temporary" ]; then
+    rm -f -- "$temporary" || cleanup_failed=1
+    sync -f /run || cleanup_failed=1
+  fi
+  [ "$status" = 0 ] && [ "$cleanup_failed" = 0 ] \
+    && [ ! -e "$runtime_journal" ] && [ ! -L "$runtime_journal" ]
+}
+
+# În mod normal jurnalul este consumat de helperul live care l-a creat. Ramura
+# allowlist de mai sus este singura migrare compatibilă și nu înlocuiește live
+# helperul înainte ca absența jurnalului să fie dovedită.
+set_constructor_install_phase recovery-preflight
+if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
+  recover_existing_runtime_journal
+fi
+for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
+  [ ! -e "$journal" ] && [ ! -L "$journal" ] \
+    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; constructor_install_failure_line=$LINENO; exit 1; }
+done
+
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
   load_install_transaction \
@@ -1056,8 +1138,11 @@ set_constructor_install_phase systemd-publication
 publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.service
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+for unit in "${constructor_timers[@]}"; do
   systemctl disable --now "$unit" >/dev/null
+done
+for unit in "${constructor_services[@]}"; do
+  stop_and_disable_constructor_service "$unit"
 done
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
 recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
