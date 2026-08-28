@@ -856,7 +856,10 @@ CONSTANTS
 }
 
 validate_constructor_timer_unit() {
-  local file=$1 logical=$2 timer=${logical#systemd-timer.} service
+  local file logical timer service
+  file=$1
+  logical=$2
+  timer=${logical#systemd-timer.}
   validate_text_file_bytes "$file" || return 1
   case "$timer" in
     kelion-codex-worker.timer) service=kelion-codex-worker.service ;;
@@ -873,7 +876,10 @@ validate_constructor_timer_unit() {
 }
 
 validate_constructor_service_unit() {
-  local file=$1 logical=$2 service=${logical#systemd-service.} marker user executable
+  local file logical service marker user executable
+  file=$1
+  logical=$2
+  service=${logical#systemd-service.}
   validate_text_file_bytes "$file" || return 1
   case "$service" in
     kelion-codex-worker.service)

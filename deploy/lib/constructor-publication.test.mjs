@@ -1046,6 +1046,46 @@ test('contractul runtime validează tupla efectivă și din nou live înainte de
   assert.match(commit, /validate_live_runtime_contract[\s\S]*write_journal_phase files-committed[\s\S]*validate_live_runtime_contract[\s\S]*write_journal_phase committed[\s\S]*publish_runtime_ready_stamp/)
 })
 
+test('validatorii unităților derivă identitatea exclusiv din argumentul explicit', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const validateText = shellFunction(cutover, 'validate_text_file_bytes')
+  const validateTimer = shellFunction(cutover, 'validate_constructor_timer_unit')
+  const validateService = shellFunction(cutover, 'validate_constructor_service_unit')
+  const script = `set -euo pipefail
+${validateText}
+${validateTimer}
+${validateService}
+validate_from_conflicting_scope() {
+  local logical=systemd-service.kelion-constructor-release.service
+  validate_constructor_timer_unit \
+    deploy/systemd/kelion-codex-worker.timer \
+    systemd-timer.kelion-codex-worker.timer
+  logical=systemd-timer.kelion-constructor-release.timer
+  validate_constructor_service_unit \
+    deploy/systemd/kelion-codex-worker.service \
+    systemd-service.kelion-codex-worker.service
+}
+reject_spoofed_argument() {
+  local logical=systemd-timer.kelion-codex-worker.timer
+  if validate_constructor_timer_unit \
+    deploy/systemd/kelion-codex-worker.timer systemd-timer.unknown; then return 1; fi
+  logical=systemd-service.kelion-codex-worker.service
+  if validate_constructor_service_unit \
+    deploy/systemd/kelion-codex-worker.service systemd-service.unknown; then return 1; fi
+}
+validate_from_conflicting_scope
+reject_spoofed_argument
+unset logical
+validate_constructor_timer_unit \
+  deploy/systemd/kelion-codex-worker.timer \
+  systemd-timer.kelion-codex-worker.timer
+validate_constructor_service_unit \
+  deploy/systemd/kelion-codex-worker.service \
+  systemd-service.kelion-codex-worker.service`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
 test('workflows refuză bundle-ul dacă master avansează chiar înainte de primul mutator VPS', () => {
   for (const path of ['.github/workflows/vps-run.yml', '.github/workflows/vps-set-env.yml']) {
     const workflow = read(path)

@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T15:59:32Z`
+Actualizat: `2026-08-28T16:33:54Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `b16aef52d80de6cad99fd952f2c689bb26a89cf4` (PR `#1478`).
-  CI master `33186001561` și buildul OCI exact `33186384353` sunt verzi.
+- `origin/master` este `a93eae09f81eb17c4f36554023e9b1209237483e` (PR `#1480`).
+  CI master `33189074236` și buildul OCI exact `33189473374` sunt verzi.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -45,8 +45,8 @@ Actualizat: `2026-08-28T15:59:32Z`
   sunt byte-for-byte identice cu manifestul și candidatele; ulterior, fiecare
   predicat strict systemd a trecut read-only. Între ultimul `daemon-reload` și
   scanarea eșuată au fost aproximativ 659 ms, iar o scanare completă durează
-  peste o secundă: cauza este o observație systemd/D-Bus tranzitorie în timpul
-  scanării, nu un contract persistent greșit.
+  peste o secundă. Aceasta a indicat inițial o observație systemd/D-Bus
+  tranzitorie, ipoteză infirmată ulterior de retry-ul bounded.
 - Release-ul manual `33184958383` pentru aceeași tuplă a validat CI, buildul și
   imaginile, apoi s-a oprit fail-closed înainte de cutover: jurnalul persistent
   de quiesce aparține configurării Constructor întrerupte, nu cererii de
@@ -63,21 +63,32 @@ Actualizat: `2026-08-28T15:59:32Z`
   stop/disable, ActiveState, zero joburi și contractul pre-publicare au trecut.
   Ipoteza unei întârzieri tranzitorii simple este infirmată; abaterea persistentă
   este într-un predicat strict-only, încă neatribuit de helperul live.
-- Patchul curent nu relaxează și nu repetă nicio mutație. La ultima dintre cele
-  12 probe emite o singură etichetă cu vocabular fix pentru predicatul strict
-  eșuat (fișier, fragment/drop-in/load/reload, UnitFileState, ActiveState, job
-  sau stamp), fără căi ori valori libere.
+- PR `#1480` nu relaxează și nu repetă nicio mutație. La ultima dintre cele 12
+  probe emite o singură etichetă cu vocabular fix pentru predicatul strict
+  eșuat, fără căi ori valori libere; toate check-urile protejate au fost verzi.
+- Configurarea controlată unică `33190206039` pe `a93eae09` a emis exact
+  `kelion-codex-worker.timer:timer-contract`, apoi a eșuat fail-closed și a
+  lăsat unitățile oprite. Cauza este evaluarea Bash a declarației `local`:
+  `timer=${logical#...}` era expandat din scope-ul apelantului înainte ca
+  `logical=$2` să fie aplicat. Validarea candidatului rula într-o buclă cu
+  `logical` corect și trecea; validarea live strictă nu avea acel scope și
+  eșua pe aceiași bytes. Declarația analogă a serviciilor are același defect
+  demonstrabil și este corectată împreună, înainte să devină următorul blocaj.
+- Patchul curent separă declarațiile de derivările dependente și păstrează
+  neschimbate toate predicatele de bytes, conținut și systemd. Regresia rulează
+  timerul și serviciul cu `logical` exterior conflictual sau absent și dovedește
+  că numai argumentul explicit este autoritativ și că un argument fals rămâne
+  respins.
 
 ## Următorul pas sigur
 
-1. Publică atribuirea strictă numai prin PR `chore/*`, fără bypass sau push în
-   master; cere toate check-urile verzi.
+1. Publică remedierea derivării Bash numai prin PR `chore/*`, fără bypass sau
+   push în master; cere toate check-urile verzi.
 2. Nu porni niciun release de producție. După merge, rulează o singură
-   configurare controlată pentru a obține eticheta finală, apoi remediază numai
-   predicatul dovedit printr-un al doilea PR protejat; nu relaxa drop-in-uri sau
-   stări systemd necunoscute.
-3. Reia activarea și release-ul numai după ce recovery-ul consumă jurnalul,
-   toate predicatele stricte trec și statusul final este verde.
+   configurare controlată: ea trebuie să consume jurnalul existent, să treacă
+   toate predicatele stricte și să încheie cu status verde.
+3. Reia activarea și release-ul numai după absența dovedită a jurnalelor și
+   după ce workerul, publisherul și release-ul trec verificarea finală.
 
 ## Legături canonice
 
@@ -91,5 +102,7 @@ Actualizat: `2026-08-28T15:59:32Z`
 - Configure strict-contract fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33183438759>
 - Release manual blocat de jurnalul configurării: <https://github.com/kelion-team/kelionai/actions/runs/33184958383>
 - Retry bounded strict fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33187020692>
+- Telemetrie strictă protejată: <https://github.com/kelion-team/kelionai/pull/1480>
+- Configure cu predicat exact: <https://github.com/kelion-team/kelionai/actions/runs/33190206039>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
