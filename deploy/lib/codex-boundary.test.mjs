@@ -72,7 +72,7 @@ test('imaginea de porți include runtime-urile cerute de testele de publicare', 
   const dockerfile = read('Dockerfile.gates')
   const gates = read('deploy/gates/run-gates.sh')
 
-  assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git python3/)
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git openssh-client python3/)
   assert.match(gates, /deploy\/lib\/constructor-publication\.test\.mjs/)
 })
 
