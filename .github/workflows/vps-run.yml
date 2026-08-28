@@ -497,6 +497,25 @@ jobs:
             info=$(ssh-keygen -lf "$key" -E sha256) || return 1
             [[ "$info" =~ ^256\ SHA256:[A-Za-z0-9+/]{43}\ .+\ \(ED25519\)$ ]]
           }
+          normalize_legacy_signing_key() {
+            local key=$1 recovery_root candidate size
+            [ -f "$key" ] && [ ! -L "$key" ] \
+              && [ "$(stat -Lc '%u:%h' "$key")" = '0:1' ] || return 1
+            size=$(stat -Lc '%s' "$key")
+            [[ "$size" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$size" -le 32768 ] || return 1
+            recovery_root=$(mktemp -d "$signing_dir/.github-publisher-signing-key.tmp.XXXXXX")
+            candidate=$recovery_root/key
+            install -o root -g root -m 0400 -- "$key" "$candidate"
+            if ! validate_signing_key "$candidate" || ! cmp -s -- "$key" "$candidate"; then
+              rm -rf -- "$recovery_root"
+              return 1
+            fi
+            sync -f "$candidate"
+            mv -f -- "$candidate" "$key"
+            sync -f "$signing_dir"
+            rmdir -- "$recovery_root"
+            sync -f "$signing_dir"
+          }
           constructor_config_check='signing-stale-cleanup'
           for stale_signing_root in "$signing_dir"/.github-publisher-signing-key.tmp.*; do
             [ -e "$stale_signing_root" ] || continue
@@ -523,7 +542,17 @@ jobs:
             sync -f "$signing_dir"
           fi
           constructor_config_check='signing-key-validation'
-          validate_signing_key "$signing_key"
+          if ! validate_signing_key "$signing_key"; then
+            # Generațiile anterioare au putut publica aceeași cheie validă cu
+            # metadata necanonică. Copia root-only trebuie să dovedească atât
+            # materialul ED25519, cât și identitatea byte-for-byte înainte de
+            # înlocuirea atomică; cheia nu este regenerată și fingerprintul nu
+            # se schimbă.
+            constructor_config_check='signing-key-normalization'
+            normalize_legacy_signing_key "$signing_key"
+            constructor_config_check='signing-key-validation'
+            validate_signing_key "$signing_key"
+          fi
           signing_public=$(ssh-keygen -y -f "$signing_key")
           signing_fingerprint=$(ssh-keygen -lf "$signing_key" -E sha256 | awk '{print $2}')
           [[ "$signing_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
