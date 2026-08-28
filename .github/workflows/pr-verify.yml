@@ -216,6 +216,7 @@ jobs:
           OPENAI_MEDIUM_MODEL=${ci_model_prefix}-medium
           OPENAI_HEAVY_MODEL=${ci_model_prefix}-heavy
           OPENAI_REALTIME_MODEL=${ci_model_prefix}-realtime
+          OPENAI_APPROVED_REALTIME_MODELS=${ci_model_prefix}-realtime,${ci_model_prefix}-realtime-transcription
           OPENAI_REALTIME_TRANSCRIPTION_MODEL=${ci_model_prefix}-realtime-transcription
           OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription
           OPENAI_TTS_MODEL=${ci_model_prefix}-tts
