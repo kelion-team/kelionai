@@ -18,11 +18,21 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum stat sync systemctl systemd-analyze usermod; do
   command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; exit 1; }
 done
-usermod --help 2>&1 | grep -q -- '--add-subuids FIRST-LAST' \
-  && usermod --help 2>&1 | grep -q -- '--del-subuids FIRST-LAST' \
-  && usermod --help 2>&1 | grep -q -- '--add-subgids FIRST-LAST' \
-  && usermod --help 2>&1 | grep -q -- '--del-subgids FIRST-LAST' \
-  || { echo 'usermod nu oferă tranzacțiile native subuid/subgid necesare' >&2; exit 1; }
+# Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
+# conducta după primul match, iar SIGPIPE-ul producătorului transformă o
+# capabilitate prezentă într-un fals eșec. Capturăm o singură ieșire bounded și
+# verificăm toate cele patru operații fără un producer concurent.
+usermod_help=$(usermod --help 2>&1) \
+  || { echo 'capabilitățile usermod nu pot fi citite' >&2; exit 1; }
+for required_usermod_option in \
+  '--add-subuids FIRST-LAST' \
+  '--del-subuids FIRST-LAST' \
+  '--add-subgids FIRST-LAST' \
+  '--del-subgids FIRST-LAST'; do
+  grep -Fq -- "$required_usermod_option" <<<"$usermod_help" \
+    || { echo 'usermod nu oferă tranzacțiile native subuid/subgid necesare' >&2; exit 1; }
+done
+unset usermod_help required_usermod_option
 
 ROOT=/root/kelion
 RUNTIME_ROOT=$ROOT/runtime

@@ -630,6 +630,9 @@ test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
 test('installerul canonic lasă toate serviciile dezactivate și nu creează secrete', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   assert.match(installer, /KELION_CONSTRUCTOR_INSTALL/)
+  assert.match(installer, /usermod_help=[$][(]usermod --help 2>&1[)]/)
+  assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
+  assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
   assert.match(installer, /systemd-analyze verify/)
   assert.match(installer, /kelion-worker\.config\.toml/)
   assert.match(installer, /constructor_markers=\(\/etc\/kelion\/codex-worker\.enabled \/etc\/kelion\/constructor-publisher\.enabled \/etc\/kelion\/constructor-release\.enabled\)/)
