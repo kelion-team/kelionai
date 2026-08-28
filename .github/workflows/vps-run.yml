@@ -720,14 +720,14 @@ jobs:
           EOF
           chmod 0600 "$cutover_stage/files/constructor-config.constructor-publisher.env"
           printf '%s\n' constructor-config.constructor-publisher.env >> "$cutover_stage/manifest"
+          # Release-ul post-merge validează joburile CI publicate pe push;
+          # merge-policy/current-tree sunt porți PR și sunt verificate separat.
           cat > "$cutover_stage/files/constructor-config.constructor-release.env" <<EOF
           CONSTRUCTOR_RELEASE_EXEC_ENABLED=1
           KELION_CONSTRUCTOR_API=http://127.0.0.1:18079
           KELION_GITHUB_REPOSITORY=$repository
           KELION_PUBLIC_APP_ORIGIN=$public_origin
           CONSTRUCTOR_RELEASE_WORKFLOW=deploy.yml
-          # Release-ul post-merge validează joburile CI publicate pe push;
-          # merge-policy/current-tree sunt porți PR și sunt verificate separat.
           CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation
           EOF
           chmod 0600 "$cutover_stage/files/constructor-config.constructor-release.env"
