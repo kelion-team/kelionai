@@ -668,7 +668,9 @@ test('telemetria instalatorului rămâne fail-closed și nu divulgă mediul', ()
   const capture = shellFunction(installer, 'capture_constructor_install_failure')
   const canary = `CANARY-CONSTRUCTOR-${process.pid}-${Date.now()}`
   const sourceCommit = '0123456789abcdef0123456789abcdef01234567'
-  assert.ok(existsSync(bashExecutable), `bash indisponibil: ${bashExecutable}`)
+  if (process.platform === 'win32') {
+    assert.ok(existsSync(bashExecutable), `bash indisponibil: ${bashExecutable}`)
+  }
   const probe = spawnSync(bashExecutable, ['-c', `
 set -Eeuo pipefail
 constructor_install_phase=unit-validation
