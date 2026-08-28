@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T20:31:50Z`
+Actualizat: `2026-08-28T21:07:24Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `d61d5d5609a873eae2bce8b305f98bd106dab7cd` (PR `#1487`).
-  CI master `33206997501` și buildul OCI exact `33207342384` sunt verzi.
+- `origin/master` este `392b174660b02ce3a2db23e0fedf1555206ea83b` (PR `#1489`).
+  CI master `33210808739` este verde; buildul OCI exact `33211160656` rulează.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -106,13 +106,17 @@ Actualizat: `2026-08-28T20:31:50Z`
   imediat după blob. Reproducerea executabilă respinge o cheie ED25519 sănătoasă
   exact în validarea copiei `0400`. Remedierea canonizează numai tipul și blobul
   public, păstrează verificarea ED25519/fingerprint și nu schimbă cheia privată.
+- PR `#1489` a canonizat strict cheia publică la algoritm + blob, a păstrat
+  protecțiile pentru tip, owner, hardlink, dimensiune și fingerprint și a fost
+  integrat prin rebase după toate porțile verzi. Workflow-ul din `master` este
+  byte-for-byte identic cu varianta validată local; CI master este verde.
 
 ## Următorul pas sigur
 
-1. Publică parserul canonic al cheii publice numai prin PR `chore/*`, fără
+1. Publică testele executabile și acest checkpoint numai prin PR `chore/*`, fără
    bypass sau push în `master`; cere toate check-urile verzi.
-2. Nu porni niciun release de producție. După merge și buildul OCI exact, rulează
-   o singură configurare controlată pe `master`.
+2. Nu porni niciun release de producție. După merge, CI și buildul OCI exact,
+   rulează o singură configurare controlată pe vârful `master`.
 3. Activarea și release-ul rămân blocate până când configurarea este verde,
    jurnalele sunt absente și statusul final confirmă workerul, publisherul și
    releaserul dezactivate/ready conform etapei curente.
@@ -140,5 +144,8 @@ Actualizat: `2026-08-28T20:31:50Z`
 - Build OCI `d61d5d56`: <https://github.com/kelion-team/kelionai/actions/runs/33207342384>
 - Release `d61d5d56` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33207891242>
 - Configure cu parserul public necanonic: <https://github.com/kelion-team/kelionai/actions/runs/33207951663>
+- Parser canonic al cheii publice: <https://github.com/kelion-team/kelionai/pull/1489>
+- CI master `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33210808739>
+- Build OCI `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33211160656>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
