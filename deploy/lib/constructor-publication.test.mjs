@@ -1935,6 +1935,10 @@ test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de
     /supersededTransactionRoot[\s\S]*supersededManifestSha256[\s\S]*supersededSourceSha256[\s\S]*sync -f "[$]temporary"[\s\S]*mv -f -- "[$]temporary" "[$]INSTALL_JOURNAL"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
   assert.match(loader,
     /has\("supersededTransactionRoot"\)[\s\S]*has\("supersededManifestSha256"\)[\s\S]*has\("supersededSourceSha256"\)[\s\S]*supersededTransactionRoot != \.transactionRoot[\s\S]*validate_superseded_install_root/)
+  assert.match(loader, /\.sourceSha256 == \.manifestSha256/,
+    'proveniența generației curente trebuie legată de manifestul autentificat')
+  assert.match(loader, /\.supersededSourceSha256 == \.supersededManifestSha256/,
+    'proveniența generației supersedate trebuie legată de manifestul autentificat')
   assert.match(validator, /\[ -e "[$]root" \] \|\| \[ -L "[$]root" \] \|\| return 1/,
     'un jurnal activ nu poate accepta dispariția rădăcinii supersedate')
   assert.match(validator, /realpath -e[\s\S]*0:0:700[\s\S]*0:0:700/)

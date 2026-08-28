@@ -608,12 +608,14 @@ load_install_transaction() {
     (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
     (.manifestSha256 | strings | test("^[0-9a-f]{64}$")) and
     (.sourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+    (.sourceSha256 == .manifestSha256) and
     (((has("supersededTransactionRoot") | not) and
       (has("supersededManifestSha256") | not) and
       (has("supersededSourceSha256") | not)) or
       ((.supersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
        (.supersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
        (.supersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.supersededSourceSha256 == .supersededManifestSha256) and
        (.supersededTransactionRoot != .transactionRoot)))' "$INSTALL_JOURNAL" >/dev/null || return 1
   install_request_id=$(jq -er '.requestId' "$INSTALL_JOURNAL")
   install_commit=$(jq -er '.commit' "$INSTALL_JOURNAL")
