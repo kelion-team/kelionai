@@ -12,6 +12,7 @@ export const MONITORED_FILES = Object.freeze([
   '.github/workflows/vps-auto-merge-chore-prs.yml',
   '.github/workflows/vps-auto-merge-watchdog.yml',
   '.github/workflows/vps-diag.yml',
+  '.github/workflows/vps-fix-acl.yml',
   '.github/workflows/vps-run.yml',
   '.github/workflows/vps-release-verifier.yml',
   '.github/workflows/vps-set-env.yml',
@@ -181,7 +182,13 @@ export function parseStateComment(body, identity) {
 }
 
 export function isMonitoredScope(files) {
-  return Array.isArray(files) && files.length > 0 && files.every((file) => MONITORED_FILES.includes(String(file)))
+  if (!Array.isArray(files) || files.length === 0) return false
+  return files.every((entry) => {
+    const file = typeof entry === 'string' ? entry : entry?.filename
+    const status = typeof entry === 'string' ? null : entry?.status
+    if (MONITORED_FILES.includes(String(file))) return true
+    return file === '.github/workflows/vps-seed-slots.yml' && status === 'removed'
+  })
 }
 
 export function assertL2DiffSafe(files, patchBytes) {

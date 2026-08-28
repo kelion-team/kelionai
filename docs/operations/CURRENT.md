@@ -1,13 +1,21 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-27T07:30:00Z`
+Actualizat: `2026-08-27T14:45:17Z`
 
 ## Current verified state
 
 - Repo: `kelion-team/kelionai`.
-- `origin/master`: `5acdf3bc`, verificat prin `git fetch`.
-- Live: `baf00ae`, verificat prin `/api/version` (deploy pending).
+- `origin/master`: `710ab45474acd9862eb5379061cbc57a6de65d3d`.
+- Live: `baf00ae`, verificat prin `/api/version`; release-ul candidat nu a fost
+  promovat.
 - Readiness live: `ready=true` (verificat prin `/readyz`).
+- CI push `33079380411` și buildul exact `33080000979` pentru `710ab454` sunt
+  verzi.
+- Release-ul protejat `33083892211` a trecut `idempotency` și
+  `verify-candidate`, apoi a fost refuzat fail-closed de validator:
+  `runtime-cutover: env invalid: runtime.env`.
+- Remedierea contractului runtime rămâne în PR-ul protejat `#1395`; branch-ul
+  este sincronizat cu `master` numai după rezolvarea conflictelor și reverificare.
 - PR #1396 (ChatGPT Pro subscription) merged pe master (`36315b40`).
 - PR #1397 (vps-set-env permite OPENAI_API_KEY gol) merged pe master (`5acdf3bc`).
 - Deploy pending: `runtime.env` pe VPS e staled; trebuie rulat `vps-set-env`
@@ -116,13 +124,15 @@ Actualizat: `2026-08-27T07:30:00Z`
 ## Canonical links
 
 - Repo: <https://github.com/kelion-team/kelionai>
-- Live: <https://kelionai.app>
+- PR remediere contract: <https://github.com/kelion-team/kelionai/pull/1395>
+- Release curent refuzat sigur: <https://github.com/kelion-team/kelionai/actions/runs/33083892211>
+- Integrare GitHub Admin: [`GITHUB-RELEASE-INTEGRATION.md`](GITHUB-RELEASE-INTEGRATION.md)
 - Contract livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
+- Live: <https://kelionai.app>
 - Inventar Admin: [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md)
 
 ## Handoff pentru sesiunea următoare
 
-Prezintă proactiv secțiunile de mai sus înainte de a cere ownerului să repete
-contextul. Verifică din nou `origin/master`, runurile GitHub și sondele live;
-orice diferență se actualizează aici înainte de o mutație. Nu declara
-Constructor, fișa de lucru sau Live Voice drept live până la dovezile E2E.
+Nu relansa runurile vechi. Verifică din nou `origin/master`, PR-ul remedierii și
+sondele publice. Provisionarea trebuie să fie un run nou din workflow-ul reparat;
+orice token gol sau reutilizat rămâne fail-closed.

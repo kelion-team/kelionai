@@ -7,6 +7,30 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startLease } from './constructor-service-client.mjs'
 
+test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
+  const workflow = read('.github/workflows/vps-diag.yml')
+  const start = workflow.indexOf("=== separarea credentialelor GitHub (numai etichete) ===")
+  const end = workflow.indexOf("=== sănătate publică ===", start)
+  assert.ok(start >= 0 && end > start)
+  const identityBlock = workflow.slice(start, end)
+
+  assert.match(identityBlock, /TOKEN_IDENTITY_COLLISION:%s:%s/)
+  assert.match(identityBlock, /TOKEN_IDENTITIES_DISTINCT/)
+  assert.match(identityBlock, /constructor_labels=\(constructor-sync constructor-publisher constructor-release\)/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_CONSTRUCTOR_ABSENT/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_INVALID:constructor:partial:%s-of-3/)
+  assert.match(identityBlock, /CODEX_WORKER_ENABLED=0[\s\S]*CONSTRUCTOR_PUBLISHER_ENABLED=0[\s\S]*CONSTRUCTOR_RELEASE_ENABLED=0/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_INVALID:constructor:configured-without-token/)
+  assert.match(identityBlock, /stat -c '%u:%g:%a'/)
+  assert.match(identityBlock, /token_gids=\(0 "\$publisher_gid" "\$release_gid"\)/)
+  assert.match(identityBlock, /token_gids\+=\(0 10050\)/)
+  assert.match(identityBlock, /without_cr_size=.*tr -d '\\015'/)
+  assert.match(identityBlock, /without_nul_size=.*tr -d '\\000'/)
+  assert.match(identityBlock, /\[ "\$\{#token_value\}" -ge 32 \]/)
+  assert.match(identityBlock, /TOKEN_IDENTITY_INVALID:%s:marginal-whitespace/)
+  assert.doesNotMatch(identityBlock, /sha(?:1|256|512)sum|openssl|base64|token_value[^\n]*printf/)
+})
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (path) => readFileSync(join(root, path), 'utf8')
 const shellFunction = (source, name) => {
@@ -16,6 +40,28 @@ const shellFunction = (source, name) => {
   assert.ok(end > start, `funcția shell ${name} nu poate fi extrasă`)
   return source.slice(start, end + 2)
 }
+
+test('remedierea ACL VPS păstrează valorile și aplică exact contractul canonic', () => {
+  const workflow = read('.github/workflows/vps-fix-acl.yml')
+  assert.doesNotMatch(workflow, /\bpush:/)
+  assert.match(workflow, /workflow_dispatch:/)
+  assert.match(workflow, /group: vps-secret-acl-maintenance[\s\S]*cancel-in-progress: false/)
+  assert.doesNotMatch(workflow, /group: production-release/)
+  assert.match(workflow, /\[ "[$]GITHUB_REF" = refs\/heads\/master \]/)
+  assert.match(workflow, /\[ -f "[$]p" \] && \[ ! -L "[$]p" \] && \[ -s "[$]p" \]/)
+  assert.match(workflow, /github-worker-token root root 0440/)
+  assert.match(workflow, /github-ghcr-read-token root root 0400/)
+  assert.match(workflow, /github-release-oauth-token root 10050 0440/)
+  assert.match(workflow, /github-publisher-token root "[$]publisher_group" 0440/)
+  assert.match(workflow, /github-release-token root "[$]release_group" 0440/)
+  assert.match(workflow, /\[\[ "[$]group" =~ \^\[0-9\]\+[$] \]\]; then printf '%s\\n' "[$]group"/)
+  assert.match(workflow, /ACL_GROUP_MISSING:/)
+  assert.match(workflow, /ACL_CHECK:\$p/)
+  assert.match(workflow, /stat -c '%u:%g:%a'/)
+  assert.doesNotMatch(workflow, /openssl|rand -hex|printf[^\n]*> "[$]p"|if \[ ! -s/)
+  assert.equal(existsSync(join(root, '.github/workflows/vps-seed-slots.yml')), false,
+    'workflow-ul concurent care genera și rescria secrete trebuie retras')
+})
 
 test('selecția runtime folosește direct candidatul validat din manifest', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
