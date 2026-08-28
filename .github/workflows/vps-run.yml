@@ -777,6 +777,26 @@ jobs:
             jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$payload" >/dev/null
             jq -c '{ready,release}' <<<"$payload"
           }
+          stop_and_disable_constructor_service() {
+            local unit=$1
+            case "$unit" in
+              kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+              *) return 1 ;;
+            esac
+            systemctl stop "$unit" >/dev/null || return 1
+            systemctl disable "$unit" >/dev/null 2>&1 || :
+          }
+          validate_constructor_unit_file_state() {
+            local unit=$1 state
+            state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+            case "$unit" in
+              kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+                [ "$state" = disabled ] ;;
+              kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+                [ "$state" = static ] ;;
+              *) return 1 ;;
+            esac
+          }
           force_quiesce_activation() {
             local unit state failed=0 ready_root=/run/kelion stamp=/run/kelion/runtime-config-recovery.ready
             if [ -e "$ready_root" ] || [ -L "$ready_root" ]; then
@@ -790,7 +810,7 @@ jobs:
               fi
             fi
             for unit in "${all_timers[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
-            for unit in "${all_services[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+            for unit in "${all_services[@]}"; do stop_and_disable_constructor_service "$unit" || failed=1; done
             if systemctl cat kelion-constructor-sync.service >/dev/null 2>&1; then
               systemctl stop kelion-constructor-sync.service >/dev/null || failed=1
             fi
@@ -798,6 +818,11 @@ jobs:
               systemctl cat "$unit" >/dev/null 2>&1 || continue
               state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
               case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+              case "$unit" in
+                kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+                kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+                  validate_constructor_unit_file_state "$unit" || failed=1 ;;
+              esac
               [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
             done
             [ "$failed" = 0 ]

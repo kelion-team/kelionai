@@ -2678,6 +2678,28 @@ constructor_release_services=(
   kelion-constructor-publisher.service
   kelion-constructor-release.service
 )
+
+stop_and_disable_constructor_release_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null || return 1
+  systemctl disable "$unit" >/dev/null 2>&1 || :
+}
+
+validate_constructor_release_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
 constructor_release_auxiliary_services=(
   kelion-constructor-sync.service
 )
@@ -2715,7 +2737,9 @@ force_quiesce_constructor_release() {
     fi
   fi
   for unit in "${constructor_release_timers[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
-  for unit in "${constructor_release_services[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+  for unit in "${constructor_release_services[@]}"; do
+    stop_and_disable_constructor_release_service "$unit" || failed=1
+  done
   for unit in "${constructor_release_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     systemctl stop "$unit" >/dev/null || failed=1
@@ -2724,6 +2748,11 @@ force_quiesce_constructor_release() {
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+    case "$unit" in
+      kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+      kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+        validate_constructor_release_unit_file_state "$unit" || failed=1 ;;
+    esac
     if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
   done
   [ "$failed" = 0 ]
@@ -3487,10 +3516,12 @@ refresh_constructor_gate() (
   stop_constructor_units() {
     local unit
     for unit in "${timers[@]}"; do systemctl disable --now "$unit" >/dev/null || return 1; done
-    for unit in "${services[@]}"; do systemctl disable --now "$unit" >/dev/null || return 1; done
+    for unit in "${services[@]}"; do stop_and_disable_constructor_release_service "$unit" || return 1; done
     for unit in "${timers[@]}" "${services[@]}"; do
       state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
       case "$state" in inactive|failed) ;; *) return 1 ;; esac
+      validate_constructor_release_unit_file_state "$unit" || return 1
+      [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
     done
   }
 
