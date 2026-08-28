@@ -292,7 +292,7 @@ jobs:
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] && [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]]
           [[ "$RELEASE_REQUEST_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
-          [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+$ ]]
+          [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ] && [ -n "$REGISTRY_TOKEN" ]
 
           umask 077
