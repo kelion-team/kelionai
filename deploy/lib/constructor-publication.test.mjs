@@ -33,6 +33,9 @@ test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (path) => readFileSync(join(root, path), 'utf8')
+const bashExecutable = process.platform === 'win32'
+  ? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe')
+  : 'bash'
 const shellFunction = (source, name) => {
   const start = source.indexOf(`${name}() {`)
   assert.ok(start >= 0, `funcția shell ${name} lipsește`)
@@ -630,6 +633,13 @@ test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
 test('installerul canonic lasă toate serviciile dezactivate și nu creează secrete', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   assert.match(installer, /KELION_CONSTRUCTOR_INSTALL/)
+  assert.match(installer, /set -Eeuo pipefail/)
+  assert.match(installer, /"event":"installer_failure","phase":"%s","line":%s,"exit_code":%s,"source_commit":"%s"/)
+  assert.match(installer, /::error::Constructor installer gate: phase=%s line=%s exit=%s source_commit=%s/)
+  assert.match(installer, /trap 'capture_constructor_install_failure "[$]LINENO"' ERR/)
+  assert.match(installer, /trap report_constructor_install_failure EXIT/)
+  assert.doesNotMatch(shellFunction(installer, 'report_constructor_install_failure'), /BASH_COMMAND|set -x|printf[^\n]*(?:token|secret|value|env)/i)
+  assert.match(installer, /KELION_CONSTRUCTOR_SOURCE_COMMIT/)
   assert.match(installer, /usermod_help=[$][(]usermod --help 2>&1[)]/)
   assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
   assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
@@ -650,6 +660,38 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 19)
   const withoutRecoveryEnable = installer.replace(/systemctl enable kelion-runtime-config-recovery\.service[^\n]*/, '')
   assert.doesNotMatch(withoutRecoveryEnable, /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
+})
+
+test('telemetria instalatorului rămâne fail-closed și nu divulgă mediul', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const reporter = shellFunction(installer, 'report_constructor_install_failure')
+  const capture = shellFunction(installer, 'capture_constructor_install_failure')
+  const canary = `CANARY-CONSTRUCTOR-${process.pid}-${Date.now()}`
+  const sourceCommit = '0123456789abcdef0123456789abcdef01234567'
+  assert.ok(existsSync(bashExecutable), `bash indisponibil: ${bashExecutable}`)
+  const probe = spawnSync(bashExecutable, ['-c', `
+set -Eeuo pipefail
+constructor_install_phase=unit-validation
+constructor_install_failure_line=0
+constructor_install_source_commit=${sourceCommit}
+${reporter}
+${capture}
+trap 'capture_constructor_install_failure "$LINENO"' ERR
+trap report_constructor_install_failure EXIT
+false
+`], {
+    encoding: 'utf8',
+    env: { ...process.env, CANARY_SECRET: canary },
+  })
+
+  assert.equal(probe.status, 1)
+  assert.equal(probe.stdout, '')
+  assert.match(probe.stderr,
+    /{"ok":false,"event":"installer_failure","phase":"unit-validation","line":\d+,"exit_code":1,"source_commit":"0123456789abcdef0123456789abcdef01234567"}/)
+  assert.match(probe.stderr,
+    /::error::Constructor installer gate: phase=unit-validation line=\d+ exit=1 source_commit=0123456789abcdef0123456789abcdef01234567/)
+  assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
+  assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
 })
 
 test('mapările subuid/subgid sunt validate strict și publicate atomic', () => {
