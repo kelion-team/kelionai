@@ -1,138 +1,126 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-27T14:45:17Z`
+Actualizat: `2026-08-28T17:03:24Z`
 
-## Current verified state
+## Stare verificată
 
-- Repo: `kelion-team/kelionai`.
-- `origin/master`: `710ab45474acd9862eb5379061cbc57a6de65d3d`.
-- Live: `baf00ae`, verificat prin `/api/version`; release-ul candidat nu a fost
-  promovat.
-- Readiness live: `ready=true` (verificat prin `/readyz`).
-- CI push `33079380411` și buildul exact `33080000979` pentru `710ab454` sunt
-  verzi.
-- Release-ul protejat `33083892211` a trecut `idempotency` și
-  `verify-candidate`, apoi a fost refuzat fail-closed de validator:
-  `runtime-cutover: env invalid: runtime.env`.
-- Remedierea contractului runtime rămâne în PR-ul protejat `#1395`; branch-ul
-  este sincronizat cu `master` numai după rezolvarea conflictelor și reverificare.
-- PR #1396 (ChatGPT Pro subscription) merged pe master (`36315b40`).
-- PR #1397 (vps-set-env permite OPENAI_API_KEY gol) merged pe master (`5acdf3bc`).
-- Deploy pending: `runtime.env` pe VPS e staled; trebuie rulat `vps-set-env`
-  înainte de deploy pentru a actualiza câmpurile noi cerute de validator.
+- Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
+- `origin/master` este `ccb4b425adfa46eb92a4df563932dc6ab79c4c66` (PR `#1482`).
+  CI master `33191079795` și buildul OCI exact `33191467117` sunt verzi.
+- Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
+  raportează `ready:true` și `sideEffectsActive:true`.
+- Statusul read-only `33176281001` confirmă cele trei timere Constructor
+  `inactive`, markerii `disabled`, `codex-auth=ready` și backendul ready.
+- Diagnosticul read-only `33176363934` confirmă că vechile valori live
+  `constructor-sync` și `constructor-publisher` sunt încă identice. Valorile
+  incoming din GitHub Actions sunt distincte, dar nu au ajuns live.
+- Unicul retry pe `f420c21c`, runul `33176522844`, a eșuat fail-closed în
+  `recovery-preflight`; nu a activat nicio unitate și nu a afectat aplicația.
+- Cauza exactă este un handoff de generație: helperul live b911, SHA-256
+  `db72ef1d...`, trebuie să consume jurnalul runtime `prepared` înainte ca
+  helperul corectat să poată fi publicat, dar interpretează serviciile oneshot
+  canonice `static/inactive` drept enabled. Timerele sunt `disabled/inactive`,
+  nu există joburi systemd sau holder al publication lock-ului.
+- PR `#1472` oprește serviciile statice și validează postcondițiile, iar pentru
+  jurnalul b911 folosește o singură migrare compatibilă dublu pin-uită, legată
+  de manifestul installerului. Helperul live nu este înlocuit înainte ca
+  absența durabilă a jurnalului să fie dovedită.
+- Prima configurare pe generația corectată, runul `33179065073`, a ajuns la
+  bootstrapul compatibil și a eșuat fail-closed deoarece `/run` este montat
+  `noexec`; copia root-only verificată prin SHA nu a putut fi executată direct.
+  Nu a activat nicio unitate și aplicația publică nu a fost afectată.
+- PR `#1474` rulează copia deja autentificată prin `bash`, compatibil cu
+  `noexec`, fără să slăbească pinningul, ownershipul sau verificarea hashului.
+- Configurările `33180818900` și retry-ul unic controlat `33181409551` au trecut
+  de `noexec`, au publicat byte-for-byte toate cele șase unități forward, apoi
+  au eșuat identic într-o post-validare systemd după peste 30 de reload-uri.
+  Jurnalul a rămas `prepared`; timerele sunt `disabled/inactive`, serviciile
+  `static/inactive`, fără joburi, markere sau stamp ready. Aplicația este verde.
+- PR `#1476` separă mutația de dovadă: stop + disable `--no-reload`
+  best-effort, un singur `daemon-reload`, apoi succes exclusiv prin
+  UnitFileState/ActiveState/zero jobs. Etapele eșuate sunt etichetate non-secret.
+- Configurarea exactă pe `3511d9df`, runul `33183438759`, a trecut
+  `post-quiesce`, apoi a eșuat fail-closed în `recovery-preflight` la
+  `unit-roll-forward:strict-live-unit-contract`. Toate cele șase fișiere live
+  sunt byte-for-byte identice cu manifestul și candidatele; ulterior, fiecare
+  predicat strict systemd a trecut read-only. Între ultimul `daemon-reload` și
+  scanarea eșuată au fost aproximativ 659 ms, iar o scanare completă durează
+  peste o secundă. Aceasta a indicat inițial o observație systemd/D-Bus
+  tranzitorie, ipoteză infirmată ulterior de retry-ul bounded.
+- Release-ul manual `33184958383` pentru aceeași tuplă a validat CI, buildul și
+  imaginile, apoi s-a oprit fail-closed înainte de cutover: jurnalul persistent
+  de quiesce aparține configurării Constructor întrerupte, nu cererii de
+  release. Nu a fost deployată o versiune nouă; jurnalul nu trebuie preluat sau
+  șters de un release cu altă tuplă.
+- PR `#1478` păstrează toate predicatele fail-closed și reîncearcă bounded
+  numai validatorii read-only (`12 × 0,25 s`); mutatorii și `daemon-reload`
+  rămân one-shot. Acceptă și actorul canonic `github-actions[bot]` printr-un
+  allowlist fără caractere de shell.
+- Configurarea `33187020692` pe `b16aef52` a executat toate cele 12 probe
+  bounded ale dovezii stricte și a eșuat tot la
+  `unit-roll-forward:strict-live-unit-contract`; rollbackul a rămas incomplet,
+  cu unitățile oprite. Absența etichetelor `quiesce-postcondition` dovedește că
+  stop/disable, ActiveState, zero joburi și contractul pre-publicare au trecut.
+  Ipoteza unei întârzieri tranzitorii simple este infirmată; abaterea persistentă
+  este într-un predicat strict-only, încă neatribuit de helperul live.
+- PR `#1480` nu relaxează și nu repetă nicio mutație. La ultima dintre cele 12
+  probe emite o singură etichetă cu vocabular fix pentru predicatul strict
+  eșuat, fără căi ori valori libere; toate check-urile protejate au fost verzi.
+- Configurarea controlată unică `33190206039` pe `a93eae09` a emis exact
+  `kelion-codex-worker.timer:timer-contract`, apoi a eșuat fail-closed și a
+  lăsat unitățile oprite. Cauza este evaluarea Bash a declarației `local`:
+  `timer=${logical#...}` era expandat din scope-ul apelantului înainte ca
+  `logical=$2` să fie aplicat. Validarea candidatului rula într-o buclă cu
+  `logical` corect și trecea; validarea live strictă nu avea acel scope și
+  eșua pe aceiași bytes. Declarația analogă a serviciilor are același defect
+  demonstrabil și este corectată împreună, înainte să devină următorul blocaj.
+- PR `#1482` a separat declarațiile de derivările dependente și a păstrat
+  neschimbate toate predicatele de bytes, conținut și systemd. Regresia rulează
+  timerul și serviciul cu `logical` exterior conflictual sau absent și dovedește
+  că numai argumentul explicit este autoritativ și că un argument fals rămâne
+  respins.
+- Release-ul canonic `33192026959` pe `ccb4b425` a validat candidatul, apoi s-a
+  oprit fail-closed înainte de cutover deoarece jurnalul persistent aparține
+  configurării Constructor întrerupte. Nu a publicat și nu a activat release-ul.
+- Configurarea controlată unică `33192142478` a consumat jurnalul, a trecut
+  recovery, supersede, publicarea artefactelor și a celor șase unități,
+  `published-validation` și `commit`; installerul s-a încheiat cu succes.
+  Blocul SSH exterior a ieșit apoi cu codul `1`, înainte de cutoverul runtime și
+  fără niciun mesaj intermediar. Workflow-ul nu avea `ERR` trap sau checkpointuri
+  după installer, deci comanda exactă nu poate fi recuperată din log; `npm`,
+  predicatele cheii de semnare, bootstrapul repo și pull-urile rămân numai
+  candidați, nu cauze demonstrate.
+- Patchul curent adaugă exclusiv atribuire: fază și checkpoint din vocabular fix,
+  linia, exit code-ul și SHA-ul sursă. Nu afișează comanda, căi sau valori secrete
+  și nu schimbă nicio mutație ori niciun predicat fail-closed.
 
-## Arhitectura curentă (verificată în cod)
+## Următorul pas sigur
 
-- OpenAI Responses este singurul creier online. Modelele pot fi accesate fie
-  prin cheie API (`sk-proj-*`), fie prin abonamentul ChatGPT Pro ($200/lună)
-  folosind tokenul OAuth din `~/.codex/auth.json` și endpoint-ul
-  `chatgpt.com/backend-api/codex/responses`.
-- `isSubscriptionMode()` returnează true când `config.openai.key` e gol și
-  există `~/.codex/auth.json` cu `auth_mode=chatgpt`.
-- `vps-set-env.yml` acceptă acum `OPENAI_API_KEY` gol (generează placeholder
-  `disabled-placeholder-*`); `deploy.sh` acceptă și acest pattern.
-- Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
-- Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
-  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`). În mod abonament,
-  verificarea catalogului `/v1/models` este sărită (endpoint-ul Codex nu o servăște).
-- Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
-  și afișează starea. Flux: `queued → claimed → accepted → working →
-  gates_passed → pr_opened → merged → deployed`.
-- `backend/.env` local are secțiunea OpenAI completă (9 env-uri, goale).
+1. Publică atribuirea post-installer numai prin PR `chore/*`, fără bypass sau
+   push în master; cere toate check-urile verzi.
+2. Nu porni niciun release de producție. După merge, rulează o singură
+   configurare controlată și folosește eticheta exactă pentru o remediere minimă;
+   nu modifica speculativ `npm`, cheia, repo-urile sau pull-urile.
+3. Reia configurarea după remedierea dovedită. Activarea și release-ul rămân
+   blocate până la status verde, absența jurnalelor și verificarea finală a
+   workerului, publisherului și releaserului.
 
-## Audit complet (27 aug 2026)
+## Legături canonice
 
-### Porți AGENTS.md — rezultate
-
-| Poartă | Rezultat |
-|---|---|
-| `typecheck` | ✓ 0 erori |
-| `backend test` | ✓ 1332/1332 trec (200 suite-uri) |
-| `frontend build` | ✓ build reușit |
-| `frontend lint` | ✓ 0 erori |
-| `verifica-hardcodari` | ✓ 0 abateri |
-| `verifica-creier-unic` | ✓ 0 furnizori retrași |
-| `verifica-exporturi` | ✓ 0 cod mort |
-| `verifica-sintaxa` | ✓ curat |
-| `verifica-workflow-uri-sigure` | ✓ curat |
-| `identifica-teste-moarte` | ✓ 0 teste moarte |
-| `inventar-audit` | ✓ curat |
-| `jscpd` | ✓ 0 duplicate |
-
-### Chat local verificat
-
-- Backend pornește pe `:8080` cu env OpenAI local.
-- Auth prin bearer token (sesiune nativă în `auth_sessions`) — funcțional.
-- `POST /api/chat` cu `idempotencyKey` — SSE streaming, `heard`, `lang`,
-  răspuns. Cu cheie OpenAI falsă, răspunsul e mesajul de epuizare (corect).
-- Cu cheie OpenAI reală, chat-ul ar funcționa complet.
-
-### Flux Admin → Constructor → Deploy verificat
-
-- `POST /api/admin/constructor` — poartă de calitate + `createBuildJob`.
-- `GET /api/admin/constructor` — status + work cards + observability.
-- `POST /api/admin/constructor/release/action` — aprobă release.
-- Worker Codex: `/api/internal/constructor-publisher/jobs/claim`.
-- Deploy: `deploy.ts` citește `build_jobs` și expune `DeployState`.
-- Testele `constructorPipeline`, `constructorOrdineSterse`, `deploy` trec.
-
-### Migrații DB locale
-
-- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
-- `auth_sessions` și toate tabelele există.
-- Backup proof generat și verificat (protecție anti-distrugere funcțională).
-
-## Fixuri aplicate în sesiunea asta
-
-1. `backend/.env` — șters `GEMINI_API_KEY`, `JULES_API_KEY`, `LIVEKIT_*`;
-   adăugat secțiune OpenAI completă.
-2. `scripts/billing-check.cjs` — re-scris pe OpenAI Responses (folosea `geminiKey` inexistent).
-3. `scripts/listeaza-modelle-imagine.mjs` — re-scris pe catalog OpenAI.
-4. `scripts/ping-gemini.cjs` — șters (mort, referia `geminiKey` inexistent).
-5. `scripts/probe-live.mjs` — URL din `PUBLIC_APP_ORIGIN`/`FRONTEND_ORIGIN` env.
-6. `backend/src/agentiA2a.test.ts` — `https://kelionai.app` hardcodat → `config.publicOrigin`.
-7. `scripts/autovedere-screenshot*.png` — șterse (duplicate locale negit-tracked).
-8. Migrații DB locale rulate (27 migrații, DB recreat de la zero).
-
-## Unfinished work
-
-- Deploy `16eecd83` la live (9 commit-uri ahead de `baf00ae`).
-- Configurare env OpenAI pe VPS (cheie project-scoped + modele validate).
-- Verificare E2E live: chat text + voce + vedere + admin + constructor.
-- `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` necesită scope `SSH signing keys: write`.
-- Profilul `kelion-codex` pe VPS trebuie să finalizeze `codex login` interactiv.
-
-## Blockers / owner action
-
-1. Cheia OpenAI de runtime pe VPS trebuie să fie project-scoped.
-2. Modelele OpenAI pe VPS: `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
-   `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL` — toate validate în catalog.
-3. Credențiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` — scope
-   `SSH signing keys: write`.
-4. `codex login` interactiv pe VPS pentru profilul `kelion-codex`.
-
-## Next ordered steps
-
-1. Configurează env OpenAI pe VPS (cheie + modele);
-2. Deploy `16eecd83` prin traseul protejat;
-3. Verifică live: `/api/version` = `16eecd83`, `/readyz` = true;
-4. Testează chat text live cu auth real;
-5. Testează voce live (OpenAI Realtime);
-6. Testează flux Admin → Constructor → PR → Deploy cu un ordin benign;
-7. Confirmă refresh client și cache update.
-
-## Canonical links
-
-- Repo: <https://github.com/kelion-team/kelionai>
-- PR remediere contract: <https://github.com/kelion-team/kelionai/pull/1395>
-- Release curent refuzat sigur: <https://github.com/kelion-team/kelionai/actions/runs/33083892211>
-- Integrare GitHub Admin: [`GITHUB-RELEASE-INTEGRATION.md`](GITHUB-RELEASE-INTEGRATION.md)
-- Contract livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
-- Live: <https://kelionai.app>
-- Inventar Admin: [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md)
-
-## Handoff pentru sesiunea următoare
-
-Nu relansa runurile vechi. Verifică din nou `origin/master`, PR-ul remedierii și
-sondele publice. Provisionarea trebuie să fie un run nou din workflow-ul reparat;
-orice token gol sau reutilizat rămâne fail-closed.
+- Recovery static + bootstrap b911: <https://github.com/kelion-team/kelionai/pull/1472>
+- Hotfix `noexec`: <https://github.com/kelion-team/kelionai/pull/1474>
+- Contract systemd strict one-shot: <https://github.com/kelion-team/kelionai/pull/1476>
+- Build OCI `3511d9df`: <https://github.com/kelion-team/kelionai/actions/runs/33182832152>
+- Configure `noexec` fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33179065073>
+- Configure post-validare fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33180818900>
+- Retry controlat identic: <https://github.com/kelion-team/kelionai/actions/runs/33181409551>
+- Configure strict-contract fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33183438759>
+- Release manual blocat de jurnalul configurării: <https://github.com/kelion-team/kelionai/actions/runs/33184958383>
+- Retry bounded strict fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33187020692>
+- Telemetrie strictă protejată: <https://github.com/kelion-team/kelionai/pull/1480>
+- Configure cu predicat exact: <https://github.com/kelion-team/kelionai/actions/runs/33190206039>
+- Remediere scope Bash: <https://github.com/kelion-team/kelionai/pull/1482>
+- Release canonic blocat de jurnal: <https://github.com/kelion-team/kelionai/actions/runs/33192026959>
+- Configure post-installer neatribuit: <https://github.com/kelion-team/kelionai/actions/runs/33192142478>
+- Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
+- Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>

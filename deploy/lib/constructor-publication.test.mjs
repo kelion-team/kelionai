@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -33,6 +34,9 @@ test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (path) => readFileSync(join(root, path), 'utf8')
+const bashExecutable = process.platform === 'win32'
+  ? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe')
+  : 'bash'
 const shellFunction = (source, name) => {
   const start = source.indexOf(`${name}() {`)
   assert.ok(start >= 0, `funcția shell ${name} lipsește`)
@@ -371,7 +375,7 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   const secureHandoff = shellFunction(installer, 'secure_handoff_spool')
   assert.match(secureParent, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown root:root[\s\S]*chmod 0711/)
   assert.match(secureChild, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown "[$]owner:[$]group"[\s\S]*chmod 0700/)
-  const handoffLockdown = secureHandoff.indexOf('chmod 0750 "$spool"')
+  const handoffLockdown = secureHandoff.indexOf('chmod 00750 "$spool"')
   const handoffChildren = secureHandoff.indexOf('for child in ready ack retired')
   assert.ok(secureHandoff.indexOf('stat -Lc \'%u\' "$spool"') >= 0
     && handoffLockdown >= 0 && handoffChildren > handoffLockdown,
@@ -432,6 +436,237 @@ if secure_handoff_spool "$test_root"; then exit 61; fi
   const bash = process.platform === 'win32' && existsSync(windowsBash) ? windowsBash : 'bash'
   const handoffFault = spawnSync(bash, ['-s'], { input: handoffFaultScript, encoding: 'utf8' })
   assert.equal(handoffFault.status, 0, handoffFault.stderr || handoffFault.stdout)
+})
+
+test('diagnose-spool este o operație SSH strict read-only și fail-closed', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- diagnose-spool/)
+  const start = workflow.indexOf('      - name: Diagnosticheaza spool-ul handoff (read-only)')
+  assert.ok(start >= 0, 'workflow-ul trebuie să declare pasul read-only pentru spool')
+  const nextStep = workflow.indexOf('\n      - name:', start + 1)
+  const diagnostic = workflow.slice(start, nextStep < 0 ? workflow.length : nextStep)
+  assert.match(diagnostic, /if: inputs\.operation == 'diagnose-spool'/)
+  assert.match(diagnostic, /stat -c 'type=%F mode=%a owner=%U group=%G ctime=%z mtime=%y'/)
+  assert.match(diagnostic, /getfacl -p "\$p"/)
+  assert.match(diagnostic, /find \/var\/lib\/kelion-constructor-handoff -maxdepth 2/)
+  assert.match(diagnostic, /sha256sum "\$activation_file"/)
+  assert.match(diagnostic, /activation_file=\/run\/kelion-release\/active/)
+  assert.match(diagnostic, /diagnostic_failure[\s\S]*source_commit/)
+  assert.match(diagnostic, /path_read_error[\s\S]*rc_total=1/)
+  assert.match(diagnostic, /probe identity id/)
+  assert.match(diagnostic, /namei -l "\$p"/)
+  assert.match(diagnostic, /findmnt -T \/var\/lib -no TARGET,FSTYPE,OPTIONS/)
+  assert.match(diagnostic, /lsattr -d \/var\/lib\/kelion-constructor-handoff/)
+  assert.match(diagnostic, /systemd-tmpfiles --cat-config/)
+  assert.match(diagnostic, /journal_signal=%s matching_files=%s/)
+
+  const remoteStart = diagnostic.indexOf("<<'REMOTE'")
+  const remoteEnd = diagnostic.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'diagnosticul trebuie să aibă payload SSH delimitat')
+  const remote = diagnostic.slice(remoteStart, remoteEnd)
+  assert.doesNotMatch(remote, /^\s*(?:sudo\s+)?(?:mkdir|chown|chmod|setfacl|rm|mv|tee|install|touch|cp|sed)\b/m,
+    'payload-ul VPS nu trebuie să invoce comenzi de mutație')
+  assert.doesNotMatch(remote, /cat\s+[^-]/, 'diagnosticul nu trebuie să afișeze conținut raw')
+})
+
+test('audit-token-identity identifică doar numele coliziunii fără valori sau mutații VPS', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- audit-token-identity/)
+  const start = workflow.indexOf('      - name: Auditeaza identitatea tokenurilor (read-only)')
+  assert.ok(start >= 0, 'workflow-ul trebuie să declare auditul read-only al identității')
+  const nextStep = workflow.indexOf('\n      - name:', start + 1)
+  const audit = workflow.slice(start, nextStep < 0 ? workflow.length : nextStep)
+  assert.match(audit, /if: inputs\.operation == 'audit-token-identity'/)
+  assert.match(audit, /audit_failure[\s\S]*source_commit/)
+  assert.match(audit, /oauth_admin_path=\/root\/kelion\/secrets\/github-release-oauth-token/)
+  assert.match(audit, /IFS= read -r oauth_admin_token/)
+  assert.match(audit, /IFS= read -r oauth_admin_token[\s\S]*\[\[ "\$oauth_admin_token" != \[\[:space:\]\]\* && "\$oauth_admin_token" != \*\[\[:space:\]\] \]\][\s\S]*sha256sum/,
+    'auditul trebuie să respingă whitespace-ul marginal și în tokenul OAuth live')
+  assert.match(audit, /oauth_admin_hash=\$\(ssh[\s\S]*\n          REMOTE\n          \)\n          \[ -n "\$oauth_admin_hash" \]/,
+    'command substitution-ul SSH trebuie închis imediat după heredoc')
+  assert.match(audit, /COLLISION: CONSTRUCTOR_SYNC_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: VPS_GITHUB_TOKEN/)
+  assert.match(audit, /COLLISION: CONSTRUCTOR_GHCR_READ_TOKEN/)
+  assert.match(audit, /\[\[ "\$value" != \[\[:space:\]\]\* && "\$value" != \*\[\[:space:\]\] \]\]/,
+    'auditul trebuie să respingă whitespace-ul marginal înainte de hashing')
+  assert.match(audit, /"\$collision" -ne 0[\s\S]*AUDIT-VERDICT: COLLISION[\s\S]*audit_collision[\s\S]*exit 1/,
+    'o coliziune trebuie să închidă auditul fail-closed cu telemetrie de eșec')
+  assert.match(audit, /AUDIT-VERDICT: NO-COLLISION[\s\S]*audit_complete/)
+  assert.doesNotMatch(audit, /AUDIT-VERDICT: COLLISION[\s\S]*"ok":true/,
+    'ramura de coliziune nu poate raporta succes')
+  assert.doesNotMatch(audit, /echo\s+['"]?\$?(?:h_sync|h_publisher|h_release|h_ghcr|oauth_admin_hash)/,
+    'auditul nu trebuie să afișeze hashurile')
+  assert.doesNotMatch(audit, /set\s+-x/, 'auditul nu trebuie să activeze xtrace')
+
+  const remoteStart = audit.indexOf("<<'REMOTE'")
+  const remoteEnd = audit.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'auditul trebuie să aibă payload SSH delimitat')
+  const remote = audit.slice(remoteStart, remoteEnd)
+  assert.doesNotMatch(remote, /^\s*(?:sudo\s+)?(?:mkdir|chown|chmod|setfacl|rm|mv|tee|install|touch|cp|sed)\b/m,
+    'payload-ul VPS nu trebuie să invoce comenzi de mutație')
+  assert.doesNotMatch(remote, /(?:cat|head|tail)\s+/, 'auditul nu trebuie să afișeze conținutul secretului')
+})
+
+test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul oprit', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- repair-spool-layout/)
+  const start = workflow.indexOf('      - name: Repara controlat layout-ul spool-ului handoff')
+  assert.ok(start >= 0, 'workflow-ul trebuie să declare remedierea dedicată a spool-ului')
+  const nextStep = workflow.indexOf('\n      - name:', start + 1)
+  const repair = workflow.slice(start, nextStep < 0 ? workflow.length : nextStep)
+  assert.match(repair, /if: inputs\.operation == 'repair-spool-layout'/)
+  assert.match(repair, /phase='repair-spool-layout'/)
+  assert.match(repair, /repair_failure[\s\S]*current_check[\s\S]*source_commit/)
+  assert.match(repair, /repair_complete/)
+  assert.match(repair, /stat -c '%U:%G:%a' \/var\/lib/)
+  assert.match(repair, /systemctl is-active --quiet "\$unit"/)
+  assert.match(repair, /codex-worker\.enabled[\s\S]*constructor-publisher\.enabled[\s\S]*constructor-release\.enabled/)
+  assert.match(repair, /find "\$spool" -mindepth 1 -maxdepth 1 -printf '%f\\n'/)
+  assert.match(repair, /case "\$child" in ready\|ack\|retired\)/)
+  assert.match(repair, /\[ -d "\$spool" \] && \[ ! -L "\$spool" \]/)
+  assert.match(repair, /install -d -o root -g kelion-handoff -m 2770 "\$spool\/retired"/)
+  assert.match(repair, /chmod 2770 "\$spool\/\$child"/)
+  const childInstall = repair.indexOf('install -d -o root -g kelion-handoff -m 2770 "$spool/retired"')
+  const firstParentChown = repair.indexOf('chown root:kelion-handoff "$spool"')
+  const firstParentChmod = repair.indexOf('chmod 00750 "$spool"')
+  const finalParentChown = repair.lastIndexOf('chown root:kelion-handoff "$spool"')
+  const finalParentChmod = repair.lastIndexOf('chmod 00750 "$spool"')
+  const childValidation = repair.indexOf("current_check='children-allowlist'")
+  const finalVerify = repair.indexOf("current_check='verify-canonical-layout'")
+  assert.ok(firstParentChown >= 0 && firstParentChown < firstParentChmod && firstParentChmod < childValidation,
+    'părintele trebuie blocat înaintea validării și mutațiilor copiilor')
+  assert.ok(childInstall < finalParentChown && finalParentChown < finalParentChmod && finalParentChmod < finalVerify,
+    'părintele trebuie normalizat din nou după copii și înaintea verificării finale')
+  assert.match(repair, /current_check="verify-canonical-layout-\$child"/)
+  assert.match(repair, /root:kelion-handoff:750/)
+  assert.match(repair, /root:kelion-handoff:2770/)
+  assert.doesNotMatch(repair, /\$\{\{\s*inputs\.[^}]+\}\}/, 'payload-ul nu trebuie să interpoleze inputuri în shell')
+  assert.doesNotMatch(repair, /^\s*(?:sudo\s+)?(?:rm|mv|tee|cp|setfacl)\b/m, 'remedierea nu trebuie să șteargă, mute sau suprascrie conținut')
+})
+
+test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-installer fără date secrete', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const stepStart = workflow.indexOf('      - name: Configureaza Constructorul fara activare prematura')
+  const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
+  assert.ok(stepStart >= 0 && stepEnd > stepStart, 'pasul configure-constructor trebuie delimitat')
+  const step = workflow.slice(stepStart, stepEnd)
+  const remoteStart = step.indexOf("<<'REMOTE'")
+  const remoteEnd = step.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'payload-ul remote configure-constructor trebuie delimitat')
+  const remote = step.slice(remoteStart, remoteEnd)
+
+  assert.match(remote, /set -Eeuo pipefail/)
+  assert.match(remote, /cleanup_remote\(\) \{\s+trap - ERR/)
+  assert.match(remote, /trap cleanup_remote EXIT[\s\S]*trap report_constructor_config_failure ERR/)
+  assert.match(remote, /report_constructor_config_failure\(\)[\s\S]*BASH_LINENO/)
+  assert.match(remote, /constructor_config_failure[\s\S]*constructor_config_phase[\s\S]*constructor_config_check[\s\S]*source_commit/)
+
+  const expectedPhases = [
+    'complete',
+    'configuration-preflight',
+    'constructor-install',
+    'dependency-install',
+    'post-installer',
+    'remote-preflight',
+    'runtime-config-cutover',
+  ]
+  const phases = [...remote.matchAll(/constructor_config_phase='([^']+)'/g)].map((match) => match[1])
+  assert.deepEqual([...new Set(phases)].sort(), expectedPhases)
+
+  const expectedChecks = [
+    'apply',
+    'bundle-contract',
+    'codex-cli-install',
+    'codex-cli-link',
+    'config-stage',
+    'cutover-stage',
+    'existing-config-contract',
+    'existing-unit-contract',
+    'install-resume-contract',
+    'installer',
+    'node-runtime',
+    'package-dependencies',
+    'package-index',
+    'payload-contract',
+    'payload-decode',
+    'publisher-gate-image',
+    'publisher-repository',
+    'resume-installer',
+    'runtime-helper-publication',
+    'runtime-journal-recovery',
+    'secret-stage',
+    'signing-key-layout',
+    'signing-key-publication',
+    'signing-key-registration',
+    'signing-key-validation',
+    'signing-stale-cleanup',
+    'success-message',
+    'unit-quiescence',
+    'worker-gate-image',
+    'worker-profile-publication',
+    'worker-repository',
+  ]
+  const checks = [...remote.matchAll(/constructor_config_check='([^']+)'/g)].map((match) => match[1])
+  assert.deepEqual([...new Set(checks)].sort(), expectedChecks)
+  assert.equal([...remote.matchAll(/constructor_config_(?:phase|check)=(?!'[a-z0-9-]+')/g)].length, 0,
+    'fazele și checkpointurile raportate trebuie să rămână literali din vocabularul fix')
+
+  for (const [check, command] of [
+    ['package-index', 'apt-get update -qq'],
+    ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
+    ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
+    ['signing-stale-cleanup', 'for stale_signing_root in'],
+    ['signing-key-validation', 'validate_signing_key "$signing_key"'],
+    ['signing-key-registration', 'existing_keys=$(curl'],
+    ['worker-repository', 'clone_or_sync kelion-codex'],
+    ['publisher-repository', 'clone_or_sync kelion-publisher'],
+    ['worker-gate-image', 'pull_gate kelion-codex'],
+    ['publisher-gate-image', 'pull_gate kelion-publisher'],
+    ['apply', 'KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh"'],
+  ]) {
+    const labelIndex = remote.indexOf(`constructor_config_check='${check}'`)
+    const commandIndex = remote.indexOf(command, labelIndex)
+    assert.ok(labelIndex >= 0 && commandIndex > labelIndex, `${check} trebuie setat înainte de comanda atribuită`)
+  }
+
+  const handlerStart = remote.indexOf('report_constructor_config_failure() {')
+  const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'handlerul ERR trebuie să poată fi extras')
+  const handler = remote.slice(handlerStart, handlerEnd + '\n          }'.length)
+    .split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n')
+  assert.doesNotMatch(handler, /BASH_COMMAND|bundle|payload|token|secret/,
+    'telemetria nu poate include comanda sau materialul sensibil')
+
+  const sourceCommit = 'a'.repeat(40)
+  const script = `set -Euo pipefail
+constructor_config_phase='post-installer'
+constructor_config_check='codex-cli-install'
+source_commit='${sourceCommit}'
+${handler}
+cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
+trap cleanup_remote EXIT
+trap report_constructor_config_failure ERR
+fail_inside_function() { return 17; }
+fail_inside_function
+exit 99
+`
+  const result = spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8' })
+  assert.equal(result.status, 17, result.stderr || result.stdout)
+  assert.equal(result.stdout.trim(), 'cleanup-complete')
+  const events = result.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('{'))
+  assert.equal(events.length, 1, result.stderr)
+  const event = JSON.parse(events[0])
+  assert.deepEqual({ ...event, line: 0 }, {
+    ok: false,
+    event: 'constructor_config_failure',
+    phase: 'post-installer',
+    check: 'codex-cli-install',
+    line: 0,
+    exit_code: 17,
+    source_commit: sourceCommit,
+  })
+  assert.ok(Number.isInteger(event.line) && event.line > 0)
 })
 
 test('configurarea Constructor păstrează ACL-ul canonic al secretelor de producție', () => {
@@ -542,11 +777,19 @@ test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () =>
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const control = read('.github/workflows/vps-run.yml')
   const installer = read('deploy/instaleaza-constructor.sh')
-  assert.match(shellFunction(deploy, 'force_quiesce_constructor_release'), /constructor_release_services[\s\S]*systemctl disable --now/)
-  assert.match(shellFunction(cutover, 'force_quiesce_constructor_units'), /constructor_services[\s\S]*systemctl disable --now/)
-  assert.match(shellFunction(cutover, 'restore_constructor_timers'), /constructor_services[\s\S]*systemctl disable[\s\S]*systemctl is-enabled/)
-  assert.match(control, /constructor_services[\s\S]*systemctl disable --now "\$unit"/)
-  assert.match(installer, /kelion-codex-worker\.service[\s\S]*kelion-constructor-release\.service[\s\S]*systemctl disable --now "\$unit"/)
+  assert.match(shellFunction(deploy, 'force_quiesce_constructor_release'), /constructor_release_timers[\s\S]*stop_and_disable_constructor_release_timer[\s\S]*constructor_release_services[\s\S]*stop_and_disable_constructor_release_service[\s\S]*systemctl daemon-reload/)
+  assert.match(shellFunction(cutover, 'force_quiesce_constructor_units'), /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload/)
+  assert.match(shellFunction(cutover, 'restore_constructor_timers'), /constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*validate_constructor_unit_file_state/)
+  assert.match(control, /all_services[\s\S]*stop_and_disable_constructor_service "\$unit"/)
+  assert.match(installer, /constructor_services[\s\S]*stop_and_disable_constructor_service "\$unit"/)
+  for (const source of [cutover, installer, deploy]) {
+    const helper = shellFunction(source, source === deploy
+      ? 'stop_and_disable_constructor_release_service'
+      : 'stop_and_disable_constructor_service')
+    assert.match(helper, /systemctl stop "\$unit"[^\n]*\|\| :[\s\S]*systemctl disable --no-reload "\$unit"[^\n]*\|\| :/)
+  }
+  assert.match(control,
+    /stop_and_disable_constructor_service\(\)[\s\S]*systemctl stop "\$unit"[^\n]*\|\| :[\s\S]*systemctl disable --no-reload "\$unit"[^\n]*\|\| :/)
 })
 
 test('workerul oprește copilul activ la pierderea lease-ului și păstrează adevărul porților locale', () => {
@@ -630,6 +873,18 @@ test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
 test('installerul canonic lasă toate serviciile dezactivate și nu creează secrete', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   assert.match(installer, /KELION_CONSTRUCTOR_INSTALL/)
+  assert.match(installer, /set -Eeuo pipefail/)
+  assert.match(installer, /"event":"installer_failure","phase":"%s","line":%s,"exit_code":%s,"source_commit":"%s"/)
+  assert.match(installer, /::error::Constructor installer gate: phase=%s line=%s exit=%s source_commit=%s/)
+  assert.match(installer, /trap 'capture_constructor_install_failure "[$]LINENO"' ERR/)
+  assert.match(installer, /trap report_constructor_install_failure EXIT/)
+  assert.doesNotMatch(shellFunction(installer, 'report_constructor_install_failure'), /BASH_COMMAND|set -x|printf[^\n]*(?:token|secret|value|env)/i)
+  assert.match(installer, /KELION_CONSTRUCTOR_SOURCE_COMMIT/)
+  assert.match(installer, /constructor_install_assert "[$]LINENO" test "[$][(]readlink/)
+  assert.match(installer, /constructor_install_assert "[$]LINENO" test "[$][(]realpath -e/)
+  assert.match(installer, /usermod_help=[$][(]usermod --help 2>&1[)]/)
+  assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
+  assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
   assert.match(installer, /systemd-analyze verify/)
   assert.match(installer, /kelion-worker\.config\.toml/)
   assert.match(installer, /constructor_markers=\(\/etc\/kelion\/codex-worker\.enabled \/etc\/kelion\/constructor-publisher\.enabled \/etc\/kelion\/constructor-release\.enabled\)/)
@@ -649,12 +904,46 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.doesNotMatch(withoutRecoveryEnable, /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
 })
 
+test('telemetria instalatorului rămâne fail-closed și nu divulgă mediul', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const reporter = shellFunction(installer, 'report_constructor_install_failure')
+  const capture = shellFunction(installer, 'capture_constructor_install_failure')
+  const canary = `CANARY-CONSTRUCTOR-${process.pid}-${Date.now()}`
+  const sourceCommit = '0123456789abcdef0123456789abcdef01234567'
+  if (process.platform === 'win32') {
+    assert.ok(existsSync(bashExecutable), `bash indisponibil: ${bashExecutable}`)
+  }
+  const probe = spawnSync(bashExecutable, ['-c', `
+set -Eeuo pipefail
+constructor_install_phase=unit-validation
+constructor_install_failure_line=0
+constructor_install_source_commit=${sourceCommit}
+${reporter}
+${capture}
+trap 'capture_constructor_install_failure "$LINENO"' ERR
+trap report_constructor_install_failure EXIT
+false
+`], {
+    encoding: 'utf8',
+    env: { ...process.env, CANARY_SECRET: canary },
+  })
+
+  assert.equal(probe.status, 1)
+  assert.equal(probe.stdout, '')
+  assert.match(probe.stderr,
+    /{"ok":false,"event":"installer_failure","phase":"unit-validation","line":\d+,"exit_code":1,"source_commit":"0123456789abcdef0123456789abcdef01234567"}/)
+  assert.match(probe.stderr,
+    /::error::Constructor installer gate: phase=unit-validation line=\d+ exit=1 source_commit=0123456789abcdef0123456789abcdef01234567/)
+  assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
+  assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
+})
+
 test('mapările subuid/subgid sunt validate strict și publicate atomic', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   const validator = shellFunction(installer, 'validate_subid_map')
   const ensure = shellFunction(installer, 'ensure_subids')
-  const durableQuiesce = installer.lastIndexOf('write_install_journal quiesced')
   const firstSubidCommit = installer.lastIndexOf('ensure_subids kelion-codex')
+  const durableQuiesce = installer.lastIndexOf('write_install_journal quiesced', firstSubidCommit)
   const secondSubidCommit = installer.lastIndexOf('ensure_subids kelion-publisher')
   assert.ok(durableQuiesce >= 0 && firstSubidCommit > durableQuiesce && secondSubidCommit > firstSubidCommit,
     'ambele mapări se publică numai după jurnalul quiesced, pentru recovery fail-closed între rename-uri')
@@ -828,7 +1117,10 @@ test('bootstrap-ul celor șase unități este jurnalizat și recuperă sigur ori
     'toți candidații roll-forward și manifestul lor trebuie fsync înainte de jurnal')
   const rollForward = shellFunction(cutover, 'roll_forward_unit_transaction')
   assert.equal((rollForward.match(/\[systemd-(?:timer|service)\.[^\]]+\]=1/g) ?? []).length, 6)
-  assert.match(rollForward, /sha256sum[\s\S]*quiesce_units_for_recovery 1[\s\S]*unit-forward[\s\S]*systemctl daemon-reload[\s\S]*force_quiesce_constructor_units[\s\S]*validate_live_constructor_units_quiesced[\s\S]*clear_runtime_ready_stamp/)
+  assert.match(rollForward, /sha256sum[\s\S]*quiesce_units_for_recovery 1[\s\S]*unit-forward[\s\S]*systemctl daemon-reload[\s\S]*force_quiesce_constructor_units[\s\S]*wait_for_live_constructor_units_quiesced[\s\S]*clear_runtime_ready_stamp/)
+  for (const stage of ['pre-quiesce', 'daemon-reload', 'post-quiesce', 'strict-live-unit-contract', 'ready-clear']) {
+    assert.match(rollForward, new RegExp(`unit-roll-forward:${stage}`))
+  }
   assert.doesNotMatch(rollForward, /validate_live_runtime_contract|publish_runtime_ready_stamp|restore_constructor_timers/)
   const forwardRecovery = recovery.indexOf('roll_forward_unit_transaction "$recovery_root"')
   const legacyRollback = recovery.indexOf('rollback-ul durabil al fișierelor')
@@ -878,6 +1170,46 @@ test('contractul runtime validează tupla efectivă și din nou live înainte de
   assert.match(commit, /validate_live_runtime_contract[\s\S]*write_journal_phase files-committed[\s\S]*validate_live_runtime_contract[\s\S]*write_journal_phase committed[\s\S]*publish_runtime_ready_stamp/)
 })
 
+test('validatorii unităților derivă identitatea exclusiv din argumentul explicit', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const validateText = shellFunction(cutover, 'validate_text_file_bytes')
+  const validateTimer = shellFunction(cutover, 'validate_constructor_timer_unit')
+  const validateService = shellFunction(cutover, 'validate_constructor_service_unit')
+  const script = `set -euo pipefail
+${validateText}
+${validateTimer}
+${validateService}
+validate_from_conflicting_scope() {
+  local logical=systemd-service.kelion-constructor-release.service
+  validate_constructor_timer_unit \
+    deploy/systemd/kelion-codex-worker.timer \
+    systemd-timer.kelion-codex-worker.timer
+  logical=systemd-timer.kelion-constructor-release.timer
+  validate_constructor_service_unit \
+    deploy/systemd/kelion-codex-worker.service \
+    systemd-service.kelion-codex-worker.service
+}
+reject_spoofed_argument() {
+  local logical=systemd-timer.kelion-codex-worker.timer
+  if validate_constructor_timer_unit \
+    deploy/systemd/kelion-codex-worker.timer systemd-timer.unknown; then return 1; fi
+  logical=systemd-service.kelion-codex-worker.service
+  if validate_constructor_service_unit \
+    deploy/systemd/kelion-codex-worker.service systemd-service.unknown; then return 1; fi
+}
+validate_from_conflicting_scope
+reject_spoofed_argument
+unset logical
+validate_constructor_timer_unit \
+  deploy/systemd/kelion-codex-worker.timer \
+  systemd-timer.kelion-codex-worker.timer
+validate_constructor_service_unit \
+  deploy/systemd/kelion-codex-worker.service \
+  systemd-service.kelion-codex-worker.service`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
 test('workflows refuză bundle-ul dacă master avansează chiar înainte de primul mutator VPS', () => {
   for (const path of ['.github/workflows/vps-run.yml', '.github/workflows/vps-set-env.yml']) {
     const workflow = read(path)
@@ -914,6 +1246,16 @@ test('workflow-ul de producție corelează idempotent cererea și rămâne envir
   assert.match(releaseJob, /environment: production[\s\S]*git\/ref\/heads\/master[\s\S]*CANDIDATE_SHA" != "\$current_master[\s\S]*printf '%s' "\$REGISTRY_TOKEN" \| ssh/)
   assert.match(workflow, /actions\/runs\/[$][{]EXPECTED_CI_RUN_ID[}][\s\S]*pr-verify\.yml[\s\S]*actions\/runs\/[$][{]EXPECTED_BUILD_RUN_ID[}][\s\S]*build-images\.yml/)
   assert.doesNotMatch(workflow, /pull_request_target|continue-on-error/)
+})
+
+test('release-ul automat acceptă botul GitHub Actions fără să lărgească username-ul SSH', () => {
+  const workflow = read('.github/workflows/deploy.yml')
+  assert.ok(workflow.includes('[[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+(\\[bot\\])?$ ]]'))
+  assert.match(workflow, /docker login ghcr\.io --username '\$GITHUB_ACTOR' --password-stdin/)
+
+  const actorContract = /^[A-Za-z0-9-]+(?:\[bot\])?$/
+  for (const actor of ['kelion-team', 'github-actions[bot]', 'dependabot[bot]']) assert.match(actor, actorContract)
+  for (const actor of ["bad'actor", 'bad actor', 'bad_actor', 'bot[bot]suffix']) assert.doesNotMatch(actor, actorContract)
 })
 
 test('identitatea workflow-ului release supraviețuiește avansării ref-ului după dispatch', () => {
@@ -1265,7 +1607,9 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
   assert.ok(dockerProof > quiesce && strict > dockerProof,
     'Docker poate eșua fără să sară quiesce-ul, dar stamp-ul nu se publică înainte să fie activ')
   const forceQuiesce = shellFunction(cutover, 'force_quiesce_constructor_units')
-  assert.match(forceQuiesce, /systemctl disable --now[\s\S]*ActiveState[\s\S]*systemctl list-jobs --no-legend --plain/)
+  const quiescePostconditions = shellFunction(cutover, 'validate_constructor_quiesce_postconditions')
+  assert.match(forceQuiesce, /stop_and_disable_constructor_timer[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload[\s\S]*wait_for_constructor_quiesce_postconditions/)
+  assert.match(quiescePostconditions, /ActiveState[\s\S]*systemctl list-jobs --no-legend --plain/)
 })
 
 test('recovery-ul de boot așteaptă bounded backendul și rămâne fail-closed la timeout', () => {
@@ -1689,6 +2033,470 @@ test('migrarea unităților legacy este unit-only înaintea tranzacției runtime
   const journal = cutover.indexOf('write_journal_phase prepared')
   const move = cutover.indexOf('mv -f -- "${prepared[$index]}"')
   assert.ok(journal >= 0 && move > journal, 'jurnalul fsync trebuie să preceadă orice înlocuire de timer')
+})
+
+test('tranzacția unit-only amână porțile secretelor până la cutover-ul mixt cu candidații noi', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const provision = read('.github/workflows/vps-set-env.yml')
+  const deploy = read('deploy/deploy.sh')
+  const validator = shellFunction(cutover, 'validate_candidate_secret_separation')
+  const hmacGate = validator.indexOf("assert_pairwise_distinct 'HMAC-urile Constructor'")
+  const oauthGate = validator.indexOf("assert_pairwise_distinct 'credentialele OAuth Admin și GHCR'", hmacGate)
+  const githubGate = validator.indexOf("assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin'", oauthGate)
+  const mainStart = cutover.indexOf('mapfile -t manifest_entries')
+  const main = cutover.slice(mainStart)
+  const stateValidation = main.indexOf('\nvalidate_constructor_state\n')
+  const validatorCall = main.indexOf('\nvalidate_candidate_secret_separation\n')
+  const journal = main.indexOf('write_journal_phase prepared', validatorCall)
+  const mutation = main.indexOf('mutation_started=1', journal)
+  const firstMove = main.indexOf('mv -f -- "${prepared[$index]}"', mutation)
+
+  assert.ok(hmacGate >= 0 && oauthGate > hmacGate && githubGate > oauthGate,
+    'validatorul păstrează ordinea tuturor porților de identitate')
+  assert.ok(stateValidation >= 0 && validatorCall > stateValidation && journal > validatorCall
+    && mutation > journal && firstMove > mutation,
+  'validatorul strict trebuie apelat după selecția generației și înainte de jurnal sau commit')
+  assert.equal((main.match(/^validate_candidate_secret_separation$/gm) ?? []).length, 1)
+  assert.match(validator, /unit_only_transaction" = 1[^\n]*defer_secret_gates" = 1[\s\S]*return 0/)
+  assert.match(validator, /constructor_configured" -eq 3/)
+  assert.match(validator, /app-secret\.github-release-oauth-token/)
+  assert.match(validator, /gate-secret\.github-ghcr-read-token/)
+  assert.equal((installer.match(/KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1/g) ?? []).length, 1,
+    'installerul poate amâna porțile numai la singurul său cutover unit-only')
+  assert.equal((provision.match(/KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1/g) ?? []).length, 1,
+    'provisionarea poate amâna porțile numai la cutover-ul unit-only urmat de staging strict')
+  assert.doesNotMatch(deploy, /KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER/,
+    'deploy-ul release trebuie să valideze secretele live chiar în cutover-ul unit-only')
+
+  const harness = `set -euo pipefail
+${validator}
+calls=0
+force_collision=0
+assert_pairwise_distinct() {
+  calls=$((calls + 1))
+  if [ "$force_collision" = 1 ]; then return 73; fi
+}
+unit_only_transaction=1
+constructor_configured=3
+defer_secret_gates=1
+force_collision=1
+validate_candidate_secret_separation
+[ "$calls" = 0 ]
+calls=0
+defer_secret_gates=0
+force_collision=0
+validate_candidate_secret_separation
+[ "$calls" = 3 ]
+calls=0
+unit_only_transaction=0
+defer_secret_gates=1
+force_collision=0
+validate_candidate_secret_separation
+[ "$calls" = 3 ]
+calls=0
+force_collision=1
+if validate_candidate_secret_separation; then exit 91; fi
+[ "$calls" = 1 ]`
+  const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
+test('quiesce distinge timerele disabled de serviciile oneshot statice', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const predicates = [
+    ['runtime', shellFunction(cutover, 'validate_constructor_unit_file_state')],
+    ['installer', shellFunction(installer, 'validate_constructor_unit_file_state')],
+  ]
+  const prepublicationPredicates = [
+    ['runtime', shellFunction(cutover, 'validate_constructor_prepublication_unit_file_state')],
+    ['installer', shellFunction(installer, 'validate_constructor_prepublication_unit_file_state')],
+  ]
+
+  for (const [label, predicate] of predicates) {
+    const harness = `set -euo pipefail
+${predicate}
+systemctl() {
+  [ "\$1" = show ] || return 91
+  [ "\${FAKE_SHOW_FAILURE:-0}" = 0 ] || return 92
+  printf '%s\\n' "\${FAKE_UNIT_FILE_STATE-}"
+}
+FAKE_UNIT_FILE_STATE=disabled
+validate_constructor_unit_file_state kelion-codex-worker.timer
+FAKE_UNIT_FILE_STATE=static
+validate_constructor_unit_file_state kelion-constructor-publisher.service
+for state in static enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_unit_file_state kelion-constructor-release.timer; then exit 101; fi
+done
+for state in disabled enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_unit_file_state kelion-constructor-release.service; then exit 102; fi
+done
+FAKE_SHOW_FAILURE=1
+if validate_constructor_unit_file_state kelion-codex-worker.timer; then exit 103; fi
+FAKE_SHOW_FAILURE=0
+FAKE_UNIT_FILE_STATE=disabled
+if validate_constructor_unit_file_state kelion-constructor-sync.service; then exit 104; fi`
+    const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+    assert.equal(result.status, 0, `${label}: ${result.stderr || result.stdout}`)
+  }
+
+  for (const [label, predicate] of prepublicationPredicates) {
+    const harness = `set -euo pipefail
+${predicate}
+systemctl() {
+  [ "\$1" = show ] || return 91
+  printf '%s\\n' "\${FAKE_UNIT_FILE_STATE-}"
+}
+FAKE_UNIT_FILE_STATE=disabled
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.timer
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.service
+FAKE_UNIT_FILE_STATE=static
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.service
+if validate_constructor_prepublication_unit_file_state kelion-constructor-release.timer; then exit 111; fi
+for state in enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_prepublication_unit_file_state kelion-constructor-release.service; then exit 112; fi
+done`
+    const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+    assert.equal(result.status, 0, `${label} prepublication: ${result.stderr || result.stdout}`)
+  }
+
+  const runtimeBarrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
+  const runtimeEarly = shellFunction(cutover, 'early_recover_only_barrier')
+  const runtimeStopTimer = shellFunction(cutover, 'stop_and_disable_constructor_timer')
+  const runtimeStopService = shellFunction(cutover, 'stop_and_disable_constructor_service')
+  const runtimeReport = shellFunction(cutover, 'report_quiesce_postcondition_failure')
+  const runtimeForce = shellFunction(cutover, 'force_quiesce_constructor_units')
+  const runtimePostconditions = shellFunction(cutover, 'validate_constructor_quiesce_postconditions')
+  const runtimeRestore = shellFunction(cutover, 'restore_constructor_timers')
+  const installerQuiesce = shellFunction(installer, 'quiesce_before_install')
+  const installerQuiescePostconditions = shellFunction(installer, 'validate_install_quiesce_postconditions')
+  const installerPublishedPostconditions = shellFunction(installer, 'validate_published_systemd_postconditions')
+  const installerPublished = installer.slice(installer.indexOf('set_constructor_install_phase published-validation'))
+  assert.match(runtimeBarrier, /validate_constructor_unit_file_state "\$unit"/)
+  assert.match(runtimeForce, /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload[\s\S]*wait_for_constructor_quiesce_postconditions/)
+  assert.match(runtimePostconditions, /ActiveState[\s\S]*list-jobs/)
+  assert.match(runtimeRestore, /constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*validate_constructor_unit_file_state/)
+  assert.doesNotMatch(installerQuiesce, /systemctl disable --now/)
+  assert.match(installerQuiesce, /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload[\s\S]*wait_for_install_quiesce_postconditions/)
+  assert.match(installerQuiescePostconditions, /validate_constructor_prepublication_unit_file_state "\$unit"/)
+  assert.match(installerPublished, /wait_for_published_systemd_postconditions/)
+  assert.match(installerPublishedPostconditions, /validate_constructor_unit_file_state "\$unit"/)
+  assert.doesNotMatch(runtimeBarrier, /is-enabled/)
+  assert.doesNotMatch(installerQuiesce, /is-enabled/)
+
+  const earlyHarness = `set -euo pipefail
+${runtimeStopTimer}
+${runtimeStopService}
+${runtimeReport}
+${shellFunction(cutover, 'validate_constructor_prepublication_unit_file_state')}
+${runtimeEarly}
+systemctl() {
+  local command=\$1 unit=\${2:-}
+  if [ "\$command" = disable ] && [ "\$unit" = --no-reload ]; then unit=\$3; fi
+  case "\$command" in
+    cat) return 0 ;;
+    stop) [ "\${FAIL_STOP:-0}" = 0 ] ;;
+    disable) [ "\${FAIL_DISABLE:-0}" = 0 ] ;;
+    daemon-reload) [ "\${FAIL_RELOAD:-0}" = 0 ] ;;
+    show)
+      if [[ "\$*" == *UnitFileState* ]]; then
+        [[ "\$unit" == *.timer ]] && echo disabled || echo "\${SERVICE_STATE:-static}"
+      else echo "\${ACTIVE_STATE:-inactive}"; fi ;;
+    list-jobs) [ "\${PENDING_JOB:-0}" = 0 ] || echo '1 fake start waiting' ;;
+    *) return 91 ;;
+  esac
+}
+early_recover_only_barrier
+FAIL_STOP=1 FAIL_DISABLE=1
+early_recover_only_barrier
+FAIL_STOP=0 FAIL_DISABLE=0
+SERVICE_STATE=enabled
+if early_recover_only_barrier; then exit 101; fi
+SERVICE_STATE=static ACTIVE_STATE=active
+if early_recover_only_barrier; then exit 102; fi
+ACTIVE_STATE=inactive PENDING_JOB=1
+if early_recover_only_barrier; then exit 103; fi`
+  const earlyResult = spawnSync(bashExecutable, ['-c', earlyHarness], { encoding: 'utf8' })
+  assert.equal(earlyResult.status, 0, earlyResult.stderr || earlyResult.stdout)
+})
+
+test('dovezile systemd post-reload reîncearcă bounded fără să relaxeze contractul', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const waiters = [
+    [cutover, 'wait_for_live_constructor_units_quiesced', 'validate_live_constructor_units_quiesced', 'wait_for_live_constructor_units_quiesced'],
+    [cutover, 'wait_for_constructor_quiesce_postconditions', 'validate_constructor_quiesce_postconditions', 'wait_for_constructor_quiesce_postconditions 1'],
+    [installer, 'wait_for_install_quiesce_postconditions', 'validate_install_quiesce_postconditions', 'wait_for_install_quiesce_postconditions 6'],
+    [installer, 'wait_for_published_systemd_postconditions', 'validate_published_systemd_postconditions', 'wait_for_published_systemd_postconditions'],
+  ]
+
+  for (const [source, waiterName, validatorName, invocation] of waiters) {
+    const waiter = shellFunction(source, waiterName)
+    assert.match(waiter, new RegExp(`attempt <= 12[\\s\\S]*${validatorName}[\\s\\S]*sleep 0\\.25`))
+    assert.doesNotMatch(waiter, /^\s*(?:systemctl|rm|mv|install)\b/m)
+
+    const harness = `set -euo pipefail
+${waiter}
+calls=0
+sleeps=0
+${validatorName}() {
+  calls=$((calls + 1))
+  [ "$calls" -ge 3 ]
+}
+sleep() { sleeps=$((sleeps + 1)); }
+${invocation}
+[ "$calls" -eq 3 ] && [ "$sleeps" -eq 2 ]
+
+calls=0
+sleeps=0
+${validatorName}() {
+  calls=$((calls + 1))
+  return 1
+}
+if ${invocation}; then exit 121; fi
+[ "$calls" -eq 12 ] && [ "$sleeps" -eq 11 ]`
+    const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+    assert.equal(result.status, 0, `${waiterName}: ${result.stderr || result.stdout}`)
+  }
+})
+
+test('contractul live strict atribuie fiecare predicat systemd fără date libere', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const reporter = shellFunction(cutover, 'report_live_constructor_quiesce_failure')
+  const effective = shellFunction(cutover, 'validate_effective_constructor_unit')
+  const strict = shellFunction(cutover, 'validate_live_constructor_units_quiesced')
+  const barrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
+
+  assert.doesNotMatch(cutover, /validate_effective_constructor_unit_for_quiesce/)
+  assert.match(effective, /local unit=\$1 report=\$\{2:-0\}/)
+  assert.match(strict, /validate_effective_constructor_unit "\$unit" "\$report"/)
+  assert.match(reporter, /case "\$unit" in[\s\S]*\*\) unit=unknown/)
+  assert.match(reporter, /case "\$predicate" in[\s\S]*\*\) predicate=unknown/)
+  assert.match(reporter, /live-quiesce-contract:%s:%s/)
+  for (const predicate of [
+    'ready-stamp-present', 'file-type', 'file-metadata-query', 'file-metadata',
+    'timer-contract', 'service-contract', 'unit-catalog', 'unit-count',
+  ]) assert.match(strict, new RegExp(predicate))
+  for (const predicate of [
+    'fragment-query', 'fragment-path', 'dropins-query', 'dropins-present',
+    'load-state-query', 'load-state', 'reload-state-query', 'reload-needed',
+  ]) assert.match(effective, new RegExp(predicate))
+  for (const predicate of [
+    'timer-unit-file-state', 'service-unit-file-state', 'active-state-query',
+    'active-state', 'pending-job', 'auxiliary-active-state-query',
+    'auxiliary-active-state', 'auxiliary-pending-job',
+  ]) assert.match(barrier, new RegExp(predicate))
+
+  const effectiveHarness = `set -euo pipefail
+${reporter}
+${effective}
+mode=ok
+systemctl() {
+  [ "$1" = show ] || return 91
+  local unit=$2 property=\${3#--property=}
+  case "$property" in
+    FragmentPath)
+      [ "$mode" != fragment-query ] || return 1
+      [ "$mode" != fragment-path ] && printf '/etc/systemd/system/%s\\n' "$unit" || printf '/wrong\\n' ;;
+    DropInPaths)
+      [ "$mode" != dropins-query ] || return 1
+      [ "$mode" != dropins-present ] || printf '/drop-in.conf\\n' ;;
+    LoadState)
+      [ "$mode" != load-state-query ] || return 1
+      [ "$mode" != load-state ] && printf 'loaded\\n' || printf 'not-found\\n' ;;
+    NeedDaemonReload)
+      [ "$mode" != reload-state-query ] || return 1
+      [ "$mode" != reload-needed ] && printf 'no\\n' || printf 'yes\\n' ;;
+    *) return 92 ;;
+  esac
+}
+for item in \\
+  fragment-query:fragment-query fragment-path:fragment-path \\
+  dropins-query:dropins-query dropins-present:dropins-present \\
+  load-state-query:load-state-query load-state:load-state \\
+  reload-state-query:reload-state-query reload-needed:reload-needed; do
+  mode=\${item%%:*}; expected=\${item#*:}
+  if output=$(validate_effective_constructor_unit kelion-codex-worker.timer 1 2>&1); then exit 121; fi
+  [ "$output" = "runtime-cutover: live-quiesce-contract:kelion-codex-worker.timer:$expected" ]
+done
+mode=ok
+validate_effective_constructor_unit kelion-codex-worker.timer 1
+[ "$(report_live_constructor_quiesce_failure '../../secret' '../../value' 2>&1)" = \\
+  'runtime-cutover: live-quiesce-contract:unknown:unknown' ]`
+  const effectiveResult = spawnSync(bashExecutable, ['-c', effectiveHarness], { encoding: 'utf8' })
+  assert.equal(effectiveResult.status, 0, effectiveResult.stderr || effectiveResult.stdout)
+
+  const barrierHarness = `set -euo pipefail
+${reporter}
+${barrier}
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+READY_STAMP=$tmp/absent
+constructor_timers=()
+constructor_services=(kelion-codex-worker.service)
+constructor_auxiliary_services=()
+validate_constructor_unit_file_state() { return 1; }
+systemctl() { [ "$1" = cat ]; }
+if output=$(validate_constructor_quiesce_barrier 1 2>&1); then exit 131; fi
+[ "$output" = 'runtime-cutover: live-quiesce-contract:kelion-codex-worker.service:service-unit-file-state' ]
+if output=$(validate_constructor_quiesce_barrier 2 2>&1); then exit 132; fi
+[ -z "$output" ]`
+  const barrierResult = spawnSync(bashExecutable, ['-c', barrierHarness], { encoding: 'utf8' })
+  assert.equal(barrierResult.status, 0, barrierResult.stderr || barrierResult.stdout)
+
+  const waiter = shellFunction(cutover, 'wait_for_live_constructor_units_quiesced')
+  const waiterHarness = `set -euo pipefail
+${waiter}
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+calls=0
+reports=''
+validate_live_constructor_units_quiesced() {
+  calls=$((calls + 1))
+  reports="$reports$1"
+  if [ "$1" = 1 ]; then printf '%s\\n' final-attribution >&2; fi
+  return 1
+}
+sleep() { :; }
+if wait_for_live_constructor_units_quiesced 2> "$tmp/output"; then exit 141; fi
+[ "$calls" -eq 12 ]
+[ "$reports" = 000000000001 ]
+[ "$(cat "$tmp/output")" = final-attribution ]`
+  const waiterResult = spawnSync(bashExecutable, ['-c', waiterHarness], { encoding: 'utf8' })
+  assert.equal(waiterResult.status, 0, waiterResult.stderr || waiterResult.stdout)
+})
+
+test('bootstrapul recovery acceptă numai helperul b911 și candidatul compatibil pin-uit', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const recovery = shellFunction(installer, 'recover_existing_runtime_journal')
+  assert.match(installer, /LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de/)
+  const compatiblePin = installer.match(/COMPATIBLE_RUNTIME_HELPER_SHA256=([0-9a-f]{64})/)?.[1]
+  assert.equal(compatiblePin, createHash('sha256').update(cutover).digest('hex'),
+    'pin-ul helperului compatibil trebuie să urmărească exact bytes din bundle')
+  const livePin = recovery.indexOf('[ "$live_sha" = "$LEGACY_STATIC_RUNTIME_HELPER_SHA256" ]')
+  const loadIntent = recovery.indexOf('load_install_transaction', livePin)
+  const bindHelper = recovery.indexOf('validate_published_candidate runtime-helper', loadIntent)
+  const bindCompose = recovery.indexOf('validate_published_candidate compose-production', bindHelper)
+  const preparedOnly = recovery.indexOf('.phase == "prepared"', bindCompose)
+  const candidatePin = recovery.indexOf('[ "$candidate_sha" = "$COMPATIBLE_RUNTIME_HELPER_SHA256" ]', preparedOnly)
+  const durableCopy = recovery.indexOf('sync -f "$temporary"', candidatePin)
+  const ownerRun = recovery.indexOf('KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id"', durableCopy)
+  const noexecSafeRun = recovery.indexOf('bash "$recovery_helper" --recover-only', ownerRun)
+  const cleanup = recovery.indexOf('rm -f -- "$temporary"', ownerRun)
+  const journalGone = recovery.indexOf('[ ! -e "$runtime_journal" ]', cleanup)
+  assert.ok(livePin >= 0 && loadIntent > livePin && bindHelper > loadIntent && bindCompose > bindHelper
+    && preparedOnly > bindCompose && candidatePin > preparedOnly && durableCopy > candidatePin
+    && ownerRun > durableCopy && noexecSafeRun > ownerRun && cleanup > noexecSafeRun && journalGone > cleanup)
+  assert.match(recovery, /elif KELION_CUTOVER_LOCK_HELD=1[\s\S]*"\$recovery_helper" --recover-only/,
+    'orice helper live necunoscut trebuie să-și consume propriul jurnal')
+  assert.doesNotMatch(recovery, /publish_install_candidate|mv -f --[^\n]*runtime-config-cutover/)
+})
+
+test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de republicare', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const journalWriter = shellFunction(installer, 'write_install_journal')
+  const loader = shellFunction(installer, 'load_install_transaction')
+  const validator = shellFunction(installer, 'validate_superseded_install_root')
+  const cleanup = shellFunction(installer, 'remove_superseded_install_root')
+  const previousCleanup = shellFunction(installer, 'remove_previous_superseded_install_root')
+  const finalizer = shellFunction(installer, 'clear_install_transaction')
+  const supersede = shellFunction(installer, 'supersede_quiesced_install_transaction')
+  const main = installer.slice(installer.indexOf("install_root=''"))
+  const branch = main.slice(main.indexOf('if [ "$resume_different_source" = 1 ]'))
+  const switchJournal = supersede.indexOf('stage_install_transaction')
+  const durableQuiesced = supersede.indexOf('write_install_journal quiesced', switchJournal)
+  const journalUnlink = finalizer.indexOf('rm -f -- "$INSTALL_JOURNAL"')
+  const journalFsync = finalizer.indexOf('sync -f "$RUNTIME_ROOT"', journalUnlink)
+  const currentRootCleanup = finalizer.indexOf('rm -f -- "$install_root/files/$logical"', journalFsync)
+  const removeOld = finalizer.indexOf('remove_superseded_install_root', currentRootCleanup)
+  const removePrevious = finalizer.indexOf('remove_previous_superseded_install_root', removeOld)
+
+  assert.match(journalWriter,
+    /supersededTransactionRoot[\s\S]*supersededManifestSha256[\s\S]*supersededSourceSha256[\s\S]*previousSupersededTransactionRoot[\s\S]*previousSupersededManifestSha256[\s\S]*previousSupersededSourceSha256[\s\S]*sync -f "[$]temporary"[\s\S]*mv -f -- "[$]temporary" "[$]INSTALL_JOURNAL"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.match(loader,
+    /has\("supersededTransactionRoot"\)[\s\S]*has\("supersededManifestSha256"\)[\s\S]*has\("supersededSourceSha256"\)[\s\S]*supersededTransactionRoot != \.transactionRoot[\s\S]*validate_superseded_install_root/)
+  assert.match(loader, /\.sourceSha256 == \.manifestSha256/,
+    'proveniența generației curente trebuie legată de manifestul autentificat')
+  assert.match(loader, /\.supersededSourceSha256 == \.supersededManifestSha256/,
+    'proveniența generației supersedate trebuie legată de manifestul autentificat')
+  assert.match(loader, /supersededSourceSha256 != \.sourceSha256/,
+    'sursa curentă nu poate reveni la generația supersedată imediat')
+  assert.match(loader,
+    /previousSupersededSourceSha256 == \.previousSupersededManifestSha256[\s\S]*previousSupersededSourceSha256 != \.sourceSha256[\s\S]*previousSupersededSourceSha256 != \.supersededSourceSha256[\s\S]*previousSupersededTransactionRoot != \.transactionRoot[\s\S]*previousSupersededTransactionRoot != \.supersededTransactionRoot/,
+    'a doua generație supersedată trebuie autentificată și distinctă de celelalte două')
+  assert.match(validator, /\[ -e "[$]root" \] \|\| \[ -L "[$]root" \] \|\| return 1/,
+    'un jurnal activ nu poate accepta dispariția rădăcinii supersedate')
+  assert.match(validator, /realpath -e[\s\S]*0:0:700[\s\S]*0:0:700/)
+  assert.match(validator, /root\/manifest[\s\S]*0:0:600[\s\S]*sha256sum[\s\S]*manifest_sha256/)
+  assert.match(validator, /candidate=[$]root\/files\/[$]logical[\s\S]*0:0:600[\s\S]*sha256sum[\s\S]*digest/)
+  assert.match(cleanup,
+    /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.match(previousCleanup,
+    /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.ok(switchJournal >= 0 && durableQuiesced > switchJournal,
+    'intentul curent trebuie să fie durabil înainte să continue instalarea')
+  assert.ok(journalUnlink >= 0 && journalFsync > journalUnlink
+    && currentRootCleanup > journalFsync && removeOld > currentRootCleanup && removePrevious > removeOld,
+  'niciun cleanup curent sau supersedat nu poate începe înainte ca absența jurnalului să fie durabilă')
+  assert.doesNotMatch(supersede, /clear_install_transaction|remove_superseded_install_root|runtime-config-cutover\.sh/,
+    'supersedarea nu poate crea o fereastră fără jurnal și nu poate executa helperul generației vechi')
+
+  const noRuntimeJournal = branch.indexOf('[ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ]')
+  const boundedSupersession = branch.indexOf('[ -z "$install_previous_superseded_root" ]')
+  const noReady = branch.indexOf('[ ! -e "$READY_STAMP" ]', noRuntimeJournal)
+  const canonicalPending = branch.indexOf('[ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ]', noReady)
+  const exactOldArtifacts = branch.indexOf('validate_published_candidate "$logical"', canonicalPending)
+  const validOldUnits = branch.indexOf('verify_candidate_units', exactOldArtifacts)
+  const atomicSwitch = branch.indexOf('supersede_quiesced_install_transaction', validOldUnits)
+  const publishCurrent = main.indexOf('set_constructor_install_phase artifact-publication', main.indexOf('if [ "$resume_different_source" = 1 ]'))
+  assert.ok(boundedSupersession >= 0 && noRuntimeJournal > boundedSupersession
+    && noReady > noRuntimeJournal && canonicalPending > noReady
+    && exactOldArtifacts > canonicalPending && validOldUnits > exactOldArtifacts && atomicSwitch > validOldUnits,
+  'a treia supersedare, orice jurnal runtime, ready, pending necanonic, artefact vechi diferit sau tuplă invalidă trebuie să refuze switch-ul')
+  assert.ok(publishCurrent > main.indexOf('supersede_quiesced_install_transaction', main.indexOf('if [ "$resume_different_source" = 1 ]')),
+    'candidații checkoutului curent pot fi publicați numai după switch-ul durabil al jurnalului')
+  assert.doesNotMatch(main, /Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent/)
+
+  const supersessionHarness = `set -euo pipefail
+${supersede}
+stage_calls=0
+write_calls=0
+stage_install_transaction() {
+  stage_calls=$((stage_calls + 1))
+  install_root=/root/kelion/runtime/constructor-install.NEW
+  install_manifest_sha256=$(printf 'c%.0s' {1..64})
+  install_source_sha256=$install_manifest_sha256
+}
+write_install_journal() { [ "\$1" = quiesced ]; write_calls=$((write_calls + 1)); }
+constructor_install_source_commit=$(printf 'd%.0s' {1..40})
+install_root=/root/kelion/runtime/constructor-install.B
+install_manifest_sha256=$(printf 'b%.0s' {1..64})
+install_source_sha256=$install_manifest_sha256
+install_superseded_root=/root/kelion/runtime/constructor-install.A
+install_superseded_manifest_sha256=$(printf 'a%.0s' {1..64})
+install_superseded_source_sha256=$install_superseded_manifest_sha256
+install_previous_superseded_root=''
+install_previous_superseded_manifest_sha256=''
+install_previous_superseded_source_sha256=''
+supersede_quiesced_install_transaction
+[ "\$install_root" = /root/kelion/runtime/constructor-install.NEW ]
+[ "\$install_superseded_root" = /root/kelion/runtime/constructor-install.B ]
+[ "\$install_previous_superseded_root" = /root/kelion/runtime/constructor-install.A ]
+[ "\$stage_calls:\$write_calls" = 1:1 ]
+stage_before=\$stage_calls
+write_before=\$write_calls
+install_root=/root/kelion/runtime/constructor-install.D
+install_manifest_sha256=$(printf 'e%.0s' {1..64})
+install_source_sha256=$install_manifest_sha256
+if supersede_quiesced_install_transaction; then exit 121; fi
+[ "\$stage_calls:\$write_calls" = "\$stage_before:\$write_before" ]`
+  const supersessionResult = spawnSync(bashExecutable, ['-c', supersessionHarness], { encoding: 'utf8' })
+  assert.equal(supersessionResult.status, 0, supersessionResult.stderr || supersessionResult.stdout)
 })
 
 test('jurnalul durabil recuperează un SIGKILL între mutări înainte de backend și timere', () => {
