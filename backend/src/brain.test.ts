@@ -17,6 +17,17 @@ describe('Expertul fiabil — clasificarea erorilor', () => {
   })
 })
 
+describe('sonda cheii OpenAI', () => {
+  it('are buget suficient și păstrează codul HTTP fără a expune răspunsul providerului', () => {
+    const source = readFileSync(new URL('./services/brain.ts', import.meta.url), 'utf8')
+    const verify = source.slice(source.indexOf('export async function verifyKeys'))
+    expect(verify).toContain('maxTokens: 64')
+    expect(verify).not.toContain('maxTokens: 8')
+    expect(verify).toContain('`fail_${failureStatus}`')
+    expect(verify).toContain("diag: { provider: 'openai'")
+  })
+})
+
 describe('Expertul fiabil — scara de modele', () => {
   it('este deduplicată și acceptă numai identificatori OpenAI validați', async () => {
     const initial = { ...config.openai }
