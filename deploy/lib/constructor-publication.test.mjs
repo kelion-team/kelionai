@@ -1947,7 +1947,7 @@ test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de
   assert.match(cleanup,
     /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
   assert.ok(switchJournal >= 0 && durableQuiesced > switchJournal,
-    'intentul curent trebuie să devină durabil înainte să continue instalarea')
+    'intentul curent trebuie să fie durabil înainte să continue instalarea')
   assert.ok(journalUnlink >= 0 && journalFsync > journalUnlink
     && currentRootCleanup > journalFsync && removeOld > currentRootCleanup,
   'niciun cleanup curent sau supersedat nu poate începe înainte ca absența jurnalului să fie durabilă')
