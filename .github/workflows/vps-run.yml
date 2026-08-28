@@ -1122,6 +1122,10 @@ jobs:
           fi
 
           current_check='apply-canonical-layout'
+          # Retragem mai întâi dreptul de rename/create al grupului, astfel
+          # încât identitatea copiilor să nu poată fi schimbată în timpul reparării.
+          chown root:kelion-handoff "$spool"
+          chmod 0750 "$spool"
           if [ ! -e "$spool/retired" ] && [ ! -L "$spool/retired" ]; then
             install -d -o root -g kelion-handoff -m 2770 "$spool/retired"
           fi

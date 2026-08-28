@@ -488,11 +488,15 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   assert.match(repair, /install -d -o root -g kelion-handoff -m 2770 "\$spool\/retired"/)
   assert.match(repair, /chmod 2770 "\$spool\/\$child"/)
   const childInstall = repair.indexOf('install -d -o root -g kelion-handoff -m 2770 "$spool/retired"')
-  const parentChown = repair.indexOf('chown root:kelion-handoff "$spool"')
-  const parentChmod = repair.indexOf('chmod 0750 "$spool"')
+  const firstParentChown = repair.indexOf('chown root:kelion-handoff "$spool"')
+  const firstParentChmod = repair.indexOf('chmod 0750 "$spool"')
+  const finalParentChown = repair.lastIndexOf('chown root:kelion-handoff "$spool"')
+  const finalParentChmod = repair.lastIndexOf('chmod 0750 "$spool"')
   const finalVerify = repair.indexOf("current_check='verify-canonical-layout'")
-  assert.ok(childInstall >= 0 && childInstall < parentChown && parentChown < parentChmod && parentChmod < finalVerify,
-    'părintele trebuie normalizat ultimul, după crearea copiilor și înaintea verificării finale')
+  assert.ok(firstParentChown >= 0 && firstParentChown < firstParentChmod && firstParentChmod < childInstall,
+    'părintele trebuie blocat înaintea mutațiilor copiilor')
+  assert.ok(childInstall < finalParentChown && finalParentChown < finalParentChmod && finalParentChmod < finalVerify,
+    'părintele trebuie normalizat din nou după copii și înaintea verificării finale')
   assert.match(repair, /current_check="verify-canonical-layout-\$child"/)
   assert.match(repair, /root:kelion-handoff:750/)
   assert.match(repair, /root:kelion-handoff:2770/)
