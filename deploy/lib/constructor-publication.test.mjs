@@ -330,6 +330,33 @@ test('cheia privată de semnare rămâne root-only și ajunge la publisher numai
   assert.doesNotMatch(workflow, /chown root:kelion-publisher "[$]signing_key"|chmod 0440 "[$]signing_key"/)
 })
 
+test('cheia publică ED25519 este canonizată fără comentariul emis de ssh-keygen', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const remoteShell = workflow.replace(/^ {10}/gm, '')
+  const canonicalizer = shellFunction(remoteShell, 'canonical_signing_public')
+  const validator = shellFunction(remoteShell, 'validate_signing_key')
+  const publicBlob = 'AAAAC3NzaC1lZDI1NTE5AAAAIEyQeN2s7FJY0m3JwWQdTGV0wRPs+TRxVv5V9smS'
+  const script = `
+ssh-keygen() {
+  [ "\${1-}" = -y ]
+  printf '%s\\n' 'ssh-ed25519 ${publicBlob} kelion-constructor@legacy.example'
+}
+${canonicalizer}
+canonical_signing_public ignored
+`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stdout.trim(), `ssh-ed25519 ${publicBlob}`)
+  assert.match(validator, /public=[$]\(canonical_signing_public "[$]key"\)/)
+  assert.match(validator, /LC_ALL=C ssh-keygen -lf - -E sha256/)
+  assert.ok(validator.includes('no\\ comment\\ \\(ED25519\\)'))
+  assert.match(workflow, /signing_public=[$]\(canonical_signing_public "[$]signing_key"\)/)
+  assert.match(canonicalizer, /ssh-keygen -y -P '' -f "[$]key" 2>\/dev\/null/)
+  assert.match(canonicalizer, /"[$]raw" != \*[$]'\\r'\*[\s\S]*"[$]raw" != \*[$]'\\n'\*/)
+  assert.doesNotMatch(workflow, /public=[$]\(ssh-keygen -y -f "[$]key"\)/)
+})
+
 test('metadata legacy a cheii de semnare este normalizată fără schimbarea materialului', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const normalization = workflow.indexOf('normalize_legacy_signing_key()')

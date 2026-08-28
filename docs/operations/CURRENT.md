@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T19:51:43Z`
+Actualizat: `2026-08-28T20:31:50Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `ccb4b425adfa46eb92a4df563932dc6ab79c4c66` (PR `#1482`).
-  CI master `33191079795` și buildul OCI exact `33191467117` sunt verzi.
+- `origin/master` este `d61d5d5609a873eae2bce8b305f98bd106dab7cd` (PR `#1487`).
+  CI master `33206997501` și buildul OCI exact `33207342384` sunt verzi.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -94,11 +94,23 @@ Actualizat: `2026-08-28T19:51:43Z`
   construiește o copie `0400` root-only, validează ED25519 și egalitatea
   byte-for-byte, apoi o publică atomic. O cheie invalidă, un symlink, un owner
   străin sau un hardlink rămân refuzate fail-closed.
+- PR `#1487` a fost integrat prin rebase, iar toate porțile master și buildul OCI
+  exact au trecut. Release-ul automat `33207891242` a validat artefactul și
+  semnăturile, apoi a fost refuzat în `Release blue-green pe VPS`; nu a produs
+  dovada externă și versiunea live a rămas neschimbată.
+- Configurarea unică `33207951663` a trecut din nou installerul complet și a
+  eșuat fail-closed la `phase=post-installer`,
+  `check=signing-key-normalization`, înainte de publicarea copiei normalizate.
+- Cauza este contractul parserului public: `ssh-keygen -y` poate emite tipul,
+  blobul și comentariul cheii, dar validatorul cerea greșit sfârșit de linie
+  imediat după blob. Reproducerea executabilă respinge o cheie ED25519 sănătoasă
+  exact în validarea copiei `0400`. Remedierea canonizează numai tipul și blobul
+  public, păstrează verificarea ED25519/fingerprint și nu schimbă cheia privată.
 
 ## Următorul pas sigur
 
-1. Publică normalizarea cheii numai prin PR `chore/*`, fără bypass sau push în
-   master; cere toate check-urile verzi.
+1. Publică parserul canonic al cheii publice numai prin PR `chore/*`, fără
+   bypass sau push în `master`; cere toate check-urile verzi.
 2. Nu porni niciun release de producție. După merge și buildul OCI exact, rulează
    o singură configurare controlată pe `master`.
 3. Activarea și release-ul rămân blocate până când configurarea este verde,
@@ -124,5 +136,9 @@ Actualizat: `2026-08-28T19:51:43Z`
 - Configure post-installer neatribuit: <https://github.com/kelion-team/kelionai/actions/runs/33192142478>
 - Configure signing-key-validation atribuit: <https://github.com/kelion-team/kelionai/actions/runs/33205355542>
 - Release `aa330322` refuzat de contractul runtime: <https://github.com/kelion-team/kelionai/actions/runs/33194500539>
+- Normalizare cheie Constructor: <https://github.com/kelion-team/kelionai/pull/1487>
+- Build OCI `d61d5d56`: <https://github.com/kelion-team/kelionai/actions/runs/33207342384>
+- Release `d61d5d56` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33207891242>
+- Configure cu parserul public necanonic: <https://github.com/kelion-team/kelionai/actions/runs/33207951663>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
