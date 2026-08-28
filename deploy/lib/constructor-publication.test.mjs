@@ -437,6 +437,30 @@ if secure_handoff_spool "$test_root"; then exit 61; fi
   assert.equal(handoffFault.status, 0, handoffFault.stderr || handoffFault.stdout)
 })
 
+test('diagnose-spool este o operație SSH strict read-only și fail-closed', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  assert.match(workflow, /operation:[\s\S]*options:[\s\S]*- diagnose-spool/)
+  const start = workflow.indexOf('      - name: Diagnosticheaza spool-ul handoff (read-only)')
+  assert.ok(start >= 0, 'workflow-ul trebuie să declare pasul read-only pentru spool')
+  const nextStep = workflow.indexOf('\n      - name:', start + 1)
+  const diagnostic = workflow.slice(start, nextStep < 0 ? workflow.length : nextStep)
+  assert.match(diagnostic, /if: inputs\.operation == 'diagnose-spool'/)
+  assert.match(diagnostic, /stat -c 'type=%F mode=%a owner=%U group=%G'/)
+  assert.match(diagnostic, /getfacl -p "\$p"/)
+  assert.match(diagnostic, /find \/var\/lib\/kelion-constructor-handoff -maxdepth 2/)
+  assert.match(diagnostic, /sha256sum "\$activation_file"/)
+  assert.match(diagnostic, /activation_file=\/run\/kelion-release\/active/)
+  assert.match(diagnostic, /diagnostic_failure[\s\S]*source_commit/)
+
+  const remoteStart = diagnostic.indexOf("<<'REMOTE'")
+  const remoteEnd = diagnostic.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'diagnosticul trebuie să aibă payload SSH delimitat')
+  const remote = diagnostic.slice(remoteStart, remoteEnd)
+  assert.doesNotMatch(remote, /\b(?:mkdir|chown|chmod|setfacl|rm|mv|tee|install|touch|cp|sed)\b/,
+    'payload-ul VPS trebuie să rămână exclusiv read-only')
+  assert.doesNotMatch(remote, /cat\s+[^-]/, 'diagnosticul nu trebuie să afișeze conținut raw')
+})
+
 test('configurarea Constructor păstrează ACL-ul canonic al secretelor de producție', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
