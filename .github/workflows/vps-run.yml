@@ -14,6 +14,7 @@ on:
           - activate-release
           - constructor-status
           - diagnose-spool
+          - repair-spool-layout
       auto_routed_to_master:
         description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
         required: false
@@ -1049,6 +1050,97 @@ jobs:
             activation_committed=1
             activation_in_progress=0
           fi
+          REMOTE
+
+      - name: Repara controlat layout-ul spool-ului handoff
+        if: inputs.operation == 'repair-spool-layout'
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          phase='repair-spool-layout'
+          current_check='runner-preflight'
+          on_err() {
+            local rc=$?
+            echo "{\"ok\":false,\"event\":\"repair_failure\",\"phase\":\"$phase\",\"check\":\"$current_check\",\"line\":${LINENO},\"exit_code\":$rc,\"source_commit\":\"$SOURCE_COMMIT\"}" >&2
+            exit "$rc"
+          }
+          trap on_err ERR
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s -- "$SOURCE_COMMIT" <<'REMOTE'
+          set -Eeuo pipefail
+          source_commit=$1
+          phase='repair-spool-layout'
+          current_check='remote-preflight'
+          on_err() {
+            local rc=$?
+            echo "{\"ok\":false,\"event\":\"repair_failure\",\"phase\":\"$phase\",\"check\":\"$current_check\",\"line\":${LINENO},\"exit_code\":$rc,\"source_commit\":\"$source_commit\"}" >&2
+            exit "$rc"
+          }
+          trap on_err ERR
+          spool=/var/lib/kelion-constructor-handoff
+
+          current_check='identity-and-services-inactive'
+          [ "$(id -u)" = 0 ]
+          [ "$(stat -c '%U:%G:%a' /var/lib)" = 'root:root:755' ]
+          for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service; do
+            if systemctl is-active --quiet "$unit"; then
+              echo "::error::Refuz normalizarea: o componenta Constructor este activa." >&2
+              exit 1
+            fi
+          done
+          for marker in /etc/kelion/codex-worker.enabled /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled; do
+            [ ! -e "$marker" ] && [ ! -L "$marker" ]
+          done
+
+          current_check='spool-identity'
+          [ -d "$spool" ] && [ ! -L "$spool" ]
+          [ "$(realpath "$spool")" = "$spool" ]
+          [ "$(stat -c '%U:%G' "$spool")" = 'root:kelion-handoff' ]
+
+          current_check='children-allowlist'
+          while IFS= read -r child; do
+            case "$child" in ready|ack|retired) ;; *) echo "::error::Refuz normalizarea: spool-ul contine un element nepermis." >&2; exit 1 ;; esac
+          done < <(find "$spool" -mindepth 1 -maxdepth 1 -printf '%f\n')
+          for child in ready ack; do
+            path="$spool/$child"
+            [ -d "$path" ] && [ ! -L "$path" ]
+            [ "$(realpath "$path")" = "$path" ]
+            [ "$(stat -c '%U:%G' "$path")" = 'root:kelion-handoff' ]
+          done
+          if [ -e "$spool/retired" ] || [ -L "$spool/retired" ]; then
+            [ -d "$spool/retired" ] && [ ! -L "$spool/retired" ]
+            [ "$(realpath "$spool/retired")" = "$spool/retired" ]
+            [ "$(stat -c '%U:%G' "$spool/retired")" = 'root:kelion-handoff' ]
+          fi
+
+          current_check='apply-canonical-layout'
+          chown root:kelion-handoff "$spool"
+          chmod 0750 "$spool"
+          if [ ! -e "$spool/retired" ] && [ ! -L "$spool/retired" ]; then
+            install -d -o root -g kelion-handoff -m 2770 "$spool/retired"
+          fi
+          for child in ready ack retired; do
+            chown root:kelion-handoff "$spool/$child"
+            chmod 2770 "$spool/$child"
+            sync -f "$spool/$child"
+          done
+          sync -f "$spool"
+          sync -f /var/lib
+
+          current_check='verify-canonical-layout'
+          [ "$(stat -c '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ]
+          for child in ready ack retired; do
+            [ "$(stat -c '%U:%G:%a' "$spool/$child")" = 'root:kelion-handoff:2770' ]
+          done
+          echo "{\"ok\":true,\"event\":\"repair_complete\",\"phase\":\"$phase\",\"source_commit\":\"$source_commit\"}"
           REMOTE
 
       - name: Diagnosticheaza spool-ul handoff (read-only)
