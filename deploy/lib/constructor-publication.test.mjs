@@ -374,7 +374,7 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   const secureHandoff = shellFunction(installer, 'secure_handoff_spool')
   assert.match(secureParent, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown root:root[\s\S]*chmod 0711/)
   assert.match(secureChild, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown "[$]owner:[$]group"[\s\S]*chmod 0700/)
-  const handoffLockdown = secureHandoff.indexOf('chmod 0750 "$spool"')
+  const handoffLockdown = secureHandoff.indexOf('chmod 00750 "$spool"')
   const handoffChildren = secureHandoff.indexOf('for child in ready ack retired')
   assert.ok(secureHandoff.indexOf('stat -Lc \'%u\' "$spool"') >= 0
     && handoffLockdown >= 0 && handoffChildren > handoffLockdown,
@@ -489,9 +489,9 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   assert.match(repair, /chmod 2770 "\$spool\/\$child"/)
   const childInstall = repair.indexOf('install -d -o root -g kelion-handoff -m 2770 "$spool/retired"')
   const firstParentChown = repair.indexOf('chown root:kelion-handoff "$spool"')
-  const firstParentChmod = repair.indexOf('chmod 0750 "$spool"')
+  const firstParentChmod = repair.indexOf('chmod 00750 "$spool"')
   const finalParentChown = repair.lastIndexOf('chown root:kelion-handoff "$spool"')
-  const finalParentChmod = repair.lastIndexOf('chmod 0750 "$spool"')
+  const finalParentChmod = repair.lastIndexOf('chmod 00750 "$spool"')
   const childValidation = repair.indexOf("current_check='children-allowlist'")
   const finalVerify = repair.indexOf("current_check='verify-canonical-layout'")
   assert.ok(firstParentChown >= 0 && firstParentChown < firstParentChmod && firstParentChmod < childValidation,

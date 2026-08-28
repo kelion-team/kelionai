@@ -1107,7 +1107,7 @@ jobs:
           # După ce identitatea părintelui este dovedită, retragem imediat
           # dreptul de rename/create al grupului înainte de a valida copiii.
           chown root:kelion-handoff "$spool"
-          chmod 0750 "$spool"
+          chmod 00750 "$spool"
 
           current_check='children-allowlist'
           while IFS= read -r child; do
@@ -1137,7 +1137,7 @@ jobs:
           # Crearea unui copil schimbă metadatele părintelui. Aplicăm invariantul
           # părintelui ultimul, apoi îl verificăm fără alte mutații în arbore.
           chown root:kelion-handoff "$spool"
-          chmod 0750 "$spool"
+          chmod 00750 "$spool"
           sync -f "$spool"
           sync -f /var/lib
 

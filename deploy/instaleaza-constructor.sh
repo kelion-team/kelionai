@@ -410,7 +410,7 @@ secure_handoff_spool() {
   # Retragem întâi dreptul de rename/create din părinte. Proprietarul root
   # verificat mai sus nu poate schimba modul concurent, iar descriptorii deja
   # deschiși ai membrilor grupului sunt supuși noului mod la fiecare operație.
-  chmod 0750 "$spool" && chown root:kelion-handoff "$spool" || return 1
+  chmod 00750 "$spool" && chown root:kelion-handoff "$spool" || return 1
   [ "$(stat -Lc '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ] || return 1
   sync -f "$spool" && sync -f "$var_lib" || return 1
 
