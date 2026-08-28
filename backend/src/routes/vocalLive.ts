@@ -1295,7 +1295,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         // primele 4 cuvinte ale unui text vechi (audit 9 aug).
         const spusa = rostireCurenta.trim() || bufUser.trim()
         if (turaDeSistem) return true // anunț declarat EXPLICIT, nu dedus
-        if (spusa && startExplicit.activa()) return true
+        // Cadrul explicit primit de la click este temei suficient pentru prima
+        // tură chiar dacă providerul livrează audio înaintea transcrierii.
+        if (startExplicit.activa()) return true
         // ── AMBIENT STRICT DUPĂ STARTUL EXPLICIT ─────────────────────────────
         // Fereastra de dialog rămâne scoasă: după rostirea armată de click, un
         // enunț fără nume MĂSURAT în transcriere nu primește răspuns. Nu e blocajul la
@@ -1444,7 +1446,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             return
           }
           if (verdictTura === null) {
-            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem
+            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem || startExplicit.activa()
             if (!areTemei) {
               // Transcrierea n-a sosit încă (Google o trimite adesea DUPĂ
               // primul cadru audio) — verdict AMÂNAT: ținem cadrul și judecăm
