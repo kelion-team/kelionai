@@ -1,22 +1,89 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
+
+# Raportează numai poziția și faza unei aserțiuni eșuate. Nu include comanda,
+# argumentele sau mediul: instalatorul poate manipula căi și metadate sensibile,
+# iar diagnosticul trebuie să rămână util fără să divulge valori.
+constructor_install_phase=bootstrap
+constructor_install_failure_line=0
+constructor_install_source_commit=${KELION_CONSTRUCTOR_SOURCE_COMMIT:-unknown}
+if [[ ! "$constructor_install_source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  constructor_install_source_commit=unknown
+fi
+readonly -a constructor_install_phases=(
+  preflight publication-lock identity-layout recovery-preflight transaction-prepare
+  quiesce transaction-supersede artifact-publication unit-validation unit-cutover systemd-publication
+  published-validation commit
+)
+set_constructor_install_phase() {
+  local requested=$1 known
+  for known in "${constructor_install_phases[@]}"; do
+    if [ "$known" = "$requested" ]; then
+      constructor_install_phase=$requested
+      printf '{"ok":true,"event":"phase_start","phase":"%s","source_commit":"%s"}\n' \
+        "$constructor_install_phase" "$constructor_install_source_commit" >&2
+      return 0
+    fi
+  done
+  return 1
+}
+constructor_install_assert() {
+  local source_line=$1
+  shift
+  "$@" || { constructor_install_failure_line=$source_line; return 1; }
+}
+report_constructor_install_failure() {
+  local status=$?
+  local line=${constructor_install_failure_line:-0}
+  trap - ERR EXIT
+  if [ "$status" = 0 ]; then
+    return 0
+  fi
+  printf '{"ok":false,"event":"installer_failure","phase":"%s","line":%s,"exit_code":%s,"source_commit":"%s"}\n' \
+    "$constructor_install_phase" "$line" "$status" "$constructor_install_source_commit" >&2
+  printf '::error::Constructor installer gate: phase=%s line=%s exit=%s source_commit=%s\n' \
+    "$constructor_install_phase" "$line" "$status" "$constructor_install_source_commit" >&2
+  builtin exit "$status"
+}
+capture_constructor_install_failure() {
+  local status=$?
+  constructor_install_failure_line=${1:-0}
+  return "$status"
+}
+trap 'capture_constructor_install_failure "$LINENO"' ERR
+trap report_constructor_install_failure EXIT
+set_constructor_install_phase preflight
 
 # Instalează numai codul, identitățile și unitățile dezactivate. Nu creează
 # credentiale, nu clonează, nu activează timere și nu pornește servicii.
-[[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; exit 1; }
+[[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 [[ "${KELION_CONSTRUCTOR_INSTALL:-0}" == "1" ]] || {
   echo 'setează KELION_CONSTRUCTOR_INSTALL=1 după review' >&2
-  exit 1
+  constructor_install_failure_line=$LINENO; exit 1
 }
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 [[ -f "$repo_root/AGENTS.md" && -f "$repo_root/deploy/constructor-publisher.mjs" ]] || {
   echo 'sursa instalării nu este repository-ul Kelion validat' >&2
-  exit 1
+  constructor_install_failure_line=$LINENO; exit 1
 }
-for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum stat sync systemctl systemd-analyze usermod; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; exit 1; }
+for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; constructor_install_failure_line=$LINENO; exit 1; }
+done
+# Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
+# conducta după primul match, iar SIGPIPE-ul producătorului transformă o
+# capabilitate prezentă într-un fals eșec. Capturăm o singură ieșire bounded și
+# verificăm toate cele patru operații fără un producer concurent.
+usermod_help=$(usermod --help 2>&1) \
+  || { echo 'capabilitățile usermod nu pot fi citite' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+for required_usermod_option in \
+  '--add-subuids FIRST-LAST' \
+  '--del-subuids FIRST-LAST' \
+  '--add-subgids FIRST-LAST' \
+  '--del-subgids FIRST-LAST'; do
+  grep -Fq -- "$required_usermod_option" <<<"$usermod_help" \
+    || { echo 'usermod nu oferă tranzacțiile native subuid/subgid necesare' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 # Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
 # conducta după primul match, iar SIGPIPE-ul producătorului transformă o
@@ -42,6 +109,7 @@ READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
 install -d -o root -g root -m 0755 "$ROOT"
 
+set_constructor_install_phase publication-lock
 acquire_publication_lock() {
   local inherited=${KELION_CUTOVER_LOCK_HELD:-0} fd_path fd_identity
   case "$inherited" in 0|1) ;; *) return 1 ;; esac
@@ -73,7 +141,8 @@ acquire_publication_lock() {
   flock -n 9 || return 1
   export KELION_CUTOVER_LOCK_HELD=1
 }
-acquire_publication_lock || { echo 'lock-ul de publicare nu poate fi dobândit și dovedit pe FD9' >&2; exit 1; }
+acquire_publication_lock || { echo 'lock-ul de publicare nu poate fi dobândit și dovedit pe FD9' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+set_constructor_install_phase identity-layout
 
 install_atomic() {
   local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
@@ -355,7 +424,7 @@ secure_handoff_spool() {
   # Retragem întâi dreptul de rename/create din părinte. Proprietarul root
   # verificat mai sus nu poate schimba modul concurent, iar descriptorii deja
   # deschiși ai membrilor grupului sunt supuși noului mod la fiecare operație.
-  chmod 0750 "$spool" && chown root:kelion-handoff "$spool" || return 1
+  chmod 00750 "$spool" && chown root:kelion-handoff "$spool" || return 1
   [ "$(stat -Lc '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ] || return 1
   sync -f "$spool" && sync -f "$var_lib" || return 1
 
@@ -497,8 +566,24 @@ write_install_journal() {
     --arg transactionRoot "$install_root" \
     --arg manifestSha256 "$install_manifest_sha256" \
     --arg sourceSha256 "$install_source_sha256" \
+    --arg supersededTransactionRoot "$install_superseded_root" \
+    --arg supersededManifestSha256 "$install_superseded_manifest_sha256" \
+    --arg supersededSourceSha256 "$install_superseded_source_sha256" \
+    --arg previousSupersededTransactionRoot "$install_previous_superseded_root" \
+    --arg previousSupersededManifestSha256 "$install_previous_superseded_manifest_sha256" \
+    --arg previousSupersededSourceSha256 "$install_previous_superseded_source_sha256" \
     '{schema:1,kind:"constructor-install",phase:$phase,requestId:$requestId,commit:$commit,
-      transactionRoot:$transactionRoot,manifestSha256:$manifestSha256,sourceSha256:$sourceSha256}' > "$temporary"
+      transactionRoot:$transactionRoot,manifestSha256:$manifestSha256,sourceSha256:$sourceSha256}
+      + if $supersededTransactionRoot == "" then {} else {
+          supersededTransactionRoot:$supersededTransactionRoot,
+          supersededManifestSha256:$supersededManifestSha256,
+          supersededSourceSha256:$supersededSourceSha256
+        } end
+      + if $previousSupersededTransactionRoot == "" then {} else {
+          previousSupersededTransactionRoot:$previousSupersededTransactionRoot,
+          previousSupersededManifestSha256:$previousSupersededManifestSha256,
+          previousSupersededSourceSha256:$previousSupersededSourceSha256
+        } end' > "$temporary"
   chown root:root "$temporary"
   chmod 0600 "$temporary"
   sync -f "$temporary"
@@ -544,12 +629,40 @@ load_install_transaction() {
     (.commit | strings | test("^[0-9a-f]{40}$")) and
     (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
     (.manifestSha256 | strings | test("^[0-9a-f]{64}$")) and
-    (.sourceSha256 | strings | test("^[0-9a-f]{64}$"))' "$INSTALL_JOURNAL" >/dev/null || return 1
+    (.sourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+    (.sourceSha256 == .manifestSha256) and
+    (((has("supersededTransactionRoot") | not) and
+      (has("supersededManifestSha256") | not) and
+      (has("supersededSourceSha256") | not)) or
+      ((.supersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+       (.supersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.supersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.supersededSourceSha256 == .supersededManifestSha256) and
+       (.supersededSourceSha256 != .sourceSha256) and
+       (.supersededTransactionRoot != .transactionRoot))) and
+    (((has("previousSupersededTransactionRoot") | not) and
+      (has("previousSupersededManifestSha256") | not) and
+      (has("previousSupersededSourceSha256") | not)) or
+      ((has("supersededTransactionRoot")) and
+       (.previousSupersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+       (.previousSupersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.previousSupersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.previousSupersededSourceSha256 == .previousSupersededManifestSha256) and
+       (.previousSupersededSourceSha256 != .sourceSha256) and
+       (.previousSupersededSourceSha256 != .supersededSourceSha256) and
+       (.previousSupersededTransactionRoot != .transactionRoot) and
+       (.previousSupersededTransactionRoot != .supersededTransactionRoot)))' "$INSTALL_JOURNAL" >/dev/null || return 1
   install_request_id=$(jq -er '.requestId' "$INSTALL_JOURNAL")
   install_commit=$(jq -er '.commit' "$INSTALL_JOURNAL")
   install_root=$(jq -er '.transactionRoot' "$INSTALL_JOURNAL")
   install_manifest_sha256=$(jq -er '.manifestSha256' "$INSTALL_JOURNAL")
   install_source_sha256=$(jq -er '.sourceSha256' "$INSTALL_JOURNAL")
+  install_superseded_root=$(jq -er '.supersededTransactionRoot // ""' "$INSTALL_JOURNAL")
+  install_superseded_manifest_sha256=$(jq -er '.supersededManifestSha256 // ""' "$INSTALL_JOURNAL")
+  install_superseded_source_sha256=$(jq -er '.supersededSourceSha256 // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_root=$(jq -er '.previousSupersededTransactionRoot // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_manifest_sha256=$(jq -er '.previousSupersededManifestSha256 // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_source_sha256=$(jq -er '.previousSupersededSourceSha256 // ""' "$INSTALL_JOURNAL")
   [ "${install_source_sha256:0:40}" = "$install_commit" ] || return 1
   [ -d "$install_root" ] && [ ! -L "$install_root" ] \
     && [ "$(realpath -e -- "$install_root")" = "$install_root" ] \
@@ -569,7 +682,99 @@ load_install_transaction() {
       && [ "$(sha256sum "$candidate" | awk '{print $1}')" = "$digest" ] || return 1
     index=$((index + 1))
   done < "$install_root/manifest"
+  [ "$index" -eq "${#install_logicals[@]}" ] || return 1
+  if [ -n "$install_superseded_root" ]; then
+    validate_superseded_install_root "$install_superseded_root" "$install_superseded_manifest_sha256"
+  fi
+  if [ -n "$install_previous_superseded_root" ]; then
+    validate_superseded_install_root "$install_previous_superseded_root" "$install_previous_superseded_manifest_sha256"
+  fi
+}
+
+validate_superseded_install_root() {
+  local root=$1 manifest_sha256=$2 index=0 logical digest extra candidate
+  [[ "$root" =~ ^/root/kelion/runtime/constructor-install\.[A-Za-z0-9]+$ ]] || return 1
+  [[ "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ -e "$root" ] || [ -L "$root" ] || return 1
+  [ -d "$root" ] && [ ! -L "$root" ] \
+    && [ "$(realpath -e -- "$root")" = "$root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root")" = '0:0:700' ] || return 1
+  [ -d "$root/files" ] && [ ! -L "$root/files" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root/files")" = '0:0:700' ] || return 1
+  [ -f "$root/manifest" ] && [ ! -L "$root/manifest" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root/manifest")" = '0:0:600' ] \
+    && [ "$(sha256sum "$root/manifest" | awk '{print $1}')" = "$manifest_sha256" ] || return 1
+  while IFS=$'\t' read -r logical digest extra; do
+    [ "$index" -lt "${#install_logicals[@]}" ] && [ -z "$extra" ] \
+      && [ "$logical" = "${install_logicals[$index]}" ] \
+      && [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    candidate=$root/files/$logical
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      && [ "$(stat -c '%u:%g:%a' "$candidate")" = '0:0:600' ] \
+      && [ "$(sha256sum "$candidate" | awk '{print $1}')" = "$digest" ] || return 1
+    index=$((index + 1))
+  done < "$root/manifest"
   [ "$index" -eq "${#install_logicals[@]}" ]
+}
+
+remove_superseded_install_root() {
+  local logical root=$install_superseded_root
+  [ -n "$root" ] || return 0
+  validate_superseded_install_root "$root" "$install_superseded_manifest_sha256" || return 1
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    for logical in "${install_logicals[@]}"; do rm -f -- "$root/files/$logical"; done
+    rm -f -- "$root/manifest"
+    rmdir -- "$root/files"
+    rmdir -- "$root"
+    sync -f "$RUNTIME_ROOT"
+  fi
+}
+
+remove_previous_superseded_install_root() {
+  local logical root=$install_previous_superseded_root
+  [ -n "$root" ] || return 0
+  validate_superseded_install_root "$root" "$install_previous_superseded_manifest_sha256" || return 1
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    for logical in "${install_logicals[@]}"; do rm -f -- "$root/files/$logical"; done
+    rm -f -- "$root/manifest"
+    rmdir -- "$root/files"
+    rmdir -- "$root"
+    sync -f "$RUNTIME_ROOT"
+  fi
+}
+
+supersede_quiesced_install_transaction() {
+  local old_root=$install_root
+  local old_manifest_sha256=$install_manifest_sha256
+  local old_source_sha256=$install_source_sha256
+
+  # Jurnalul nou, construit integral din checkoutul curent, înlocuiește atomic
+  # intentul vechi. Referința autentificată la rădăcina veche rămâne în jurnal
+  # până la commitul durabil al noii generații; cleanup-ul începe numai după
+  # unlink+fsync al jurnalului, astfel încât un crash înainte sau după switch
+  # are întotdeauna exact un owner durabil și recuperabil.
+  # Maximum două generații supersedate autentificate. A doua mută referința
+  # veche în slotul precedent; o a treia este refuzată înainte de orice switch.
+  if [ -n "$install_superseded_root" ]; then
+    [ -z "$install_previous_superseded_root" ] || return 1
+    install_previous_superseded_root=$install_superseded_root
+    install_previous_superseded_manifest_sha256=$install_superseded_manifest_sha256
+    install_previous_superseded_source_sha256=$install_superseded_source_sha256
+  fi
+  install_superseded_root=$old_root
+  install_superseded_manifest_sha256=$old_manifest_sha256
+  install_superseded_source_sha256=$old_source_sha256
+  stage_install_transaction
+  [ "$install_source_sha256" != "$install_superseded_source_sha256" ]
+  [ -z "$install_previous_superseded_source_sha256" ] \
+    || [ "$install_source_sha256" != "$install_previous_superseded_source_sha256" ]
+  write_install_journal quiesced
+  # Rădăcina veche rămâne intactă și referită până când noua generație trece
+  # toate validările. Cleanup-ul ambelor rădăcini începe numai după unlink+fsync
+  # al jurnalului la commit; un crash poate lăsa astfel doar un orphan root-only,
+  # niciodată un jurnal care indică o tranzacție ștearsă parțial.
+  printf '{"ok":true,"event":"install_intent_superseded","superseded_source_sha256":"%s","current_source_sha256":"%s","source_commit":"%s"}\n' \
+    "$old_source_sha256" "$install_source_sha256" "$constructor_install_source_commit" >&2
 }
 
 publish_install_candidate() {
@@ -648,6 +853,113 @@ validate_effective_installed_unit() {
     && [ "$load_state" = loaded ] && [ "$need_reload" = no ]
 }
 
+validate_constructor_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Serviciile oneshot nu au [Install]; starea canonică este static, nu
+      # enabled/disabled. Numai timerele dețin capabilitatea de pornire.
+      [ "$state" = static ] ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_constructor_prepublication_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Înainte de publicare pot exista fie unități legacy enable-able curățate
+      # la disabled, fie serviciile canonice fără [Install], deci static.
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+
+stop_and_disable_constructor_timer() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+stop_and_disable_constructor_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  # Unitățile vechi pot avea [Install], cele canonice sunt statice. Retragem
+  # best-effort legăturile legacy și folosim numai postcondiția verificată mai
+  # jos ca autoritate pentru succes.
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+validate_install_quiesce_postconditions() {
+  local expected_count=${1:-} unit state count=0
+  case "$expected_count" in 0|6) ;; *) return 1 ;; esac
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    count=$((count + 1))
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    validate_constructor_prepublication_unit_file_state "$unit" || return 1
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+  [ "$count" -eq "$expected_count" ] || return 1
+  for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+}
+
+wait_for_install_quiesce_postconditions() {
+  local expected_count=${1:-} attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_install_quiesce_postconditions "$expected_count"; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
+validate_published_systemd_postconditions() {
+  local unit state
+  for unit in \
+    kelion-runtime-config-recovery.service kelion-constructor-sync.service \
+    "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    validate_effective_installed_unit "$unit" || return 1
+  done
+  systemctl is-enabled --quiet kelion-runtime-config-recovery.service || return 1
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    validate_constructor_unit_file_state "$unit" || return 1
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+  done
+}
+
+wait_for_published_systemd_postconditions() {
+  local attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_published_systemd_postconditions; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
 retract_ready_stamp() {
   if [ ! -e "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ]; then return 0; fi
   [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
@@ -663,32 +975,27 @@ retract_ready_stamp() {
 }
 
 quiesce_before_install() {
-  local unit state count=0 failed=0
+  local unit count=0 failed=0
   retract_ready_stamp || failed=1
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+  for unit in "${constructor_timers[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       count=$((count + 1))
-      systemctl disable --now "$unit" >/dev/null || failed=1
+      stop_and_disable_constructor_timer "$unit" || failed=1
+    fi
+  done
+  for unit in "${constructor_services[@]}"; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      count=$((count + 1))
+      stop_and_disable_constructor_service "$unit" || failed=1
     fi
   done
   for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
-    if systemctl cat "$unit" >/dev/null 2>&1; then systemctl stop "$unit" >/dev/null || failed=1; fi
+    if systemctl cat "$unit" >/dev/null 2>&1; then systemctl stop "$unit" >/dev/null 2>&1 || :; fi
   done
+  systemctl daemon-reload || failed=1
   case "$count" in 0|6) ;; *) failed=1 ;; esac
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    if systemctl is-enabled --quiet "$unit"; then failed=1; fi
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
-  done
-  for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
-  done
-  [ "$failed" = 0 ]
+  [ "$failed" = 0 ] || return 1
+  wait_for_install_quiesce_postconditions "$count"
 }
 
 clear_install_transaction() {
@@ -700,32 +1007,112 @@ clear_install_transaction() {
   rm -f -- "$install_root/manifest"
   rmdir -- "$install_root/files"
   rmdir -- "$install_root"
+  remove_superseded_install_root
+  remove_previous_superseded_install_root
+  sync -f "$RUNTIME_ROOT"
 }
-
-# Un jurnal runtime existent este consumat de helperul exact care l-a creat,
-# sub același lock, înainte ca acel helper să poată fi înlocuit.
-if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
-  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ]
-  [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ]
-  KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" \
-    --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
-fi
-for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
-  [ ! -e "$journal" ] && [ ! -L "$journal" ] \
-    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; exit 1; }
-done
 
 install_root=''
 install_request_id=''
 install_commit=''
 install_manifest_sha256=''
 install_source_sha256=''
+install_superseded_root=''
+install_superseded_manifest_sha256=''
+install_superseded_source_sha256=''
+install_previous_superseded_root=''
+install_previous_superseded_manifest_sha256=''
+install_previous_superseded_source_sha256=''
 resume_different_source=0
+
+# b911 a publicat serviciile canonice statice și jurnalul runtime `prepared`,
+# apoi helperul său a rămas blocat deoarece a tratat exit-ul `disable` pentru o
+# unitate statică drept eșec. Compatibilitatea este intenționat one-shot și
+# dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
+# copia de recovery trebuie să fie exact helperul auditat din acest bundle.
+readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=f8e2822ba3b756f7f76298469833cc2ea8c2ea897b1edc60e485455ade32a531
+
+recover_existing_runtime_journal() {
+  local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
+  local live_helper=$ROOT/bin/runtime-config-cutover.sh
+  local live_compose=$ROOT/config/compose.production.yml
+  local candidate_helper=$repo_root/deploy/lib/runtime-config-cutover.sh
+  local live_sha candidate_sha recovery_helper temporary='' status=0 cleanup_failed=0
+
+  [ -f "$runtime_journal" ] && [ ! -L "$runtime_journal" ] \
+    && [ "$(stat -c '%u:%g:%a' "$runtime_journal")" = '0:0:600' ] || return 1
+  [ -f "$live_helper" ] && [ ! -L "$live_helper" ] \
+    && [ "$(stat -c '%u:%g:%a' "$live_helper")" = '0:0:500' ] || return 1
+  [ -f "$live_compose" ] && [ ! -L "$live_compose" ] \
+    && [ "$(stat -c '%u:%g:%a' "$live_compose")" = '0:0:444' ] || return 1
+  live_sha=$(sha256sum "$live_helper" | awk '{print $1}') || return 1
+  recovery_helper=$live_helper
+
+  if [ "$live_sha" = "$LEGACY_STATIC_RUNTIME_HELPER_SHA256" ]; then
+    # Jurnalul installerului autentifică tranzacția b911, iar manifestul ei
+    # leagă helperul și compose-ul live de candidații root-only cu hash.
+    load_install_transaction || return 1
+    validate_published_candidate runtime-helper || return 1
+    validate_published_candidate compose-production || return 1
+    jq -e '
+      .schema == 1 and .phase == "prepared" and
+      (.transactionRoot | strings | test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$")) and
+      (keys == ["phase","schema","transactionRoot"])
+    ' "$runtime_journal" >/dev/null || return 1
+    [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
+    candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
+    [ "$candidate_sha" = "$COMPATIBLE_RUNTIME_HELPER_SHA256" ] || return 1
+
+    temporary=$(mktemp /run/kelion-runtime-recovery-helper.XXXXXX) || return 1
+    if ! install -o root -g root -m 0500 "$candidate_helper" "$temporary" \
+      || [ -L "$temporary" ] \
+      || [ "$(stat -c '%u:%g:%a' "$temporary")" != '0:0:500' ] \
+      || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$COMPATIBLE_RUNTIME_HELPER_SHA256" ] \
+      || ! sync -f "$temporary"; then
+      rm -f -- "$temporary" || true
+      return 1
+    fi
+    recovery_helper=$temporary
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id" \
+      KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
+      bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      status=0
+    else
+      status=$?
+    fi
+  elif KELION_CUTOVER_LOCK_HELD=1 \
+    "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [ -n "$temporary" ]; then
+    rm -f -- "$temporary" || cleanup_failed=1
+    sync -f /run || cleanup_failed=1
+  fi
+  [ "$status" = 0 ] && [ "$cleanup_failed" = 0 ] \
+    && [ ! -e "$runtime_journal" ] && [ ! -L "$runtime_journal" ]
+}
+
+# În mod normal jurnalul este consumat de helperul live care l-a creat. Ramura
+# allowlist de mai sus este singura migrare compatibilă și nu înlocuiește live
+# helperul înainte ca absența jurnalului să fie dovedită.
+set_constructor_install_phase recovery-preflight
+if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
+  recover_existing_runtime_journal
+fi
+for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
+  [ ! -e "$journal" ] && [ ! -L "$journal" ] \
+    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; constructor_install_failure_line=$LINENO; exit 1; }
+done
+
+set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
   load_install_transaction \
-    || { echo 'jurnalul de instalare/deploy existent nu este un intent Constructor autentic' >&2; exit 1; }
+    || { echo 'jurnalul de instalare/deploy existent nu este un intent Constructor autentic' >&2; constructor_install_failure_line=$LINENO; exit 1; }
   current_source=$(current_source_sha256)
   if [ "$current_source" != "$install_source_sha256" ]; then resume_different_source=1; fi
 else
@@ -735,8 +1122,9 @@ fi
 # Intentul root-only și candidații cu hash sunt durabili înainte de prima oprire
 # ori mutație live. Boot recovery recunoaște jurnalul schema 1 și nu poate
 # republica stamp-ul fără owner; retry-ul rescrie toată generația din candidați.
+set_constructor_install_phase quiesce
 quiesce_before_install \
-  || { echo 'unitățile Constructor nu pot fi dovedite complet quiesced' >&2; exit 1; }
+  || { echo 'unitățile Constructor nu pot fi dovedite complet quiesced' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 write_install_journal quiesced
 # /etc/subuid și /etc/subgid nu pot fi comise printr-un singur rename. Le
 # publicăm numai după intentul durabil și quiesce: un crash între fișiere lasă
@@ -746,9 +1134,37 @@ ensure_subids kelion-publisher
 rm -f -- "${constructor_markers[@]}"
 sync -f /etc/kelion
 for marker in "${constructor_markers[@]}"; do
-  [ ! -e "$marker" ] && [ ! -L "$marker" ] || { echo "markerul nu a putut fi retras: $marker" >&2; exit 1; }
+  [ ! -e "$marker" ] && [ ! -L "$marker" ] || { echo "markerul nu a putut fi retras: $marker" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 
+if [ "$resume_different_source" = 1 ]; then
+  set_constructor_install_phase transaction-supersede
+  # Sunt permise cel mult două generații supersedate, ambele autentificate și
+  # păstrate până după unlink+fsync al jurnalului. A treia este refuzată.
+  [ -z "$install_previous_superseded_root" ]
+  [ -z "$install_superseded_source_sha256" ] \
+    || [ "$current_source" != "$install_superseded_source_sha256" ]
+  [ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]
+  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
+  for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
+  [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ "$(stat -c '%u:%g:%a' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
+    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
+  for logical in \
+    artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
+    artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
+    artifact.constructor-sync-worker artifact.constructor-service-client artifact.github-fixed-client \
+    runtime-helper compose-production; do
+    validate_published_candidate "$logical"
+  done
+  verify_candidate_units
+  supersede_quiesced_install_transaction
+  resume_different_source=0
+fi
+
+set_constructor_install_phase artifact-publication
 for logical in \
   artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
@@ -757,12 +1173,14 @@ for logical in \
   publish_install_candidate "$logical"
 done
 
+set_constructor_install_phase unit-validation
 verify_candidate_units \
-  || { echo 'tupla systemd Constructor candidată este invalidă' >&2; exit 1; }
+  || { echo 'tupla systemd Constructor candidată este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 
 # Cele șase unități-capabilitate sunt publicate exclusiv prin tranzacția
 # unit-only jurnalizată. Bariera pending rămâne după succes și poate fi
 # consumată numai de cutover-ul mixt care validează noul runtime.env.
+set_constructor_install_phase unit-cutover
 unit_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
 chown root:root "$unit_stage"
 chmod 0700 "$unit_stage"
@@ -779,50 +1197,44 @@ for unit in "${constructor_services[@]}"; do
   printf '%s\n' "systemd-service.$unit" >> "$unit_stage/manifest"
 done
 KELION_CUTOVER_LOCK_HELD=1 \
+KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1 \
 KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id" \
 KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
   "$ROOT/bin/runtime-config-cutover.sh" \
     "$unit_stage" "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
 
+set_constructor_install_phase systemd-publication
 publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.service
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
-for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-  systemctl disable --now "$unit" >/dev/null
+for unit in "${constructor_timers[@]}"; do
+  stop_and_disable_constructor_timer "$unit"
 done
+for unit in "${constructor_services[@]}"; do
+  stop_and_disable_constructor_service "$unit"
+done
+systemctl daemon-reload
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
 recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
 recovery_wants_link=$recovery_wants_dir/kelion-runtime-config-recovery.service
-[ -d "$recovery_wants_dir" ] && [ ! -L "$recovery_wants_dir" ]
-[ -L "$recovery_wants_link" ] \
-  && [ "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ] \
-  && [ "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ]
+constructor_install_assert "$LINENO" test -d "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test ! -L "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test -L "$recovery_wants_link"
+constructor_install_assert "$LINENO" test "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
+constructor_install_assert "$LINENO" test "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
 sync -f "$recovery_wants_dir"
 sync -f /etc/systemd/system
 
+set_constructor_install_phase published-validation
 for logical in "${install_logicals[@]}"; do validate_published_candidate "$logical"; done
-for unit in \
-  kelion-runtime-config-recovery.service kelion-constructor-sync.service \
-  "${constructor_timers[@]}" "${constructor_services[@]}"; do
-  validate_effective_installed_unit "$unit"
-done
-systemctl is-enabled --quiet kelion-runtime-config-recovery.service
 for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
 [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
 [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ "$(stat -c '%u:%g:%a' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600' ] \
   && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
-for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-  state=$(systemctl show "$unit" --property=ActiveState --value)
-  case "$state" in inactive|failed) ;; *) exit 1 ;; esac
-  if systemctl is-enabled --quiet "$unit"; then exit 1; fi
-  [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]
-done
+wait_for_published_systemd_postconditions
 
+set_constructor_install_phase commit
 clear_install_transaction
-if [ "$resume_different_source" = 1 ]; then
-  echo 'Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent.'
-  exec env KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 bash "$repo_root/deploy/instaleaza-constructor.sh"
-fi
 echo 'Constructor instalat dezactivat; configurarea și activarea sunt etape separate.'

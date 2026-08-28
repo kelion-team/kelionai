@@ -579,7 +579,8 @@ jobs:
               install -o root -g root -m 0600 "$work/deploy/systemd/$unit" "$cutover_stage/files/systemd-service.$unit"
               printf '%s\n' "systemd-service.$unit" >> "$cutover_stage/manifest"
             done
-            KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+            KELION_CUTOVER_LOCK_HELD=1 KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1 \
+              bash "$work/deploy/lib/runtime-config-cutover.sh" \
               "$cutover_stage" "$work/deploy/compose.production.yml" --leave-constructor-quiesced
             cutover_stage=''
           fi
