@@ -824,6 +824,54 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
   assert.doesNotMatch(control, /^\s+CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation$/m)
 })
 
+test('rescrierea runtime.env din control rulează cu AWK-ul de sistem', () => {
+  const control = read('.github/workflows/vps-run.yml')
+  const commandStart = control.indexOf('          awk -F= \\')
+  const programMarker = '-v required_checks="$constructor_required_checks" \''
+  const markerStart = control.indexOf(programMarker, commandStart)
+  const programStart = control.indexOf('\n', markerStart) + 1
+  const programEnd = control.indexOf('\n          \' "$runtime_file" >', programStart)
+
+  assert.ok(commandStart >= 0 && markerStart >= commandStart && programStart > markerStart && programEnd > programStart,
+    'programul AWK care rescrie runtime.env nu poate fi extras din workflow')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-runtime-rewrite-'))
+  const runtime = join(sandbox, 'runtime.env')
+  writeFileSync(runtime, [
+    'NODE_ENV=production',
+    'CONSTRUCTOR_RETRY_MAX_SECONDS=999',
+    'CONSTRUCTOR_REQUIRED_CHECKS=stale',
+    '',
+  ].join('\n'))
+
+  try {
+    const result = spawnSync('awk', [
+      '-F=',
+      '-v', 'retry_base=60',
+      '-v', 'retry_max=1800',
+      '-v', 'retry_external=900',
+      '-v', 'required_checks=verify,container-isolation,current-tree,merge-policy',
+      control.slice(programStart, programEnd),
+      runtime,
+    ], { encoding: 'utf8' })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stderr, '')
+    const lines = result.stdout.trimEnd().split('\n')
+    assert.equal(lines.filter((line) => line === 'CONSTRUCTOR_RETRY_MAX_SECONDS=1800').length, 1)
+    assert.equal(lines.filter((line) => line === 'CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation,current-tree,merge-policy').length, 1)
+    for (const expected of [
+      'CODEX_WORKER_ENABLED=1',
+      'CONSTRUCTOR_PUBLISHER_ENABLED=1',
+      'CONSTRUCTOR_RELEASE_ENABLED=1',
+      'CONSTRUCTOR_RETRY_BASE_SECONDS=60',
+      'CONSTRUCTOR_EXTERNAL_RETRY_SECONDS=900',
+    ]) assert.ok(lines.includes(expected), `runtime.env nu conține ${expected}`)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
 test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   const worker = read('deploy/systemd/kelion-codex-worker.service')
   const publisher = read('deploy/systemd/kelion-constructor-publisher.service')
