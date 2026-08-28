@@ -1,16 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T21:26:00Z`
+Actualizat: `2026-08-28T21:07:24Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `378bec975631349f73fa5c80fcd55cbbf7633bb4` (PR-urile
-  `#1489` și `#1490`). CI master exact `33211625428` este verde.
-- Buildul OCI exact `33211964526` s-a oprit înainte de publicare în imaginea
-  izolată `codex-gates`: regresia reală din `#1490` invocă `ssh-keygen`, dar
-  runtime-ul gate nu includea `openssh-client`. Celelalte 180 de teste ale
-  suitei statice au trecut; nicio imagine și niciun deploy nu au fost publicate.
+- `origin/master` este `392b174660b02ce3a2db23e0fedf1555206ea83b` (PR `#1489`).
+  CI master `33210808739` este verde; buildul OCI exact `33211160656` rulează.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -117,12 +113,13 @@ Actualizat: `2026-08-28T21:26:00Z`
 
 ## Următorul pas sigur
 
-1. Include `openssh-client` în imaginea `codex-gates`, păstrează regresia reală
-   și publică remedierea numai prin PR, fără bypass sau push în `master`.
-2. După toate check-urile verzi, cere CI și buildul OCI exact pentru noul vârf
-   `master`, apoi rulează o singură configurare controlată a Constructorului.
-3. Numai după configurare verde, relansează runul canonic de producție pentru
-   aceeași tuplă și cere dovada externă exactă plus verifierul post-deploy.
+1. Publică testele executabile și acest checkpoint numai prin PR `chore/*`, fără
+   bypass sau push în `master`; cere toate check-urile verzi.
+2. Nu porni niciun release de producție. După merge, CI și buildul OCI exact,
+   rulează o singură configurare controlată pe vârful `master`.
+3. Activarea și release-ul rămân blocate până când configurarea este verde,
+   jurnalele sunt absente și statusul final confirmă workerul, publisherul și
+   releaserul dezactivate/ready conform etapei curente.
 
 ## Legături canonice
 
@@ -150,7 +147,5 @@ Actualizat: `2026-08-28T21:26:00Z`
 - Parser canonic al cheii publice: <https://github.com/kelion-team/kelionai/pull/1489>
 - CI master `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33210808739>
 - Build OCI `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33211160656>
-- CI master `378bec97`: <https://github.com/kelion-team/kelionai/actions/runs/33211625428>
-- Build gate fără `ssh-keygen`: <https://github.com/kelion-team/kelionai/actions/runs/33211964526>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
