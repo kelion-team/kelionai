@@ -52,6 +52,7 @@ import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './service
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
 import { realtimeHealth } from './services/realtimeHealth.js'
+import { isSubscriptionMode } from './services/chatgptSubscription.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -265,7 +266,7 @@ async function readinessSnapshot() {
     && fs.existsSync(config.converterWorker.socket),
   )
   const ready = requiredConfig && realtime.ok && database && migrations && browserWorker && converterWorker
-  return reply.code(ready ? 200 : 503).send({
+  return {
     ready,
     checks: {
       config: requiredConfig,
