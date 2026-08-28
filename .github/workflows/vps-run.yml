@@ -245,7 +245,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "umask 077; systemctl is-active --quiet '$cleanup_unit.timer'; [ ! -e '$remote_payload' ] && [ ! -L '$remote_payload' ]; cat > '$remote_payload'" < "$payload"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" "$GITHUB_SHA" <<'REMOTE'
-          set -euo pipefail
+          set -Eeuo pipefail
           umask 077
           bundle=$1; payload=$2; cleanup_unit=$3; gate_image=$4; public_origin=$5; repository=$6; source_commit=$7
           [[ "$bundle" =~ ^/root/kelion/runtime/constructor-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
@@ -265,6 +265,7 @@ jobs:
           bootstrap=/run/kelion-constructor-bootstrap
           cutover_stage=''
           cleanup_remote() {
+            trap - ERR
             rm -f -- "$bundle" "$payload"; rm -rf -- "$bootstrap"
             systemctl stop "$cleanup_unit.timer" "$cleanup_unit.service" >/dev/null 2>&1 || true
             systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || true
@@ -274,6 +275,21 @@ jobs:
             case "$work" in /root/kelion/runtime/constructor.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
           trap cleanup_remote EXIT
+          constructor_config_phase='remote-preflight'
+          constructor_config_check='bundle-contract'
+          report_constructor_config_failure() {
+            local rc=$? failure_line=${BASH_LINENO[0]:-0}
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then exit "$rc"; fi
+            trap - ERR
+            printf '{"ok":false,"event":"constructor_config_failure","phase":"%s","check":"%s","line":%s,"exit_code":%s,"source_commit":"%s"}\n' \
+              "$constructor_config_phase" "$constructor_config_check" "$failure_line" "$rc" "$source_commit" >&2
+            exit "$rc"
+          }
+          fail_constructor_config() {
+            local rc=${1:-1}
+            return "$rc"
+          }
+          trap report_constructor_config_failure ERR
           [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -f "$payload" ] && [ ! -L "$payload" ]
           if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
@@ -281,6 +297,7 @@ jobs:
           deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
           constructor_install_resume=0
           constructor_install_resumed=0
+          constructor_config_check='install-resume-contract'
           if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
             if [ -f "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
               && [ "$(stat -c '%u:%g:%a' "$deploy_quiesce_journal")" = '0:0:600' ] \
@@ -306,12 +323,16 @@ jobs:
             # trebuie reluat înaintea precheck-ului 0/6. Installerul consumă mai
             # întâi orice jurnal runtime cu helperul care l-a creat, apoi
             # republică exact toți cei șase candidați din manifest.
+            constructor_config_phase='constructor-install'
+            constructor_config_check='resume-installer'
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
               KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
             constructor_install_resumed=1
             constructor_install_resume=0
           fi
+          constructor_config_phase='configuration-preflight'
+          constructor_config_check='runtime-journal-recovery'
           if [ "$constructor_install_resume" = 0 ] && { \
             [ -e /root/kelion/runtime/runtime-config-cutover.journal ] || [ -L /root/kelion/runtime/runtime-config-cutover.journal ] \
             || [ -e /root/kelion/runtime/constructor-activation.journal ] || [ -L /root/kelion/runtime/constructor-activation.journal ] \
@@ -324,6 +345,7 @@ jobs:
               --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
           fi
 
+          constructor_config_check='payload-decode'
           decode() {
             local name=$1 encoded
             encoded=$(awk -F: -v wanted="$name" '$1 == wanted { print substr($0, index($0, ":") + 1) }' "$payload")
@@ -335,6 +357,7 @@ jobs:
           constructor_retry_max_seconds=$(decode constructor-retry-max-seconds)
           constructor_external_retry_seconds=$(decode constructor-external-retry-seconds)
           constructor_required_checks=$(decode constructor-required-checks)
+          constructor_config_check='payload-contract'
           validate_decoded_secret() {
             local name=$1 value=$2 bytes clean_bytes
             bytes=$(printf '%s' "$value" | wc -c)
@@ -366,6 +389,7 @@ jobs:
           [ "$(tr ',' '\n' <<<"$constructor_required_checks" | sort | uniq -d | wc -l)" -eq 0 ]
           case ",$constructor_required_checks," in *,verify,*) ;; *) exit 1 ;; esac
           case ",$constructor_required_checks," in *,container-isolation,*) ;; *) exit 1 ;; esac
+          constructor_config_check='existing-config-contract'
           if [ "$constructor_install_resume" = 0 ]; then
             for marker in codex-worker constructor-publisher constructor-release; do
               [ ! -e "/etc/kelion/$marker.enabled" ] && [ ! -L "/etc/kelion/$marker.enabled" ] || { echo 'Reconfigurarea unui Constructor activ este refuzata' >&2; exit 1; }
@@ -379,6 +403,7 @@ jobs:
             fi
           done
           case "$config_count" in 0|3) ;; *) echo 'Set de configuri Constructor parțial; configurarea este refuzată' >&2; exit 1 ;; esac
+          constructor_config_check='existing-unit-contract'
           constructor_timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
           constructor_services=(kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service)
           unit_count=0
@@ -390,18 +415,26 @@ jobs:
             *) echo 'Set systemd Constructor parțial; configurarea este refuzată' >&2; exit 1 ;;
           esac
 
+          constructor_config_phase='dependency-install'
+          constructor_config_check='package-index'
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
+          constructor_config_check='package-dependencies'
           apt-get install -y -qq ca-certificates curl git jq bubblewrap podman uidmap
+          constructor_config_check='node-runtime'
           if [ ! -x /usr/bin/node ]; then apt-get install -y -qq nodejs; fi
           if [ ! -x /usr/bin/npm ]; then apt-get install -y -qq npm; fi
           [ -x /usr/bin/node ]
           [ -x /usr/bin/npm ]
           if [ "$constructor_install_resumed" = 0 ]; then
+            constructor_config_phase='constructor-install'
+            constructor_config_check='installer'
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
               KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
           fi
+          constructor_config_phase='post-installer'
+          constructor_config_check='runtime-helper-publication'
           install_atomic() {
             local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
             temporary=$(mktemp "$target.install.XXXXXX")
@@ -414,17 +447,22 @@ jobs:
           install -d -o root -g 10050 -m 0750 /root/kelion/config
           install_atomic "$work/deploy/lib/runtime-config-cutover.sh" /root/kelion/bin/runtime-config-cutover.sh root root 0500
           install_atomic "$work/deploy/compose.production.yml" /root/kelion/config/compose.production.yml root root 0444
+          constructor_config_check='unit-quiescence'
           for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
             state=$(systemctl show "$unit" --property=ActiveState --value)
-            case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; exit 1 ;; esac
+            case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; fail_constructor_config 1 ;; esac
           done
 
+          constructor_config_check='codex-cli-install'
           install -d -o root -g root -m 0755 /opt/kelion-codex/bin /opt/kelion-codex/npm
           npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1' >/dev/null
+          constructor_config_check='codex-cli-link'
           ln -sfn /opt/kelion-codex/npm/bin/codex /opt/kelion-codex/bin/codex
           chown -h root:root /opt/kelion-codex/bin/codex
+          constructor_config_check='worker-profile-publication'
           install -o root -g root -m 0444 /opt/kelion-codex/profile-home/kelion-worker.config.toml /var/lib/kelion-codex-auth/kelion-worker.config.toml
 
+          constructor_config_check='cutover-stage'
           install -d -o root -g root -m 0750 /root/kelion/publisher-secrets
           cutover_stage=$(mktemp -d /root/kelion/runtime/runtime-cutover.XXXXXX)
           install -d -o root -g root -m 0700 "$cutover_stage/files"
@@ -436,6 +474,7 @@ jobs:
             chmod 0600 "$cutover_stage/files/$logical"
             printf '%s\n' "$logical" >> "$cutover_stage/manifest"
           }
+          constructor_config_check='secret-stage'
           stage_value app-secret.codex-worker-secret "$codex_secret"
           stage_value app-secret.constructor-publisher-secret "$publisher_secret"
           stage_value app-secret.constructor-release-secret "$release_secret"
@@ -450,6 +489,7 @@ jobs:
             chown root:"$group" "$temporary"; chmod 0440 "$temporary"; mv "$temporary" "$path"
           }
 
+          constructor_config_check='signing-key-layout'
           install -d -o root -g root -m 0700 "$bootstrap"
           signing_key=/root/kelion/publisher-secrets/github-publisher-signing-key
           signing_dir=$(dirname -- "$signing_key")
@@ -462,6 +502,7 @@ jobs:
             info=$(ssh-keygen -lf "$key" -E sha256) || return 1
             [[ "$info" =~ ^256\ SHA256:[A-Za-z0-9+/]{43}\ .+\ \(ED25519\)$ ]]
           }
+          constructor_config_check='signing-stale-cleanup'
           for stale_signing_root in "$signing_dir"/.github-publisher-signing-key.tmp.*; do
             [ -e "$stale_signing_root" ] || continue
             [[ "$stale_signing_root" =~ ^/root/kelion/publisher-secrets/\.github-publisher-signing-key\.tmp\.[A-Za-z0-9]+$ ]]
@@ -470,6 +511,7 @@ jobs:
             rm -rf -- "$stale_signing_root"
             sync -f "$signing_dir"
           done
+          constructor_config_check='signing-key-publication'
           if [ ! -e "$signing_key" ] && [ ! -L "$signing_key" ]; then
             signing_root=$(mktemp -d "$signing_dir/.github-publisher-signing-key.tmp.XXXXXX")
             signing_candidate=$signing_root/key
@@ -485,10 +527,12 @@ jobs:
             rmdir -- "$signing_root"
             sync -f "$signing_dir"
           fi
+          constructor_config_check='signing-key-validation'
           validate_signing_key "$signing_key"
           signing_public=$(ssh-keygen -y -f "$signing_key")
           signing_fingerprint=$(ssh-keygen -lf "$signing_key" -E sha256 | awk '{print $2}')
           [[ "$signing_fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          constructor_config_check='signing-key-registration'
           publisher_headers=$bootstrap/publisher-api.headers
           printf 'Authorization: Bearer %s\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\n' "$publisher_token" > "$publisher_headers"
           chown root:root "$publisher_headers"; chmod 0600 "$publisher_headers"
@@ -611,9 +655,12 @@ jobs:
             dangerous=$(runuser -u "$user" -- env HOME="$home_dir" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$target" config --local --get-regexp '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' || true)
             [ -z "$dangerous" ]
           }
+          constructor_config_check='worker-repository'
           clone_or_sync kelion-codex /var/lib/kelion-codex/repo "$bootstrap/worker/token" /var/lib/kelion-codex
+          constructor_config_check='publisher-repository'
           clone_or_sync kelion-publisher /var/lib/kelion-publisher/repo "$bootstrap/publisher/token" /var/lib/kelion-publisher
 
+          constructor_config_check='config-stage'
           cat > "$cutover_stage/files/constructor-config.codex-worker.env" <<EOF
           CODEX_WORKER_EXEC_ENABLED=1
           KELION_CODEX_API=http://127.0.0.1:18079
@@ -692,10 +739,16 @@ jobs:
             runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
             rm -f -- "$authfile"
           }
+          constructor_config_check='worker-gate-image'
           pull_gate kelion-codex /run/kelion-codex "$ghcr_read_token"
+          constructor_config_check='publisher-gate-image'
           pull_gate kelion-publisher /run/kelion-publisher "$ghcr_read_token"
+          constructor_config_phase='runtime-config-cutover'
+          constructor_config_check='apply'
           KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" "$cutover_stage" "$work/deploy/compose.production.yml"
           cutover_stage=''
+          constructor_config_phase='complete'
+          constructor_config_check='success-message'
           printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si autentificarea ChatGPT'
           REMOTE
 
