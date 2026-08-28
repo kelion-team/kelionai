@@ -769,13 +769,13 @@ jobs:
             local authfile="$runtime/constructor-auth.json"
             install -d -o "$user" -g "$user" -m 0700 "$runtime"
             rm -f -- "$authfile"
-            printf '%s' "$token" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "${repository%%/*}" --password-stdin >/dev/null
-            if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$gate_image" >/dev/null; then
-              runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
+            printf '%s' "$token" | (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "${repository%%/*}" --password-stdin) >/dev/null
+            if ! (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$gate_image") >/dev/null; then
+              (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null 2>&1 || true
               rm -f -- "$authfile"
               return 1
             fi
-            runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
+            (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null
             rm -f -- "$authfile"
           }
           constructor_config_check='worker-gate-image'
