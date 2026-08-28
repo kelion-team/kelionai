@@ -1008,7 +1008,7 @@ recover_existing_runtime_journal() {
     if KELION_CUTOVER_LOCK_HELD=1 \
       KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id" \
       KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
-      "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
       status=0
     else
       status=$?

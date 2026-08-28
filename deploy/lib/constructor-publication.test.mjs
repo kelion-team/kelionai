@@ -2044,11 +2044,12 @@ test('bootstrapul recovery acceptă numai helperul b911 și candidatul compatibi
   const candidatePin = recovery.indexOf('[ "$candidate_sha" = "$COMPATIBLE_RUNTIME_HELPER_SHA256" ]', preparedOnly)
   const durableCopy = recovery.indexOf('sync -f "$temporary"', candidatePin)
   const ownerRun = recovery.indexOf('KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id"', durableCopy)
+  const noexecSafeRun = recovery.indexOf('bash "$recovery_helper" --recover-only', ownerRun)
   const cleanup = recovery.indexOf('rm -f -- "$temporary"', ownerRun)
   const journalGone = recovery.indexOf('[ ! -e "$runtime_journal" ]', cleanup)
   assert.ok(livePin >= 0 && loadIntent > livePin && bindHelper > loadIntent && bindCompose > bindHelper
     && preparedOnly > bindCompose && candidatePin > preparedOnly && durableCopy > candidatePin
-    && ownerRun > durableCopy && cleanup > ownerRun && journalGone > cleanup)
+    && ownerRun > durableCopy && noexecSafeRun > ownerRun && cleanup > noexecSafeRun && journalGone > cleanup)
   assert.match(recovery, /elif KELION_CUTOVER_LOCK_HELD=1[\s\S]*"\$recovery_helper" --recover-only/,
     'orice helper live necunoscut trebuie să-și consume propriul jurnal')
   assert.doesNotMatch(recovery, /publish_install_candidate|mv -f --[^\n]*runtime-config-cutover/)
