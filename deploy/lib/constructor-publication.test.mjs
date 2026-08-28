@@ -353,8 +353,50 @@ canonical_signing_public ignored
   assert.ok(validator.includes('no\\ comment\\ \\(ED25519\\)'))
   assert.match(workflow, /signing_public=[$]\(canonical_signing_public "[$]signing_key"\)/)
   assert.match(canonicalizer, /ssh-keygen -y -P '' -f "[$]key" 2>\/dev\/null/)
+  assert.match(canonicalizer, /\[ "[$]\{#raw\}" -ge 1 \][\s\S]*\[ "[$]\{#raw\}" -le 32768 \]/)
   assert.match(canonicalizer, /"[$]raw" != \*[$]'\\r'\*[\s\S]*"[$]raw" != \*[$]'\\n'\*/)
   assert.doesNotMatch(workflow, /public=[$]\(ssh-keygen -y -f "[$]key"\)/)
+})
+
+test('canonizarea reală păstrează fingerprintul și respinge alte tipuri sau o parolă', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const canonicalizer = shellFunction(workflow.replace(/^ {10}/gm, ''), 'canonical_signing_public')
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-signing-public-'))
+  const key = join(sandbox, 'ed25519')
+  const encrypted = join(sandbox, 'encrypted')
+  const ecdsa = join(sandbox, 'ecdsa')
+  const generate = (args) => spawnSync('ssh-keygen', ['-q', ...args], { encoding: 'utf8' })
+  const canonicalize = (path) => spawnSync(bashExecutable,
+    ['-c', `${canonicalizer}\ncanonical_signing_public "$1"`, 'bash', path], { encoding: 'utf8' })
+
+  try {
+    const generated = generate(['-t', 'ed25519', '-N', '', '-C', 'kelion constructor legacy comment', '-f', key])
+    assert.equal(generated.status, 0, generated.stderr)
+    const raw = spawnSync('ssh-keygen', ['-y', '-P', '', '-f', key], { encoding: 'utf8' })
+    assert.equal(raw.status, 0, raw.stderr)
+
+    const canonical = canonicalize(key)
+    assert.equal(canonical.status, 0, canonical.stderr)
+    assert.equal(canonical.stdout.trim(), raw.stdout.trim().split(/\s+/).slice(0, 2).join(' '))
+
+    const privateFingerprint = spawnSync('ssh-keygen', ['-lf', key, '-E', 'sha256'], { encoding: 'utf8' })
+    const publicFingerprint = spawnSync('ssh-keygen', ['-lf', '-', '-E', 'sha256'], {
+      encoding: 'utf8', input: canonical.stdout,
+    })
+    assert.equal(privateFingerprint.status, 0, privateFingerprint.stderr)
+    assert.equal(publicFingerprint.status, 0, publicFingerprint.stderr)
+    assert.equal(publicFingerprint.stdout.split(/\s+/)[1], privateFingerprint.stdout.split(/\s+/)[1])
+
+    const encryptedGenerated = generate(['-t', 'ed25519', '-N', 'not-empty', '-C', 'encrypted', '-f', encrypted])
+    assert.equal(encryptedGenerated.status, 0, encryptedGenerated.stderr)
+    assert.notEqual(canonicalize(encrypted).status, 0)
+
+    const ecdsaGenerated = generate(['-t', 'ecdsa', '-b', '256', '-N', '', '-C', 'wrong-type', '-f', ecdsa])
+    assert.equal(ecdsaGenerated.status, 0, ecdsaGenerated.stderr)
+    assert.notEqual(canonicalize(ecdsa).status, 0)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
 })
 
 test('metadata legacy a cheii de semnare este normalizată fără schimbarea materialului', () => {
