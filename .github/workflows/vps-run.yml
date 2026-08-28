@@ -1317,6 +1317,7 @@ jobs:
           [ "$(stat -c '%u:%g:%a' "$oauth_admin_path")" = '0:10050:440' ]
           IFS= read -r oauth_admin_token < "$oauth_admin_path"
           [ -n "$oauth_admin_token" ] && [ "${#oauth_admin_token}" -ge 32 ]
+          [[ "$oauth_admin_token" != [[:space:]]* && "$oauth_admin_token" != *[[:space:]] ]]
           printf '%s' "$oauth_admin_token" | sha256sum | cut -d' ' -f1
           oauth_admin_token=''
           REMOTE

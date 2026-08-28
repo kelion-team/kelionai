@@ -479,6 +479,8 @@ test('audit-token-identity identifică doar numele coliziunii fără valori sau 
   assert.match(audit, /audit_failure[\s\S]*source_commit/)
   assert.match(audit, /oauth_admin_path=\/root\/kelion\/secrets\/github-release-oauth-token/)
   assert.match(audit, /IFS= read -r oauth_admin_token/)
+  assert.match(audit, /IFS= read -r oauth_admin_token[\s\S]*\[\[ "\$oauth_admin_token" != \[\[:space:\]\]\* && "\$oauth_admin_token" != \*\[\[:space:\]\] \]\][\s\S]*sha256sum/,
+    'auditul trebuie să respingă whitespace-ul marginal și în tokenul OAuth live')
   assert.match(audit, /COLLISION: CONSTRUCTOR_SYNC_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: VPS_GITHUB_TOKEN/)
