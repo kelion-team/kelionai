@@ -1122,8 +1122,6 @@ jobs:
           fi
 
           current_check='apply-canonical-layout'
-          chown root:kelion-handoff "$spool"
-          chmod 0750 "$spool"
           if [ ! -e "$spool/retired" ] && [ ! -L "$spool/retired" ]; then
             install -d -o root -g kelion-handoff -m 2770 "$spool/retired"
           fi
@@ -1132,12 +1130,17 @@ jobs:
             chmod 2770 "$spool/$child"
             sync -f "$spool/$child"
           done
+          # Crearea unui copil schimbă metadatele părintelui. Aplicăm invariantul
+          # părintelui ultimul, apoi îl verificăm fără alte mutații în arbore.
+          chown root:kelion-handoff "$spool"
+          chmod 0750 "$spool"
           sync -f "$spool"
           sync -f /var/lib
 
           current_check='verify-canonical-layout'
           [ "$(stat -c '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ]
           for child in ready ack retired; do
+            current_check="verify-canonical-layout-$child"
             [ "$(stat -c '%U:%G:%a' "$spool/$child")" = 'root:kelion-handoff:2770' ]
           done
           echo "{\"ok\":true,\"event\":\"repair_complete\",\"phase\":\"$phase\",\"source_commit\":\"$source_commit\"}"
