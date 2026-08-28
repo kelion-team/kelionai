@@ -1293,6 +1293,7 @@ jobs:
           [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           for value in "$SYNC_GITHUB_TOKEN" "$PUBLISHER_GITHUB_TOKEN" "$RELEASE_GITHUB_TOKEN" "$GHCR_READ_TOKEN"; do
             [ -n "$value" ] && [ "${#value}" -ge 32 ]
+            [[ "$value" != [[:space:]]* && "$value" != *[[:space:]] ]]
           done
           umask 077
           key_file=$(mktemp)
@@ -1326,5 +1327,10 @@ jobs:
           if [ "$h_publisher" = "$oauth_admin_hash" ]; then echo 'COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN'; collision=1; else echo 'DISTINCT: publisher'; fi
           if [ "$h_release" = "$oauth_admin_hash" ]; then echo 'COLLISION: VPS_GITHUB_TOKEN'; collision=1; else echo 'DISTINCT: release'; fi
           if [ "$h_ghcr" = "$oauth_admin_hash" ]; then echo 'COLLISION: CONSTRUCTOR_GHCR_READ_TOKEN'; collision=1; else echo 'DISTINCT: ghcr-read'; fi
-          if [ "$collision" -eq 0 ]; then echo 'AUDIT-VERDICT: NO-COLLISION'; else echo 'AUDIT-VERDICT: COLLISION'; fi
+          if [ "$collision" -ne 0 ]; then
+            echo 'AUDIT-VERDICT: COLLISION'
+            echo "{\"ok\":false,\"event\":\"audit_collision\",\"phase\":\"$phase\",\"source_commit\":\"$SOURCE_COMMIT\"}" >&2
+            exit 1
+          fi
+          echo 'AUDIT-VERDICT: NO-COLLISION'
           echo "{\"ok\":true,\"event\":\"audit_complete\",\"phase\":\"$phase\",\"source_commit\":\"$SOURCE_COMMIT\"}"

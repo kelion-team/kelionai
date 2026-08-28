@@ -483,7 +483,13 @@ test('audit-token-identity identifică doar numele coliziunii fără valori sau 
   assert.match(audit, /COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: VPS_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: CONSTRUCTOR_GHCR_READ_TOKEN/)
-  assert.match(audit, /AUDIT-VERDICT: NO-COLLISION[\s\S]*AUDIT-VERDICT: COLLISION/)
+  assert.match(audit, /\[\[ "\$value" != \[\[:space:\]\]\* && "\$value" != \*\[\[:space:\]\] \]\]/,
+    'auditul trebuie să respingă whitespace-ul marginal înainte de hashing')
+  assert.match(audit, /"\$collision" -ne 0[\s\S]*AUDIT-VERDICT: COLLISION[\s\S]*audit_collision[\s\S]*exit 1/,
+    'o coliziune trebuie să închidă auditul fail-closed cu telemetrie de eșec')
+  assert.match(audit, /AUDIT-VERDICT: NO-COLLISION[\s\S]*audit_complete/)
+  assert.doesNotMatch(audit, /AUDIT-VERDICT: COLLISION[\s\S]*"ok":true/,
+    'ramura de coliziune nu poate raporta succes')
   assert.doesNotMatch(audit, /echo\s+['"]?\$?(?:h_sync|h_publisher|h_release|h_ghcr|oauth_admin_hash)/,
     'auditul nu trebuie să afișeze hashurile')
   assert.doesNotMatch(audit, /set\s+-x/, 'auditul nu trebuie să activeze xtrace')
