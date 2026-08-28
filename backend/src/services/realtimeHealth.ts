@@ -5,6 +5,13 @@ export type RealtimeHealth = {
   reason: 'configured' | 'missing_configuration' | 'provider_unreachable' | 'model_unavailable'
 }
 
+/** Candidates are intentionally inert. Provider reachability becomes a hard
+ * readiness gate only for the active generation, where deployment rollback
+ * can safely restore the last known-good version. */
+export function realtimeReadinessSatisfied(sideEffectsActive: boolean, health: RealtimeHealth): boolean {
+  return !sideEffectsActive || health.ok
+}
+
 let cache: { at: number; value: RealtimeHealth } | null = null
 let inFlight: Promise<RealtimeHealth> | null = null
 

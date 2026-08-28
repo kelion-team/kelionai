@@ -51,7 +51,7 @@ import { makeLogTee, capturaConsole } from './services/logbuffer.js'
 import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
-import { realtimeHealth } from './services/realtimeHealth.js'
+import { realtimeHealth, realtimeReadinessSatisfied } from './services/realtimeHealth.js'
 import { isSubscriptionMode } from './services/chatgptSubscription.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -265,12 +265,25 @@ async function readinessSnapshot() {
     && config.converterWorker.secret.length >= 32
     && fs.existsSync(config.converterWorker.socket),
   )
-  const ready = requiredConfig && realtime.ok && database && migrations && browserWorker && converterWorker
+  // A release candidate is deliberately inert and is also how CI validates
+  // the production container without a live provider credential.  Requiring
+  // an account-level provider probe there would couple the local isolation
+  // gate to an external service (and made the gate impossible with its
+  // synthetic key).  Once side effects are activated, provider availability
+  // is mandatory again; deploy's post-activation readiness check therefore
+  // remains fail-closed and rolls back an unavailable Realtime configuration.
+  const realtimeRequired = releaseSideEffectsEnabled()
+  const ready = requiredConfig
+    && realtimeReadinessSatisfied(realtimeRequired, realtime)
+    && database
+    && migrations
+    && browserWorker
+    && converterWorker
   return {
     ready,
     checks: {
       config: requiredConfig,
-      realtime: { ok: realtime.ok, reason: realtime.reason },
+      realtime: { required: realtimeRequired, ok: realtime.ok, reason: realtime.reason },
       database,
       migrations,
       browserWorker,
