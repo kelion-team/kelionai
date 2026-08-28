@@ -492,9 +492,10 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   const firstParentChmod = repair.indexOf('chmod 0750 "$spool"')
   const finalParentChown = repair.lastIndexOf('chown root:kelion-handoff "$spool"')
   const finalParentChmod = repair.lastIndexOf('chmod 0750 "$spool"')
+  const childValidation = repair.indexOf("current_check='children-allowlist'")
   const finalVerify = repair.indexOf("current_check='verify-canonical-layout'")
-  assert.ok(firstParentChown >= 0 && firstParentChown < firstParentChmod && firstParentChmod < childInstall,
-    'părintele trebuie blocat înaintea mutațiilor copiilor')
+  assert.ok(firstParentChown >= 0 && firstParentChown < firstParentChmod && firstParentChmod < childValidation,
+    'părintele trebuie blocat înaintea validării și mutațiilor copiilor')
   assert.ok(childInstall < finalParentChown && finalParentChown < finalParentChmod && finalParentChmod < finalVerify,
     'părintele trebuie normalizat din nou după copii și înaintea verificării finale')
   assert.match(repair, /current_check="verify-canonical-layout-\$child"/)
