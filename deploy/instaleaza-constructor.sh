@@ -28,6 +28,11 @@ set_constructor_install_phase() {
   done
   return 1
 }
+constructor_install_assert() {
+  local source_line=$1
+  shift
+  "$@" || { constructor_install_failure_line=$source_line; return 1; }
+}
 report_constructor_install_failure() {
   local status=$?
   local line=${constructor_install_failure_line:-0}
@@ -850,10 +855,11 @@ done
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
 recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
 recovery_wants_link=$recovery_wants_dir/kelion-runtime-config-recovery.service
-[ -d "$recovery_wants_dir" ] && [ ! -L "$recovery_wants_dir" ]
-[ -L "$recovery_wants_link" ] \
-  && [ "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ] \
-  && [ "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ]
+constructor_install_assert "$LINENO" test -d "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test ! -L "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test -L "$recovery_wants_link"
+constructor_install_assert "$LINENO" test "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
+constructor_install_assert "$LINENO" test "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
 sync -f "$recovery_wants_dir"
 sync -f /etc/systemd/system
 

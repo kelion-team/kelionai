@@ -640,6 +640,8 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.match(installer, /trap report_constructor_install_failure EXIT/)
   assert.doesNotMatch(shellFunction(installer, 'report_constructor_install_failure'), /BASH_COMMAND|set -x|printf[^\n]*(?:token|secret|value|env)/i)
   assert.match(installer, /KELION_CONSTRUCTOR_SOURCE_COMMIT/)
+  assert.match(installer, /constructor_install_assert "[$]LINENO" test "[$][(]readlink/)
+  assert.match(installer, /constructor_install_assert "[$]LINENO" test "[$][(]realpath -e/)
   assert.match(installer, /usermod_help=[$][(]usermod --help 2>&1[)]/)
   assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
   assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
