@@ -1085,28 +1085,89 @@ jobs:
           trap on_err ERR
           echo "source_commit=$source_commit"
           rc_total=0
+          probe() {
+            local label=$1 rc
+            shift
+            printf -- '--- probe=%s\n' "$label"
+            if "$@" 2>&1; then
+              :
+            else
+              rc=$?
+              printf 'probe_error=%s exit_code=%s\n' "$label" "$rc"
+            fi
+          }
           for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
             echo "--- $p"
-            stat -c 'type=%F mode=%a owner=%U group=%G' "$p" 2>&1
-            if command -v getfacl >/dev/null 2>&1; then
-              if getfacl -p "$p" 2>&1; then
-                :
+            if stat -c 'type=%F mode=%a owner=%U group=%G ctime=%z mtime=%y' "$p" 2>&1; then
+              if command -v getfacl >/dev/null 2>&1; then
+                if getfacl -p "$p" 2>&1; then
+                  :
+                else
+                  rc=$?
+                  printf 'acl_read_error exit_code=%s path=%s\n' "$rc" "$p"
+                  rc_total=1
+                fi
               else
-                rc=$?
-                printf 'acl_read_error exit_code=%s path=%s\n' "$rc" "$p"
-                rc_total=$rc
+                echo 'ACL_UNAVAILABLE=1 reason=getfacl_absent'
               fi
             else
-              echo 'ACL_UNAVAILABLE=1 reason=getfacl_absent'
+              rc=$?
+              printf 'path_read_error exit_code=%s path=%s\n' "$rc" "$p"
+              rc_total=1
             fi
           done
+          probe identity id
+          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
+            probe "namei:$p" namei -l "$p"
+          done
+          probe findmnt-var-lib findmnt -T /var/lib -no TARGET,FSTYPE,OPTIONS
+          probe findmnt-spool findmnt -T /var/lib/kelion-constructor-handoff -no TARGET,FSTYPE,OPTIONS
+          probe lsattr-spool lsattr -d /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired
+          probe command-chmod command -V chmod
+          probe command-chown command -V chown
+          probe command-install command -V install
+          probe command-sync command -V sync
+          probe command-stat command -V stat
+          echo '--- probe=tmpfiles-kelion-handoff'
+          if command -v systemd-tmpfiles >/dev/null 2>&1; then
+            if systemd-tmpfiles --cat-config 2>/dev/null | grep -Ei 'kelion|handoff'; then
+              :
+            else
+              rc=$?
+              printf 'probe_notice=tmpfiles_no_match exit_code=%s\n' "$rc"
+            fi
+          else
+            echo 'probe_notice=systemd-tmpfiles_unavailable'
+          fi
+          echo '--- probe=runtime-journals'
+          if [ -d /root/kelion/runtime ]; then
+            find /root/kelion/runtime -maxdepth 1 -type f -name '*.journal' -printf 'journal mode=%m owner=%u group=%g path=%p\n' 2>&1 || true
+            for signal in 'phase=prepared' 'phase=applied' rollback; do
+              count=$({ grep -E -l -- "$signal" /root/kelion/runtime/*.journal 2>/dev/null || true; } | wc -l)
+              printf 'journal_signal=%s matching_files=%s\n' "$signal" "$count"
+            done
+          else
+            echo 'probe_notice=runtime_journal_dir_absent'
+          fi
           echo '--- tree'
-          find /var/lib/kelion-constructor-handoff -maxdepth 2 -printf '%y %m %u:%g %p -> %l\n' 2>&1
+          if find /var/lib/kelion-constructor-handoff -maxdepth 2 -printf '%y %m %u:%g %p -> %l\n' 2>&1; then
+            :
+          else
+            rc=$?
+            printf 'tree_read_error exit_code=%s\n' "$rc"
+            rc_total=1
+          fi
           echo '--- activation file'
           activation_file=/run/kelion-release/active
           if [ -f "$activation_file" ]; then
-            stat -c 'mode=%a owner=%U group=%G' "$activation_file"
-            sha256sum "$activation_file"
+            if stat -c 'mode=%a owner=%U group=%G ctime=%z mtime=%y' "$activation_file" \
+              && sha256sum "$activation_file"; then
+              :
+            else
+              rc=$?
+              printf 'activation_read_error exit_code=%s\n' "$rc"
+              rc_total=1
+            fi
           else
             echo 'absent'
           fi
