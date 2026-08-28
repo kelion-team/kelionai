@@ -555,12 +555,20 @@ write_install_journal() {
     --arg supersededTransactionRoot "$install_superseded_root" \
     --arg supersededManifestSha256 "$install_superseded_manifest_sha256" \
     --arg supersededSourceSha256 "$install_superseded_source_sha256" \
+    --arg previousSupersededTransactionRoot "$install_previous_superseded_root" \
+    --arg previousSupersededManifestSha256 "$install_previous_superseded_manifest_sha256" \
+    --arg previousSupersededSourceSha256 "$install_previous_superseded_source_sha256" \
     '{schema:1,kind:"constructor-install",phase:$phase,requestId:$requestId,commit:$commit,
       transactionRoot:$transactionRoot,manifestSha256:$manifestSha256,sourceSha256:$sourceSha256}
       + if $supersededTransactionRoot == "" then {} else {
           supersededTransactionRoot:$supersededTransactionRoot,
           supersededManifestSha256:$supersededManifestSha256,
           supersededSourceSha256:$supersededSourceSha256
+        } end
+      + if $previousSupersededTransactionRoot == "" then {} else {
+          previousSupersededTransactionRoot:$previousSupersededTransactionRoot,
+          previousSupersededManifestSha256:$previousSupersededManifestSha256,
+          previousSupersededSourceSha256:$previousSupersededSourceSha256
         } end' > "$temporary"
   chown root:root "$temporary"
   chmod 0600 "$temporary"
@@ -616,7 +624,20 @@ load_install_transaction() {
        (.supersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
        (.supersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
        (.supersededSourceSha256 == .supersededManifestSha256) and
-       (.supersededTransactionRoot != .transactionRoot)))' "$INSTALL_JOURNAL" >/dev/null || return 1
+       (.supersededSourceSha256 != .sourceSha256) and
+       (.supersededTransactionRoot != .transactionRoot))) and
+    (((has("previousSupersededTransactionRoot") | not) and
+      (has("previousSupersededManifestSha256") | not) and
+      (has("previousSupersededSourceSha256") | not)) or
+      ((has("supersededTransactionRoot")) and
+       (.previousSupersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+       (.previousSupersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.previousSupersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.previousSupersededSourceSha256 == .previousSupersededManifestSha256) and
+       (.previousSupersededSourceSha256 != .sourceSha256) and
+       (.previousSupersededSourceSha256 != .supersededSourceSha256) and
+       (.previousSupersededTransactionRoot != .transactionRoot) and
+       (.previousSupersededTransactionRoot != .supersededTransactionRoot)))' "$INSTALL_JOURNAL" >/dev/null || return 1
   install_request_id=$(jq -er '.requestId' "$INSTALL_JOURNAL")
   install_commit=$(jq -er '.commit' "$INSTALL_JOURNAL")
   install_root=$(jq -er '.transactionRoot' "$INSTALL_JOURNAL")
@@ -625,6 +646,9 @@ load_install_transaction() {
   install_superseded_root=$(jq -er '.supersededTransactionRoot // ""' "$INSTALL_JOURNAL")
   install_superseded_manifest_sha256=$(jq -er '.supersededManifestSha256 // ""' "$INSTALL_JOURNAL")
   install_superseded_source_sha256=$(jq -er '.supersededSourceSha256 // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_root=$(jq -er '.previousSupersededTransactionRoot // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_manifest_sha256=$(jq -er '.previousSupersededManifestSha256 // ""' "$INSTALL_JOURNAL")
+  install_previous_superseded_source_sha256=$(jq -er '.previousSupersededSourceSha256 // ""' "$INSTALL_JOURNAL")
   [ "${install_source_sha256:0:40}" = "$install_commit" ] || return 1
   [ -d "$install_root" ] && [ ! -L "$install_root" ] \
     && [ "$(realpath -e -- "$install_root")" = "$install_root" ] \
@@ -647,6 +671,9 @@ load_install_transaction() {
   [ "$index" -eq "${#install_logicals[@]}" ] || return 1
   if [ -n "$install_superseded_root" ]; then
     validate_superseded_install_root "$install_superseded_root" "$install_superseded_manifest_sha256"
+  fi
+  if [ -n "$install_previous_superseded_root" ]; then
+    validate_superseded_install_root "$install_previous_superseded_root" "$install_previous_superseded_manifest_sha256"
   fi
 }
 
@@ -689,6 +716,19 @@ remove_superseded_install_root() {
   fi
 }
 
+remove_previous_superseded_install_root() {
+  local logical root=$install_previous_superseded_root
+  [ -n "$root" ] || return 0
+  validate_superseded_install_root "$root" "$install_previous_superseded_manifest_sha256" || return 1
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    for logical in "${install_logicals[@]}"; do rm -f -- "$root/files/$logical"; done
+    rm -f -- "$root/manifest"
+    rmdir -- "$root/files"
+    rmdir -- "$root"
+    sync -f "$RUNTIME_ROOT"
+  fi
+}
+
 supersede_quiesced_install_transaction() {
   local old_root=$install_root
   local old_manifest_sha256=$install_manifest_sha256
@@ -699,10 +739,21 @@ supersede_quiesced_install_transaction() {
   # până la commitul durabil al noii generații; cleanup-ul începe numai după
   # unlink+fsync al jurnalului, astfel încât un crash înainte sau după switch
   # are întotdeauna exact un owner durabil și recuperabil.
+  # Maximum două generații supersedate autentificate. A doua mută referința
+  # veche în slotul precedent; o a treia este refuzată înainte de orice switch.
+  if [ -n "$install_superseded_root" ]; then
+    [ -z "$install_previous_superseded_root" ] || return 1
+    install_previous_superseded_root=$install_superseded_root
+    install_previous_superseded_manifest_sha256=$install_superseded_manifest_sha256
+    install_previous_superseded_source_sha256=$install_superseded_source_sha256
+  fi
   install_superseded_root=$old_root
   install_superseded_manifest_sha256=$old_manifest_sha256
   install_superseded_source_sha256=$old_source_sha256
   stage_install_transaction
+  [ "$install_source_sha256" != "$install_superseded_source_sha256" ]
+  [ -z "$install_previous_superseded_source_sha256" ] \
+    || [ "$install_source_sha256" != "$install_previous_superseded_source_sha256" ]
   write_install_journal quiesced
   # Rădăcina veche rămâne intactă și referită până când noua generație trece
   # toate validările. Cleanup-ul ambelor rădăcini începe numai după unlink+fsync
@@ -788,6 +839,34 @@ validate_effective_installed_unit() {
     && [ "$load_state" = loaded ] && [ "$need_reload" = no ]
 }
 
+validate_constructor_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Serviciile oneshot nu au [Install]; starea canonică este static, nu
+      # enabled/disabled. Numai timerele dețin capabilitatea de pornire.
+      [ "$state" = static ] ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_constructor_prepublication_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Înainte de publicare pot exista fie unități legacy enable-able curățate
+      # la disabled, fie serviciile canonice fără [Install], deci static.
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+
 retract_ready_stamp() {
   if [ ! -e "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ]; then return 0; fi
   [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
@@ -805,7 +884,13 @@ retract_ready_stamp() {
 quiesce_before_install() {
   local unit state count=0 failed=0
   retract_ready_stamp || failed=1
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+  for unit in "${constructor_timers[@]}"; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      count=$((count + 1))
+      systemctl disable --now "$unit" >/dev/null || failed=1
+    fi
+  done
+  for unit in "${constructor_services[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       count=$((count + 1))
       systemctl disable --now "$unit" >/dev/null || failed=1
@@ -819,7 +904,7 @@ quiesce_before_install() {
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    if systemctl is-enabled --quiet "$unit"; then failed=1; fi
+    validate_constructor_prepublication_unit_file_state "$unit" || failed=1
     [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || failed=1
   done
   for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
@@ -841,6 +926,7 @@ clear_install_transaction() {
   rmdir -- "$install_root/files"
   rmdir -- "$install_root"
   remove_superseded_install_root
+  remove_previous_superseded_install_root
   sync -f "$RUNTIME_ROOT"
 }
 
@@ -868,6 +954,9 @@ install_source_sha256=''
 install_superseded_root=''
 install_superseded_manifest_sha256=''
 install_superseded_source_sha256=''
+install_previous_superseded_root=''
+install_previous_superseded_manifest_sha256=''
+install_previous_superseded_source_sha256=''
 resume_different_source=0
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
@@ -899,9 +988,11 @@ done
 
 if [ "$resume_different_source" = 1 ]; then
   set_constructor_install_phase transaction-supersede
-  # O singură generație supersedată este permisă. O a doua schimbare de sursă
-  # cere diagnostic explicit și nu poate acumula rădăcini orfane într-o buclă.
-  [ -z "$install_superseded_root" ]
+  # Sunt permise cel mult două generații supersedate, ambele autentificate și
+  # păstrate până după unlink+fsync al jurnalului. A treia este refuzată.
+  [ -z "$install_previous_superseded_root" ]
+  [ -z "$install_superseded_source_sha256" ] \
+    || [ "$current_source" != "$install_superseded_source_sha256" ]
   [ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]
   [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
   for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
@@ -965,7 +1056,7 @@ set_constructor_install_phase systemd-publication
 publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.service
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
-for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
   systemctl disable --now "$unit" >/dev/null
 done
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
@@ -996,7 +1087,8 @@ for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$mar
 for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
   state=$(systemctl show "$unit" --property=ActiveState --value)
   case "$state" in inactive|failed) ;; *) constructor_install_failure_line=$LINENO; exit 1 ;; esac
-  if systemctl is-enabled --quiet "$unit"; then constructor_install_failure_line=$LINENO; exit 1; fi
+  validate_constructor_unit_file_state "$unit" \
+    || { constructor_install_failure_line=$LINENO; exit 1; }
   [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]
 done
 

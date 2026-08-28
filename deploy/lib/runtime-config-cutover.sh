@@ -61,6 +61,32 @@ fi
 # Bariera minimă rulează înainte de validarea compose-ului, inventarul de
 # utilitare și publication lock. La boot, orice astfel de eroare trebuie să
 # lase stamp-ul absent și inclusiv unitățile legacy disabled/inactive.
+validate_constructor_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Serviciile oneshot sunt intenționat statice: numai timerele le pot
+      # porni, iar validatorul unității interzice [Install]/WantedBy.
+      [ "$state" = static ] ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_constructor_prepublication_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+
 early_recover_only_barrier() {
   local unit state failed=0 ready_root=/run/kelion ready_stamp=/run/kelion/runtime-config-recovery.ready
   if [ -e "$ready_root" ] || [ -L "$ready_root" ]; then
@@ -89,7 +115,9 @@ early_recover_only_barrier() {
     esac
     state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    if [ "$unit" != kelion-constructor-sync.service ] && systemctl is-enabled --quiet "$unit"; then failed=1; fi
+    if [ "$unit" != kelion-constructor-sync.service ]; then
+      validate_constructor_prepublication_unit_file_state "$unit" || failed=1
+    fi
     if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
   done
   [ "$failed" = 0 ]
@@ -1010,7 +1038,7 @@ validate_constructor_quiesce_barrier() {
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     count=$((count + 1))
-    if systemctl is-enabled --quiet "$unit"; then return 1; fi
+    validate_constructor_unit_file_state "$unit" || return 1
     state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
     case "$state" in inactive|failed) ;; *) return 1 ;; esac
     [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
@@ -1201,7 +1229,7 @@ restore_constructor_timers() {
   if [ "$boot_recovery" = 0 ]; then
     for unit in "${constructor_services[@]}"; do
       systemctl disable "$unit" >/dev/null || failed=1
-      if systemctl is-enabled --quiet "$unit"; then failed=1; fi
+      validate_constructor_unit_file_state "$unit" || failed=1
       state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
       case "$state" in inactive|failed) ;; *) failed=1 ;; esac
     done

@@ -1914,12 +1914,90 @@ if validate_candidate_secret_separation; then exit 91; fi
   assert.equal(result.status, 0, result.stderr || result.stdout)
 })
 
+test('quiesce distinge timerele disabled de serviciile oneshot statice', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const predicates = [
+    ['runtime', shellFunction(cutover, 'validate_constructor_unit_file_state')],
+    ['installer', shellFunction(installer, 'validate_constructor_unit_file_state')],
+  ]
+  const prepublicationPredicates = [
+    ['runtime', shellFunction(cutover, 'validate_constructor_prepublication_unit_file_state')],
+    ['installer', shellFunction(installer, 'validate_constructor_prepublication_unit_file_state')],
+  ]
+
+  for (const [label, predicate] of predicates) {
+    const harness = `set -euo pipefail
+${predicate}
+systemctl() {
+  [ "\$1" = show ] || return 91
+  [ "\${FAKE_SHOW_FAILURE:-0}" = 0 ] || return 92
+  printf '%s\\n' "\${FAKE_UNIT_FILE_STATE-}"
+}
+FAKE_UNIT_FILE_STATE=disabled
+validate_constructor_unit_file_state kelion-codex-worker.timer
+FAKE_UNIT_FILE_STATE=static
+validate_constructor_unit_file_state kelion-constructor-publisher.service
+for state in static enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_unit_file_state kelion-constructor-release.timer; then exit 101; fi
+done
+for state in disabled enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_unit_file_state kelion-constructor-release.service; then exit 102; fi
+done
+FAKE_SHOW_FAILURE=1
+if validate_constructor_unit_file_state kelion-codex-worker.timer; then exit 103; fi
+FAKE_SHOW_FAILURE=0
+FAKE_UNIT_FILE_STATE=disabled
+if validate_constructor_unit_file_state kelion-constructor-sync.service; then exit 104; fi`
+    const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+    assert.equal(result.status, 0, `${label}: ${result.stderr || result.stdout}`)
+  }
+
+  for (const [label, predicate] of prepublicationPredicates) {
+    const harness = `set -euo pipefail
+${predicate}
+systemctl() {
+  [ "\$1" = show ] || return 91
+  printf '%s\\n' "\${FAKE_UNIT_FILE_STATE-}"
+}
+FAKE_UNIT_FILE_STATE=disabled
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.timer
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.service
+FAKE_UNIT_FILE_STATE=static
+validate_constructor_prepublication_unit_file_state kelion-constructor-release.service
+if validate_constructor_prepublication_unit_file_state kelion-constructor-release.timer; then exit 111; fi
+for state in enabled enabled-runtime linked linked-runtime indirect masked generated transient bad ''; do
+  FAKE_UNIT_FILE_STATE=\$state
+  if validate_constructor_prepublication_unit_file_state kelion-constructor-release.service; then exit 112; fi
+done`
+    const result = spawnSync(bashExecutable, ['-c', harness], { encoding: 'utf8' })
+    assert.equal(result.status, 0, `${label} prepublication: ${result.stderr || result.stdout}`)
+  }
+
+  const runtimeBarrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
+  const runtimeForce = shellFunction(cutover, 'force_quiesce_constructor_units')
+  const runtimeRestore = shellFunction(cutover, 'restore_constructor_timers')
+  const installerQuiesce = shellFunction(installer, 'quiesce_before_install')
+  const installerPublished = installer.slice(installer.indexOf('set_constructor_install_phase published-validation'))
+  assert.match(runtimeBarrier, /validate_constructor_unit_file_state "\$unit"/)
+  assert.match(runtimeForce, /constructor_timers[\s\S]*disable --now[\s\S]*constructor_services[\s\S]*disable --now/)
+  assert.match(runtimeRestore, /constructor_services[\s\S]*systemctl disable[\s\S]*validate_constructor_unit_file_state/)
+  assert.equal((installerQuiesce.match(/systemctl disable --now "\$unit"/g) ?? []).length, 2)
+  assert.match(installerQuiesce, /validate_constructor_prepublication_unit_file_state "\$unit"/)
+  assert.match(installerPublished, /validate_constructor_unit_file_state "\$unit"/)
+  assert.doesNotMatch(runtimeBarrier, /is-enabled/)
+  assert.doesNotMatch(installerQuiesce, /is-enabled/)
+})
+
 test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de republicare', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   const journalWriter = shellFunction(installer, 'write_install_journal')
   const loader = shellFunction(installer, 'load_install_transaction')
   const validator = shellFunction(installer, 'validate_superseded_install_root')
   const cleanup = shellFunction(installer, 'remove_superseded_install_root')
+  const previousCleanup = shellFunction(installer, 'remove_previous_superseded_install_root')
   const finalizer = shellFunction(installer, 'clear_install_transaction')
   const supersede = shellFunction(installer, 'supersede_quiesced_install_transaction')
   const main = installer.slice(installer.indexOf("install_root=''"))
@@ -1930,15 +2008,21 @@ test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de
   const journalFsync = finalizer.indexOf('sync -f "$RUNTIME_ROOT"', journalUnlink)
   const currentRootCleanup = finalizer.indexOf('rm -f -- "$install_root/files/$logical"', journalFsync)
   const removeOld = finalizer.indexOf('remove_superseded_install_root', currentRootCleanup)
+  const removePrevious = finalizer.indexOf('remove_previous_superseded_install_root', removeOld)
 
   assert.match(journalWriter,
-    /supersededTransactionRoot[\s\S]*supersededManifestSha256[\s\S]*supersededSourceSha256[\s\S]*sync -f "[$]temporary"[\s\S]*mv -f -- "[$]temporary" "[$]INSTALL_JOURNAL"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+    /supersededTransactionRoot[\s\S]*supersededManifestSha256[\s\S]*supersededSourceSha256[\s\S]*previousSupersededTransactionRoot[\s\S]*previousSupersededManifestSha256[\s\S]*previousSupersededSourceSha256[\s\S]*sync -f "[$]temporary"[\s\S]*mv -f -- "[$]temporary" "[$]INSTALL_JOURNAL"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
   assert.match(loader,
     /has\("supersededTransactionRoot"\)[\s\S]*has\("supersededManifestSha256"\)[\s\S]*has\("supersededSourceSha256"\)[\s\S]*supersededTransactionRoot != \.transactionRoot[\s\S]*validate_superseded_install_root/)
   assert.match(loader, /\.sourceSha256 == \.manifestSha256/,
     'proveniența generației curente trebuie legată de manifestul autentificat')
   assert.match(loader, /\.supersededSourceSha256 == \.supersededManifestSha256/,
     'proveniența generației supersedate trebuie legată de manifestul autentificat')
+  assert.match(loader, /supersededSourceSha256 != \.sourceSha256/,
+    'sursa curentă nu poate reveni la generația supersedată imediat')
+  assert.match(loader,
+    /previousSupersededSourceSha256 == \.previousSupersededManifestSha256[\s\S]*previousSupersededSourceSha256 != \.sourceSha256[\s\S]*previousSupersededSourceSha256 != \.supersededSourceSha256[\s\S]*previousSupersededTransactionRoot != \.transactionRoot[\s\S]*previousSupersededTransactionRoot != \.supersededTransactionRoot/,
+    'a doua generație supersedată trebuie autentificată și distinctă de celelalte două')
   assert.match(validator, /\[ -e "[$]root" \] \|\| \[ -L "[$]root" \] \|\| return 1/,
     'un jurnal activ nu poate accepta dispariția rădăcinii supersedate')
   assert.match(validator, /realpath -e[\s\S]*0:0:700[\s\S]*0:0:700/)
@@ -1946,16 +2030,18 @@ test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de
   assert.match(validator, /candidate=[$]root\/files\/[$]logical[\s\S]*0:0:600[\s\S]*sha256sum[\s\S]*digest/)
   assert.match(cleanup,
     /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
+  assert.match(previousCleanup,
+    /validate_superseded_install_root[\s\S]*rm -f -- "[$]root\/files\/[$]logical"[\s\S]*rmdir -- "[$]root\/files"[\s\S]*rmdir -- "[$]root"[\s\S]*sync -f "[$]RUNTIME_ROOT"/)
   assert.ok(switchJournal >= 0 && durableQuiesced > switchJournal,
     'intentul curent trebuie să fie durabil înainte să continue instalarea')
   assert.ok(journalUnlink >= 0 && journalFsync > journalUnlink
-    && currentRootCleanup > journalFsync && removeOld > currentRootCleanup,
+    && currentRootCleanup > journalFsync && removeOld > currentRootCleanup && removePrevious > removeOld,
   'niciun cleanup curent sau supersedat nu poate începe înainte ca absența jurnalului să fie durabilă')
   assert.doesNotMatch(supersede, /clear_install_transaction|remove_superseded_install_root|runtime-config-cutover\.sh/,
     'supersedarea nu poate crea o fereastră fără jurnal și nu poate executa helperul generației vechi')
 
   const noRuntimeJournal = branch.indexOf('[ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ]')
-  const boundedSupersession = branch.indexOf('[ -z "$install_superseded_root" ]')
+  const boundedSupersession = branch.indexOf('[ -z "$install_previous_superseded_root" ]')
   const noReady = branch.indexOf('[ ! -e "$READY_STAMP" ]', noRuntimeJournal)
   const canonicalPending = branch.indexOf('[ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ]', noReady)
   const exactOldArtifacts = branch.indexOf('validate_published_candidate "$logical"', canonicalPending)
@@ -1965,10 +2051,46 @@ test('un intent quiesced dintr-o sursă veche este supersedat atomic înainte de
   assert.ok(boundedSupersession >= 0 && noRuntimeJournal > boundedSupersession
     && noReady > noRuntimeJournal && canonicalPending > noReady
     && exactOldArtifacts > canonicalPending && validOldUnits > exactOldArtifacts && atomicSwitch > validOldUnits,
-  'supersedarea repetată, orice jurnal runtime, ready, pending necanonic, artefact vechi diferit sau tuplă invalidă trebuie să refuze switch-ul')
+  'a treia supersedare, orice jurnal runtime, ready, pending necanonic, artefact vechi diferit sau tuplă invalidă trebuie să refuze switch-ul')
   assert.ok(publishCurrent > main.indexOf('supersede_quiesced_install_transaction', main.indexOf('if [ "$resume_different_source" = 1 ]')),
     'candidații checkoutului curent pot fi publicați numai după switch-ul durabil al jurnalului')
   assert.doesNotMatch(main, /Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent/)
+
+  const supersessionHarness = `set -euo pipefail
+${supersede}
+stage_calls=0
+write_calls=0
+stage_install_transaction() {
+  stage_calls=$((stage_calls + 1))
+  install_root=/root/kelion/runtime/constructor-install.NEW
+  install_manifest_sha256=$(printf 'c%.0s' {1..64})
+  install_source_sha256=$install_manifest_sha256
+}
+write_install_journal() { [ "\$1" = quiesced ]; write_calls=$((write_calls + 1)); }
+constructor_install_source_commit=$(printf 'd%.0s' {1..40})
+install_root=/root/kelion/runtime/constructor-install.B
+install_manifest_sha256=$(printf 'b%.0s' {1..64})
+install_source_sha256=$install_manifest_sha256
+install_superseded_root=/root/kelion/runtime/constructor-install.A
+install_superseded_manifest_sha256=$(printf 'a%.0s' {1..64})
+install_superseded_source_sha256=$install_superseded_manifest_sha256
+install_previous_superseded_root=''
+install_previous_superseded_manifest_sha256=''
+install_previous_superseded_source_sha256=''
+supersede_quiesced_install_transaction
+[ "\$install_root" = /root/kelion/runtime/constructor-install.NEW ]
+[ "\$install_superseded_root" = /root/kelion/runtime/constructor-install.B ]
+[ "\$install_previous_superseded_root" = /root/kelion/runtime/constructor-install.A ]
+[ "\$stage_calls:\$write_calls" = 1:1 ]
+stage_before=\$stage_calls
+write_before=\$write_calls
+install_root=/root/kelion/runtime/constructor-install.D
+install_manifest_sha256=$(printf 'e%.0s' {1..64})
+install_source_sha256=$install_manifest_sha256
+if supersede_quiesced_install_transaction; then exit 121; fi
+[ "\$stage_calls:\$write_calls" = "\$stage_before:\$write_before" ]`
+  const supersessionResult = spawnSync(bashExecutable, ['-c', supersessionHarness], { encoding: 'utf8' })
+  assert.equal(supersessionResult.status, 0, supersessionResult.stderr || supersessionResult.stdout)
 })
 
 test('jurnalul durabil recuperează un SIGKILL între mutări înainte de backend și timere', () => {
