@@ -1321,6 +1321,7 @@ jobs:
           printf '%s' "$oauth_admin_token" | sha256sum | cut -d' ' -f1
           oauth_admin_token=''
           REMOTE
+          )
           [ -n "$oauth_admin_hash" ] && [ "${#oauth_admin_hash}" -eq 64 ]
 
           collision=0

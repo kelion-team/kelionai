@@ -481,6 +481,8 @@ test('audit-token-identity identifică doar numele coliziunii fără valori sau 
   assert.match(audit, /IFS= read -r oauth_admin_token/)
   assert.match(audit, /IFS= read -r oauth_admin_token[\s\S]*\[\[ "\$oauth_admin_token" != \[\[:space:\]\]\* && "\$oauth_admin_token" != \*\[\[:space:\]\] \]\][\s\S]*sha256sum/,
     'auditul trebuie să respingă whitespace-ul marginal și în tokenul OAuth live')
+  assert.match(audit, /oauth_admin_hash=\$\(ssh[\s\S]*\n          REMOTE\n          \)\n          \[ -n "\$oauth_admin_hash" \]/,
+    'command substitution-ul SSH trebuie închis imediat după heredoc')
   assert.match(audit, /COLLISION: CONSTRUCTOR_SYNC_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN/)
   assert.match(audit, /COLLISION: VPS_GITHUB_TOKEN/)
