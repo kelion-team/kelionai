@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T16:33:54Z`
+Actualizat: `2026-08-28T17:03:24Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `a93eae09f81eb17c4f36554023e9b1209237483e` (PR `#1480`).
-  CI master `33189074236` și buildul OCI exact `33189473374` sunt verzi.
+- `origin/master` este `ccb4b425adfa46eb92a4df563932dc6ab79c4c66` (PR `#1482`).
+  CI master `33191079795` și buildul OCI exact `33191467117` sunt verzi.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -74,21 +74,36 @@ Actualizat: `2026-08-28T16:33:54Z`
   `logical` corect și trecea; validarea live strictă nu avea acel scope și
   eșua pe aceiași bytes. Declarația analogă a serviciilor are același defect
   demonstrabil și este corectată împreună, înainte să devină următorul blocaj.
-- Patchul curent separă declarațiile de derivările dependente și păstrează
+- PR `#1482` a separat declarațiile de derivările dependente și a păstrat
   neschimbate toate predicatele de bytes, conținut și systemd. Regresia rulează
   timerul și serviciul cu `logical` exterior conflictual sau absent și dovedește
   că numai argumentul explicit este autoritativ și că un argument fals rămâne
   respins.
+- Release-ul canonic `33192026959` pe `ccb4b425` a validat candidatul, apoi s-a
+  oprit fail-closed înainte de cutover deoarece jurnalul persistent aparține
+  configurării Constructor întrerupte. Nu a publicat și nu a activat release-ul.
+- Configurarea controlată unică `33192142478` a consumat jurnalul, a trecut
+  recovery, supersede, publicarea artefactelor și a celor șase unități,
+  `published-validation` și `commit`; installerul s-a încheiat cu succes.
+  Blocul SSH exterior a ieșit apoi cu codul `1`, înainte de cutoverul runtime și
+  fără niciun mesaj intermediar. Workflow-ul nu avea `ERR` trap sau checkpointuri
+  după installer, deci comanda exactă nu poate fi recuperată din log; `npm`,
+  predicatele cheii de semnare, bootstrapul repo și pull-urile rămân numai
+  candidați, nu cauze demonstrate.
+- Patchul curent adaugă exclusiv atribuire: fază și checkpoint din vocabular fix,
+  linia, exit code-ul și SHA-ul sursă. Nu afișează comanda, căi sau valori secrete
+  și nu schimbă nicio mutație ori niciun predicat fail-closed.
 
 ## Următorul pas sigur
 
-1. Publică remedierea derivării Bash numai prin PR `chore/*`, fără bypass sau
+1. Publică atribuirea post-installer numai prin PR `chore/*`, fără bypass sau
    push în master; cere toate check-urile verzi.
 2. Nu porni niciun release de producție. După merge, rulează o singură
-   configurare controlată: ea trebuie să consume jurnalul existent, să treacă
-   toate predicatele stricte și să încheie cu status verde.
-3. Reia activarea și release-ul numai după absența dovedită a jurnalelor și
-   după ce workerul, publisherul și release-ul trec verificarea finală.
+   configurare controlată și folosește eticheta exactă pentru o remediere minimă;
+   nu modifica speculativ `npm`, cheia, repo-urile sau pull-urile.
+3. Reia configurarea după remedierea dovedită. Activarea și release-ul rămân
+   blocate până la status verde, absența jurnalelor și verificarea finală a
+   workerului, publisherului și releaserului.
 
 ## Legături canonice
 
@@ -104,5 +119,8 @@ Actualizat: `2026-08-28T16:33:54Z`
 - Retry bounded strict fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33187020692>
 - Telemetrie strictă protejată: <https://github.com/kelion-team/kelionai/pull/1480>
 - Configure cu predicat exact: <https://github.com/kelion-team/kelionai/actions/runs/33190206039>
+- Remediere scope Bash: <https://github.com/kelion-team/kelionai/pull/1482>
+- Release canonic blocat de jurnal: <https://github.com/kelion-team/kelionai/actions/runs/33192026959>
+- Configure post-installer neatribuit: <https://github.com/kelion-team/kelionai/actions/runs/33192142478>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>

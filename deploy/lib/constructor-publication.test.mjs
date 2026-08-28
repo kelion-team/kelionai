@@ -545,6 +545,130 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   assert.doesNotMatch(repair, /^\s*(?:sudo\s+)?(?:rm|mv|tee|cp|setfacl)\b/m, 'remedierea nu trebuie să șteargă, mute sau suprascrie conținut')
 })
 
+test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-installer fără date secrete', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const stepStart = workflow.indexOf('      - name: Configureaza Constructorul fara activare prematura')
+  const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
+  assert.ok(stepStart >= 0 && stepEnd > stepStart, 'pasul configure-constructor trebuie delimitat')
+  const step = workflow.slice(stepStart, stepEnd)
+  const remoteStart = step.indexOf("<<'REMOTE'")
+  const remoteEnd = step.lastIndexOf('\n          REMOTE')
+  assert.ok(remoteStart >= 0 && remoteEnd > remoteStart, 'payload-ul remote configure-constructor trebuie delimitat')
+  const remote = step.slice(remoteStart, remoteEnd)
+
+  assert.match(remote, /set -Eeuo pipefail/)
+  assert.match(remote, /cleanup_remote\(\) \{\s+trap - ERR/)
+  assert.match(remote, /trap cleanup_remote EXIT[\s\S]*trap report_constructor_config_failure ERR/)
+  assert.match(remote, /report_constructor_config_failure\(\)[\s\S]*BASH_LINENO/)
+  assert.match(remote, /constructor_config_failure[\s\S]*constructor_config_phase[\s\S]*constructor_config_check[\s\S]*source_commit/)
+
+  const expectedPhases = [
+    'complete',
+    'configuration-preflight',
+    'constructor-install',
+    'dependency-install',
+    'post-installer',
+    'remote-preflight',
+    'runtime-config-cutover',
+  ]
+  const phases = [...remote.matchAll(/constructor_config_phase='([^']+)'/g)].map((match) => match[1])
+  assert.deepEqual([...new Set(phases)].sort(), expectedPhases)
+
+  const expectedChecks = [
+    'apply',
+    'bundle-contract',
+    'codex-cli-install',
+    'codex-cli-link',
+    'config-stage',
+    'cutover-stage',
+    'existing-config-contract',
+    'existing-unit-contract',
+    'install-resume-contract',
+    'installer',
+    'node-runtime',
+    'package-dependencies',
+    'package-index',
+    'payload-contract',
+    'payload-decode',
+    'publisher-gate-image',
+    'publisher-repository',
+    'resume-installer',
+    'runtime-helper-publication',
+    'runtime-journal-recovery',
+    'secret-stage',
+    'signing-key-layout',
+    'signing-key-publication',
+    'signing-key-registration',
+    'signing-key-validation',
+    'signing-stale-cleanup',
+    'success-message',
+    'unit-quiescence',
+    'worker-gate-image',
+    'worker-profile-publication',
+    'worker-repository',
+  ]
+  const checks = [...remote.matchAll(/constructor_config_check='([^']+)'/g)].map((match) => match[1])
+  assert.deepEqual([...new Set(checks)].sort(), expectedChecks)
+  assert.equal([...remote.matchAll(/constructor_config_(?:phase|check)=(?!'[a-z0-9-]+')/g)].length, 0,
+    'fazele și checkpointurile raportate trebuie să rămână literali din vocabularul fix')
+
+  for (const [check, command] of [
+    ['package-index', 'apt-get update -qq'],
+    ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
+    ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
+    ['signing-stale-cleanup', 'for stale_signing_root in'],
+    ['signing-key-validation', 'validate_signing_key "$signing_key"'],
+    ['signing-key-registration', 'existing_keys=$(curl'],
+    ['worker-repository', 'clone_or_sync kelion-codex'],
+    ['publisher-repository', 'clone_or_sync kelion-publisher'],
+    ['worker-gate-image', 'pull_gate kelion-codex'],
+    ['publisher-gate-image', 'pull_gate kelion-publisher'],
+    ['apply', 'KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh"'],
+  ]) {
+    const labelIndex = remote.indexOf(`constructor_config_check='${check}'`)
+    const commandIndex = remote.indexOf(command, labelIndex)
+    assert.ok(labelIndex >= 0 && commandIndex > labelIndex, `${check} trebuie setat înainte de comanda atribuită`)
+  }
+
+  const handlerStart = remote.indexOf('report_constructor_config_failure() {')
+  const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'handlerul ERR trebuie să poată fi extras')
+  const handler = remote.slice(handlerStart, handlerEnd + '\n          }'.length)
+    .split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n')
+  assert.doesNotMatch(handler, /BASH_COMMAND|bundle|payload|token|secret/,
+    'telemetria nu poate include comanda sau materialul sensibil')
+
+  const sourceCommit = 'a'.repeat(40)
+  const script = `set -Euo pipefail
+constructor_config_phase='post-installer'
+constructor_config_check='codex-cli-install'
+source_commit='${sourceCommit}'
+${handler}
+cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
+trap cleanup_remote EXIT
+trap report_constructor_config_failure ERR
+fail_inside_function() { return 17; }
+fail_inside_function
+exit 99
+`
+  const result = spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8' })
+  assert.equal(result.status, 17, result.stderr || result.stdout)
+  assert.equal(result.stdout.trim(), 'cleanup-complete')
+  const events = result.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('{'))
+  assert.equal(events.length, 1, result.stderr)
+  const event = JSON.parse(events[0])
+  assert.deepEqual({ ...event, line: 0 }, {
+    ok: false,
+    event: 'constructor_config_failure',
+    phase: 'post-installer',
+    check: 'codex-cli-install',
+    line: 0,
+    exit_code: 17,
+    source_commit: sourceCommit,
+  })
+  assert.ok(Number.isInteger(event.line) && event.line > 0)
+})
+
 test('configurarea Constructor păstrează ACL-ul canonic al secretelor de producție', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
