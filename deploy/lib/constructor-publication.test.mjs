@@ -1475,6 +1475,20 @@ test('credentialele GitHub dedicate nu se amestecă între Admin, gate și ident
   assert.match(cutover, /assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin'[\s\S]*worker-secret\.github-worker-token[\s\S]*app-secret\.github-release-oauth-token/)
 })
 
+test('Podman rulează din runtime-ul accesibil identității Constructor', () => {
+  const control = read('.github/workflows/vps-run.yml')
+  const deploy = read('deploy/deploy.sh')
+
+  for (const [name, source] of [['control', control], ['deploy', deploy]]) {
+    const commands = source.split('\n').filter((line) => line.includes('runuser -u "$user"') && line.includes('podman '))
+    assert.equal(commands.length, 4, `${name} trebuie să aibă exact login, pull și cele două logout-uri Podman`)
+    for (const command of commands) {
+      assert.match(command, /\(cd "[$]runtime" && runuser -u "[$]user" -- env /,
+        `${name} nu poate porni Podman moștenind directorul root-only al sesiunii SSH`)
+    }
+  }
+})
+
 test('cutover-ul runtime oprește toate unitățile, face rollback de grup și recreează backendul înainte de activare', () => {
   const deploy = read('deploy/deploy.sh')
   const control = read('.github/workflows/vps-run.yml')
