@@ -2103,10 +2103,13 @@ if ${invocation}; then exit 121; fi
 test('contractul live strict atribuie fiecare predicat systemd fără date libere', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const reporter = shellFunction(cutover, 'report_live_constructor_quiesce_failure')
-  const effective = shellFunction(cutover, 'validate_effective_constructor_unit_for_quiesce')
+  const effective = shellFunction(cutover, 'validate_effective_constructor_unit')
   const strict = shellFunction(cutover, 'validate_live_constructor_units_quiesced')
   const barrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
 
+  assert.doesNotMatch(cutover, /validate_effective_constructor_unit_for_quiesce/)
+  assert.match(effective, /local unit=\$1 report=\$\{2:-0\}/)
+  assert.match(strict, /validate_effective_constructor_unit "\$unit" "\$report"/)
   assert.match(reporter, /case "\$unit" in[\s\S]*\*\) unit=unknown/)
   assert.match(reporter, /case "\$predicate" in[\s\S]*\*\) predicate=unknown/)
   assert.match(reporter, /live-quiesce-contract:%s:%s/)
@@ -2153,11 +2156,11 @@ for item in \\
   load-state-query:load-state-query load-state:load-state \\
   reload-state-query:reload-state-query reload-needed:reload-needed; do
   mode=\${item%%:*}; expected=\${item#*:}
-  if output=$(validate_effective_constructor_unit_for_quiesce kelion-codex-worker.timer 1 2>&1); then exit 121; fi
+  if output=$(validate_effective_constructor_unit kelion-codex-worker.timer 1 2>&1); then exit 121; fi
   [ "$output" = "runtime-cutover: live-quiesce-contract:kelion-codex-worker.timer:$expected" ]
 done
 mode=ok
-validate_effective_constructor_unit_for_quiesce kelion-codex-worker.timer 1
+validate_effective_constructor_unit kelion-codex-worker.timer 1
 [ "$(report_live_constructor_quiesce_failure '../../secret' '../../value' 2>&1)" = \\
   'runtime-cutover: live-quiesce-contract:unknown:unknown' ]`
   const effectiveResult = spawnSync(bashExecutable, ['-c', effectiveHarness], { encoding: 'utf8' })

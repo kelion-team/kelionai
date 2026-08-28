@@ -895,14 +895,45 @@ validate_constructor_service_unit() {
     && [ "$(grep -c '^\[Install\]$' "$file")" -eq 0 ]
 }
 
+report_live_constructor_quiesce_failure() {
+  local unit=${1:-unknown} predicate=${2:-unknown}
+  case "$unit" in
+    runtime-ready-stamp|systemd|\
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service|\
+    kelion-constructor-sync.service|kelion-runtime-config-recovery.service) ;;
+    *) unit=unknown ;;
+  esac
+  case "$predicate" in
+    ready-stamp-present|file-type|file-metadata-query|file-metadata|timer-contract|service-contract|\
+    unit-catalog|fragment-query|fragment-path|dropins-query|dropins-present|load-state-query|load-state|\
+    reload-state-query|reload-needed|unit-count|timer-unit-file-state|service-unit-file-state|\
+    active-state-query|active-state|pending-job|auxiliary-active-state-query|auxiliary-active-state|\
+    auxiliary-pending-job) ;;
+    *) predicate=unknown ;;
+  esac
+  printf 'runtime-cutover: live-quiesce-contract:%s:%s\n' "$unit" "$predicate" >&2
+}
+
 validate_effective_constructor_unit() {
-  local unit=$1 expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
-  fragment=$(systemctl show "$unit" --property=FragmentPath --value) || return 1
-  dropins=$(systemctl show "$unit" --property=DropInPaths --value) || return 1
-  load_state=$(systemctl show "$unit" --property=LoadState --value) || return 1
-  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) || return 1
-  [ "$load_state" = loaded ] && [ "$fragment" = "$expected" ] \
-    && [ -z "$dropins" ] && [ "$need_reload" = no ]
+  local unit=$1 report=${2:-0} expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  fragment=$(systemctl show "$unit" --property=FragmentPath --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-query; return 1; }
+  dropins=$(systemctl show "$unit" --property=DropInPaths --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-query; return 1; }
+  load_state=$(systemctl show "$unit" --property=LoadState --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state-query; return 1; }
+  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-state-query; return 1; }
+  [ "$load_state" = loaded ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state; return 1; }
+  [ "$fragment" = "$expected" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-path; return 1; }
+  [ -z "$dropins" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-present; return 1; }
+  [ "$need_reload" = no ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-needed; return 1; }
 }
 
 validate_live_runtime_recovery_unit() {
@@ -1049,47 +1080,6 @@ validate_live_runtime_contract() {
   fi
 }
 
-report_live_constructor_quiesce_failure() {
-  local unit=${1:-unknown} predicate=${2:-unknown}
-  case "$unit" in
-    runtime-ready-stamp|systemd|\
-    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
-    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service|\
-    kelion-constructor-sync.service|kelion-runtime-config-recovery.service) ;;
-    *) unit=unknown ;;
-  esac
-  case "$predicate" in
-    ready-stamp-present|file-type|file-metadata-query|file-metadata|timer-contract|service-contract|\
-    unit-catalog|fragment-query|fragment-path|dropins-query|dropins-present|load-state-query|load-state|\
-    reload-state-query|reload-needed|unit-count|timer-unit-file-state|service-unit-file-state|\
-    active-state-query|active-state|pending-job|auxiliary-active-state-query|auxiliary-active-state|\
-    auxiliary-pending-job) ;;
-    *) predicate=unknown ;;
-  esac
-  printf 'runtime-cutover: live-quiesce-contract:%s:%s\n' "$unit" "$predicate" >&2
-}
-
-validate_effective_constructor_unit_for_quiesce() {
-  local unit=$1 report=${2:-0} expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
-  case "$report" in 0|1) ;; *) return 1 ;; esac
-  fragment=$(systemctl show "$unit" --property=FragmentPath --value) \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-query; return 1; }
-  [ "$fragment" = "$expected" ] \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-path; return 1; }
-  dropins=$(systemctl show "$unit" --property=DropInPaths --value) \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-query; return 1; }
-  [ -z "$dropins" ] \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-present; return 1; }
-  load_state=$(systemctl show "$unit" --property=LoadState --value) \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state-query; return 1; }
-  [ "$load_state" = loaded ] \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state; return 1; }
-  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-state-query; return 1; }
-  [ "$need_reload" = no ] \
-    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-needed; return 1; }
-}
-
 validate_live_constructor_units_quiesced() {
   local report=${1:-0} unit path metadata count=0
   case "$report" in 0|1) ;; *) return 1 ;; esac
@@ -1107,7 +1097,7 @@ validate_live_constructor_units_quiesced() {
       || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" timer-contract; return 1; }
     systemctl cat "$unit" >/dev/null 2>&1 \
       || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
-    validate_effective_constructor_unit_for_quiesce "$unit" "$report" || return 1
+    validate_effective_constructor_unit "$unit" "$report" || return 1
     count=$((count + 1))
   done
   for unit in "${constructor_services[@]}"; do
@@ -1122,7 +1112,7 @@ validate_live_constructor_units_quiesced() {
       || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" service-contract; return 1; }
     systemctl cat "$unit" >/dev/null 2>&1 \
       || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
-    validate_effective_constructor_unit_for_quiesce "$unit" "$report" || return 1
+    validate_effective_constructor_unit "$unit" "$report" || return 1
     count=$((count + 1))
   done
   [ "$count" -eq 6 ] \
