@@ -817,6 +817,8 @@ test('politica de retry și checks a Constructorului rămâne aliniată în prov
     'toate cele trei env-uri gate trebuie validate înainte de publicarea jurnalului')
   assert.match(refresh, /assert_constructor_env_value "[$]publisher_env" CONSTRUCTOR_REQUIRED_CHECKS "[$]required_checks"/)
   assert.match(refresh, /assert_constructor_env_value "[$]release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "[$]release_required_checks"/)
+  assert.match(refresh, /release[)]\s+awk -F= -v checks="[$]release_required_checks"/)
+  assert.doesNotMatch(refresh, /release[)]\s+awk -F= -v checks="[$]required_checks"/)
   assert.match(refresh, /token_file=\/root\/kelion\/gate-secrets\/github-ghcr-read-token/)
   assert.match(refresh, /stat -c '%u:%g:%a' "[$]token_file"[)]" = '0:0:400'/)
   assert.match(deploy, /restore_constructor_after_release[\s\S]*systemctl is-enabled --quiet "[$]timer"[\s\S]*systemctl is-active --quiet "[$]timer"/)

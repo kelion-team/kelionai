@@ -3649,7 +3649,7 @@ refresh_constructor_gate() (
         ' "$target" > "$temporary"
         ;;
       release)
-        awk -F= -v checks="$required_checks" '
+        awk -F= -v checks="$release_required_checks" '
           $1 == "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS" { if (!checks_written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks; checks_written=1; next }
           { print }
           END { if (!checks_written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks }
