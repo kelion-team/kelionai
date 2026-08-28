@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T23:18:36Z`
+Actualizat: `2026-08-28T23:25:19Z`
 
 ## Stare verificată
 
@@ -135,7 +135,7 @@ Actualizat: `2026-08-28T23:18:36Z`
   `constructor-config.constructor-release.env` conținea două comentarii, iar
   validatorul strict acceptă exclusiv linii `CHEIE=valoare`. Versiunea publică
   a rămas `baf00ae` și endpointurile de sănătate sunt verzi.
-- Remedierea curentă mută explicația în afara heredoc-ului `.env` și corectează
+- PR `#1499` mută explicația în afara heredoc-ului `.env` și corectează
   și următorul blocaj determinist: contractul live trebuie să ceară egalitatea
   runtime/publisher pentru porțile PR, dar release-ul post-merge trebuie să
   rămână exact `verify,container-isolation`. Regresiile execută validatorul pe
@@ -189,5 +189,6 @@ Actualizat: `2026-08-28T23:18:36Z`
 - Build OCI `645afe8d`: <https://github.com/kelion-team/kelionai/actions/runs/33219033777>
 - Release `645afe8d` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33219478924>
 - Configurare cu comentarii în env-ul staged: <https://github.com/kelion-team/kelionai/actions/runs/33219503435>
+- Remediere env release și contract checks: <https://github.com/kelion-team/kelionai/pull/1499>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
