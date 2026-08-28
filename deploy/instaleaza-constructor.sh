@@ -840,6 +840,7 @@ for unit in "${constructor_services[@]}"; do
   printf '%s\n' "systemd-service.$unit" >> "$unit_stage/manifest"
 done
 KELION_CUTOVER_LOCK_HELD=1 \
+KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1 \
 KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$install_request_id" \
 KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
   "$ROOT/bin/runtime-config-cutover.sh" \

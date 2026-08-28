@@ -17,6 +17,8 @@ case "$activation_resume_operation" in
 esac
 deploy_quiesce_proof=${KELION_DEPLOY_QUIESCE_PROOF:-0}
 case "$deploy_quiesce_proof" in 0|1) ;; *) die 'KELION_DEPLOY_QUIESCE_PROOF trebuie 0 sau 1' ;; esac
+defer_secret_gates=${KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER:-0}
+case "$defer_secret_gates" in 0|1) ;; *) die 'KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER trebuie 0 sau 1' ;; esac
 deploy_owner_request_id=${KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID:-}
 deploy_owner_commit=${KELION_DEPLOY_QUIESCE_OWNER_COMMIT:-}
 if [ -n "$deploy_owner_request_id" ] || [ -n "$deploy_owner_commit" ]; then
@@ -1320,6 +1322,30 @@ assert_pairwise_distinct() {
   done
 }
 
+validate_candidate_secret_separation() {
+  if [ "$unit_only_transaction" = 1 ] && [ "$defer_secret_gates" = 1 ]; then
+    # Tranzacția unit-only publică exclusiv cele șase unități, le păstrează
+    # quiesced și ridică bariera durabilă care poate fi consumată numai de
+    # cutover-ul mixt următor. Opt-in-ul este permis numai apelanților care
+    # continuă cu un astfel de cutover. Nu valida aici secretele live legacy: noile
+    # credențiale sunt încă în payload-ul apelantului și sunt staged abia după
+    # instalarea unităților. Cutover-ul mixt validează candidații efectivi înainte
+    # de orice commit și nu poate consuma bariera dacă distinctness eșuează.
+    return 0
+  fi
+  assert_pairwise_distinct 'HMAC-urile Constructor' \
+    app-secret.codex-worker-secret app-secret.constructor-publisher-secret app-secret.constructor-release-secret \
+    || return 1
+  assert_pairwise_distinct 'credentialele OAuth Admin și GHCR' \
+    app-secret.github-release-oauth-token gate-secret.github-ghcr-read-token \
+    || return 1
+  if [ "$constructor_configured" -eq 3 ]; then
+    assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin' \
+      worker-secret.github-worker-token publisher-secret.github-publisher-token release-secret.github-release-token gate-secret.github-ghcr-read-token app-secret.github-release-oauth-token \
+      || return 1
+  fi
+}
+
 recreate_active_release() {
   local selected_compose=${1:-$compose_file}
   local marker slot bind_port subnet worker_ip proxy_ip role id image readiness
@@ -2244,14 +2270,7 @@ for index in "${!logical_names[@]}"; do
   fi
 done
 
-assert_pairwise_distinct 'HMAC-urile Constructor' \
-  app-secret.codex-worker-secret app-secret.constructor-publisher-secret app-secret.constructor-release-secret
-assert_pairwise_distinct 'credentialele OAuth Admin și GHCR' \
-  app-secret.github-release-oauth-token gate-secret.github-ghcr-read-token
-if [ "$constructor_configured" -eq 3 ]; then
-  assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin' \
-    worker-secret.github-worker-token publisher-secret.github-publisher-token release-secret.github-release-token gate-secret.github-ghcr-read-token app-secret.github-release-oauth-token
-fi
+validate_candidate_secret_separation
 
 if [ "$restart_required" = 1 ] && { [ -e "$RUNTIME_ROOT/release-state/active" ] || [ -L "$RUNTIME_ROOT/release-state/active" ]; }; then
   [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
