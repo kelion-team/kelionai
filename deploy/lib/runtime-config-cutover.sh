@@ -92,14 +92,28 @@ validate_constructor_prepublication_unit_file_state() {
 # încercăm să retragem orice symlink [Install] legacy, iar apelantul validează
 # apoi UnitFileState, ActiveState și absența joburilor. Codul de ieșire al
 # mutatorului nu poate înlocui acele postcondiții.
+stop_and_disable_constructor_timer() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
 stop_and_disable_constructor_service() {
   local unit=$1
   case "$unit" in
     kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
     *) return 1 ;;
   esac
-  systemctl stop "$unit" >/dev/null || return 1
-  systemctl disable "$unit" >/dev/null 2>&1 || :
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+report_quiesce_postcondition_failure() {
+  printf 'runtime-cutover: quiesce-postcondition:%s:%s\n' "$1" "$2" >&2
 }
 
 early_recover_only_barrier() {
@@ -125,17 +139,28 @@ early_recover_only_barrier() {
     kelion-constructor-sync.service; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     case "$unit" in
-      kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null || failed=1 ;;
-      *.timer) systemctl disable --now "$unit" >/dev/null || failed=1 ;;
+      kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null 2>&1 || : ;;
+      *.timer) stop_and_disable_constructor_timer "$unit" || failed=1 ;;
       *.service) stop_and_disable_constructor_service "$unit" || failed=1 ;;
       *) failed=1 ;;
     esac
-    state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+  done
+  systemctl daemon-reload || { report_quiesce_postcondition_failure systemd daemon-reload; failed=1; }
+  for unit in \
+    kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
+    kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service \
+    kelion-constructor-sync.service; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
     if [ "$unit" != kelion-constructor-sync.service ]; then
-      validate_constructor_prepublication_unit_file_state "$unit" || failed=1
+      validate_constructor_prepublication_unit_file_state "$unit" \
+        || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; }
     fi
-    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
   done
   [ "$failed" = 0 ]
 }
@@ -1188,7 +1213,7 @@ force_quiesce_constructor_units() {
   units_quiesced=1
   for unit in "${constructor_timers[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl disable --now "$unit" >/dev/null || failed=1
+    stop_and_disable_constructor_timer "$unit" || failed=1
   done
   for unit in "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
@@ -1196,21 +1221,26 @@ force_quiesce_constructor_units() {
   done
   for unit in "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl stop "$unit" >/dev/null || failed=1
+    systemctl stop "$unit" >/dev/null 2>&1 || :
   done
+  systemctl daemon-reload || { report_quiesce_postcondition_failure systemd daemon-reload; failed=1; }
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}" "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+    state=$(systemctl show "$unit" --property=ActiveState --value) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
     case "$unit" in
       kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
       kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
-        validate_constructor_prepublication_unit_file_state "$unit" || failed=1 ;;
+        validate_constructor_prepublication_unit_file_state "$unit" \
+          || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; } ;;
     esac
     # La boot, un legacy WantedBy poate avea deja un start job care așteaptă
-    # după Before=. disable --now trebuie să-l anuleze sincron; altfel ar porni
-    # imediat după ce recovery-ul fail-closed returnează.
-    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
+    # după Before=. Stop-ul sincron urmat de postcondiția fără job trebuie să-l
+    # anuleze; altfel ar porni imediat după recovery-ul fail-closed.
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
   done
   [ "$failed" = 0 ]
 }
@@ -1310,7 +1340,8 @@ roll_forward_unit_transaction() {
 
   # Setul 1..5 este tolerat exclusiv după autentificarea jurnalului, a
   # directorului root-only, a setului exact și a hashurilor candidaților.
-  quiesce_units_for_recovery 1 || return 1
+  quiesce_units_for_recovery 1 \
+    || { printf 'runtime-cutover: unit-roll-forward:pre-quiesce\n' >&2; return 1; }
   for index in "${!forward_targets[@]}"; do
     temporary=$(mktemp "${forward_targets[$index]}.unit-forward.XXXXXX") || { failed=1; continue; }
     if install -o "${forward_owners[$index]}" -g "${forward_groups[$index]}" -m "${forward_modes[$index]}" \
@@ -1322,16 +1353,22 @@ roll_forward_unit_transaction() {
       && fsync_path "$(dirname -- "${forward_targets[$index]}")"; then
       :
     else
-      rm -f -- "$temporary"; failed=1
+      rm -f -- "$temporary"
+      printf 'runtime-cutover: unit-roll-forward:publish:%s\n' "${forward_logicals[$index]}" >&2
+      failed=1
     fi
   done
   [ "$failed" = 0 ] || return 1
-  systemctl daemon-reload || return 1
-  force_quiesce_constructor_units || return 1
-  validate_live_constructor_units_quiesced || return 1
+  systemctl daemon-reload \
+    || { printf 'runtime-cutover: unit-roll-forward:daemon-reload\n' >&2; return 1; }
+  force_quiesce_constructor_units \
+    || { printf 'runtime-cutover: unit-roll-forward:post-quiesce\n' >&2; return 1; }
+  validate_live_constructor_units_quiesced \
+    || { printf 'runtime-cutover: unit-roll-forward:strict-live-unit-contract\n' >&2; return 1; }
   # Un forward unit-only nu publică niciodată capabilitatea de execuție. Markerul
   # pending obligă următoarea etapă mixtă să treacă schema runtime strictă.
-  clear_runtime_ready_stamp || return 1
+  clear_runtime_ready_stamp \
+    || { printf 'runtime-cutover: unit-roll-forward:ready-clear\n' >&2; return 1; }
   units_quiesced=0
 }
 

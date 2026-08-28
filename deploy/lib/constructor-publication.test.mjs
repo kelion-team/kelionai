@@ -652,8 +652,8 @@ test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () =>
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const control = read('.github/workflows/vps-run.yml')
   const installer = read('deploy/instaleaza-constructor.sh')
-  assert.match(shellFunction(deploy, 'force_quiesce_constructor_release'), /constructor_release_timers[\s\S]*systemctl disable --now[\s\S]*constructor_release_services[\s\S]*stop_and_disable_constructor_release_service/)
-  assert.match(shellFunction(cutover, 'force_quiesce_constructor_units'), /constructor_services[\s\S]*stop_and_disable_constructor_service/)
+  assert.match(shellFunction(deploy, 'force_quiesce_constructor_release'), /constructor_release_timers[\s\S]*stop_and_disable_constructor_release_timer[\s\S]*constructor_release_services[\s\S]*stop_and_disable_constructor_release_service[\s\S]*systemctl daemon-reload/)
+  assert.match(shellFunction(cutover, 'force_quiesce_constructor_units'), /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload/)
   assert.match(shellFunction(cutover, 'restore_constructor_timers'), /constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*validate_constructor_unit_file_state/)
   assert.match(control, /all_services[\s\S]*stop_and_disable_constructor_service "\$unit"/)
   assert.match(installer, /constructor_services[\s\S]*stop_and_disable_constructor_service "\$unit"/)
@@ -661,10 +661,10 @@ test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () =>
     const helper = shellFunction(source, source === deploy
       ? 'stop_and_disable_constructor_release_service'
       : 'stop_and_disable_constructor_service')
-    assert.match(helper, /systemctl stop "\$unit"[\s\S]*systemctl disable "\$unit"[^\n]*\|\| :/)
+    assert.match(helper, /systemctl stop "\$unit"[^\n]*\|\| :[\s\S]*systemctl disable --no-reload "\$unit"[^\n]*\|\| :/)
   }
   assert.match(control,
-    /stop_and_disable_constructor_service\(\)[\s\S]*systemctl stop "\$unit"[\s\S]*systemctl disable "\$unit"[^\n]*\|\| :/)
+    /stop_and_disable_constructor_service\(\)[\s\S]*systemctl stop "\$unit"[^\n]*\|\| :[\s\S]*systemctl disable --no-reload "\$unit"[^\n]*\|\| :/)
 })
 
 test('workerul oprește copilul activ la pierderea lease-ului și păstrează adevărul porților locale', () => {
@@ -993,6 +993,9 @@ test('bootstrap-ul celor șase unități este jurnalizat și recuperă sigur ori
   const rollForward = shellFunction(cutover, 'roll_forward_unit_transaction')
   assert.equal((rollForward.match(/\[systemd-(?:timer|service)\.[^\]]+\]=1/g) ?? []).length, 6)
   assert.match(rollForward, /sha256sum[\s\S]*quiesce_units_for_recovery 1[\s\S]*unit-forward[\s\S]*systemctl daemon-reload[\s\S]*force_quiesce_constructor_units[\s\S]*validate_live_constructor_units_quiesced[\s\S]*clear_runtime_ready_stamp/)
+  for (const stage of ['pre-quiesce', 'daemon-reload', 'post-quiesce', 'strict-live-unit-contract', 'ready-clear']) {
+    assert.match(rollForward, new RegExp(`unit-roll-forward:${stage}`))
+  }
   assert.doesNotMatch(rollForward, /validate_live_runtime_contract|publish_runtime_ready_stamp|restore_constructor_timers/)
   const forwardRecovery = recovery.indexOf('roll_forward_unit_transaction "$recovery_root"')
   const legacyRollback = recovery.indexOf('rollback-ul durabil al fișierelor')
@@ -1429,7 +1432,7 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
   assert.ok(dockerProof > quiesce && strict > dockerProof,
     'Docker poate eșua fără să sară quiesce-ul, dar stamp-ul nu se publică înainte să fie activ')
   const forceQuiesce = shellFunction(cutover, 'force_quiesce_constructor_units')
-  assert.match(forceQuiesce, /systemctl disable --now[\s\S]*ActiveState[\s\S]*systemctl list-jobs --no-legend --plain/)
+  assert.match(forceQuiesce, /stop_and_disable_constructor_timer[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload[\s\S]*ActiveState[\s\S]*systemctl list-jobs --no-legend --plain/)
 })
 
 test('recovery-ul de boot așteaptă bounded backendul și rămâne fail-closed la timeout', () => {
@@ -1986,46 +1989,54 @@ done`
 
   const runtimeBarrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
   const runtimeEarly = shellFunction(cutover, 'early_recover_only_barrier')
+  const runtimeStopTimer = shellFunction(cutover, 'stop_and_disable_constructor_timer')
   const runtimeStopService = shellFunction(cutover, 'stop_and_disable_constructor_service')
+  const runtimeReport = shellFunction(cutover, 'report_quiesce_postcondition_failure')
   const runtimeForce = shellFunction(cutover, 'force_quiesce_constructor_units')
   const runtimeRestore = shellFunction(cutover, 'restore_constructor_timers')
   const installerQuiesce = shellFunction(installer, 'quiesce_before_install')
   const installerPublished = installer.slice(installer.indexOf('set_constructor_install_phase published-validation'))
   assert.match(runtimeBarrier, /validate_constructor_unit_file_state "\$unit"/)
-  assert.match(runtimeForce, /constructor_timers[\s\S]*disable --now[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service/)
+  assert.match(runtimeForce, /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload[\s\S]*ActiveState[\s\S]*list-jobs/)
   assert.match(runtimeRestore, /constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*validate_constructor_unit_file_state/)
-  assert.equal((installerQuiesce.match(/systemctl disable --now "\$unit"/g) ?? []).length, 1)
-  assert.match(installerQuiesce, /constructor_services[\s\S]*stop_and_disable_constructor_service/)
+  assert.doesNotMatch(installerQuiesce, /systemctl disable --now/)
+  assert.match(installerQuiesce, /constructor_timers[\s\S]*stop_and_disable_constructor_timer[\s\S]*constructor_services[\s\S]*stop_and_disable_constructor_service[\s\S]*systemctl daemon-reload/)
   assert.match(installerQuiesce, /validate_constructor_prepublication_unit_file_state "\$unit"/)
   assert.match(installerPublished, /validate_constructor_unit_file_state "\$unit"/)
   assert.doesNotMatch(runtimeBarrier, /is-enabled/)
   assert.doesNotMatch(installerQuiesce, /is-enabled/)
 
   const earlyHarness = `set -euo pipefail
+${runtimeStopTimer}
 ${runtimeStopService}
+${runtimeReport}
 ${shellFunction(cutover, 'validate_constructor_prepublication_unit_file_state')}
 ${runtimeEarly}
 systemctl() {
-  local command=\$1 unit=\$2
-  if [ "\$command" = disable ] && [ "\$unit" = --now ]; then unit=\$3; fi
+  local command=\$1 unit=\${2:-}
+  if [ "\$command" = disable ] && [ "\$unit" = --no-reload ]; then unit=\$3; fi
   case "\$command" in
     cat) return 0 ;;
     stop) [ "\${FAIL_STOP:-0}" = 0 ] ;;
-    disable) [[ "\$unit" == *.timer ]] ;;
+    disable) [ "\${FAIL_DISABLE:-0}" = 0 ] ;;
+    daemon-reload) [ "\${FAIL_RELOAD:-0}" = 0 ] ;;
     show)
       if [[ "\$*" == *UnitFileState* ]]; then
         [[ "\$unit" == *.timer ]] && echo disabled || echo "\${SERVICE_STATE:-static}"
       else echo "\${ACTIVE_STATE:-inactive}"; fi ;;
-    list-jobs) return 0 ;;
+    list-jobs) [ "\${PENDING_JOB:-0}" = 0 ] || echo '1 fake start waiting' ;;
     *) return 91 ;;
   esac
 }
 early_recover_only_barrier
+FAIL_STOP=1 FAIL_DISABLE=1
+early_recover_only_barrier
+FAIL_STOP=0 FAIL_DISABLE=0
 SERVICE_STATE=enabled
 if early_recover_only_barrier; then exit 101; fi
 SERVICE_STATE=static ACTIVE_STATE=active
 if early_recover_only_barrier; then exit 102; fi
-ACTIVE_STATE=inactive FAIL_STOP=1
+ACTIVE_STATE=inactive PENDING_JOB=1
 if early_recover_only_barrier; then exit 103; fi`
   const earlyResult = spawnSync(bashExecutable, ['-c', earlyHarness], { encoding: 'utf8' })
   assert.equal(earlyResult.status, 0, earlyResult.stderr || earlyResult.stdout)
@@ -2035,7 +2046,7 @@ test('bootstrapul recovery acceptă numai helperul b911 și candidatul compatibi
   const installer = read('deploy/instaleaza-constructor.sh')
   const recovery = shellFunction(installer, 'recover_existing_runtime_journal')
   assert.match(installer, /LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de/)
-  assert.match(installer, /COMPATIBLE_RUNTIME_HELPER_SHA256=962962542addede737783b56aa04830057e5b6b1c6094d8bb2f78b05ea013eee/)
+  assert.match(installer, /COMPATIBLE_RUNTIME_HELPER_SHA256=162878a1d8442ecdd4ffca2e9828f34775cc6ea3971034f5b7e463d5230d5abe/)
   const livePin = recovery.indexOf('[ "$live_sha" = "$LEGACY_STATIC_RUNTIME_HELPER_SHA256" ]')
   const loadIntent = recovery.indexOf('load_install_transaction', livePin)
   const bindHelper = recovery.indexOf('validate_published_candidate runtime-helper', loadIntent)
