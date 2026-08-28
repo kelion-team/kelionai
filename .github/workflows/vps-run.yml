@@ -13,6 +13,7 @@ on:
           - activate-worker-publisher
           - activate-release
           - constructor-status
+          - diagnose-spool
       auto_routed_to_master:
         description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
         required: false
@@ -1047,5 +1048,55 @@ jobs:
             clear_activation_journal
             activation_committed=1
             activation_in_progress=0
+          fi
+          REMOTE
+
+      - name: Diagnosticheaza spool-ul handoff (read-only)
+        if: inputs.operation == 'diagnose-spool'
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          phase='diagnose-spool'
+          on_err() {
+            local rc=$?
+            echo "{\"ok\":false,\"event\":\"diagnostic_failure\",\"phase\":\"$phase\",\"line\":${LINENO},\"exit_code\":$rc,\"source_commit\":\"$SOURCE_COMMIT\"}" >&2
+            exit "$rc"
+          }
+          trap on_err ERR
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          echo '== spool diagnostics (read-only) =='
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s -- "$SOURCE_COMMIT" <<'REMOTE'
+          set -Eeuo pipefail
+          source_commit=$1
+          phase='diagnose-spool'
+          on_err() {
+            local rc=$?
+            echo "{\"ok\":false,\"event\":\"diagnostic_failure\",\"phase\":\"$phase\",\"line\":${LINENO},\"exit_code\":$rc,\"source_commit\":\"$source_commit\"}" >&2
+            exit "$rc"
+          }
+          trap on_err ERR
+          echo "source_commit=$source_commit"
+          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
+            echo "--- $p"
+            stat -c 'type=%F mode=%a owner=%U group=%G' "$p" 2>&1
+            getfacl -p "$p" 2>&1
+          done
+          echo '--- tree'
+          find /var/lib/kelion-constructor-handoff -maxdepth 2 -printf '%y %m %u:%g %p -> %l\n' 2>&1
+          echo '--- activation file'
+          activation_file=/run/kelion-release/active
+          if [ -f "$activation_file" ]; then
+            stat -c 'mode=%a owner=%U group=%G' "$activation_file"
+            sha256sum "$activation_file"
+          else
+            echo 'absent'
           fi
           REMOTE
