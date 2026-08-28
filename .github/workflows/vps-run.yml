@@ -759,7 +759,7 @@ jobs:
             }
             $1 in replacement { if (!written[$1]++) print $1 "=" replacement[$1]; next }
             { print }
-            END { for (index = 1; index <= 7; index++) if (!written[order[index]]) print order[index] "=" replacement[order[index]] }
+            END { for (i = 1; i <= 7; i++) if (!written[order[i]]) print order[i] "=" replacement[order[i]] }
           ' "$runtime_file" > "$cutover_stage/files/runtime.env"
           chmod 0600 "$cutover_stage/files/runtime.env"
           printf '%s\n' runtime.env >> "$cutover_stage/manifest"
