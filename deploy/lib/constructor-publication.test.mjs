@@ -2100,6 +2100,109 @@ if ${invocation}; then exit 121; fi
   }
 })
 
+test('contractul live strict atribuie fiecare predicat systemd fără date libere', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const reporter = shellFunction(cutover, 'report_live_constructor_quiesce_failure')
+  const effective = shellFunction(cutover, 'validate_effective_constructor_unit_for_quiesce')
+  const strict = shellFunction(cutover, 'validate_live_constructor_units_quiesced')
+  const barrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
+
+  assert.match(reporter, /case "\$unit" in[\s\S]*\*\) unit=unknown/)
+  assert.match(reporter, /case "\$predicate" in[\s\S]*\*\) predicate=unknown/)
+  assert.match(reporter, /live-quiesce-contract:%s:%s/)
+  for (const predicate of [
+    'ready-stamp-present', 'file-type', 'file-metadata-query', 'file-metadata',
+    'timer-contract', 'service-contract', 'unit-catalog', 'unit-count',
+  ]) assert.match(strict, new RegExp(predicate))
+  for (const predicate of [
+    'fragment-query', 'fragment-path', 'dropins-query', 'dropins-present',
+    'load-state-query', 'load-state', 'reload-state-query', 'reload-needed',
+  ]) assert.match(effective, new RegExp(predicate))
+  for (const predicate of [
+    'timer-unit-file-state', 'service-unit-file-state', 'active-state-query',
+    'active-state', 'pending-job', 'auxiliary-active-state-query',
+    'auxiliary-active-state', 'auxiliary-pending-job',
+  ]) assert.match(barrier, new RegExp(predicate))
+
+  const effectiveHarness = `set -euo pipefail
+${reporter}
+${effective}
+mode=ok
+systemctl() {
+  [ "$1" = show ] || return 91
+  local unit=$2 property=\${3#--property=}
+  case "$property" in
+    FragmentPath)
+      [ "$mode" != fragment-query ] || return 1
+      [ "$mode" != fragment-path ] && printf '/etc/systemd/system/%s\\n' "$unit" || printf '/wrong\\n' ;;
+    DropInPaths)
+      [ "$mode" != dropins-query ] || return 1
+      [ "$mode" != dropins-present ] || printf '/drop-in.conf\\n' ;;
+    LoadState)
+      [ "$mode" != load-state-query ] || return 1
+      [ "$mode" != load-state ] && printf 'loaded\\n' || printf 'not-found\\n' ;;
+    NeedDaemonReload)
+      [ "$mode" != reload-state-query ] || return 1
+      [ "$mode" != reload-needed ] && printf 'no\\n' || printf 'yes\\n' ;;
+    *) return 92 ;;
+  esac
+}
+for item in \\
+  fragment-query:fragment-query fragment-path:fragment-path \\
+  dropins-query:dropins-query dropins-present:dropins-present \\
+  load-state-query:load-state-query load-state:load-state \\
+  reload-state-query:reload-state-query reload-needed:reload-needed; do
+  mode=\${item%%:*}; expected=\${item#*:}
+  if output=$(validate_effective_constructor_unit_for_quiesce kelion-codex-worker.timer 1 2>&1); then exit 121; fi
+  [ "$output" = "runtime-cutover: live-quiesce-contract:kelion-codex-worker.timer:$expected" ]
+done
+mode=ok
+validate_effective_constructor_unit_for_quiesce kelion-codex-worker.timer 1
+[ "$(report_live_constructor_quiesce_failure '../../secret' '../../value' 2>&1)" = \\
+  'runtime-cutover: live-quiesce-contract:unknown:unknown' ]`
+  const effectiveResult = spawnSync(bashExecutable, ['-c', effectiveHarness], { encoding: 'utf8' })
+  assert.equal(effectiveResult.status, 0, effectiveResult.stderr || effectiveResult.stdout)
+
+  const barrierHarness = `set -euo pipefail
+${reporter}
+${barrier}
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+READY_STAMP=$tmp/absent
+constructor_timers=()
+constructor_services=(kelion-codex-worker.service)
+constructor_auxiliary_services=()
+validate_constructor_unit_file_state() { return 1; }
+systemctl() { [ "$1" = cat ]; }
+if output=$(validate_constructor_quiesce_barrier 1 2>&1); then exit 131; fi
+[ "$output" = 'runtime-cutover: live-quiesce-contract:kelion-codex-worker.service:service-unit-file-state' ]
+if output=$(validate_constructor_quiesce_barrier 2 2>&1); then exit 132; fi
+[ -z "$output" ]`
+  const barrierResult = spawnSync(bashExecutable, ['-c', barrierHarness], { encoding: 'utf8' })
+  assert.equal(barrierResult.status, 0, barrierResult.stderr || barrierResult.stdout)
+
+  const waiter = shellFunction(cutover, 'wait_for_live_constructor_units_quiesced')
+  const waiterHarness = `set -euo pipefail
+${waiter}
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+calls=0
+reports=''
+validate_live_constructor_units_quiesced() {
+  calls=$((calls + 1))
+  reports="$reports$1"
+  if [ "$1" = 1 ]; then printf '%s\\n' final-attribution >&2; fi
+  return 1
+}
+sleep() { :; }
+if wait_for_live_constructor_units_quiesced 2> "$tmp/output"; then exit 141; fi
+[ "$calls" -eq 12 ]
+[ "$reports" = 000000000001 ]
+[ "$(cat "$tmp/output")" = final-attribution ]`
+  const waiterResult = spawnSync(bashExecutable, ['-c', waiterHarness], { encoding: 'utf8' })
+  assert.equal(waiterResult.status, 0, waiterResult.stderr || waiterResult.stdout)
+})
+
 test('bootstrapul recovery acceptă numai helperul b911 și candidatul compatibil pin-uit', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')

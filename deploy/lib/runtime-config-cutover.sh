@@ -1049,35 +1049,93 @@ validate_live_runtime_contract() {
   fi
 }
 
+report_live_constructor_quiesce_failure() {
+  local unit=${1:-unknown} predicate=${2:-unknown}
+  case "$unit" in
+    runtime-ready-stamp|systemd|\
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service|\
+    kelion-constructor-sync.service|kelion-runtime-config-recovery.service) ;;
+    *) unit=unknown ;;
+  esac
+  case "$predicate" in
+    ready-stamp-present|file-type|file-metadata-query|file-metadata|timer-contract|service-contract|\
+    unit-catalog|fragment-query|fragment-path|dropins-query|dropins-present|load-state-query|load-state|\
+    reload-state-query|reload-needed|unit-count|timer-unit-file-state|service-unit-file-state|\
+    active-state-query|active-state|pending-job|auxiliary-active-state-query|auxiliary-active-state|\
+    auxiliary-pending-job) ;;
+    *) predicate=unknown ;;
+  esac
+  printf 'runtime-cutover: live-quiesce-contract:%s:%s\n' "$unit" "$predicate" >&2
+}
+
+validate_effective_constructor_unit_for_quiesce() {
+  local unit=$1 report=${2:-0} expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  fragment=$(systemctl show "$unit" --property=FragmentPath --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-query; return 1; }
+  [ "$fragment" = "$expected" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-path; return 1; }
+  dropins=$(systemctl show "$unit" --property=DropInPaths --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-query; return 1; }
+  [ -z "$dropins" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-present; return 1; }
+  load_state=$(systemctl show "$unit" --property=LoadState --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state-query; return 1; }
+  [ "$load_state" = loaded ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state; return 1; }
+  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-state-query; return 1; }
+  [ "$need_reload" = no ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-needed; return 1; }
+}
+
 validate_live_constructor_units_quiesced() {
-  local unit path count=0
-  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  local report=${1:-0} unit path metadata count=0
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure runtime-ready-stamp ready-stamp-present; return 1; }
   for unit in "${constructor_timers[@]}"; do
     path=/etc/systemd/system/$unit
     [ -f "$path" ] && [ ! -L "$path" ] \
-      && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:444' ] \
-      && validate_constructor_timer_unit "$path" "systemd-timer.$unit" \
-      && systemctl cat "$unit" >/dev/null 2>&1 \
-      && validate_effective_constructor_unit "$unit" || return 1
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-type; return 1; }
+    metadata=$(stat -c '%u:%g:%a' "$path") \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata-query; return 1; }
+    [ "$metadata" = '0:0:444' ] \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata; return 1; }
+    validate_constructor_timer_unit "$path" "systemd-timer.$unit" \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" timer-contract; return 1; }
+    systemctl cat "$unit" >/dev/null 2>&1 \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
+    validate_effective_constructor_unit_for_quiesce "$unit" "$report" || return 1
     count=$((count + 1))
   done
   for unit in "${constructor_services[@]}"; do
     path=/etc/systemd/system/$unit
     [ -f "$path" ] && [ ! -L "$path" ] \
-      && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:444' ] \
-      && validate_constructor_service_unit "$path" "systemd-service.$unit" \
-      && systemctl cat "$unit" >/dev/null 2>&1 \
-      && validate_effective_constructor_unit "$unit" || return 1
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-type; return 1; }
+    metadata=$(stat -c '%u:%g:%a' "$path") \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata-query; return 1; }
+    [ "$metadata" = '0:0:444' ] \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata; return 1; }
+    validate_constructor_service_unit "$path" "systemd-service.$unit" \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" service-contract; return 1; }
+    systemctl cat "$unit" >/dev/null 2>&1 \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
+    validate_effective_constructor_unit_for_quiesce "$unit" "$report" || return 1
     count=$((count + 1))
   done
-  [ "$count" -eq 6 ] || return 1
-  validate_constructor_quiesce_barrier
+  [ "$count" -eq 6 ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure systemd unit-count; return 1; }
+  validate_constructor_quiesce_barrier "$report"
 }
 
 wait_for_live_constructor_units_quiesced() {
-  local attempt
+  local attempt report
   for ((attempt = 1; attempt <= 12; attempt++)); do
-    if validate_live_constructor_units_quiesced; then return 0; fi
+    report=0
+    [ "$attempt" -lt 12 ] || report=1
+    if validate_live_constructor_units_quiesced "$report"; then return 0; fi
     [ "$attempt" -lt 12 ] || break
     # systemctl daemon-reload este sincron, dar proprietățile efective pot fi
     # observate tranzitoriu din generații diferite. Repetăm numai dovada
@@ -1088,22 +1146,57 @@ wait_for_live_constructor_units_quiesced() {
 }
 
 validate_constructor_quiesce_barrier() {
-  local unit state count=0
-  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  local report=${1:-0} unit state count=0 predicate
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  if [ -e "$READY_STAMP" ] || [ -L "$READY_STAMP" ]; then
+    [ "$report" = 0 ] || report_live_constructor_quiesce_failure runtime-ready-stamp ready-stamp-present
+    return 1
+  fi
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     count=$((count + 1))
-    validate_constructor_unit_file_state "$unit" || return 1
-    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
-    case "$state" in inactive|failed) ;; *) return 1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    if ! validate_constructor_unit_file_state "$unit"; then
+      case "$unit" in *.timer) predicate=timer-unit-file-state ;; *) predicate=service-unit-file-state ;; esac
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" "$predicate"
+      return 1
+    fi
+    state=$(systemctl show "$unit" --property=ActiveState --value) || {
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" active-state-query
+      return 1
+    }
+    case "$state" in
+      inactive|failed) ;;
+      *)
+        [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" active-state
+        return 1 ;;
+    esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" pending-job
+      return 1
+    fi
   done
-  case "$count" in 0|6) ;; *) return 1 ;; esac
+  case "$count" in
+    0|6) ;;
+    *)
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure systemd unit-count
+      return 1 ;;
+  esac
   for unit in "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
-    case "$state" in inactive|failed) ;; *) return 1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    state=$(systemctl show "$unit" --property=ActiveState --value) || {
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-active-state-query
+      return 1
+    }
+    case "$state" in
+      inactive|failed) ;;
+      *)
+        [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-active-state
+        return 1 ;;
+    esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-pending-job
+      return 1
+    fi
   done
 }
 
