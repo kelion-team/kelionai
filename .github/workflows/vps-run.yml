@@ -1104,6 +1104,10 @@ jobs:
           [ -d "$spool" ] && [ ! -L "$spool" ]
           [ "$(realpath "$spool")" = "$spool" ]
           [ "$(stat -c '%U:%G' "$spool")" = 'root:kelion-handoff' ]
+          # După ce identitatea părintelui este dovedită, retragem imediat
+          # dreptul de rename/create al grupului înainte de a valida copiii.
+          chown root:kelion-handoff "$spool"
+          chmod 0750 "$spool"
 
           current_check='children-allowlist'
           while IFS= read -r child; do
@@ -1122,10 +1126,6 @@ jobs:
           fi
 
           current_check='apply-canonical-layout'
-          # Retragem mai întâi dreptul de rename/create al grupului, astfel
-          # încât identitatea copiilor să nu poată fi schimbată în timpul reparării.
-          chown root:kelion-handoff "$spool"
-          chmod 0750 "$spool"
           if [ ! -e "$spool/retired" ] && [ ! -L "$spool/retired" ]; then
             install -d -o root -g kelion-handoff -m 2770 "$spool/retired"
           fi
