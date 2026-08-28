@@ -45,6 +45,11 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
     expect(ruta).toMatch(/else if \(final && verdictTura === null\) \{/)
   })
 
+  it('startul explicit permite primul audio chiar când transcrierea sosește ulterior', () => {
+    expect(ruta).toMatch(/if \(startExplicit\.activa\(\)\) return true/)
+    expect(ruta).toMatch(/const areTemei = rostireCurenta\.trim\(\) \|\| bufUser\.trim\(\) \|\| turaDeSistem \|\| startExplicit\.activa\(\)/)
+  })
+
   it('gardul de limbă judecă ÎNAINTE de livrare: cadrele așteaptă verdictul, cu fail-open 700ms', () => {
     expect(ruta).toMatch(/asteaptaVerdictLimba/)
     expect(ruta).toMatch(/gard de limbă fail-open: transcrierea răspunsului n-a sosit în 700 ms/)
