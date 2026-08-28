@@ -777,14 +777,23 @@ jobs:
             jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$payload" >/dev/null
             jq -c '{ready,release}' <<<"$payload"
           }
+          stop_and_disable_constructor_timer() {
+            local unit=$1
+            case "$unit" in
+              kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+              *) return 1 ;;
+            esac
+            systemctl stop "$unit" >/dev/null 2>&1 || :
+            systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+          }
           stop_and_disable_constructor_service() {
             local unit=$1
             case "$unit" in
               kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
               *) return 1 ;;
             esac
-            systemctl stop "$unit" >/dev/null || return 1
-            systemctl disable "$unit" >/dev/null 2>&1 || :
+            systemctl stop "$unit" >/dev/null 2>&1 || :
+            systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
           }
           validate_constructor_unit_file_state() {
             local unit=$1 state
@@ -809,11 +818,12 @@ jobs:
                 fsync_remote "$ready_root" || return 1
               fi
             fi
-            for unit in "${all_timers[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+            for unit in "${all_timers[@]}"; do stop_and_disable_constructor_timer "$unit" || failed=1; done
             for unit in "${all_services[@]}"; do stop_and_disable_constructor_service "$unit" || failed=1; done
             if systemctl cat kelion-constructor-sync.service >/dev/null 2>&1; then
-              systemctl stop kelion-constructor-sync.service >/dev/null || failed=1
+              systemctl stop kelion-constructor-sync.service >/dev/null 2>&1 || :
             fi
+            systemctl daemon-reload || failed=1
             for unit in "${all_timers[@]}" "${all_services[@]}" kelion-constructor-sync.service; do
               systemctl cat "$unit" >/dev/null 2>&1 || continue
               state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }

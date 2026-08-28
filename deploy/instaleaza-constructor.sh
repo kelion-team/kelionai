@@ -867,17 +867,27 @@ validate_constructor_prepublication_unit_file_state() {
   esac
 }
 
+stop_and_disable_constructor_timer() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
 stop_and_disable_constructor_service() {
   local unit=$1
   case "$unit" in
     kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
     *) return 1 ;;
   esac
-  systemctl stop "$unit" >/dev/null || return 1
+  systemctl stop "$unit" >/dev/null 2>&1 || :
   # Unitățile vechi pot avea [Install], cele canonice sunt statice. Retragem
   # best-effort legăturile legacy și folosim numai postcondiția verificată mai
   # jos ca autoritate pentru succes.
-  systemctl disable "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
 }
 
 retract_ready_stamp() {
@@ -900,7 +910,7 @@ quiesce_before_install() {
   for unit in "${constructor_timers[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       count=$((count + 1))
-      systemctl disable --now "$unit" >/dev/null || failed=1
+      stop_and_disable_constructor_timer "$unit" || failed=1
     fi
   done
   for unit in "${constructor_services[@]}"; do
@@ -910,8 +920,9 @@ quiesce_before_install() {
     fi
   done
   for unit in kelion-constructor-sync.service kelion-runtime-config-recovery.service; do
-    if systemctl cat "$unit" >/dev/null 2>&1; then systemctl stop "$unit" >/dev/null || failed=1; fi
+    if systemctl cat "$unit" >/dev/null 2>&1; then systemctl stop "$unit" >/dev/null 2>&1 || :; fi
   done
+  systemctl daemon-reload || failed=1
   case "$count" in 0|6) ;; *) failed=1 ;; esac
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
@@ -962,7 +973,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=962962542addede737783b56aa04830057e5b6b1c6094d8bb2f78b05ea013eee
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=162878a1d8442ecdd4ffca2e9828f34775cc6ea3971034f5b7e463d5230d5abe
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
@@ -1139,11 +1150,12 @@ publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.servic
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
 for unit in "${constructor_timers[@]}"; do
-  systemctl disable --now "$unit" >/dev/null
+  stop_and_disable_constructor_timer "$unit"
 done
 for unit in "${constructor_services[@]}"; do
   stop_and_disable_constructor_service "$unit"
 done
+systemctl daemon-reload
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
 recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
 recovery_wants_link=$recovery_wants_dir/kelion-runtime-config-recovery.service

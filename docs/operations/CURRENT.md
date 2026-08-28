@@ -1,12 +1,12 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T14:15:32Z`
+Actualizat: `2026-08-28T14:46:50Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `79353662bf3ead7229eeb4526a7eed8e3f466a07` (PR `#1472`).
-  `pr-verify` `33178082929` și buildul OCI exact `33178459096` sunt verzi.
+- `origin/master` este `90358096ac0fb4f8bc72d2e2d5d078dee10dce25` (PR `#1474`).
+  `pr-verify` `33179748579` și buildul OCI exact `33180175167` sunt verzi.
 - Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
   raportează `ready:true` și `sideEffectsActive:true`.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
@@ -29,14 +29,22 @@ Actualizat: `2026-08-28T14:15:32Z`
   bootstrapul compatibil și a eșuat fail-closed deoarece `/run` este montat
   `noexec`; copia root-only verificată prin SHA nu a putut fi executată direct.
   Nu a activat nicio unitate și aplicația publică nu a fost afectată.
-- Hotfix-ul curent rulează copia deja autentificată prin `bash`, compatibil cu
+- PR `#1474` rulează copia deja autentificată prin `bash`, compatibil cu
   `noexec`, fără să slăbească pinningul, ownershipul sau verificarea hashului.
+- Configurările `33180818900` și retry-ul unic controlat `33181409551` au trecut
+  de `noexec`, au publicat byte-for-byte toate cele șase unități forward, apoi
+  au eșuat identic într-o post-validare systemd după peste 30 de reload-uri.
+  Jurnalul a rămas `prepared`; timerele sunt `disabled/inactive`, serviciile
+  `static/inactive`, fără joburi, markere sau stamp ready. Aplicația este verde.
+- Remedierea curentă separă mutația de dovadă: stop + disable `--no-reload`
+  best-effort, un singur `daemon-reload`, apoi succes exclusiv prin
+  UnitFileState/ActiveState/zero jobs. Etapele eșuate sunt etichetate non-secret.
 - Validări locale curente: `bash -n`, `git diff --check`, workflow safety,
   hardcoding și `67/67` teste Constructor/deploy aplicabile sunt verzi.
 
 ## Următorul pas sigur
 
-1. Publică hotfix-ul `noexec` numai prin PR `chore/*`, fără bypass sau push în
+1. Publică remedierea postcondițiilor systemd numai prin PR `chore/*`, fără bypass sau push în
    master; cere toate check-urile verzi, merge și build OCI pentru SHA-ul exact.
 2. Rulează exact o operație `configure-constructor`; cere recovery, cutover,
    credențiale distincte și status final verzi.
@@ -46,7 +54,10 @@ Actualizat: `2026-08-28T14:15:32Z`
 ## Legături canonice
 
 - Recovery static + bootstrap b911: <https://github.com/kelion-team/kelionai/pull/1472>
-- Build OCI `79353662`: <https://github.com/kelion-team/kelionai/actions/runs/33178459096>
+- Hotfix `noexec`: <https://github.com/kelion-team/kelionai/pull/1474>
+- Build OCI `90358096`: <https://github.com/kelion-team/kelionai/actions/runs/33180175167>
 - Configure `noexec` fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33179065073>
+- Configure post-validare fail-closed: <https://github.com/kelion-team/kelionai/actions/runs/33180818900>
+- Retry controlat identic: <https://github.com/kelion-team/kelionai/actions/runs/33181409551>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>
