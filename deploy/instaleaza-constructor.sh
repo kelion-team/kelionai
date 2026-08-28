@@ -13,7 +13,7 @@ if [[ ! "$constructor_install_source_commit" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 readonly -a constructor_install_phases=(
   preflight publication-lock identity-layout recovery-preflight transaction-prepare
-  quiesce artifact-publication unit-validation unit-cutover systemd-publication
+  quiesce transaction-supersede artifact-publication unit-validation unit-cutover systemd-publication
   published-validation commit
 )
 set_constructor_install_phase() {
@@ -552,8 +552,16 @@ write_install_journal() {
     --arg transactionRoot "$install_root" \
     --arg manifestSha256 "$install_manifest_sha256" \
     --arg sourceSha256 "$install_source_sha256" \
+    --arg supersededTransactionRoot "$install_superseded_root" \
+    --arg supersededManifestSha256 "$install_superseded_manifest_sha256" \
+    --arg supersededSourceSha256 "$install_superseded_source_sha256" \
     '{schema:1,kind:"constructor-install",phase:$phase,requestId:$requestId,commit:$commit,
-      transactionRoot:$transactionRoot,manifestSha256:$manifestSha256,sourceSha256:$sourceSha256}' > "$temporary"
+      transactionRoot:$transactionRoot,manifestSha256:$manifestSha256,sourceSha256:$sourceSha256}
+      + if $supersededTransactionRoot == "" then {} else {
+          supersededTransactionRoot:$supersededTransactionRoot,
+          supersededManifestSha256:$supersededManifestSha256,
+          supersededSourceSha256:$supersededSourceSha256
+        } end' > "$temporary"
   chown root:root "$temporary"
   chmod 0600 "$temporary"
   sync -f "$temporary"
@@ -599,12 +607,24 @@ load_install_transaction() {
     (.commit | strings | test("^[0-9a-f]{40}$")) and
     (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
     (.manifestSha256 | strings | test("^[0-9a-f]{64}$")) and
-    (.sourceSha256 | strings | test("^[0-9a-f]{64}$"))' "$INSTALL_JOURNAL" >/dev/null || return 1
+    (.sourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+    (.sourceSha256 == .manifestSha256) and
+    (((has("supersededTransactionRoot") | not) and
+      (has("supersededManifestSha256") | not) and
+      (has("supersededSourceSha256") | not)) or
+      ((.supersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+       (.supersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.supersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+       (.supersededSourceSha256 == .supersededManifestSha256) and
+       (.supersededTransactionRoot != .transactionRoot)))' "$INSTALL_JOURNAL" >/dev/null || return 1
   install_request_id=$(jq -er '.requestId' "$INSTALL_JOURNAL")
   install_commit=$(jq -er '.commit' "$INSTALL_JOURNAL")
   install_root=$(jq -er '.transactionRoot' "$INSTALL_JOURNAL")
   install_manifest_sha256=$(jq -er '.manifestSha256' "$INSTALL_JOURNAL")
   install_source_sha256=$(jq -er '.sourceSha256' "$INSTALL_JOURNAL")
+  install_superseded_root=$(jq -er '.supersededTransactionRoot // ""' "$INSTALL_JOURNAL")
+  install_superseded_manifest_sha256=$(jq -er '.supersededManifestSha256 // ""' "$INSTALL_JOURNAL")
+  install_superseded_source_sha256=$(jq -er '.supersededSourceSha256 // ""' "$INSTALL_JOURNAL")
   [ "${install_source_sha256:0:40}" = "$install_commit" ] || return 1
   [ -d "$install_root" ] && [ ! -L "$install_root" ] \
     && [ "$(realpath -e -- "$install_root")" = "$install_root" ] \
@@ -624,7 +644,72 @@ load_install_transaction() {
       && [ "$(sha256sum "$candidate" | awk '{print $1}')" = "$digest" ] || return 1
     index=$((index + 1))
   done < "$install_root/manifest"
+  [ "$index" -eq "${#install_logicals[@]}" ] || return 1
+  if [ -n "$install_superseded_root" ]; then
+    validate_superseded_install_root "$install_superseded_root" "$install_superseded_manifest_sha256"
+  fi
+}
+
+validate_superseded_install_root() {
+  local root=$1 manifest_sha256=$2 index=0 logical digest extra candidate
+  [[ "$root" =~ ^/root/kelion/runtime/constructor-install\.[A-Za-z0-9]+$ ]] || return 1
+  [[ "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ -e "$root" ] || [ -L "$root" ] || return 1
+  [ -d "$root" ] && [ ! -L "$root" ] \
+    && [ "$(realpath -e -- "$root")" = "$root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root")" = '0:0:700' ] || return 1
+  [ -d "$root/files" ] && [ ! -L "$root/files" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root/files")" = '0:0:700' ] || return 1
+  [ -f "$root/manifest" ] && [ ! -L "$root/manifest" ] \
+    && [ "$(stat -c '%u:%g:%a' "$root/manifest")" = '0:0:600' ] \
+    && [ "$(sha256sum "$root/manifest" | awk '{print $1}')" = "$manifest_sha256" ] || return 1
+  while IFS=$'\t' read -r logical digest extra; do
+    [ "$index" -lt "${#install_logicals[@]}" ] && [ -z "$extra" ] \
+      && [ "$logical" = "${install_logicals[$index]}" ] \
+      && [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    candidate=$root/files/$logical
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      && [ "$(stat -c '%u:%g:%a' "$candidate")" = '0:0:600' ] \
+      && [ "$(sha256sum "$candidate" | awk '{print $1}')" = "$digest" ] || return 1
+    index=$((index + 1))
+  done < "$root/manifest"
   [ "$index" -eq "${#install_logicals[@]}" ]
+}
+
+remove_superseded_install_root() {
+  local logical root=$install_superseded_root
+  [ -n "$root" ] || return 0
+  validate_superseded_install_root "$root" "$install_superseded_manifest_sha256" || return 1
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    for logical in "${install_logicals[@]}"; do rm -f -- "$root/files/$logical"; done
+    rm -f -- "$root/manifest"
+    rmdir -- "$root/files"
+    rmdir -- "$root"
+    sync -f "$RUNTIME_ROOT"
+  fi
+}
+
+supersede_quiesced_install_transaction() {
+  local old_root=$install_root
+  local old_manifest_sha256=$install_manifest_sha256
+  local old_source_sha256=$install_source_sha256
+
+  # Jurnalul nou, construit integral din checkoutul curent, înlocuiește atomic
+  # intentul vechi. Referința autentificată la rădăcina veche rămâne în jurnal
+  # până la commitul durabil al noii generații; cleanup-ul începe numai după
+  # unlink+fsync al jurnalului, astfel încât un crash înainte sau după switch
+  # are întotdeauna exact un owner durabil și recuperabil.
+  install_superseded_root=$old_root
+  install_superseded_manifest_sha256=$old_manifest_sha256
+  install_superseded_source_sha256=$old_source_sha256
+  stage_install_transaction
+  write_install_journal quiesced
+  # Rădăcina veche rămâne intactă și referită până când noua generație trece
+  # toate validările. Cleanup-ul ambelor rădăcini începe numai după unlink+fsync
+  # al jurnalului la commit; un crash poate lăsa astfel doar un orphan root-only,
+  # niciodată un jurnal care indică o tranzacție ștearsă parțial.
+  printf '{"ok":true,"event":"install_intent_superseded","superseded_source_sha256":"%s","current_source_sha256":"%s","source_commit":"%s"}\n' \
+    "$old_source_sha256" "$install_source_sha256" "$constructor_install_source_commit" >&2
 }
 
 publish_install_candidate() {
@@ -755,6 +840,8 @@ clear_install_transaction() {
   rm -f -- "$install_root/manifest"
   rmdir -- "$install_root/files"
   rmdir -- "$install_root"
+  remove_superseded_install_root
+  sync -f "$RUNTIME_ROOT"
 }
 
 # Un jurnal runtime existent este consumat de helperul exact care l-a creat,
@@ -778,6 +865,9 @@ install_request_id=''
 install_commit=''
 install_manifest_sha256=''
 install_source_sha256=''
+install_superseded_root=''
+install_superseded_manifest_sha256=''
+install_superseded_source_sha256=''
 resume_different_source=0
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
@@ -806,6 +896,31 @@ sync -f /etc/kelion
 for marker in "${constructor_markers[@]}"; do
   [ ! -e "$marker" ] && [ ! -L "$marker" ] || { echo "markerul nu a putut fi retras: $marker" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
+
+if [ "$resume_different_source" = 1 ]; then
+  set_constructor_install_phase transaction-supersede
+  # O singură generație supersedată este permisă. O a doua schimbare de sursă
+  # cere diagnostic explicit și nu poate acumula rădăcini orfane într-o buclă.
+  [ -z "$install_superseded_root" ]
+  [ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]
+  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
+  for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
+  [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ "$(stat -c '%u:%g:%a' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
+    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
+  for logical in \
+    artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
+    artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
+    artifact.constructor-sync-worker artifact.constructor-service-client artifact.github-fixed-client \
+    runtime-helper compose-production; do
+    validate_published_candidate "$logical"
+  done
+  verify_candidate_units
+  supersede_quiesced_install_transaction
+  resume_different_source=0
+fi
 
 set_constructor_install_phase artifact-publication
 for logical in \
@@ -887,10 +1002,4 @@ done
 
 set_constructor_install_phase commit
 clear_install_transaction
-if [ "$resume_different_source" = 1 ]; then
-  echo 'Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent.'
-  exec env KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
-    KELION_CONSTRUCTOR_SOURCE_COMMIT="$constructor_install_source_commit" \
-    bash "$repo_root/deploy/instaleaza-constructor.sh"
-fi
 echo 'Constructor instalat dezactivat; configurarea și activarea sunt etape separate.'
