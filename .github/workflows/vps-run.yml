@@ -253,14 +253,31 @@ jobs:
           [[ "$cleanup_unit" =~ ^kelion-constructor-payload-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
           [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          constructor_config_phase='remote-preflight'
+          constructor_config_check='remote-input-contract'
+          report_constructor_config_failure() {
+            local rc=$? failure_line=${BASH_LINENO[0]:-0}
+            if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then exit "$rc"; fi
+            trap - ERR
+            printf '{"ok":false,"event":"constructor_config_failure","phase":"%s","check":"%s","line":%s,"exit_code":%s,"source_commit":"%s"}\n' \
+              "$constructor_config_phase" "$constructor_config_check" "$failure_line" "$rc" "$source_commit" >&2
+            exit "$rc"
+          }
+          fail_constructor_config() {
+            local rc=${1:-1}
+            return "$rc"
+          }
+          trap report_constructor_config_failure ERR
           gate_prefix="ghcr.io/${repository,,}/codex-gates@sha256:"
           [[ "$gate_image" == "$gate_prefix"* ]]
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$public_origin"
           public_host=$(node -e 'process.stdout.write(new URL(process.argv[1]).hostname)' "$public_origin")
+          constructor_config_check='publication-lock'
           exec 9>/root/kelion/publicare.lock
           flock -n 9
           export KELION_CUTOVER_LOCK_HELD=1
+          constructor_config_check='workspace'
           work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)
           bootstrap=/run/kelion-constructor-bootstrap
           cutover_stage=''
@@ -275,16 +292,7 @@ jobs:
             case "$work" in /root/kelion/runtime/constructor.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
           trap cleanup_remote EXIT
-          constructor_config_phase='remote-preflight'
           constructor_config_check='bundle-contract'
-          report_constructor_config_failure() {
-            local rc=$? failure_line=${BASH_LINENO[0]:-0}
-            trap - ERR
-            printf '{"ok":false,"event":"constructor_config_failure","phase":"%s","check":"%s","line":%s,"exit_code":%s,"source_commit":"%s"}\n' \
-              "$constructor_config_phase" "$constructor_config_check" "$failure_line" "$rc" "$source_commit" >&2
-            exit "$rc"
-          }
-          trap report_constructor_config_failure ERR
           [ -f "$bundle" ] && [ ! -L "$bundle" ] && [ -f "$payload" ] && [ ! -L "$payload" ]
           if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
@@ -445,7 +453,7 @@ jobs:
           constructor_config_check='unit-quiescence'
           for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
             state=$(systemctl show "$unit" --property=ActiveState --value)
-            case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; exit 1 ;; esac
+            case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; fail_constructor_config 1 ;; esac
           done
 
           constructor_config_check='codex-cli-install'
@@ -537,6 +545,7 @@ jobs:
               curl --fail --silent --show-error -X POST --header "@$publisher_headers" -H 'Content-Type: application/json' --data-binary @- https://api.github.com/user/ssh_signing_keys >/dev/null
           fi
 
+          constructor_config_check='repository-bootstrap-secrets'
           install -d -o root -g kelion-codex -m 0750 "$bootstrap/worker"
           install -d -o root -g kelion-publisher -m 0750 "$bootstrap/publisher"
           write_bootstrap_secret "$bootstrap/worker/token" kelion-codex "$sync_token"

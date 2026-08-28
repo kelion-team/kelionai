@@ -558,9 +558,20 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
 
   assert.match(remote, /set -Eeuo pipefail/)
   assert.match(remote, /cleanup_remote\(\) \{\s+trap - ERR/)
-  assert.match(remote, /trap cleanup_remote EXIT[\s\S]*trap report_constructor_config_failure ERR/)
-  assert.match(remote, /report_constructor_config_failure\(\)[\s\S]*BASH_LINENO/)
+  assert.match(remote, /trap report_constructor_config_failure ERR[\s\S]*trap cleanup_remote EXIT/)
+  assert.match(remote, /report_constructor_config_failure\(\)[\s\S]*BASH_LINENO[\s\S]*BASH_SUBSHELL[\s\S]*exit "\$rc"/)
   assert.match(remote, /constructor_config_failure[\s\S]*constructor_config_phase[\s\S]*constructor_config_check[\s\S]*source_commit/)
+  assert.doesNotMatch(remote, /\blocal\b[^\n]*=\$\(/,
+    'local ar masca statusul unei substituții și ar împiedica raportarea unică în părinte')
+  const postInstaller = remote.slice(remote.indexOf("constructor_config_phase='post-installer'"))
+  assert.match(postInstaller, /unit-quiescence[\s\S]*Unitatea \$unit a devenit activă[\s\S]*fail_constructor_config 1/)
+  assert.doesNotMatch(postInstaller, /\bexit [1-9][0-9]*\b/,
+    'eșecurile post-installer trebuie să treacă prin ERR, nu să-l ocolească prin exit explicit')
+  const errorTrap = remote.indexOf('trap report_constructor_config_failure ERR')
+  for (const command of ['gate_prefix=', 'node -e', 'exec 9>', 'flock -n 9', 'work=$(mktemp']) {
+    assert.ok(errorTrap >= 0 && remote.indexOf(command, errorTrap) > errorTrap,
+      `${command} trebuie să ruleze numai după instalarea trap-ului remote`)
+  }
 
   const expectedPhases = [
     'complete',
@@ -590,8 +601,11 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'package-index',
     'payload-contract',
     'payload-decode',
+    'publication-lock',
     'publisher-gate-image',
     'publisher-repository',
+    'remote-input-contract',
+    'repository-bootstrap-secrets',
     'resume-installer',
     'runtime-helper-publication',
     'runtime-journal-recovery',
@@ -606,6 +620,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'worker-gate-image',
     'worker-profile-publication',
     'worker-repository',
+    'workspace',
   ]
   const checks = [...remote.matchAll(/constructor_config_check='([^']+)'/g)].map((match) => match[1])
   assert.deepEqual([...new Set(checks)].sort(), expectedChecks)
@@ -613,12 +628,16 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'fazele și checkpointurile raportate trebuie să rămână literali din vocabularul fix')
 
   for (const [check, command] of [
+    ['remote-input-contract', 'gate_prefix="ghcr.io/${repository,,}/codex-gates@sha256:"'],
+    ['publication-lock', 'exec 9>/root/kelion/publicare.lock'],
+    ['workspace', 'work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)'],
     ['package-index', 'apt-get update -qq'],
     ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
     ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
     ['signing-stale-cleanup', 'for stale_signing_root in'],
     ['signing-key-validation', 'validate_signing_key "$signing_key"'],
     ['signing-key-registration', 'existing_keys=$(curl'],
+    ['repository-bootstrap-secrets', 'install -d -o root -g kelion-codex -m 0750 "$bootstrap/worker"'],
     ['worker-repository', 'clone_or_sync kelion-codex'],
     ['publisher-repository', 'clone_or_sync kelion-publisher'],
     ['worker-gate-image', 'pull_gate kelion-codex'],
@@ -631,42 +650,60 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   }
 
   const handlerStart = remote.indexOf('report_constructor_config_failure() {')
-  const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
+  const handlerEnd = remote.indexOf('\n          }\n          fail_constructor_config() {', handlerStart)
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'handlerul ERR trebuie să poată fi extras')
   const handler = remote.slice(handlerStart, handlerEnd + '\n          }'.length)
+    .split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n')
+  const explicitFailureStart = remote.indexOf('fail_constructor_config() {', handlerEnd)
+  const explicitFailureEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', explicitFailureStart)
+  assert.ok(explicitFailureStart >= 0 && explicitFailureEnd > explicitFailureStart,
+    'helperul pentru eșec explicit trebuie să poată fi extras')
+  const explicitFailure = remote.slice(explicitFailureStart, explicitFailureEnd + '\n          }'.length)
     .split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n')
   assert.doesNotMatch(handler, /BASH_COMMAND|bundle|payload|token|secret/,
     'telemetria nu poate include comanda sau materialul sensibil')
 
   const sourceCommit = 'a'.repeat(40)
-  const script = `set -Euo pipefail
+  const runFailureProbe = (body, exitCode, check) => {
+    const script = `set -Eeuo pipefail
 constructor_config_phase='post-installer'
-constructor_config_check='codex-cli-install'
+constructor_config_check='${check}'
 source_commit='${sourceCommit}'
 ${handler}
-cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
+${explicitFailure}
+cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete >&2; }
 trap cleanup_remote EXIT
 trap report_constructor_config_failure ERR
-fail_inside_function() { return 17; }
-fail_inside_function
+${body}
 exit 99
 `
-  const result = spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8' })
-  assert.equal(result.status, 17, result.stderr || result.stdout)
-  assert.equal(result.stdout.trim(), 'cleanup-complete')
-  const events = result.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('{'))
-  assert.equal(events.length, 1, result.stderr)
-  const event = JSON.parse(events[0])
-  assert.deepEqual({ ...event, line: 0 }, {
-    ok: false,
-    event: 'constructor_config_failure',
-    phase: 'post-installer',
-    check: 'codex-cli-install',
-    line: 0,
-    exit_code: 17,
-    source_commit: sourceCommit,
-  })
-  assert.ok(Number.isInteger(event.line) && event.line > 0)
+    const result = spawnSync(bashExecutable, ['-s'], { input: script, encoding: 'utf8' })
+    assert.equal(result.status, exitCode, result.stderr || result.stdout)
+    assert.equal(result.stdout, '')
+    const lines = result.stderr.trim().split(/\r?\n/)
+    const events = lines.filter((line) => line.startsWith('{'))
+    assert.equal(events.length, 1, result.stderr)
+    assert.equal(lines.filter((line) => line === 'cleanup-complete').length, 1, result.stderr)
+    const event = JSON.parse(events[0])
+    assert.deepEqual({ ...event, line: 0 }, {
+      ok: false,
+      event: 'constructor_config_failure',
+      phase: 'post-installer',
+      check,
+      line: 0,
+      exit_code: exitCode,
+      source_commit: sourceCommit,
+    })
+    assert.ok(Number.isInteger(event.line) && event.line > 0)
+  }
+
+  runFailureProbe('fail_constructor_config 17', 17, 'unit-quiescence')
+  runFailureProbe("top_level_value=$(bash -c 'exit 18')", 18, 'codex-cli-install')
+  runFailureProbe('top_level_value=$(false; printf continued)', 1, 'codex-cli-install')
+  runFailureProbe(`fail_assignment_inside_function() {
+  nested_value=$(bash -c 'exit 19')
+}
+fail_assignment_inside_function`, 19, 'signing-key-registration')
 })
 
 test('configurarea Constructor păstrează ACL-ul canonic al secretelor de producție', () => {
