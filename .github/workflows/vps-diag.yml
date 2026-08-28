@@ -65,6 +65,118 @@ jobs:
           else
             printf '%s\n' '(manifestul activ lipsește)'
           fi
+          printf '%s\n' '=== separarea credentialelor GitHub (numai etichete) ==='
+          constructor_labels=(constructor-sync constructor-publisher constructor-release)
+          constructor_paths=(
+            /root/kelion/worker-secrets/github-worker-token
+            /root/kelion/publisher-secrets/github-publisher-token
+            /root/kelion/release-secrets/github-release-token
+          )
+          constructor_present=0
+          for token_path in "${constructor_paths[@]}"; do
+            if [ -e "$token_path" ] || [ -L "$token_path" ]; then
+              constructor_present=$((constructor_present + 1))
+            fi
+          done
+          case "$constructor_present" in
+            0)
+              runtime_env=/root/kelion/config/runtime.env
+              [ -f "$runtime_env" ] && [ ! -L "$runtime_env" ] \
+                && grep -qx 'CODEX_WORKER_ENABLED=0' "$runtime_env" \
+                && grep -qx 'CONSTRUCTOR_PUBLISHER_ENABLED=0' "$runtime_env" \
+                && grep -qx 'CONSTRUCTOR_RELEASE_ENABLED=0' "$runtime_env" || {
+                  printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:runtime-enabled
+                  exit 1
+                }
+              for constructor_state_path in \
+                /root/kelion/config/codex-worker.env \
+                /root/kelion/config/constructor-publisher.env \
+                /root/kelion/config/constructor-release.env \
+                /etc/kelion/codex-worker.enabled \
+                /etc/kelion/constructor-publisher.enabled \
+                /etc/kelion/constructor-release.enabled; do
+                [ ! -e "$constructor_state_path" ] && [ ! -L "$constructor_state_path" ] || {
+                  printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:configured-without-token
+                  exit 1
+                }
+              done
+              token_labels=()
+              token_paths=()
+              token_gids=()
+              token_modes=()
+              printf '%s\n' TOKEN_IDENTITY_CONSTRUCTOR_ABSENT
+              ;;
+            3)
+              publisher_gid=$(getent group kelion-publisher | awk -F: 'NR == 1 { print $3 }')
+              release_gid=$(getent group kelion-release | awk -F: 'NR == 1 { print $3 }')
+              [[ "$publisher_gid" =~ ^[0-9]+$ ]] && [[ "$release_gid" =~ ^[0-9]+$ ]] || {
+                printf '%s\n' TOKEN_IDENTITY_INVALID:constructor:group
+                exit 1
+              }
+              token_labels=("${constructor_labels[@]}")
+              token_paths=("${constructor_paths[@]}")
+              token_gids=(0 "$publisher_gid" "$release_gid")
+              token_modes=(440 440 440)
+              ;;
+            *)
+              printf 'TOKEN_IDENTITY_INVALID:constructor:partial:%s-of-3\n' "$constructor_present"
+              exit 1
+              ;;
+          esac
+          token_labels+=(ghcr-read admin-oauth)
+          token_paths+=(
+            /root/kelion/gate-secrets/github-ghcr-read-token
+            /root/kelion/secrets/github-release-oauth-token
+          )
+          token_gids+=(0 10050)
+          token_modes+=(400 440)
+          token_values=()
+          for index in "${!token_paths[@]}"; do
+            token_path=${token_paths[$index]}
+            [ -f "$token_path" ] && [ ! -L "$token_path" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:file\n' "${token_labels[$index]}"
+              exit 1
+            }
+            metadata=$(stat -c '%u:%g:%a' -- "$token_path")
+            [ "$metadata" = "0:${token_gids[$index]}:${token_modes[$index]}" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:acl\n' "${token_labels[$index]}"
+              exit 1
+            }
+            [ "$(wc -l < "$token_path")" -eq 1 ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:format\n' "${token_labels[$index]}"
+              exit 1
+            }
+            original_size=$(wc -c < "$token_path")
+            without_cr_size=$(tr -d '\015' < "$token_path" | wc -c)
+            without_nul_size=$(tr -d '\000' < "$token_path" | wc -c)
+            [ "$original_size" -eq "$without_cr_size" ] && [ "$original_size" -eq "$without_nul_size" ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:control-byte\n' "${token_labels[$index]}"
+              exit 1
+            }
+            token_value=$(sed -n '1p' -- "$token_path")
+            [ "${#token_value}" -ge 32 ] || {
+              printf 'TOKEN_IDENTITY_INVALID:%s:length\n' "${token_labels[$index]}"
+              exit 1
+            }
+            if [[ "$token_value" = [[:space:]]* ]] || [[ "$token_value" = *[[:space:]] ]]; then
+              printf 'TOKEN_IDENTITY_INVALID:%s:marginal-whitespace\n' "${token_labels[$index]}"
+              exit 1
+            fi
+            token_values+=("$token_value")
+          done
+          token_collision=0
+          for ((left = 0; left < ${#token_values[@]}; left++)); do
+            for ((right = left + 1; right < ${#token_values[@]}; right++)); do
+              if [ "${token_values[$left]}" = "${token_values[$right]}" ]; then
+                printf 'TOKEN_IDENTITY_COLLISION:%s:%s\n' "${token_labels[$left]}" "${token_labels[$right]}"
+                token_collision=1
+              fi
+            done
+          done
+          if [ "$token_collision" -ne 0 ]; then
+            exit 1
+          fi
+          printf '%s\n' TOKEN_IDENTITIES_DISTINCT
           printf '%s\n' '=== sănătate publică ==='
           for path in /livez /readyz /api/version; do
             code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 "$public_origin$path" || true)

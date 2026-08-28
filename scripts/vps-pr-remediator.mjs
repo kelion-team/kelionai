@@ -161,7 +161,9 @@ async function reviewThreads(number) {
 
 async function snapshot(number) {
   const pr = await api(`/repos/${repository}/pulls/${number}`)
-  const files = (await paged(`/repos/${repository}/pulls/${number}/files`)).map((file) => file.filename)
+  const fileEntries = (await paged(`/repos/${repository}/pulls/${number}/files`))
+    .map((file) => ({ filename: file.filename, status: file.status }))
+  const files = fileEntries.map((file) => file.filename)
   const checksPayload = await api(`/repos/${repository}/commits/${pr.head.sha}/check-runs?per_page=100`)
   if (checksPayload.total_count > 100) throw new Error('Mai mult de 100 check-runs; evaluarea incompletă este refuzată')
   const statuses = await api(`/repos/${repository}/commits/${pr.head.sha}/status`)
@@ -195,7 +197,7 @@ async function snapshot(number) {
     pr,
     prNodeId: reviews.prNodeId,
     files,
-    scopeValid: isMonitoredScope(files),
+    scopeValid: isMonitoredScope(fileEntries),
     draft: pr.draft,
     mergeable: pr.mergeable,
     mergeableState: pr.mergeable_state,
