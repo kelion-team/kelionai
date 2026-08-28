@@ -350,16 +350,11 @@ function configuredAdminEmail(): string {
 function runtimeOpenAIKey(): string {
   const key = env(...ENV_ALIASES.openaiKey)
   // Organization Admin keys are privileged control-plane credentials. They
-  // are never a fallback for runtime inference or the Codex worker.
-  if (!key) {
-    if (isProd) throw new Error('OPENAI_API_KEY_FILE este obligatoriu în producție pentru credențiala de proiect Kelion')
-    return ''
-  }
-  if (!key.startsWith('sk-proj-')) {
-    if (isProd) throw new Error('OPENAI_API_KEY_FILE trebuie să conțină o cheie OpenAI project-scoped (sk-proj-)')
-    return ''
-  }
-  return key
+  // are never a fallback for runtime inference or the Codex worker. An absent
+  // or disabled placeholder remains empty so the supported ChatGPT
+  // Subscription transport can start; Realtime stays unavailable without a
+  // real project-scoped key and is reported separately by readiness.
+  return key.startsWith('sk-proj-') ? key : ''
 }
 
 // Model IDs are deployment configuration. Production refuses to boot when a

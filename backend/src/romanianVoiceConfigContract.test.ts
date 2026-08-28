@@ -11,8 +11,9 @@ describe('Romanian Realtime production configuration', () => {
     expect(source).toContain('OPENAI_APPROVED_REALTIME_MODELS este obligatoriu în producție')
   })
 
-  it('fails production boot clearly when the injected shared project credential is absent', () => {
-    expect(source).toContain('OPENAI_API_KEY_FILE este obligatoriu în producție')
-    expect(source).toContain('sk-proj-')
+  it('accepts only a project credential without disabling subscription mode', () => {
+    expect(source).toContain("return key.startsWith('sk-proj-') ? key : ''")
+    expect(source).toContain('supported ChatGPT')
+    expect(source).not.toContain('OPENAI_API_KEY_FILE este obligatoriu în producție')
   })
 })
