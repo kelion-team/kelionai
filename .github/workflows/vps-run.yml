@@ -241,14 +241,15 @@ jobs:
             "systemd-run --quiet --unit='$cleanup_unit' --on-active=15m /usr/bin/rm -f -- '$remote_payload'; systemctl is-active --quiet '$cleanup_unit.timer'"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "umask 077; systemctl is-active --quiet '$cleanup_unit.timer'; [ ! -e '$remote_payload' ] && [ ! -L '$remote_payload' ]; cat > '$remote_payload'" < "$payload"
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" <<'REMOTE'
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" "$GATE_IMAGE" "$PUBLIC_APP_ORIGIN" "$GITHUB_REPOSITORY" "$GITHUB_SHA" <<'REMOTE'
           set -euo pipefail
           umask 077
-          bundle=$1; payload=$2; cleanup_unit=$3; gate_image=$4; public_origin=$5; repository=$6
+          bundle=$1; payload=$2; cleanup_unit=$3; gate_image=$4; public_origin=$5; repository=$6; source_commit=$7
           [[ "$bundle" =~ ^/root/kelion/runtime/constructor-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
           [[ "$payload" =~ ^/run/kelion-constructor-payload\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
           [[ "$cleanup_unit" =~ ^kelion-constructor-payload-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
           [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
           gate_prefix="ghcr.io/${repository,,}/codex-gates@sha256:"
           [[ "$gate_image" == "$gate_prefix"* ]]
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
@@ -303,6 +304,7 @@ jobs:
             # întâi orice jurnal runtime cu helperul care l-a creat, apoi
             # republică exact toți cei șase candidați din manifest.
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
             constructor_install_resumed=1
             constructor_install_resume=0
@@ -394,6 +396,7 @@ jobs:
           [ -x /usr/bin/npm ]
           if [ "$constructor_install_resumed" = 0 ]; then
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
           fi
           install_atomic() {

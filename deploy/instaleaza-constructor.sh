@@ -1,36 +1,89 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
+
+# Raportează numai poziția și faza unei aserțiuni eșuate. Nu include comanda,
+# argumentele sau mediul: instalatorul poate manipula căi și metadate sensibile,
+# iar diagnosticul trebuie să rămână util fără să divulge valori.
+constructor_install_phase=bootstrap
+constructor_install_failure_line=0
+constructor_install_source_commit=${KELION_CONSTRUCTOR_SOURCE_COMMIT:-unknown}
+if [[ ! "$constructor_install_source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  constructor_install_source_commit=unknown
+fi
+readonly -a constructor_install_phases=(
+  preflight publication-lock identity-layout recovery-preflight transaction-prepare
+  quiesce artifact-publication unit-validation unit-cutover systemd-publication
+  published-validation commit
+)
+set_constructor_install_phase() {
+  local requested=$1 known
+  for known in "${constructor_install_phases[@]}"; do
+    if [ "$known" = "$requested" ]; then
+      constructor_install_phase=$requested
+      printf '{"ok":true,"event":"phase_start","phase":"%s","source_commit":"%s"}\n' \
+        "$constructor_install_phase" "$constructor_install_source_commit" >&2
+      return 0
+    fi
+  done
+  return 1
+}
+constructor_install_assert() {
+  local source_line=$1
+  shift
+  "$@" || { constructor_install_failure_line=$source_line; return 1; }
+}
+report_constructor_install_failure() {
+  local status=$?
+  local line=${constructor_install_failure_line:-0}
+  trap - ERR EXIT
+  if [ "$status" = 0 ]; then
+    return 0
+  fi
+  printf '{"ok":false,"event":"installer_failure","phase":"%s","line":%s,"exit_code":%s,"source_commit":"%s"}\n' \
+    "$constructor_install_phase" "$line" "$status" "$constructor_install_source_commit" >&2
+  printf '::error::Constructor installer gate: phase=%s line=%s exit=%s source_commit=%s\n' \
+    "$constructor_install_phase" "$line" "$status" "$constructor_install_source_commit" >&2
+  builtin exit "$status"
+}
+capture_constructor_install_failure() {
+  local status=$?
+  constructor_install_failure_line=${1:-0}
+  return "$status"
+}
+trap 'capture_constructor_install_failure "$LINENO"' ERR
+trap report_constructor_install_failure EXIT
+set_constructor_install_phase preflight
 
 # Instalează numai codul, identitățile și unitățile dezactivate. Nu creează
 # credentiale, nu clonează, nu activează timere și nu pornește servicii.
-[[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; exit 1; }
+[[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 [[ "${KELION_CONSTRUCTOR_INSTALL:-0}" == "1" ]] || {
   echo 'setează KELION_CONSTRUCTOR_INSTALL=1 după review' >&2
-  exit 1
+  constructor_install_failure_line=$LINENO; exit 1
 }
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 [[ -f "$repo_root/AGENTS.md" && -f "$repo_root/deploy/constructor-publisher.mjs" ]] || {
   echo 'sursa instalării nu este repository-ul Kelion validat' >&2
-  exit 1
+  constructor_install_failure_line=$LINENO; exit 1
 }
 for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum stat sync systemctl systemd-analyze usermod; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 # Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
 # conducta după primul match, iar SIGPIPE-ul producătorului transformă o
 # capabilitate prezentă într-un fals eșec. Capturăm o singură ieșire bounded și
 # verificăm toate cele patru operații fără un producer concurent.
 usermod_help=$(usermod --help 2>&1) \
-  || { echo 'capabilitățile usermod nu pot fi citite' >&2; exit 1; }
+  || { echo 'capabilitățile usermod nu pot fi citite' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 for required_usermod_option in \
   '--add-subuids FIRST-LAST' \
   '--del-subuids FIRST-LAST' \
   '--add-subgids FIRST-LAST' \
   '--del-subgids FIRST-LAST'; do
   grep -Fq -- "$required_usermod_option" <<<"$usermod_help" \
-    || { echo 'usermod nu oferă tranzacțiile native subuid/subgid necesare' >&2; exit 1; }
+    || { echo 'usermod nu oferă tranzacțiile native subuid/subgid necesare' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 unset usermod_help required_usermod_option
 
@@ -42,6 +95,7 @@ READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
 install -d -o root -g root -m 0755 "$ROOT"
 
+set_constructor_install_phase publication-lock
 acquire_publication_lock() {
   local inherited=${KELION_CUTOVER_LOCK_HELD:-0} fd_path fd_identity
   case "$inherited" in 0|1) ;; *) return 1 ;; esac
@@ -73,7 +127,8 @@ acquire_publication_lock() {
   flock -n 9 || return 1
   export KELION_CUTOVER_LOCK_HELD=1
 }
-acquire_publication_lock || { echo 'lock-ul de publicare nu poate fi dobândit și dovedit pe FD9' >&2; exit 1; }
+acquire_publication_lock || { echo 'lock-ul de publicare nu poate fi dobândit și dovedit pe FD9' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+set_constructor_install_phase identity-layout
 
 install_atomic() {
   local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
@@ -704,6 +759,7 @@ clear_install_transaction() {
 
 # Un jurnal runtime existent este consumat de helperul exact care l-a creat,
 # sub același lock, înainte ca acel helper să poată fi înlocuit.
+set_constructor_install_phase recovery-preflight
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
   [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
     && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ]
@@ -714,7 +770,7 @@ if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/
 fi
 for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
   [ ! -e "$journal" ] && [ ! -L "$journal" ] \
-    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; exit 1; }
+    || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 
 install_root=''
@@ -723,9 +779,10 @@ install_commit=''
 install_manifest_sha256=''
 install_source_sha256=''
 resume_different_source=0
+set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
   load_install_transaction \
-    || { echo 'jurnalul de instalare/deploy existent nu este un intent Constructor autentic' >&2; exit 1; }
+    || { echo 'jurnalul de instalare/deploy existent nu este un intent Constructor autentic' >&2; constructor_install_failure_line=$LINENO; exit 1; }
   current_source=$(current_source_sha256)
   if [ "$current_source" != "$install_source_sha256" ]; then resume_different_source=1; fi
 else
@@ -735,8 +792,9 @@ fi
 # Intentul root-only și candidații cu hash sunt durabili înainte de prima oprire
 # ori mutație live. Boot recovery recunoaște jurnalul schema 1 și nu poate
 # republica stamp-ul fără owner; retry-ul rescrie toată generația din candidați.
+set_constructor_install_phase quiesce
 quiesce_before_install \
-  || { echo 'unitățile Constructor nu pot fi dovedite complet quiesced' >&2; exit 1; }
+  || { echo 'unitățile Constructor nu pot fi dovedite complet quiesced' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 write_install_journal quiesced
 # /etc/subuid și /etc/subgid nu pot fi comise printr-un singur rename. Le
 # publicăm numai după intentul durabil și quiesce: un crash între fișiere lasă
@@ -746,9 +804,10 @@ ensure_subids kelion-publisher
 rm -f -- "${constructor_markers[@]}"
 sync -f /etc/kelion
 for marker in "${constructor_markers[@]}"; do
-  [ ! -e "$marker" ] && [ ! -L "$marker" ] || { echo "markerul nu a putut fi retras: $marker" >&2; exit 1; }
+  [ ! -e "$marker" ] && [ ! -L "$marker" ] || { echo "markerul nu a putut fi retras: $marker" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 
+set_constructor_install_phase artifact-publication
 for logical in \
   artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
@@ -757,12 +816,14 @@ for logical in \
   publish_install_candidate "$logical"
 done
 
+set_constructor_install_phase unit-validation
 verify_candidate_units \
-  || { echo 'tupla systemd Constructor candidată este invalidă' >&2; exit 1; }
+  || { echo 'tupla systemd Constructor candidată este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 
 # Cele șase unități-capabilitate sunt publicate exclusiv prin tranzacția
 # unit-only jurnalizată. Bariera pending rămâne după succes și poate fi
 # consumată numai de cutover-ul mixt care validează noul runtime.env.
+set_constructor_install_phase unit-cutover
 unit_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
 chown root:root "$unit_stage"
 chmod 0700 "$unit_stage"
@@ -784,6 +845,7 @@ KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$install_commit" \
   "$ROOT/bin/runtime-config-cutover.sh" \
     "$unit_stage" "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
 
+set_constructor_install_phase systemd-publication
 publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.service
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
@@ -793,13 +855,15 @@ done
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
 recovery_wants_dir=/etc/systemd/system/multi-user.target.wants
 recovery_wants_link=$recovery_wants_dir/kelion-runtime-config-recovery.service
-[ -d "$recovery_wants_dir" ] && [ ! -L "$recovery_wants_dir" ]
-[ -L "$recovery_wants_link" ] \
-  && [ "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ] \
-  && [ "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service ]
+constructor_install_assert "$LINENO" test -d "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test ! -L "$recovery_wants_dir"
+constructor_install_assert "$LINENO" test -L "$recovery_wants_link"
+constructor_install_assert "$LINENO" test "$(readlink "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
+constructor_install_assert "$LINENO" test "$(realpath -e -- "$recovery_wants_link")" = /etc/systemd/system/kelion-runtime-config-recovery.service
 sync -f "$recovery_wants_dir"
 sync -f /etc/systemd/system
 
+set_constructor_install_phase published-validation
 for logical in "${install_logicals[@]}"; do validate_published_candidate "$logical"; done
 for unit in \
   kelion-runtime-config-recovery.service kelion-constructor-sync.service \
@@ -815,14 +879,17 @@ for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$mar
   && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
 for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
   state=$(systemctl show "$unit" --property=ActiveState --value)
-  case "$state" in inactive|failed) ;; *) exit 1 ;; esac
-  if systemctl is-enabled --quiet "$unit"; then exit 1; fi
+  case "$state" in inactive|failed) ;; *) constructor_install_failure_line=$LINENO; exit 1 ;; esac
+  if systemctl is-enabled --quiet "$unit"; then constructor_install_failure_line=$LINENO; exit 1; fi
   [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]
 done
 
+set_constructor_install_phase commit
 clear_install_transaction
 if [ "$resume_different_source" = 1 ]; then
   echo 'Intentul întrerupt a fost finalizat fail-closed; se aplică acum checkoutul curent.'
-  exec env KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 bash "$repo_root/deploy/instaleaza-constructor.sh"
+  exec env KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+    KELION_CONSTRUCTOR_SOURCE_COMMIT="$constructor_install_source_commit" \
+    bash "$repo_root/deploy/instaleaza-constructor.sh"
 fi
 echo 'Constructor instalat dezactivat; configurarea și activarea sunt etape separate.'
