@@ -1,14 +1,29 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-28T21:07:24Z`
+Actualizat: `2026-08-28T22:43:48Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-- `origin/master` este `392b174660b02ce3a2db23e0fedf1555206ea83b` (PR `#1489`).
-  CI master `33210808739` este verde; buildul OCI exact `33211160656` rulează.
-- Aplicația live rulează sănătos pe slotul green la `baf00ae`; `/readyz`
-  raportează `ready:true` și `sideEffectsActive:true`.
+- `origin/master` este `01d8522140098a74cd632c6f7f11a8e2097abe6e` (PR `#1493`).
+  CI master `33216840949` și buildul OCI exact `33217134821` sunt verzi.
+- Aplicația live este încă versiunea sănătoasă `baf00ae`; la
+  `2026-08-28T22:43Z`, `/api/version`, `/readyz`, `/livez` și `/health` au
+  răspuns 200, cu `ready:true` și `sideEffectsActive:true`.
+- PR `#1493` a înlocuit variabila AWK `index`, incompatibilă cu `mawk`, cu
+  `i` și a adăugat regresia care execută programul AWK real din workflow.
+  Configurarea `33217617233` a trecut installerul, clonele și rescrierea
+  `runtime.env`, confirmând remedierea.
+- Release-ul canonic `33217596289` pentru tupla
+  `01d8522` / CI `33216840949` / build `33217134821` s-a oprit fail-closed la
+  validatorul `runtime.env`, înainte de cutover; versiunea live nu s-a schimbat.
+- Configurarea `33217617233` a atribuit următorul blocaj la
+  `phase=post-installer`, `check=worker-gate-image`, `exit_code=125`:
+  Podman rootless moștenea directorul SSH `/root` prin `runuser` și refuza
+  pornirea cu `cannot chdir to /root`. Remedierea curentă pornește toate cele
+  patru comenzi Podman din runtime-ul 0700 deținut de identitatea respectivă,
+  atât în controlul VPS, cât și în refresh-ul gate-ului din deploy. Regresia
+  numără și verifică toate cele opt invocări; suita relevantă este verde 77/77.
 - Statusul read-only `33176281001` confirmă cele trei timere Constructor
   `inactive`, markerii `disabled`, `codex-auth=ready` și backendul ready.
 - Diagnosticul read-only `33176363934` confirmă că vechile valori live
@@ -113,13 +128,13 @@ Actualizat: `2026-08-28T21:07:24Z`
 
 ## Următorul pas sigur
 
-1. Publică testele executabile și acest checkpoint numai prin PR `chore/*`, fără
-   bypass sau push în `master`; cere toate check-urile verzi.
-2. Nu porni niciun release de producție. După merge, CI și buildul OCI exact,
-   rulează o singură configurare controlată pe vârful `master`.
-3. Activarea și release-ul rămân blocate până când configurarea este verde,
-   jurnalele sunt absente și statusul final confirmă workerul, publisherul și
-   releaserul dezactivate/ready conform etapei curente.
+1. Publică remedierea cwd Podman, regresia executabilă și acest checkpoint numai
+   prin PR `chore/*`, fără bypass sau push în `master`; cere toate check-urile.
+2. După merge, cere CI și build OCI verzi pentru noul vârf `master`, apoi rulează
+   o singură configurare controlată pe acel SHA și cere rezultat verde.
+3. Abia după configurarea verde, folosește tupla noului SHA și release-ul canonic
+   asociat; dovedește extern SHA-ul complet, readiness și side effects înainte
+   să marchezi deploy-ul reușit sau să închizi incidentele verifierului.
 
 ## Legături canonice
 
@@ -147,5 +162,10 @@ Actualizat: `2026-08-28T21:07:24Z`
 - Parser canonic al cheii publice: <https://github.com/kelion-team/kelionai/pull/1489>
 - CI master `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33210808739>
 - Build OCI `392b1746`: <https://github.com/kelion-team/kelionai/actions/runs/33211160656>
+- Remediere AWK runtime: <https://github.com/kelion-team/kelionai/pull/1493>
+- CI master `01d8522`: <https://github.com/kelion-team/kelionai/actions/runs/33216840949>
+- Build OCI `01d8522`: <https://github.com/kelion-team/kelionai/actions/runs/33217134821>
+- Release `01d8522` refuzat înainte de cutover: <https://github.com/kelion-team/kelionai/actions/runs/33217596289>
+- Configurare cu cwd Podman invalid: <https://github.com/kelion-team/kelionai/actions/runs/33217617233>
 - Status read-only: <https://github.com/kelion-team/kelionai/actions/runs/33176281001>
 - Diagnostic token live: <https://github.com/kelion-team/kelionai/actions/runs/33176363934>

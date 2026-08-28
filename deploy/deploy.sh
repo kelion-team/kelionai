@@ -3616,12 +3616,12 @@ refresh_constructor_gate() (
     registry_owner="${registry_owner%%/*}"
     authfile=$runtime/release-gate-auth.json
     rm -f -- "$authfile"
-    cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin >/dev/null
-    if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE" >/dev/null; then
-      runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
+    cat "$token_file" | (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin) >/dev/null
+    if ! (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE") >/dev/null; then
+      (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null 2>&1 || true
       exit 1
     fi
-    runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
+    (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null
     rm -f -- "$authfile"
     authfile=''
   done
