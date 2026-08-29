@@ -3234,3 +3234,20 @@ test('pierderea lease-ului este observabilă înainte de următoarea mutație', 
     globalThis.fetch = originalFetch
   }
 })
+
+test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const collector = shellFunction(cutover, 'garbage_collect_activations')
+  const existsGuard = '    [ -e "$candidate" ] || continue'
+  const journalSkip = '    [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue'
+  const directoryGuard = '&& [ -d "$candidate" ] && [ ! -L "$candidate" ]'
+
+  assert.equal(collector.split(journalSkip).length - 1, 1,
+    'excluderea jurnalului trebuie să fie exactă și unică')
+  assert.ok(collector.indexOf(existsGuard) < collector.indexOf(journalSkip),
+    'candidatul trebuie să existe înainte de comparație')
+  assert.ok(collector.indexOf(journalSkip) < collector.indexOf(directoryGuard),
+    'jurnalul trebuie exclus înainte de testul de director')
+  assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
+    'snapshoturile reale trebuie curățate în continuare')
+})
