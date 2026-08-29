@@ -24,7 +24,7 @@ const TIPARE_RETRASE = [
   // API-ul local specific. Numele furnizorului poate lipsi complet din cod.
   {
     nume: 'ollama-transport',
-    re: /\b11434\b|(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|\[::1\]|host\.docker\.internal)(?::\d+)?\/api\/(?:tags|generate|pull|show|embed|embeddings|ps|copy|delete|create|blobs)\b/i,
+    re: /\b11434\b|(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|\[::1\]|host\.docker\.internal)(?::\d+)?\/api\/(?:chat|generate|tags|show|pull|push|create|copy|delete|embed|embeddings|ps|version|blobs)\b/i,
   },
   // Nume ambigue în limbaj natural: le prindem numai în forma de produs/config.
   { nume: 'together-ai', re: /\btogether\.ai\b|\bTOGETHER_(?:API|KEY|MODEL)\b|\bprovider[^\n]{0,30}\btogether\b/i },
