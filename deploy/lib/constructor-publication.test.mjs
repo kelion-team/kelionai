@@ -44,6 +44,45 @@ const shellFunction = (source, name) => {
   assert.ok(end > start, `funcția shell ${name} nu poate fi extrasă`)
   return source.slice(start, end + 2)
 }
+const runtimeFixture = (cutover) => {
+  const runtimeAllowed = cutover.match(/runtime\.env\)\s+allowed_names='([^']+)'/)
+  assert.ok(runtimeAllowed, 'allowlist-ul runtime nu poate fi extras')
+  const overrides = new Map([
+    ['NODE_ENV', 'production'],
+    ['PORT', '8080'],
+    ['PUBLIC_APP_ORIGIN', 'https://kelionai.app'],
+    ['FRONTEND_ORIGIN', 'https://kelionai.app'],
+    ['GOOGLE_REDIRECT_URI', 'https://kelionai.app/auth/google/callback'],
+    ['OPENAI_API_KEY_FILE', '/run/secrets/openai-project-key'],
+    ['DATABASE_URL_FILE', '/run/secrets/database-url'],
+    ['SESSION_SECRET_FILE', '/run/secrets/session-secret'],
+    ['GOOGLE_CLIENT_SECRET_FILE', '/run/secrets/google-client-secret'],
+    ['GOOGLE_TOKEN_ENCRYPTION_KEY_FILE', '/run/secrets/google-token-encryption-key'],
+    ['CODEX_WORKER_SECRET_FILE', '/run/secrets/codex-worker-secret'],
+    ['CONSTRUCTOR_PUBLISHER_SECRET_FILE', '/run/secrets/constructor-publisher-secret'],
+    ['CONSTRUCTOR_RELEASE_SECRET_FILE', '/run/secrets/constructor-release-secret'],
+    ['GITHUB_RELEASE_OAUTH_TOKEN_FILE', '/run/secrets/github-release-oauth-token'],
+    ['BROWSER_WORKER_SOCKET', '/run/kelion-browser-api/browser.sock'],
+    ['BROWSER_WORKER_SECRET_FILE', '/run/secrets/browser-worker-secret'],
+    ['CONVERTER_WORKER_SOCKET', '/run/kelion-converter-api/converter.sock'],
+    ['CONVERTER_WORKER_SECRET_FILE', '/run/secrets/converter-worker-secret'],
+    ['REVOLUT_MERCHANT_SECRET_KEY_FILE', '/run/secrets/revolut-merchant-secret-key'],
+    ['REVOLUT_WEBHOOK_SIGNING_SECRET_FILE', '/run/secrets/revolut-webhook-signing-secret'],
+    ['VAPID_PRIVATE_KEY_FILE', '/run/secrets/vapid-private-key'],
+    ['CODEX_WORKER_ENABLED', '0'],
+    ['CONSTRUCTOR_PUBLISHER_ENABLED', '0'],
+    ['CONSTRUCTOR_RELEASE_ENABLED', '0'],
+    ['CONSTRUCTOR_RETRY_BASE_SECONDS', '60'],
+    ['CONSTRUCTOR_RETRY_MAX_SECONDS', '1800'],
+    ['CONSTRUCTOR_EXTERNAL_RETRY_SECONDS', '900'],
+    ['CONSTRUCTOR_REQUIRED_CHECKS', 'verify,container-isolation'],
+  ])
+  const names = runtimeAllowed[1].split(' ')
+  return {
+    names,
+    lines: names.map((name) => `${name}=${overrides.get(name) ?? ''}`).join('\n'),
+  }
+}
 
 test('remedierea ACL VPS păstrează valorile și aplică exact contractul canonic', () => {
   const workflow = read('.github/workflows/vps-fix-acl.yml')
@@ -886,6 +925,7 @@ test('contractul live separă porțile PR de porțile release post-merge', () =>
 
 test('rescrierea runtime.env din control rulează cu AWK-ul de sistem', () => {
   const control = read('.github/workflows/vps-run.yml')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const commandStart = control.indexOf('          awk -F= \\')
   const programMarker = '-v required_checks="$constructor_required_checks" \''
   const markerStart = control.indexOf(programMarker, commandStart)
@@ -897,12 +937,21 @@ test('rescrierea runtime.env din control rulează cu AWK-ul de sistem', () => {
 
   const sandbox = mkdtempSync(join(tmpdir(), 'kelion-runtime-rewrite-'))
   const runtime = join(sandbox, 'runtime.env')
-  writeFileSync(runtime, [
-    'NODE_ENV=production',
-    'CONSTRUCTOR_RETRY_MAX_SECONDS=999',
-    'CONSTRUCTOR_REQUIRED_CHECKS=stale',
-    '',
-  ].join('\n'))
+  const migrated = join(sandbox, 'migrated.env')
+  const { lines: currentRuntime } = runtimeFixture(cutover)
+  const legacyMissing = new Set([
+    'CONSTRUCTOR_RETRY_BASE_SECONDS',
+    'CONSTRUCTOR_RETRY_MAX_SECONDS',
+    'CONSTRUCTOR_EXTERNAL_RETRY_SECONDS',
+    'CONSTRUCTOR_REQUIRED_CHECKS',
+    'GITHUB_RELEASE_OAUTH_TOKEN_FILE',
+    'GOOGLE_TTS_VOICE',
+  ])
+  const legacyRuntime = currentRuntime
+    .split('\n')
+    .filter((line) => !legacyMissing.has(line.slice(0, line.indexOf('='))))
+    .join('\n')
+  writeFileSync(runtime, `${legacyRuntime}\n`)
 
   try {
     const result = spawnSync('awk', [
@@ -917,16 +966,32 @@ test('rescrierea runtime.env din control rulează cu AWK-ul de sistem', () => {
 
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stderr, '')
+    writeFileSync(migrated, result.stdout)
     const lines = result.stdout.trimEnd().split('\n')
-    assert.equal(lines.filter((line) => line === 'CONSTRUCTOR_RETRY_MAX_SECONDS=1800').length, 1)
-    assert.equal(lines.filter((line) => line === 'CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation,current-tree,merge-policy').length, 1)
     for (const expected of [
       'CODEX_WORKER_ENABLED=1',
       'CONSTRUCTOR_PUBLISHER_ENABLED=1',
       'CONSTRUCTOR_RELEASE_ENABLED=1',
       'CONSTRUCTOR_RETRY_BASE_SECONDS=60',
+      'CONSTRUCTOR_RETRY_MAX_SECONDS=1800',
       'CONSTRUCTOR_EXTERNAL_RETRY_SECONDS=900',
-    ]) assert.ok(lines.includes(expected), `runtime.env nu conține ${expected}`)
+      'CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation,current-tree,merge-policy',
+      'GITHUB_RELEASE_OAUTH_TOKEN_FILE=/run/secrets/github-release-oauth-token',
+      'GOOGLE_TTS_VOICE=Charon',
+    ]) assert.equal(lines.filter((line) => line === expected).length, 1,
+      `runtime.env nu conține exact o apariție ${expected}`)
+
+    const validator = [
+      'set -euo pipefail',
+      shellFunction(cutover, 'validate_text_file_bytes'),
+      shellFunction(cutover, 'validate_env_file'),
+      'validate_env_file "$1" runtime.env',
+    ].join('\n')
+    const validation = spawnSync(bashExecutable, ['-c', validator, 'validate-migrated-runtime', migrated], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    assert.equal(validation.status, 0, validation.stderr)
   } finally {
     rmSync(sandbox, { recursive: true, force: true })
   }
@@ -1892,40 +1957,7 @@ if validate_secret_file "$test_root/nul"; then exit 22; fi
 
 test('allowlist-ul runtime respinge newline injection și chei necunoscute', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
-  const runtimeAllowed = cutover.match(/runtime\.env\)\s+allowed_names='([^']+)'/)
-  assert.ok(runtimeAllowed, 'allowlist-ul runtime nu poate fi extras')
-  const overrides = new Map([
-    ['NODE_ENV', 'production'],
-    ['PORT', '8080'],
-    ['PUBLIC_APP_ORIGIN', 'https://kelionai.app'],
-    ['FRONTEND_ORIGIN', 'https://kelionai.app'],
-    ['GOOGLE_REDIRECT_URI', 'https://kelionai.app/auth/google/callback'],
-    ['OPENAI_API_KEY_FILE', '/run/secrets/openai-project-key'],
-    ['DATABASE_URL_FILE', '/run/secrets/database-url'],
-    ['SESSION_SECRET_FILE', '/run/secrets/session-secret'],
-    ['GOOGLE_CLIENT_SECRET_FILE', '/run/secrets/google-client-secret'],
-    ['GOOGLE_TOKEN_ENCRYPTION_KEY_FILE', '/run/secrets/google-token-encryption-key'],
-    ['CODEX_WORKER_SECRET_FILE', '/run/secrets/codex-worker-secret'],
-    ['CONSTRUCTOR_PUBLISHER_SECRET_FILE', '/run/secrets/constructor-publisher-secret'],
-    ['CONSTRUCTOR_RELEASE_SECRET_FILE', '/run/secrets/constructor-release-secret'],
-    ['GITHUB_RELEASE_OAUTH_TOKEN_FILE', '/run/secrets/github-release-oauth-token'],
-    ['BROWSER_WORKER_SOCKET', '/run/kelion-browser-api/browser.sock'],
-    ['BROWSER_WORKER_SECRET_FILE', '/run/secrets/browser-worker-secret'],
-    ['CONVERTER_WORKER_SOCKET', '/run/kelion-converter-api/converter.sock'],
-    ['CONVERTER_WORKER_SECRET_FILE', '/run/secrets/converter-worker-secret'],
-    ['REVOLUT_MERCHANT_SECRET_KEY_FILE', '/run/secrets/revolut-merchant-secret-key'],
-    ['REVOLUT_WEBHOOK_SIGNING_SECRET_FILE', '/run/secrets/revolut-webhook-signing-secret'],
-    ['VAPID_PRIVATE_KEY_FILE', '/run/secrets/vapid-private-key'],
-    ['CODEX_WORKER_ENABLED', '0'],
-    ['CONSTRUCTOR_PUBLISHER_ENABLED', '0'],
-    ['CONSTRUCTOR_RELEASE_ENABLED', '0'],
-    ['CONSTRUCTOR_RETRY_BASE_SECONDS', '60'],
-    ['CONSTRUCTOR_RETRY_MAX_SECONDS', '1800'],
-    ['CONSTRUCTOR_EXTERNAL_RETRY_SECONDS', '900'],
-    ['CONSTRUCTOR_REQUIRED_CHECKS', 'verify,container-isolation'],
-  ])
-  const runtimeNames = runtimeAllowed[1].split(' ')
-  const runtimeLines = runtimeNames.map((name) => `${name}=${overrides.get(name) ?? ''}`).join('\n')
+  const { names: runtimeNames, lines: runtimeLines } = runtimeFixture(cutover)
   const provision = read('.github/workflows/vps-set-env.yml')
   const payloadStart = provision.indexOf("env_payload=$(printf '%s\\n'")
   const payload = provision.slice(payloadStart, provision.indexOf('\n\n          umask 077', payloadStart))
