@@ -36,6 +36,26 @@ describe('chat route durable replay wiring', () => {
     expect(afterClaim).toContain('saveChatMessageOnce({')
   })
 
+  it('returns missing brain configuration before debit and SSE after replay lookup', () => {
+    const replay = chat.indexOf("if (replayClaim.kind === 'replay')")
+    const directDevice = chat.indexOf('if (deviceCmd)')
+    const directGesture = chat.indexOf('if (gestureCmd)')
+    const unavailable = chat.indexOf('if (!config.openai.key && !voceAmbianta)')
+    const debit = chat.indexOf('const debit = await debitWalletMinorAtomar')
+    const stream = chat.indexOf("// Stream the brain's reply back as SSE events")
+    const guard = chat.slice(unavailable, debit)
+
+    expect(replay).toBeGreaterThan(0)
+    expect(directDevice).toBeGreaterThan(replay)
+    expect(directGesture).toBeGreaterThan(directDevice)
+    expect(unavailable).toBeGreaterThan(directGesture)
+    expect(debit).toBeGreaterThan(unavailable)
+    expect(stream).toBeGreaterThan(debit)
+    expect(guard).toContain("code: 'brain_not_configured'")
+    expect(guard).toContain('httpStatus: 503')
+    expect(guard).toContain("return reply.code(503).send({ error: 'brain_not_configured' })")
+  })
+
   it('expires retained replay text at startup and in the retention timer', () => {
     expect(index.match(/expireChatReplayResults\(\)/g)?.length).toBeGreaterThanOrEqual(2)
   })

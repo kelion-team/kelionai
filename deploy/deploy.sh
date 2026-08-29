@@ -1760,17 +1760,33 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
 fi
 
 # Jurnalele runtime/activare sunt recuperate cu helperul instalat care le-a
-# creat. Abia după ce starea veche este coerentă putem înlocui helperul cu
-# versiunea din bundle-ul candidat.
+# creat. Un helper vechi poate însă refuza chiar jurnalul legitim pe care l-a
+# scris (de exemplu jurnalul de activare inclus de propriul glob). În acel caz,
+# validăm unitatea candidatului și îl instalăm atomic numai pentru recovery-ul
+# jurnalizat; niciun helper nu este înlocuit pe un host fără jurnal de recovery.
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
   || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+  [ -f "$BUNDLE_DIR/lib/runtime-config-cutover.sh" ] && [ ! -L "$BUNDLE_DIR/lib/runtime-config-cutover.sh" ] \
+    || die 'helperul runtime candidat din bundle lipsește'
+  [ -f "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service" ] \
+    && [ ! -L "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service" ] \
+    || die 'unitatea recovery runtime candidat din bundle lipsește'
+  if ! systemd-analyze verify "$BUNDLE_DIR/systemd/kelion-runtime-config-recovery.service"; then
+    die 'unitatea recovery runtime candidat din bundle este invalidă'
+  fi
   [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500:1' ] \
     || die 'helperul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
   [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/config/compose.production.yml")" = '0:0:444:1' ] \
     || die 'compose-ul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
+  install_recovery_artifact "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" root root 0500 \
+    || die 'helperul candidat nu a putut fi instalat atomic pentru recovery'
+  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500:1' ] \
+    && cmp -s -- "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+    || die 'helperul candidat instalat pentru recovery diferă de bundle'
   exec 9>&8
   KELION_CUTOVER_LOCK_HELD=1 \
   KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \

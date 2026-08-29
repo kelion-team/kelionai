@@ -108,6 +108,17 @@ describe('frontend chat retry identity', () => {
     expect(keys).toEqual([REQUEST_ID, REQUEST_ID])
   })
 
+  it('propagates a pre-stream unavailable brain as its stable configuration code', async () => {
+    transport.apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: 'brain_not_configured',
+    }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
+    }))
+
+    await expect(readTurn()).rejects.toThrow('brain_not_configured')
+  })
+
   it('recovers a broken partial stream from terminal storage without duplicating its prefix', async () => {
     transport.apiFetch
       .mockResolvedValueOnce(brokenSse('Email tr'))

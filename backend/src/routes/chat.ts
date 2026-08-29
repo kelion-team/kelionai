@@ -1007,10 +1007,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // session contains identity only and cannot expose or replay this token.
     const googleRefreshToken = await getGoogleRefreshToken(user.email).catch(() => '')
 
-    // OpenAI is the single online brain. If its runtime key is missing, the
-    // streaming safety net returns a clear error in
-    // the user's language — which is why there is no longer a 503
-    // "brain_not_configured" guard here.
+    // OpenAI is the single online brain. A fresh ordinary turn without its
+    // runtime key must end before SSE so the browser receives the stable,
+    // localized `brain_not_configured` contract. Completed replay and ambient
+    // voice retain their existing, deliberately different recovery paths.
     const tSosire = Date.now() // contorul serverului: sosire → creier
     const rawMessages = req.body?.messages
     const image = req.body?.image
@@ -1392,6 +1392,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     if (gestureCmd) {
       await instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
       return
+    }
+
+    // A claimed turn must be finalized before returning a non-stream error;
+    // otherwise its idempotency key remains leased and the browser sees a
+    // misleading `turn_in_progress` instead of the actual configuration state.
+    // Ambient audio deliberately reaches the existing silent gate below: it
+    // may not be addressed to Kelion and must not create a visible bubble.
+    if (!config.openai.key && !voceAmbianta) {
+      await failChatTurn({
+        userEmail: user.email,
+        idempotencyKey: clientKey,
+        leaseToken: replayLeaseToken,
+        text: '',
+        code: 'brain_not_configured',
+        httpStatus: 503,
+      })
+      return reply.code(503).send({ error: 'brain_not_configured' })
     }
 
     // Access tokens are short-lived request data and are never copied into the
