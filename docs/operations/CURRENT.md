@@ -1,55 +1,34 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T19:52:00Z`
+Actualizat: `2026-08-29T20:18:21Z`
 
 ## Stare verificată
 
-- Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-  Vârful remote și release-ul activ sunt
-  `ff6d2e30991b4f35adaf68f4b3a88ada8504d350`.
-- Diagnoza VPS a confirmat containerele slotului verde sănătoase și
-  răspuns `200` pentru `/livez`, `/readyz` și `/api/version`. Interfața
-  publică rămâne disponibilă.
-- Remedierea ACL pentru Codex CLI este inclusă în release-ul curent, dar
-  activarea Constructorului nu ajunge încă la proba CLI.
-- `vps-constructor-control` run `33254987691`, inclusiv relansarea
-  controlată, și recovery-ul generic run `33255194656` se opresc
-  fail-closed cu mesajul că snapshoturile de activare orfane nu pot fi
-  curățate sigur.
-- Cauza este deterministă în `runtime-config-cutover.sh`:
-  `garbage_collect_activations` iterează globul `constructor-activation.*`,
-  care include și fișierul legitim `constructor-activation.journal`.
-  Recovery-ul quiesced păstrează intenționat jurnalul, apoi garbage
-  collectorul îl respinge fiindcă nu este director.
-- Toate cele trei timere Constructor sunt inactive, iar stamp-ul de
-  execuție este retras. Constructorul rămâne fail-closed fără să oprească
-  release-ul web activ.
-- Cheia OpenAI API de producție rămâne revocată; chatul și vocea online
-  nu sunt declarate funcționale până la configurarea explicită a unei
-  chei valide sau a modului suportat „API dezactivat”.
-- Remedierea este pregătită pe ramura
-  `chore/constructor-activation-journal-gc-20260829`: exclude numai calea
-  exactă a jurnalului înainte de validarea directoarelor, păstrează
-  refuzul pentru orice alt nod neașteptat, actualizează pinul SHA-256 al
-  helperului compatibil și adaugă regresia în suita Constructor deja
-  obligatorie în CI.
+- Ținta unică de producție este `master`, la
+  `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
+- Release-ul de producție `33272696377` a eșuat înainte de schimbarea
+  versiunii live: helperul persistent vechi a refuzat jurnalul legitim de
+  activare înainte să poată instala helperul corect din bundle.
+- Candidatul `93f3b4103b2542b96db484d3dda3f2b0e02abb04` instalează atomic
+  helperul candidat, după validarea unității, numai când există un jurnal de
+  recovery; apoi rulează recovery-ul sub lock. Hosturile fără jurnal păstrează
+  ordinea normală de bootstrap.
+- Același candidat închide corect o tură de chat fără cheie OpenAI cu
+  `503 brain_not_configured`, înainte de debitare și SSE. Replay-urile
+  finalizate și vocea ambientală își păstrează căile fail-closed existente.
+- O cheie OpenAI de proiect validă rămâne necesară pentru chatul și vocea
+  online. Un avertisment pentru cheie revocată, credit insuficient, plată
+  pending sau citire nereușită este un semnal real și nu trebuie ascuns.
+- Nu există o dovadă nouă a versiunii live din această sesiune.
 
 ## Următorul pas sigur
 
-1. Deschide PR-ul unic pentru remedierea garbage collectorului și lasă
-   `verify` plus `container-isolation` să treacă integral.
-2. Îmbină prin rebase numai pe verde și confirmă deploy-ul noului `master`.
-3. Rulează recovery-ul Constructor, apoi `activate-worker-publisher`;
-   acceptă rezultatul numai după proba `codex --version` ca
-   `kelion-codex` și starea activă a celor două timere.
-4. Rulează ceremonia oficială `VPS Codex Login Bridge`, verifică
-   `codex login status`, apoi activează și probează release-ul Constructor.
-5. Separat, repară modul explicit „OpenAI API dezactivat” sau rotește o
-   cheie validă înainte de a relua testarea chatului și vocii online.
-
-## Legături canonice
-
-- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Activare/retry eșuat: <https://github.com/kelion-team/kelionai/actions/runs/33254987691>
-- Recovery eșuat: <https://github.com/kelion-team/kelionai/actions/runs/33255194656>
-- Versiune live: <https://kelionai.app/api/release-proof>
+1. Rulează porțile complete pentru candidatul curent și deschide/integrează
+   release train-ul numai pe verde.
+2. Confirmă release-ul automat pentru noul `master` cu health și
+   `/api/release-proof`; acceptă deploy-ul numai dacă commitul live coincide.
+3. Rotește cheia OpenAI project-scoped în secret store, fără a o introduce în
+   cod sau documentație, apoi verifică chatul text, vocea live și starea
+   OpenAI din admin.
+4. După recovery reușit, reactivează Constructorul și acceptă starea numai
+   după probele Codex, worker, publisher și release.
