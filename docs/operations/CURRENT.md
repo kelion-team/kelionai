@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T00:47:35Z`
+Actualizat: `2026-08-29T00:50:44Z`
 
 ## Stare verificată
 
@@ -25,7 +25,7 @@ Actualizat: `2026-08-29T00:47:35Z`
   caracter de control interzis din cele opt unități systemd canonice.
 - Remedierea curentă elimină byte-ul `CR`, verifică același contract strict de
   bytes în installer înainte de publicare și rulează validatorii reali pe toate
-  cele opt unități în regresie. PR `#1503` publică remedierea și adaugă exact
+  cele opt unități în regresie. PR `#1504` publică remedierea și adaugă exact
   unitatea sync în scope-ul VPS permis de merge-policy. Suita relevantă este verde `80/80`;
   `bash -n`, verificarea workflow-urilor, sintaxei, hardcodărilor și
   `git diff --check` sunt verzi.
@@ -52,7 +52,7 @@ Actualizat: `2026-08-29T00:47:35Z`
 
 ## Legături canonice
 
-- PR contract bytes systemd: <https://github.com/kelion-team/kelionai/pull/1503>
+- PR contract bytes systemd: <https://github.com/kelion-team/kelionai/pull/1504>
 - PR migrare runtime: <https://github.com/kelion-team/kelionai/pull/1501>
 - CI exact `02d0835`: <https://github.com/kelion-team/kelionai/actions/runs/33223120345>
 - Build OCI exact `02d0835`: <https://github.com/kelion-team/kelionai/actions/runs/33223350633>
