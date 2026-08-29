@@ -85,6 +85,13 @@ export function optiuniPool(url: string): pg.PoolConfig {
     max: numar('DB_POOL_MAX', 10, 1),
     idleTimeoutMillis: numar('DB_IDLE_TIMEOUT_MS', 30_000, 1_000),
     connectionTimeoutMillis: numar('DB_CONNECT_TIMEOUT_MS', 10_000, 1_000),
+    // Limite de sesiune, active chiar pentru primul BEGIN/SET. Deadline-urile
+    // apelanților opresc răspunsul HTTP, iar acestea împiedică interogarea
+    // abandonată să ocupe permanent o conexiune din pool.
+    statement_timeout: numar('DB_STATEMENT_TIMEOUT_MS', 12_000, 1_000),
+    lock_timeout: numar('DB_LOCK_TIMEOUT_MS', 8_000, 1_000),
+    idle_in_transaction_session_timeout: numar('DB_IDLE_TRANSACTION_TIMEOUT_MS', 15_000, 1_000),
+    query_timeout: numar('DB_QUERY_TIMEOUT_MS', 15_000, 1_000),
     // Conexiunile nu îmbătrânesc la infinit: una reciclată din vreme e una pe
     // care mentenanța gazdei nu mai are ce să ne-o taie sub mână.
     maxLifetimeSeconds: numar('DB_MAX_LIFETIME_SEC', 1_800, 1),

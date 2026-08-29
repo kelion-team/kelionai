@@ -142,3 +142,28 @@ export interface UserActivityRow {
    *  dinaintea scutirilor) se afișează cu explicația, nu ca datorie vie. */
   scutit: boolean
 }
+
+/** Safe, public reason for an unavailable OpenAI Realtime voice. Provider
+ * bodies/messages never cross this contract. */
+export type VocalLiveFailureCode =
+  | 'unauthorized'
+  | 'invalid_key'
+  | 'quota'
+  | 'model_access'
+  | 'not_configured'
+  | 'configuration'
+  | 'idle_timeout'
+  | 'session_limit'
+  | 'billing_conflict'
+  | 'billing_unavailable'
+  | 'rate_limit'
+  | 'provider_5xx'
+  | 'transport'
+
+export interface VocalLiveCapability {
+  disponibil: boolean
+  model: string
+  voce: string
+  code?: VocalLiveFailureCode
+  retryable: boolean
+}

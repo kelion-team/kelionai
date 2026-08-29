@@ -3,9 +3,19 @@ import { config } from '../config.js'
 import { recordProviderUsage } from '../db.js'
 import { readSSE } from './sse.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall, ResponseCarryItem } from './brainContract.js'
-import { getSubscriptionCredentials, isSubscriptionMode, CHATGPT_ACCOUNT_ID_HEADER } from './chatgptSubscription.js'
+import {
+  cacheOpenAIHealthProbe,
+  classifyOpenAIError,
+  probeOpenAIHealth,
+  type OpenAIAuthMode,
+  type OpenAIHealthResult,
+} from './openaiHealth.js'
+
+export { probeOpenAIHealth } from './openaiHealth.js'
+export type { OpenAIHealthResult } from './openaiHealth.js'
 
 const OPENAI_BASE = 'https://api.openai.com/v1'
+const PROVIDER_USAGE_WRITE_TIMEOUT_MS = 5_000
 
 type ResponseInput = Record<string, unknown>
 
@@ -32,6 +42,7 @@ interface OpenAIResponse {
   usage?: {
     input_tokens?: number
     output_tokens?: number
+    total_tokens?: number
     input_tokens_details?: { cached_tokens?: number }
     output_tokens_details?: { reasoning_tokens?: number }
   }
@@ -39,7 +50,7 @@ interface OpenAIResponse {
 }
 
 export function openaiAvailable(): boolean {
-  return Boolean(config.openai?.key) || isSubscriptionMode()
+  return Boolean(config.openai?.key)
 }
 
 function contentToInput(content: OrMessage['content'], assistant: boolean): unknown {
@@ -140,34 +151,24 @@ export function toResponsesBody(
   stream: boolean,
 ): Record<string, unknown> {
   const converted = toResponsesInput(messages)
-  const subMode = isSubscriptionMode()
   const body: Record<string, unknown> = {
     model,
     input: converted.input,
     stream,
     store: false,
+    max_output_tokens: opts.maxTokens ?? 1024,
+    include: ['reasoning.encrypted_content'],
   }
-  // Endpoint-ul Codex (abonament) NU acceptă max_output_tokens, safety_identifier,
-  // include, sau temperature. Le omitem în modul subscription.
-  if (!subMode) {
-    body.max_output_tokens = opts.maxTokens ?? 1024
-    body.include = ['reasoning.encrypted_content']
-  }
-  if (!subMode && opts.usageContext?.userEmail) {
+  if (opts.usageContext?.userEmail) {
     body.safety_identifier = createHmac('sha256', config.sessionSecret)
       .update(`openai-safety\0${opts.usageContext.userEmail.trim().toLowerCase()}`)
       .digest('hex')
   }
-  // instructions e OBLIGATORIU în modul subscription (non-empty string)
-  if (converted.instructions) {
-    body.instructions = converted.instructions
-  } else if (subMode) {
-    body.instructions = 'You are a helpful assistant.'
-  }
+  if (converted.instructions) body.instructions = converted.instructions
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   // Reasoning models reject temperature. Keep it only for explicitly
   // non-reasoning legacy models configured by an operator.
-  if (!subMode && opts.temperature != null && !/^gpt-5(?:\.|-|$)/i.test(model)) body.temperature = opts.temperature
+  if (opts.temperature != null && !/^gpt-5(?:\.|-|$)/i.test(model)) body.temperature = opts.temperature
   // gpt-4.1, gpt-4.1-mini, gpt-4o etc. NU suportă reasoning.effort —
   // doar modelele o-series (o3, o4-mini) și gpt-5 îl acceptă. Dacă
   // trimitem reasoning pe un model care nu-l suportă, OpenAI dă 400.
@@ -181,27 +182,10 @@ export function toResponsesBody(
   return body
 }
 
-async function openaiFetch(body: unknown, timeoutMs: number): Promise<Response> {
-  // Modul abonament ChatGPT Pro: folosește tokenul OAuth din ~/.codex/auth.json
-  // contra chatgpt.com/backend-api/codex, plătit din abonamentul $200/lună.
-  if (isSubscriptionMode()) {
-    const creds = await getSubscriptionCredentials()
-    if (creds) {
-      return fetch(`${creds.baseUrl}/responses`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${creds.accessToken}`,
-          [CHATGPT_ACCOUNT_ID_HEADER]: creds.accountId,
-          'Content-Type': 'application/json',
-          'originator': 'codex_cli_rs',
-          'OpenAI-Beta': 'responses=experimental',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-    }
-  }
-  // Modul cheie API (legacy/prod): api.openai.com/v1 cu sk-...
+async function openaiFetch(
+  body: unknown,
+  timeoutMs: number,
+): Promise<Response> {
   return fetch(`${OPENAI_BASE}/responses`, {
     method: 'POST',
     headers: {
@@ -282,28 +266,54 @@ async function meterResponse(response: OpenAIResponse, opts: BrainCallOpts, fall
 }> {
   const responseId = String(response.id ?? '')
   if (!responseId) throw new Error('openai_usage_missing_response_id')
-  const inputTokens = Number(response.usage?.input_tokens ?? 0)
-  const outputTokens = Number(response.usage?.output_tokens ?? 0)
+  if (
+    !response.usage
+    || typeof response.usage.input_tokens !== 'number'
+    || typeof response.usage.output_tokens !== 'number'
+    || typeof response.usage.total_tokens !== 'number'
+  ) throw new Error('openai_usage_missing')
+  const inputTokens = response.usage.input_tokens
+  const outputTokens = response.usage.output_tokens
+  const totalTokens = response.usage.total_tokens
   const cachedInputTokens = Number(response.usage?.input_tokens_details?.cached_tokens ?? 0)
   const reasoningOutputTokens = Number(response.usage?.output_tokens_details?.reasoning_tokens ?? 0)
-  const ints = [inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens]
-  if (ints.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+  const ints = [inputTokens, outputTokens, totalTokens, cachedInputTokens, reasoningOutputTokens]
+  if (
+    ints.some((value) => !Number.isSafeInteger(value) || value < 0)
+    || totalTokens !== inputTokens + outputTokens
+    || cachedInputTokens > inputTokens
+    || reasoningOutputTokens > outputTokens
+  ) {
     throw new Error('openai_usage_invalid')
   }
   const model = String(response.model ?? fallbackModel)
   const serviceTier = typeof response.service_tier === 'string' ? response.service_tier.slice(0, 40) : null
   const context = opts.usageContext ?? { userEmail: 'system', surface: 'unattributed' }
-  await recordProviderUsage({
-    responseId,
-    userEmail: context.userEmail,
-    surface: context.surface,
-    model,
-    serviceTier,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    reasoningOutputTokens,
-  })
+  let deadline: ReturnType<typeof setTimeout> | null = null
+  try {
+    await Promise.race([
+      recordProviderUsage({
+        responseId,
+        userEmail: context.userEmail,
+        surface: context.surface,
+        model,
+        serviceTier,
+        inputTokens,
+        outputTokens,
+        cachedInputTokens,
+        reasoningOutputTokens,
+      }),
+      new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error('provider_usage_write_timeout')),
+          PROVIDER_USAGE_WRITE_TIMEOUT_MS,
+        )
+        deadline.unref?.()
+      }),
+    ])
+  } finally {
+    if (deadline) clearTimeout(deadline)
+  }
   return { responseId, model, serviceTier, inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens }
 }
 
@@ -411,24 +421,49 @@ export async function openaiResponsesStream(
   }
 }
 
-export async function openaiHealth(): Promise<{ ok: boolean; serving: boolean; reason?: 'quota' | 'error' | 'no_key' }> {
-  if (!openaiAvailable()) return { ok: false, serving: false, reason: 'no_key' }
-  try {
-    const response = await openaiFetch({
-      model: config.openai.luna,
-      input: 'Reply with ok.',
-      max_output_tokens: 8,
-      reasoning: { effort: 'none' },
-      store: false,
-    }, 8_000)
-    if (response.ok) return { ok: true, serving: true }
-    const body = (await response.text().catch(() => '')).toLowerCase()
-    return {
-      ok: true,
-      serving: false,
-      reason: response.status === 429 || /quota|rate.?limit|billing/.test(body) ? 'quota' : 'error',
-    }
-  } catch {
-    return { ok: false, serving: false, reason: 'error' }
-  }
+function authModeOpenAI(): OpenAIAuthMode {
+  return config.openai?.key ? 'api_key' : 'unknown'
+}
+
+async function probeOpenAIHealthOnce(): Promise<OpenAIHealthResult> {
+  const model = config.openai.luna
+  const authMode = authModeOpenAI()
+  const body = toResponsesBody(
+    model,
+    [
+      { role: 'system', content: 'This is a provider health probe. Return only ok.' },
+      { role: 'user', content: 'ok' },
+    ],
+    [],
+    {
+      maxTokens: 8,
+      reasoning: 'none',
+      usageContext: { userEmail: 'system', surface: 'openai_health' },
+    },
+    false,
+  )
+  return probeOpenAIHealth(authMode !== 'unknown', () => openaiFetch(body, 8_000), {
+    authMode,
+    onServing: async (response) => {
+      const payload = await response.json() as OpenAIResponse
+      // Even a semantically failed/incomplete 2xx response can be billable.
+      // Persist every provider response that carries an id before deciding
+      // whether it proves the service healthy.
+      await meterResponse(payload, {
+        usageContext: { userEmail: 'system', surface: 'openai_health' },
+      }, model)
+      if (
+        payload.error
+        || payload.status === 'failed'
+        || payload.status === 'incomplete'
+        || payload.status === 'cancelled'
+      ) return classifyOpenAIError(400, payload.error, authMode)
+    },
+  })
+}
+
+const cachedOpenAIHealth = cacheOpenAIHealthProbe(probeOpenAIHealthOnce)
+
+export function openaiHealth(): Promise<OpenAIHealthResult> {
+  return cachedOpenAIHealth()
 }

@@ -174,6 +174,15 @@ export interface Strings {
   offlineNoVision?: string
   // ── THE VOICE, HONEST (audit Aug 2: the real reason was thrown away) ─────
   voiceDownTemp: string
+  voiceInvalidKey: string
+  voiceProviderQuota: string
+  voiceModelAccess: string
+  voiceNotConfigured: string
+  voiceIdleTimeout: string
+  voiceSessionLimit: string
+  voiceBillingConflict: string
+  voiceBillingUnavailable: string
+  voiceRetryStopped: string
   voiceNeedLogin: string
   voiceNeedCredit: string
   asrLost: string
@@ -418,6 +427,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'I attached a document — read it and tell me what it contains.',
     voiceDownTemp:
       'My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.',
+    voiceInvalidKey:
+      'Live voice is off because the OpenAI key configured on the server is invalid. The administrator must correct it.',
+    voiceProviderQuota:
+      'Live voice is off because the OpenAI API project has no available quota. This is separate from your Kelion credit.',
+    voiceModelAccess:
+      'Live voice is off because the OpenAI API project cannot access the configured Realtime model.',
+    voiceNotConfigured:
+      'Live voice is off because its OpenAI server configuration is missing or invalid.',
+    voiceIdleTimeout:
+      'Live voice stopped after a period of inactivity. Press the microphone when you want to speak again.',
+    voiceSessionLimit:
+      'Live voice is already open in another tab or device. Close it there, then press the microphone here.',
+    voiceBillingConflict:
+      'Live voice stopped to prevent a duplicate charge. The administrator must check the billing record before trying again.',
+    voiceBillingUnavailable:
+      'Live voice stopped because usage could not be recorded safely. The administrator must check billing storage before trying again.',
+    voiceRetryStopped:
+      'Live voice still cannot connect. Automatic retries have stopped; press the microphone to start a new attempt.',
     voiceNeedLogin: 'The live voice needs you signed in — sign in and I can speak again.',
     voiceNeedCredit:
       'Your credit has run out, so the live voice is paused — typing still works. Top up and the voice comes back.',
@@ -632,6 +659,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'Am atașat un document — citește-l și spune-mi ce conține.',
     voiceDownTemp:
       'Vocea mea live e momentan indisponibilă — dictarea și scrisul merg, iar eu reîncerc singur vocea completă în curând.',
+    voiceInvalidKey:
+      'Vocea live este oprită deoarece cheia OpenAI configurată pe server este invalidă. Administratorul trebuie să o corecteze.',
+    voiceProviderQuota:
+      'Vocea live este oprită deoarece proiectul OpenAI API nu mai are cotă disponibilă. Aceasta este separată de creditul tău Kelion.',
+    voiceModelAccess:
+      'Vocea live este oprită deoarece proiectul OpenAI API nu are acces la modelul Realtime configurat.',
+    voiceNotConfigured:
+      'Vocea live este oprită deoarece configurarea OpenAI de pe server lipsește sau este invalidă.',
+    voiceIdleTimeout:
+      'Vocea live s-a oprit după o perioadă de inactivitate. Apasă microfonul când vrei să vorbești din nou.',
+    voiceSessionLimit:
+      'Vocea live este deja deschisă în alt tab sau pe alt dispozitiv. Oprește-o acolo, apoi apasă microfonul aici.',
+    voiceBillingConflict:
+      'Vocea live s-a oprit pentru a evita o debitare duplicată. Administratorul trebuie să verifice înregistrarea înainte de o nouă încercare.',
+    voiceBillingUnavailable:
+      'Vocea live s-a oprit deoarece utilizarea nu a putut fi înregistrată în siguranță. Administratorul trebuie să verifice stocarea facturării înainte de o nouă încercare.',
+    voiceRetryStopped:
+      'Vocea live tot nu se poate conecta. Am oprit reluările automate; apasă microfonul pentru o încercare nouă.',
     voiceNeedLogin: 'Vocea live cere să fii logat — conectează-te și pot vorbi din nou.',
     voiceNeedCredit:
       'Creditul s-a terminat, așa că vocea live e pe pauză — scrisul merge în continuare. Reîncarcă și vocea revine.',
@@ -815,6 +860,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'Adjunté un documento — léelo y dime qué contiene.',
     voiceDownTemp:
       'Mi voz en vivo no está disponible temporalmente — el dictado y la escritura siguen funcionando, y reintentaré la voz completa pronto.',
+    voiceInvalidKey:
+      'La voz en vivo está desactivada porque la clave de OpenAI configurada en el servidor no es válida. El administrador debe corregirla.',
+    voiceProviderQuota:
+      'La voz en vivo está desactivada porque el proyecto de la API de OpenAI no tiene cuota disponible. Esto es independiente de tu crédito Kelion.',
+    voiceModelAccess:
+      'La voz en vivo está desactivada porque el proyecto de la API de OpenAI no tiene acceso al modelo Realtime configurado.',
+    voiceNotConfigured:
+      'La voz en vivo está desactivada porque falta la configuración de OpenAI del servidor o no es válida.',
+    voiceIdleTimeout:
+      'La voz en vivo se detuvo tras un periodo de inactividad. Pulsa el micrófono cuando quieras volver a hablar.',
+    voiceSessionLimit:
+      'La voz en vivo ya está abierta en otra pestaña o dispositivo. Ciérrala allí y luego pulsa el micrófono aquí.',
+    voiceBillingConflict:
+      'La voz en vivo se detuvo para evitar un cobro duplicado. El administrador debe revisar el registro de cobro antes de volver a intentarlo.',
+    voiceBillingUnavailable:
+      'La voz en vivo se detuvo porque el uso no pudo registrarse de forma segura. El administrador debe revisar el almacenamiento de facturación antes de volver a intentarlo.',
+    voiceRetryStopped:
+      'La voz en vivo sigue sin poder conectarse. Se detuvieron los reintentos automáticos; pulsa el micrófono para iniciar un nuevo intento.',
     voiceNeedLogin: 'La voz en vivo requiere que inicies sesión — inicia sesión y podré hablar de nuevo.',
     voiceNeedCredit:
       'Tu crédito se ha agotado, por lo que la voz en vivo está pausada — la escritura sigue funcionando. Recarga y la voz volverá.',
@@ -979,6 +1042,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'J’ai joint un document — lis-le et dis-moi ce qu’il contient.',
     voiceDownTemp:
       'Ma voix en direct est temporairement indisponible — la dictée et l’écriture fonctionnent toujours, et je réessaierai bientôt la voix complète.',
+    voiceInvalidKey:
+      'La voix en direct est désactivée car la clé OpenAI configurée sur le serveur est invalide. L’administrateur doit la corriger.',
+    voiceProviderQuota:
+      'La voix en direct est désactivée car le projet API OpenAI n’a plus de quota disponible. Cela est distinct de votre crédit Kelion.',
+    voiceModelAccess:
+      'La voix en direct est désactivée car le projet API OpenAI n’a pas accès au modèle Realtime configuré.',
+    voiceNotConfigured:
+      'La voix en direct est désactivée car la configuration OpenAI du serveur est absente ou invalide.',
+    voiceIdleTimeout:
+      'La voix en direct s’est arrêtée après une période d’inactivité. Appuyez sur le microphone pour reparler.',
+    voiceSessionLimit:
+      'La voix en direct est déjà ouverte dans un autre onglet ou appareil. Fermez-la là-bas, puis appuyez sur le microphone ici.',
+    voiceBillingConflict:
+      'La voix en direct s’est arrêtée pour éviter une facturation en double. L’administrateur doit vérifier l’enregistrement avant de réessayer.',
+    voiceBillingUnavailable:
+      'La voix en direct s’est arrêtée car l’utilisation n’a pas pu être enregistrée en toute sécurité. L’administrateur doit vérifier le stockage de facturation avant de réessayer.',
+    voiceRetryStopped:
+      'La voix en direct ne peut toujours pas se connecter. Les tentatives automatiques sont arrêtées ; appuyez sur le microphone pour réessayer.',
     voiceNeedLogin: 'La voix en direct nécessite que vous soyez connecté — connectez-vous et je pourrai reparler.',
     voiceNeedCredit:
       'Votre crédit est épuisé, la voix en direct est donc en pause — l’écriture fonctionne toujours. Rechargez y la voix reviendra.',
@@ -1143,6 +1224,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'Ich habe ein Dokument angehängt — lies es und sag mir, was es enthält.',
     voiceDownTemp:
       'Meine Live-Stimme ist vorübergehend nicht verfügbar — Diktat und Schreiben funktionieren weiterhin, und ich versuche es in Kürze selbst erneut.',
+    voiceInvalidKey:
+      'Die Live-Stimme ist ausgeschaltet, weil der auf dem Server konfigurierte OpenAI-Schlüssel ungültig ist. Der Administrator muss ihn korrigieren.',
+    voiceProviderQuota:
+      'Die Live-Stimme ist ausgeschaltet, weil das OpenAI-API-Projekt kein verfügbares Kontingent hat. Dies ist vom Kelion-Guthaben getrennt.',
+    voiceModelAccess:
+      'Die Live-Stimme ist ausgeschaltet, weil das OpenAI-API-Projekt keinen Zugriff auf das konfigurierte Realtime-Modell hat.',
+    voiceNotConfigured:
+      'Die Live-Stimme ist ausgeschaltet, weil die OpenAI-Serverkonfiguration fehlt oder ungültig ist.',
+    voiceIdleTimeout:
+      'Die Live-Stimme wurde nach einer Zeit der Inaktivität beendet. Drücke das Mikrofon, wenn du wieder sprechen möchtest.',
+    voiceSessionLimit:
+      'Die Live-Stimme ist bereits in einem anderen Tab oder Gerät geöffnet. Beende sie dort und drücke dann hier das Mikrofon.',
+    voiceBillingConflict:
+      'Die Live-Stimme wurde beendet, um eine doppelte Abbuchung zu verhindern. Der Administrator muss den Eintrag vor einem neuen Versuch prüfen.',
+    voiceBillingUnavailable:
+      'Die Live-Stimme wurde beendet, weil die Nutzung nicht sicher erfasst werden konnte. Der Administrator muss den Abrechnungsspeicher vor einem neuen Versuch prüfen.',
+    voiceRetryStopped:
+      'Die Live-Stimme kann weiterhin keine Verbindung herstellen. Automatische Versuche wurden beendet; drücke das Mikrofon für einen neuen Versuch.',
     voiceNeedLogin: 'Für die Live-Stimme musst du angemeldet sein — melde dich an, damit ich wieder sprechen kann.',
     voiceNeedCredit:
       'Dein Guthaben ist aufgebraucht, daher ist die Live-Stimme pausiert — Schreiben funktioniert weiterhin. Lade auf und die Stimme kehrt zurück.',
@@ -1307,6 +1406,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'Ho allegato un documento — leggilo e dimmi cosa contiene.',
     voiceDownTemp:
       'La mia voce dal vivo è temporaneamente non disponibile — la dettatura e la scrittura funzionano ancora e riproverò presto a ripristinare la voce completa.',
+    voiceInvalidKey:
+      'La voce dal vivo è disattivata perché la chiave OpenAI configurata sul server non è valida. L’amministratore deve correggerla.',
+    voiceProviderQuota:
+      'La voce dal vivo è disattivata perché il progetto API OpenAI non ha quota disponibile. Questo è separato dal tuo credito Kelion.',
+    voiceModelAccess:
+      'La voce dal vivo è disattivata perché il progetto API OpenAI non può accedere al modello Realtime configurato.',
+    voiceNotConfigured:
+      'La voce dal vivo è disattivata perché la configurazione OpenAI del server manca o non è valida.',
+    voiceIdleTimeout:
+      'La voce dal vivo si è fermata dopo un periodo di inattività. Premi il microfono quando vuoi parlare di nuovo.',
+    voiceSessionLimit:
+      'La voce dal vivo è già aperta in un’altra scheda o dispositivo. Chiudila lì, poi premi qui il microfono.',
+    voiceBillingConflict:
+      'La voce dal vivo si è fermata per evitare un addebito duplicato. L’amministratore deve controllare la registrazione prima di riprovare.',
+    voiceBillingUnavailable:
+      'La voce dal vivo si è fermata perché non è stato possibile registrare l’utilizzo in modo sicuro. L’amministratore deve controllare l’archivio di fatturazione prima di riprovare.',
+    voiceRetryStopped:
+      'La voce dal vivo non riesce ancora a connettersi. I tentativi automatici sono stati interrotti; premi il microfono per un nuovo tentativo.',
     voiceNeedLogin: 'La voce dal vivo richiede l’accesso — accedi e potrò parlare di nuovo.',
     voiceNeedCredit:
       'Il tuo credito è esaurito, quindi la voce dal vivo è in pausa — la scrittura funziona ancora. Ricarica e la voce tornerà.',
@@ -1471,6 +1588,24 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     docPrompt: 'Anexei um documento — leia-o e me diga o que ele contém.',
     voiceDownTemp:
       'Minha voz ao vivo está temporariamente indisponível — o ditado e a escrita continuam funcionando, e tentarei novamente a voz completa em breve.',
+    voiceInvalidKey:
+      'A voz ao vivo está desativada porque a chave OpenAI configurada no servidor é inválida. O administrador precisa corrigi-la.',
+    voiceProviderQuota:
+      'A voz ao vivo está desativada porque o projeto da API OpenAI não tem cota disponível. Isso é separado do seu crédito Kelion.',
+    voiceModelAccess:
+      'A voz ao vivo está desativada porque o projeto da API OpenAI não tem acesso ao modelo Realtime configurado.',
+    voiceNotConfigured:
+      'A voz ao vivo está desativada porque a configuração OpenAI do servidor está ausente ou inválida.',
+    voiceIdleTimeout:
+      'A voz ao vivo parou após um período de inatividade. Pressione o microfone quando quiser falar novamente.',
+    voiceSessionLimit:
+      'A voz ao vivo já está aberta em outra aba ou dispositivo. Feche-a lá e depois pressione o microfone aqui.',
+    voiceBillingConflict:
+      'A voz ao vivo parou para evitar uma cobrança duplicada. O administrador deve verificar o registro antes de tentar novamente.',
+    voiceBillingUnavailable:
+      'A voz ao vivo parou porque não foi possível registrar o uso com segurança. O administrador deve verificar o armazenamento de faturamento antes de tentar novamente.',
+    voiceRetryStopped:
+      'A voz ao vivo ainda não consegue se conectar. As tentativas automáticas foram interrompidas; pressione o microfone para uma nova tentativa.',
     voiceNeedLogin: 'A voz ao vivo requer que você esteja conectado — entre para que eu possa falar novamente.',
     voiceNeedCredit:
       'Seu crédito acabou, por isso a voz ao vivo está pausada — a escrita continua funcionando. Recarregue e a voz voltará.',

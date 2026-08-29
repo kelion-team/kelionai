@@ -72,13 +72,29 @@ export async function fetchFinance(): Promise<Finance | null> {
 // are credit, roșu = fără (402/0), gri = nu pot verifica. `facturare` = pagina
 // de reîncărcare a furnizorului (click-ul becului duce acolo).
 export type BecCredit = 'verde' | 'rosu' | 'gri'
+export type OpenAIHealthClass =
+  | 'ok'
+  | 'invalid_key'
+  | 'invalid_credentials'
+  | 'insufficient_quota'
+  | 'rate_limited'
+  | 'model_access'
+  | 'bad_request'
+  | 'provider_5xx'
+  | 'transport'
+  | 'metering_unavailable'
+  | 'no_key'
 export interface CreditAIFurnizor {
   furnizor: string
   alimenteaza: string
   cheieConfigurata: boolean
   ramas: { masurat: boolean; valoare?: { cantitate: number; unitate: string }; motiv?: string }
   cheltuitLuna: { masurat: boolean; valoare?: { usd: number }; motiv?: string }
-  serveste?: { masurat: boolean; valoare?: { da: boolean; detaliu?: string }; motiv?: string }
+  serveste?: {
+    masurat: boolean
+    valoare?: { da: boolean; status: number | null; clasa: OpenAIHealthClass; detaliu?: string }
+    motiv?: string
+  }
   facturare?: string
   bec: BecCredit
 }
