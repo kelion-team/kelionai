@@ -1953,7 +1953,7 @@ test('release-ul drenează handoff-urile Constructor după quiesce și înainte 
 
 test('markerul release și helperul de recovery sunt persistate în ordinea sigură', () => {
   const deploy = read('deploy/deploy.sh')
-  const oldRecovery = deploy.indexOf("# Jurnalele runtime/activare sunt recuperate cu helperul instalat")
+  const oldRecovery = deploy.indexOf("# Jurnalele runtime/activare sunt recuperate în mod normal cu helperul care le-a")
   const nextRecovery = deploy.indexOf('# Un SIGKILL/reboot în timpul rotației runtime', oldRecovery)
   const recoveryBootstrap = deploy.slice(oldRecovery, nextRecovery)
   const helperInstalls = [...recoveryBootstrap.matchAll(/install_recovery_artifact "[$]BUNDLE_DIR\/lib\/runtime-config-cutover\.sh"/g)]
