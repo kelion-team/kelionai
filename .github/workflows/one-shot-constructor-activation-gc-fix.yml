@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'retry-one-shot-constructor-gc-repair'
+    if: github.event.head_commit.message == 'retry-one-shot-constructor-gc-repair-v4'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,12 +28,14 @@ jobs:
         with:
           node-version: 22
 
-      - name: Aplică remedierea și regresia în suita existentă
+      - name: Aplică remedierea, pinul și regresia
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          from hashlib import sha256
           from pathlib import Path
+          import re
 
           script_path = Path('deploy/lib/runtime-config-cutover.sh')
           source = script_path.read_text(encoding='utf-8')
@@ -50,8 +52,20 @@ jobs:
           )
           if '$candidate" = "$ACTIVATION_JOURNAL' in body:
               raise SystemExit('contract drift: journal skip already exists')
-          script_path.write_text(
-              source[:start] + body.replace(guard, guard + journal_skip, 1) + source[end:],
+          patched = source[:start] + body.replace(guard, guard + journal_skip, 1) + source[end:]
+          script_path.write_text(patched, encoding='utf-8')
+
+          installer_path = Path('deploy/instaleaza-constructor.sh')
+          installer = installer_path.read_text(encoding='utf-8')
+          pin_pattern = r'(?m)^readonly COMPATIBLE_RUNTIME_HELPER_SHA256=[0-9a-f]{64}$'
+          if len(re.findall(pin_pattern, installer)) != 1:
+              raise SystemExit('contract drift: compatible runtime helper pin is not unique')
+          helper_digest = sha256(patched.encode('utf-8')).hexdigest()
+          installer_path.write_text(
+              re.sub(pin_pattern,
+                     f'readonly COMPATIBLE_RUNTIME_HELPER_SHA256={helper_digest}',
+                     installer,
+                     count=1),
               encoding='utf-8',
           )
 
@@ -85,7 +99,7 @@ jobs:
           cat > docs/operations/CURRENT.md <<'CURRENT'
           # Checkpoint operațional curent
 
-          Actualizat: `2026-08-29T19:46:00Z`
+          Actualizat: `2026-08-29T19:49:00Z`
 
           ## Stare verificată
 
@@ -115,8 +129,9 @@ jobs:
           - Remedierea este pregătită pe ramura
             `fix/constructor-activation-journal-gc-20260829`: exclude numai calea
             exactă a jurnalului înainte de validarea directoarelor, păstrează
-            refuzul pentru orice alt nod neașteptat și adaugă regresia în suita
-            Constructor deja obligatorie în CI.
+            refuzul pentru orice alt nod neașteptat, actualizează pinul SHA-256 al
+            helperului compatibil și adaugă regresia în suita Constructor deja
+            obligatorie în CI.
 
           ## Următorul pas sigur
 
@@ -140,7 +155,10 @@ jobs:
           CURRENT
 
           bash -n deploy/lib/runtime-config-cutover.sh
-          node --test deploy/lib/constructor-publication.test.mjs
+          bash -n deploy/instaleaza-constructor.sh
+          node --test \
+            --test-name-pattern='garbage collectorul activărilor păstrează jurnalul canonic|bootstrapul recovery acceptă numai helperul b911' \
+            deploy/lib/constructor-publication.test.mjs
           node scripts/verifica-sintaxa.mjs
           node scripts/verifica-contract-deploy.mjs
           git diff --check
@@ -152,6 +170,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add deploy/lib/runtime-config-cutover.sh \
+            deploy/instaleaza-constructor.sh \
             deploy/lib/constructor-publication.test.mjs \
             docs/operations/CURRENT.md
           git diff --cached --check
