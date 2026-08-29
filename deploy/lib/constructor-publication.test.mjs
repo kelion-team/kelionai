@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1774,7 +1775,7 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   assert.equal(canUnitStart({ phase: 'applied', pending: false, ready: true }), true)
 })
 
-test('release-ul drenează handoff-urile Constructor după quiesce și înainte de PONR', () => {
+test('release-ul drenează handoff-urile Constructor după quiesce și înainte de PONR', async () => {
   const deploy = read('deploy/deploy.sh')
   const quiesce = deploy.lastIndexOf('\nquiesce_constructor_before_candidate \\\n')
   const drain = deploy.indexOf('\nassert_constructor_release_handoff_drained \\\n', quiesce)
@@ -1783,9 +1784,112 @@ test('release-ul drenează handoff-urile Constructor după quiesce și înainte 
   const ponr = deploy.indexOf('\n  mark_point_of_no_return', drain)
   assert.ok(quiesce >= 0 && drain > quiesce && backup > drain && migration > drain && ponr > drain,
     'preflight-ul DB trebuie să fie post-quiesce și pre-backup/migrare/PONR')
-  assert.match(deploy, /assert_constructor_release_handoff_drained\(\)[\s\S]*information_schema\.columns[\s\S]*FROM build_jobs[\s\S]*b\.status = [$]1[\s\S]*b\.constructor_stage = ANY\([$]2::text\[\]\)[\s\S]*"running",[\s\S]*\["merged", "release_dispatched"\]/)
+  assert.match(deploy, /assert_constructor_release_handoff_drained\(\)[\s\S]*information_schema\.columns[\s\S]*FROM build_jobs[\s\S]*b\.status = [$]1::text[\s\S]*b\.constructor_stage = ANY\([$]2::text\[\]\)/)
+  assert.match(deploy, /const sharedOwnershipValues = \[[\s\S]*"running",[\s\S]*\["merged", "release_dispatched"\]/)
   assert.match(deploy, /count\(\*\) FILTER \(WHERE is_current IS NOT TRUE\)/)
   assert.match(deploy, /hasV2Schema[\s\S]*release_protocol_version = 2[\s\S]*release_intent_receipt_sha256 IS NOT NULL[\s\S]*release_dispatch_receipt_sha256 IS NOT NULL/)
+
+  const ownershipStart = deploy.indexOf('  const sharedOwnershipValues = [')
+  const ownershipEnd = deploy.indexOf('\n  const result = await client.query(`', ownershipStart)
+  const queryStartMarker = '  const result = await client.query(`\n'
+  const queryStart = deploy.indexOf(queryStartMarker, ownershipEnd) + queryStartMarker.length
+  const queryEnd = deploy.indexOf('\n  `, ownership.values)', queryStart)
+  assert.ok(ownershipStart >= 0 && ownershipEnd > ownershipStart && queryStart >= queryStartMarker.length && queryEnd > queryStart,
+    'query builder-ul handoff nu poate fi extras din deploy')
+
+  const buildOwnership = new Function('hasV2Schema', 'process',
+    `${deploy.slice(ownershipStart, ownershipEnd)}\nreturn ownership`)
+  const queryTemplate = deploy.slice(queryStart, queryEnd)
+  const releaseEnv = {
+    KELION_RELEASE_REQUEST_ID: '11111111-1111-4111-8111-111111111111',
+    KELION_RELEASE_COMMIT_SHA: 'a'.repeat(40),
+    KELION_RELEASE_CI_RUN_ID: '8001',
+    KELION_RELEASE_BUILD_RUN_ID: '8002',
+    KELION_RELEASE_WORKFLOW_RUN_ID: '9001',
+  }
+  const ownershipFor = (hasV2Schema) => buildOwnership(hasV2Schema, { env: releaseEnv })
+  const queryFor = (ownership) => queryTemplate.replace('${ownership.predicate}', ownership.predicate)
+  const assertContiguousParameters = (ownership) => {
+    const indexes = [...new Set([...queryFor(ownership).matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))]
+      .sort((left, right) => left - right)
+    assert.deepEqual(indexes, Array.from({ length: ownership.values.length }, (_, index) => index + 1),
+      'fiecare valoare bind trebuie să aibă un placeholder tipabil și contiguu')
+  }
+  const v1Ownership = ownershipFor(false)
+  const v2Ownership = ownershipFor(true)
+  assertContiguousParameters(v1Ownership)
+  assertContiguousParameters(v2Ownership)
+  assert.equal(v1Ownership.values.length, 5)
+  assert.equal(v2Ownership.values.length, 7)
+
+  const backendRequire = createRequire(join(root, 'backend/package.json'))
+  const { PGlite } = backendRequire('@electric-sql/pglite')
+  const exerciseSchema = async (hasV2Schema) => {
+    const database = new PGlite()
+    try {
+      await database.exec(`
+        CREATE TABLE build_jobs (
+          id bigint PRIMARY KEY,
+          status text NOT NULL,
+          constructor_stage text NOT NULL
+        );
+        CREATE TABLE constructor_pipeline (
+          job_id bigint PRIMARY KEY,
+          release_request_id uuid,
+          merged_commit_sha text,
+          release_workflow_run_id bigint,
+          release_dispatch_receipt_sha256 text
+          ${hasV2Schema ? `,
+          release_protocol_version integer,
+          release_target_sha text,
+          release_target_receipt_sha256 text,
+          release_ci_run_id bigint,
+          release_build_run_id bigint,
+          release_artifact_id text,
+          release_candidate_receipt_sha256 text,
+          release_intent_receipt_sha256 text` : ''}
+        );
+        INSERT INTO build_jobs (id, status, constructor_stage) VALUES
+          (1, 'running', 'release_dispatched'),
+          (2, 'running', 'merged');
+      `)
+      if (hasV2Schema) {
+        await database.query(`
+          INSERT INTO constructor_pipeline (
+            job_id, release_request_id, merged_commit_sha, release_workflow_run_id,
+            release_dispatch_receipt_sha256, release_protocol_version, release_target_sha,
+            release_target_receipt_sha256, release_ci_run_id, release_build_run_id,
+            release_artifact_id, release_candidate_receipt_sha256, release_intent_receipt_sha256
+          ) VALUES
+            (1, $1::uuid, $2::text, $3::bigint, 'legacy-receipt', 2, $2::text,
+             'target-receipt', $4::bigint, $5::bigint, 'artifact', 'candidate-receipt', 'intent-receipt'),
+            (2, '22222222-2222-4222-8222-222222222222'::uuid, $2::text, 9999,
+             'foreign-legacy-receipt', 2, $2::text, 'foreign-target-receipt',
+             $4::bigint, $5::bigint, 'foreign-artifact', 'foreign-candidate-receipt', 'foreign-intent-receipt')
+        `, [releaseEnv.KELION_RELEASE_REQUEST_ID, releaseEnv.KELION_RELEASE_COMMIT_SHA,
+          releaseEnv.KELION_RELEASE_WORKFLOW_RUN_ID, releaseEnv.KELION_RELEASE_CI_RUN_ID,
+          releaseEnv.KELION_RELEASE_BUILD_RUN_ID])
+      } else {
+        await database.query(`
+          INSERT INTO constructor_pipeline (
+            job_id, release_request_id, merged_commit_sha, release_workflow_run_id,
+            release_dispatch_receipt_sha256
+          ) VALUES
+            (1, $1::uuid, $2::text, $3::bigint, 'current-receipt'),
+            (2, '22222222-2222-4222-8222-222222222222'::uuid, $2::text, 9999, 'foreign-receipt')
+        `, [releaseEnv.KELION_RELEASE_REQUEST_ID, releaseEnv.KELION_RELEASE_COMMIT_SHA,
+          releaseEnv.KELION_RELEASE_WORKFLOW_RUN_ID])
+      }
+      const ownership = ownershipFor(hasV2Schema)
+      const result = await database.query(queryFor(ownership), ownership.values)
+      assert.deepEqual(result.rows, [{ blocking: 1, current: 1 }])
+    } finally {
+      await database.close()
+    }
+  }
+  await exerciseSchema(false)
+  await exerciseSchema(true)
+
   const trap = deploy.indexOf('trap on_release_exit EXIT')
   assert.ok(trap >= 0 && trap < drain, 'trap-ul de rollback trebuie armat înainte de preflight-ul DB')
 })
