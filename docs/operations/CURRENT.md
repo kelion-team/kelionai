@@ -55,4 +55,4 @@ Actualizat: `2026-08-29T01:34:37Z`
 - CI exact `88e2955`: <https://github.com/kelion-team/kelionai/actions/runs/33225442208>
 - Build OCI exact `88e2955`: <https://github.com/kelion-team/kelionai/actions/runs/33225642455>
 - Release canonic refuzat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33225988793>
-- Issue verifier curent: <https://github.com/kelion-team/kelionai/issues/1502>
+- Issue verifier curent: <https://github.com/kelion-team/kelionai/issues/1505>
