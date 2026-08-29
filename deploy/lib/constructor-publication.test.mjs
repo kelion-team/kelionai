@@ -3251,3 +3251,62 @@ test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
   assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
     'snapshoturile reale trebuie curățate în continuare')
 })
+
+test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
+  const deploy = read('deploy/deploy.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const recovery = shellFunction(deploy, 'recover_runtime_activation_before_upgrade')
+
+  assert.match(deploy,
+    /LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e/)
+  const compatiblePin = deploy.match(
+    /COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=([0-9a-f]{64})/)?.[1]
+  assert.equal(compatiblePin, createHash('sha256').update(cutover).digest('hex'),
+    'helperul candidat trebuie pin-uit la bytes exacți')
+
+  const livePin = recovery.indexOf(
+    '[ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]')
+  const mixedRuntimeRefusal = recovery.indexOf(
+    'for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"', livePin)
+  const journalAcl = recovery.indexOf("0:0:600:1", mixedRuntimeRefusal)
+  const workerOnly = recovery.indexOf('.operation == "activate-worker-publisher"', journalAcl)
+  const rootAllowlist = recovery.indexOf('constructor-activation\\\\.[A-Za-z0-9]+', workerOnly)
+  const candidatePin = recovery.indexOf(
+    '[ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]', rootAllowlist)
+  const temporaryCopy = recovery.indexOf(
+    'mktemp /run/kelion-activation-recovery-helper.XXXXXX', candidatePin)
+  const durableCopy = recovery.indexOf('fsync_release_artifact "$temporary" file', temporaryCopy)
+  const explicitResume = recovery.indexOf(
+    'KELION_ACTIVATION_RESUME_OPERATION="$activation_operation"', durableCopy)
+  const resumeRun = recovery.indexOf(
+    'bash "$recovery_helper" --recover-only "$live_compose";', explicitResume)
+  const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', resumeRun)
+  const requiesce = recovery.indexOf(
+    'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced', journalGone)
+  const orphanProof = recovery.indexOf(
+    'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', requiesce)
+  const readyAbsent = recovery.indexOf(
+    '[ ! -e /run/kelion/runtime-config-recovery.ready ]', orphanProof)
+  const cleanup = recovery.indexOf('rm -f -- "$temporary"', readyAbsent)
+
+  assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && journalAcl > mixedRuntimeRefusal
+    && workerOnly > journalAcl && rootAllowlist > workerOnly && candidatePin > rootAllowlist
+    && temporaryCopy > candidatePin && durableCopy > temporaryCopy
+    && explicitResume > durableCopy && resumeRun > explicitResume && journalGone > resumeRun
+    && requiesce > journalGone && orphanProof > requiesce && readyAbsent > orphanProof
+    && cleanup > readyAbsent,
+  'fallback-ul trebuie să fie pur, dublu pin-uit, explicit, requiesced și curățat')
+  assert.match(recovery,
+    /elif \[ "\$status" = 0 \]; then[\s\S]*"\$recovery_helper" --recover-only "\$live_compose" --leave-constructor-quiesced/,
+    'orice alt helper trebuie să-și recupereze propriile jurnale')
+  assert.doesNotMatch(recovery,
+    /install_recovery_artifact[\s\S]*runtime-config-cutover|mv -f --[^\n]*ROOT\/bin\/runtime-config-cutover/,
+    'migrarea one-shot nu poate înlocui helperul live înainte de recovery')
+
+  const mainStart = deploy.indexOf('# Jurnalele runtime/activare sunt recuperate în mod normal')
+  const call = deploy.indexOf('\n  recover_runtime_activation_before_upgrade \\\n', mainStart)
+  const persistentUpgrade = deploy.indexOf(
+    '# Upgrade atomic și fsync al recovery gate-ului de boot', call)
+  assert.ok(mainStart >= 0 && call > mainStart && persistentUpgrade > call,
+    'recovery-ul one-shot trebuie să se încheie înaintea upgrade-ului persistent')
+})

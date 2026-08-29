@@ -1759,25 +1759,123 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
   exec 9>&-
 fi
 
-# Jurnalele runtime/activare sunt recuperate cu helperul instalat care le-a
-# creat. Abia după ce starea veche este coerentă putem înlocui helperul cu
-# versiunea din bundle-ul candidat.
+# Jurnalele runtime/activare sunt recuperate în mod normal cu helperul care le-a
+# creat. Excepția de mai jos este o migrare one-shot, dublu pin-uită,
+# pentru generația care a inclus jurnalul canonic în globul directoarelor
+# `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
+# runtime/gate/deploy journals mixte.
+readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=cd93ea4f7474f9336e22755799a8fa0fc4894ee3ebdab8ca64075a60a58a2b47
+
+recover_runtime_activation_before_upgrade() {
+  local live_helper=$ROOT/bin/runtime-config-cutover.sh
+  local live_compose=$ROOT/config/compose.production.yml
+  local candidate_helper=$BUNDLE_DIR/lib/runtime-config-cutover.sh
+  local activation_journal=$RUNTIME_ROOT/constructor-activation.journal
+  local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
+  local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal
+  local live_sha candidate_sha recovery_helper activation_operation=''
+  local temporary='' status=0 cleanup_failed=0 use_compatible_activation_resume=0
+  local incompatible activation_candidate
+
+  [ -f "$live_helper" ] && [ ! -L "$live_helper" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$live_helper")" = '0:0:500:1' ] \
+    || return 1
+  [ -f "$live_compose" ] && [ ! -L "$live_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$live_compose")" = '0:0:444:1' ] \
+    || return 1
+  live_sha=$(sha256sum "$live_helper" | awk '{print $1}') || return 1
+  recovery_helper=$live_helper
+
+  if { [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; } \
+    && [ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]; then
+    for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; do
+      [ ! -e "$incompatible" ] && [ ! -L "$incompatible" ] || return 1
+    done
+    [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+      || return 1
+    activation_operation=$(jq -er '
+      select(.schema == 2 and
+        (.phase == "prepared" or .phase == "quiesced" or .phase == "applied") and
+        .operation == "activate-worker-publisher" and
+        (.activationRoot | strings |
+          test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))) |
+      .operation
+    ' "$activation_journal") || return 1
+    [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
+    candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
+    [ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] || return 1
+
+    temporary=$(mktemp /run/kelion-activation-recovery-helper.XXXXXX) || return 1
+    if ! install -o root -g root -m 0500 "$candidate_helper" "$temporary" \
+      || [ -L "$temporary" ] \
+      || [ "$(stat -Lc '%u:%g:%a:%h' "$temporary")" != '0:0:500:1' ] \
+      || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] \
+      || ! fsync_release_artifact "$temporary" file; then
+      rm -f -- "$temporary" || true
+      return 1
+    fi
+    recovery_helper=$temporary
+    use_compatible_activation_resume=1
+  fi
+
+  exec 9>&8 || status=1
+  if [ "$status" = 0 ] && [ "$use_compatible_activation_resume" = 1 ]; then
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_ACTIVATION_RESUME_OPERATION="$activation_operation" \
+      bash "$recovery_helper" --recover-only "$live_compose"; then
+      if [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+        && [ ! -e /run/kelion/constructor-activation.pending ] \
+        && [ ! -L /run/kelion/constructor-activation.pending ]; then
+        if KELION_CUTOVER_LOCK_HELD=1 \
+          bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+          status=0
+        else
+          status=$?
+        fi
+      else
+        status=1
+      fi
+    else
+      status=$?
+    fi
+    if [ "$status" = 0 ]; then
+      for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*; do
+        if [ -e "$activation_candidate" ] || [ -L "$activation_candidate" ]; then
+          status=1
+          break
+        fi
+      done
+    fi
+    if [ "$status" = 0 ]; then
+      [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+        && [ ! -L /run/kelion/runtime-config-recovery.ready ] || status=1
+    fi
+  elif [ "$status" = 0 ]; then
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+      KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+      "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      status=0
+    else
+      status=$?
+    fi
+  fi
+  exec 9>&- || cleanup_failed=1
+
+  if [ -n "$temporary" ]; then
+    rm -f -- "$temporary" || cleanup_failed=1
+    fsync_release_artifact /run directory || cleanup_failed=1
+  fi
+  [ "$status" = 0 ] && [ "$cleanup_failed" = 0 ]
+}
+
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
   || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
-  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ] \
-    || die 'helperul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
-  [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
-    || die 'compose-ul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
-  exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 \
-  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
-  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
-    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced \
-    || die 'recovery-ul runtime/activare cu helperul existent a eșuat'
-  exec 9>&-
+  recover_runtime_activation_before_upgrade \
+    || die 'recovery-ul runtime/activare pre-upgrade a eșuat fail-closed'
 fi
 
 # Upgrade atomic și fsync al recovery gate-ului de boot înainte de orice altă
