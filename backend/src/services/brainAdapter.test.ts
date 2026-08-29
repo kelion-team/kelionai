@@ -26,7 +26,7 @@ describe('brain.messages.create — adaptorul NU mai fabulează usage-ul', () =>
           model: 'gpt-5.6-luna',
           status: 'completed',
           output: [{ type: 'message', content: [{ type: 'output_text', text: '["fapt"]' }] }],
-          usage: { input_tokens: 321, output_tokens: 9 },
+          usage: { input_tokens: 321, output_tokens: 9, total_tokens: 330 },
         }),
         { status: 200 },
       )

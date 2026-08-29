@@ -34,6 +34,8 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { cheltuieliAplicatiei } from '../services/cheltuieli.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { openaiAvailable } from '../services/openaiChat.js'
+import { openaiHealth } from '../services/openaiResponses.js'
+import { openaiHealthAction } from '../services/openaiHealth.js'
 import { motivCatalogOpenAI, reimprospateazaCatalogOpenAI } from '../services/openaiModele.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -339,11 +341,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const [vps, serperBalance] = await Promise.all([
+    const [vps, serperBalance, openai] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
       // /account endpoint. Cached 5 min in the service.
       getSerperBalance(),
+      openaiHealth(),
     ])
     return reply.send({
       active: 'openai',
@@ -368,8 +371,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         error: serperBalance.error,
       },
       openai: {
-        checked: true,
-        serving: openaiAvailable(),
+        checked: openai.ok,
+        serving: openai.serving,
+        status: openai.status,
+        class: openai.class,
+        action: openaiHealthAction(openai.class),
         // Costul real vine dintr-un import separat al OpenAI Costs API; runtime
         // nu transformă tokeni în dolari cu tarife scrise în cod.
         monthUsd: undefined,

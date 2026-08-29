@@ -1,19 +1,55 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { cameraActivationAllowed, cameraImageRequested } from './lib/cameraConsent'
 import {
   asteaptaDeschidereaSocket,
+  deschideVocalLive,
   golesteSurseAudio,
   instantaneeInputImage,
   poateTrimiteLive,
+  vocalLiveDisponibila,
   vocalLiveStateForServerEvent,
 } from './lib/vocalLive'
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('OpenAI Realtime media behavior', () => {
+  it('ține aceeași limită de retry după ready și invalidează pornirile stale înainte de await', () => {
+    const source = readFileSync(fileURLToPath(new URL('./components/ChatPanel.tsx', import.meta.url)), 'utf8')
+    const ensureStart = source.indexOf('async function ensureMic()')
+    const ensureEnd = source.indexOf('const ensureMicRef', ensureStart)
+    const ensure = source.slice(ensureStart, ensureEnd)
+    expect(ensureStart).toBeGreaterThan(0)
+    expect(ensure.indexOf('const generatie = ++vlGeneratieRef.current')).toBeLessThan(
+      ensure.indexOf('await vocalLiveDisponibila()'),
+    )
+    expect(ensure).toContain('signal: startController.signal')
+    expect(ensure).toContain('startController.signal.aborted')
+    expect(ensure).toMatch(/finally\s*\{[\s\S]*generatie === vlGeneratieRef\.current[\s\S]*micStartControllerRef\.current === startController/)
+
+    const readyStart = ensure.indexOf('onGata: () =>')
+    const readyEnd = ensure.indexOf('onUser:', readyStart)
+    const ready = ensure.slice(readyStart, readyEnd)
+    expect(ready).not.toContain('micRetryAttemptsRef.current = 0')
+    expect(ready).not.toContain('micRetryStoppedAckedRef.current = false')
+  })
+
+  it('nu pornește nicio resursă pentru o tentativă deja anulată', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const onEroare = vi.fn()
+    await expect(deschideVocalLive({
+      signal: controller.signal,
+      onEroare,
+    })).resolves.toBeNull()
+    expect(onEroare).not.toHaveBeenCalled()
+  })
+
   it('barge-in oprește fiecare sursă și golește coada chiar dacă una era deja terminată', () => {
     const first = { stop: vi.fn() }
     const ended = { stop: vi.fn(() => { throw new DOMException('ended') }) }
@@ -99,5 +135,37 @@ describe('OpenAI Realtime media behavior', () => {
     expect(state).toBe('interrupted')
     state = vocalLiveStateForServerEvent('tura_gata')
     expect(state).toBe('listening')
+  })
+
+  it('păstrează verdictul capability pentru 401/429/5xx fără body liber', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    for (const [status, code, retryable] of [
+      [401, 'unauthorized', false],
+      [403, 'unauthorized', false],
+      [429, 'rate_limit', true],
+      [503, 'transport', true],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(new Response('provider body must stay ignored', { status }))
+      await expect(vocalLiveDisponibila()).resolves.toMatchObject({
+        disponibil: false,
+        code,
+        retryable,
+      })
+    }
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      disponibil: false,
+      model: 'gpt-realtime',
+      voce: 'cedar',
+      code: 'invalid_key',
+      retryable: false,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await expect(vocalLiveDisponibila()).resolves.toMatchObject({
+      disponibil: false,
+      code: 'invalid_key',
+      retryable: false,
+    })
   })
 })

@@ -8,6 +8,14 @@ import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
 import { faraBluetoothSigur } from './rutaAudio'
 import { apiFetch, openApiWebSocket } from './transport'
+import {
+  clasificaInchidereVocalLive,
+  esteCodEroareVocalLive,
+  esteEroareVocalLiveTranzitorie,
+  parseazaCapabilitateVocalLive,
+  type VocalLiveCapability,
+  type VocalLiveFailureCode,
+} from './vocalLiveAvailability'
 
 // ── OPENAI REALTIME FULL-DUPLEX — CLIENTUL DIN BROWSER ───────────────────────
 //
@@ -86,6 +94,9 @@ export function asteaptaDeschidereaSocket(
 }
 
 export interface VocalLiveOpts {
+  /** Cancels a start that became stale because the user pressed Stop, the tab
+   * unmounted or another audio owner took over. */
+  signal?: AbortSignal
   /** Armat numai de clickul manual pe microfon. Serverul îl consumă o singură
    * dată; reconectările automate nu trebuie să-l trimită. */
   explicitStart?: boolean
@@ -109,7 +120,7 @@ export interface VocalLiveOpts {
    *  aceluiași handleControl ca la chatul scris. Vocea NU vine pe aici. */
   onControl?(frame: unknown): void
   /** Orice eroare, NUMITĂ. Niciun „merge" prefăcut. */
-  onEroare(motiv: string): void
+  onEroare(motiv: string, code?: VocalLiveFailureCode): void
   /** Coordonatele device-ului, la cerere (8 aug: „nu are acces la gps, meteo"
    *  + „îi trebuiesc date de la gps real"). `acc` = precizia MĂSURATĂ a fixului
    *  (±metri, raportată de senzor) — pleacă și ea, ca serverul să spună
@@ -191,11 +202,26 @@ export interface VocalLiveHandle {
 
 /** Serverul are cheia și modelul Live? Se întreabă ÎNAINTE de a deschide socketul,
  *  ca să nu pornim o cale vocală spre gol. */
-export async function vocalLiveDisponibila(): Promise<{ disponibil: boolean; model: string; voce: string } | null> {
+export async function vocalLiveDisponibila(): Promise<VocalLiveCapability | null> {
   try {
     const r = await apiFetch('/api/vocal-live/capability', { cache: 'no-store' })
-    if (!r.ok) return null
-    return (await r.json()) as { disponibil: boolean; model: string; voce: string }
+    if (!r.ok) {
+      const code: VocalLiveFailureCode = r.status === 401 || r.status === 403
+        ? 'unauthorized'
+        : r.status === 429
+          ? 'rate_limit'
+          : r.status >= 500
+            ? 'transport'
+            : 'transport'
+      return {
+        disponibil: false,
+        model: '',
+        voce: '',
+        code,
+        retryable: esteEroareVocalLiveTranzitorie(code),
+      }
+    }
+    return parseazaCapabilitateVocalLive(await r.json())
   } catch {
     return null
   }
@@ -240,6 +266,7 @@ let sesiuneActiva: { inchide: () => void } | null = null
 
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
   opts.onState?.('connecting')
+  if (opts.signal?.aborted) return null
   if (!navigator.mediaDevices?.getUserMedia) {
     opts.onState?.('error')
     opts.onEroare('browserul nu dă acces la microfon')
@@ -253,8 +280,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let ws: WebSocket
   try {
     ws = await openApiWebSocket('/api/vocal-live', 'vocal-live')
-  } catch (e) {
-    opts.onEroare(`nu pot deschide sesiunea vocală: ${String(e).slice(0, 60)}`)
+  } catch {
+    opts.onEroare('nu pot deschide sesiunea vocală', 'transport')
+    return null
+  }
+  if (opts.signal?.aborted) {
+    try { ws.close() } catch { /* already closed */ }
     return null
   }
   ws.binaryType = 'arraybuffer'
@@ -271,7 +302,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // `onclose` trag amândouă — fără frâna asta, ChatPanel ar porni DOUĂ lanțuri
   // de reluare în paralel (adică două sesiuni) la fiecare ratare de conectare.
   let eroareUrcata = false
-  const urcaEroarea = (m: string): void => {
+  const urcaEroarea = (m: string, code?: VocalLiveFailureCode): void => {
     if (eroareUrcata) return
     eroareUrcata = true
     opts.onState?.('error')
@@ -284,7 +315,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     } catch {
       /* raportarea nu poate arunca */
     }
-    opts.onEroare(m)
+    opts.onEroare(m, code)
   }
   let octeti = 0
   // Coada de redare: fiecare cadru primit se programează DUPĂ ce se termină
@@ -315,6 +346,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // raportarea onestă {type:'aec'} către server.
   let procesareActiva = false
   let curataDispozitive: (() => void) | null = null
+  let curataAnulareExterna: (() => void) | null = null
 
   const inchide = (): void => {
     if (inchis) return
@@ -324,6 +356,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     alimenteazaNivelVoce(0)
     curataHeartbeat?.()
     curataDispozitive?.()
+    curataAnulareExterna?.()
+    curataAnulareExterna = null
     curataAutoResumeOut?.()
     curataAutoResumeIn?.()
     if (resumeTimer) clearInterval(resumeTimer)
@@ -356,6 +390,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       ws.close()
     } catch {
       /* deja închis */
+    }
+  }
+  if (opts.signal) {
+    const onAbort = (): void => inchide()
+    opts.signal.addEventListener('abort', onAbort, { once: true })
+    curataAnulareExterna = () => opts.signal?.removeEventListener('abort', onAbort)
+    if (opts.signal.aborted) {
+      inchide()
+      return null
     }
   }
   // Zăvorul se ia IMEDIAT ce sesiunea are un `inchide` întreg — inclusiv în
@@ -490,7 +533,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
 
   ws.onmessage = (ev: MessageEvent): void => {
     if (typeof ev.data !== 'string') return
-    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; frame?: unknown; opus?: boolean; codec?: string }
+    let m: { type?: string; data?: string; text?: string; final?: boolean; motiv?: string; reason?: string; code?: string; frame?: unknown; opus?: boolean; codec?: string }
     try {
       m = JSON.parse(ev.data) as typeof m
     } catch {
@@ -607,7 +650,15 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       case 'pong':
         break
       case 'eroare':
-        urcaEroarea(m.motiv ?? 'eroare necunoscută în sesiunea vocală')
+        urcaEroarea(
+          m.motiv ?? 'eroare necunoscută în sesiunea vocală',
+          esteCodEroareVocalLive(m.code) ? m.code : undefined,
+        )
+        break
+      case 'session_closed':
+        if (m.reason === 'idle_timeout') {
+          urcaEroarea('sesiune vocală închisă după inactivitate', 'idle_timeout')
+        }
         break
       default:
         break
@@ -623,33 +674,20 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   }
   ws.onclose = (ev: CloseEvent): void => {
     if (inchis) return
-    // Specific WebSocket code handling: 1006 is abnormal closure (network drop / timeout)
-    if (ev.code === 1008) {
-      // Serverul închide cu 1008 pe DOUĂ cauze diferite (F4 al marii
-      // verificări): lipsa sesiunii ȘI creditul epuizat. „Nu ești
-      // autentificat" pe un client plătitor cu soldul golit era un
-      // diagnostic FALS (Legea #1) — se ramifică pe motivul real.
-      // ATENȚIE (R4): textele „credit epuizat" / „nu ești autentificat" sunt
-      // CUPLATE cu detecția din ChatPanel.onEroare (motiv.includes) care taie
-      // reconectările pe cauze ne-tranzitorii — schimbi aici, schimbi și acolo.
+    const failure = clasificaInchidereVocalLive(ev.code, ev.reason)
+    if (failure === 'no_credit') {
+      urcaEroarea('sesiune vocală: credit epuizat — reîncarcă pentru voce')
+    } else if (failure === 'unauthorized') {
+      // Textele sunt consumate de ChatPanel pentru verdictele de cont, nu de
+      // classifierul OpenAI (creditul Kelion și sesiunea nu sunt erori provider).
+      urcaEroarea('sesiune vocală: nu ești autentificat')
+    } else if (failure) {
       urcaEroarea(
-        ev.reason === 'fara_credit'
-          ? 'sesiune vocală: credit epuizat — reîncarcă pentru voce'
-          : 'sesiune vocală: nu ești autentificat',
+        failure === 'idle_timeout'
+          ? 'sesiune vocală închisă după inactivitate'
+          : 'sesiune vocală indisponibilă',
+        failure,
       )
-    } else if (ev.code === 1011) {
-      urcaEroarea('sesiune vocală indisponibilă pe server (lipsește cheia?)')
-    } else if (ev.code === 1006) {
-      urcaEroarea('sesiune vocală întreruptă de rețea (cod 1006 abnormal closure) — reîncercare conexiune')
-    } else if (ev.code !== 1000) {
-      urcaEroarea(`sesiunea vocală s-a închis singură (cod ${ev.code}${ev.reason ? `: ${ev.reason.slice(0, 80)}` : ''})`)
-    } else {
-      // BUG REPARAT (registrul frontend #2, blocant): închiderea „politicoasă" (1000)
-      // venită de la SERVER (noi n-am cerut-o — `inchis` e false aici) lăsa omul SURD
-      // și MUT tăcut: vlRef rămânea setat, becul aprins, ensureMic ieșea pe gardă, iar
-      // nimeni nu era anunțat — până la refresh. O ridicăm ca pe orice cădere, ca
-      // apelantul (ChatPanel) să curețe și să re-armeze lanțul vocal.
-      urcaEroarea('sesiunea vocală a fost închisă de server (cod 1000) — reiau conexiunea')
     }
     inchide()
   }
@@ -669,8 +707,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       if (opts.explicitStart) {
         try {
           ws.send(JSON.stringify({ type: 'explicit_start' }))
-        } catch (e) {
-          urcaEroarea(`explicit_start a eșuat: ${e instanceof Error ? e.message.slice(0, 80) : String(e).slice(0, 80)}`)
+        } catch {
+          urcaEroarea('nu am putut arma sesiunea vocală', 'transport')
           inchide()
           return
         }
@@ -681,7 +719,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       curataHeartbeat = startVoiceHeartbeat(() => ws, 10_000)
   }, openController.signal).catch((e: Error) => {
     if (inchis) return
-    urcaEroarea(e.message)
+    urcaEroarea(e.message, 'transport')
     inchide()
   })
   if (inchis || ws.readyState !== WebSocket.OPEN) return null
@@ -724,10 +762,16 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     // funcționează ieșirea pe bluetooth", MODE_IN_COMMUNICATION rupe A2DP) să
     // nu se poată întoarce. Desktop: pornită, ca până acum.
     const procesare = !eMobil || (await faraBluetoothSigur())
+    if (inchis) return null
     procesareActiva = procesare
-    stream = await navigator.mediaDevices.getUserMedia({
+    const streamNou = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: procesare, noiseSuppression: false, autoGainControl: procesare },
     })
+    if (inchis) {
+      streamNou.getTracks().forEach((track) => track.stop())
+      return null
+    }
+    stream = streamNou
   } catch {
     urcaEroarea('microfonul nu a fost permis')
     inchide()
@@ -801,7 +845,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     void faraBluetoothSigur().then((faraBt) => {
       if (inchis) return
       if ((!eMobil || faraBt) !== procesareActiva) {
-        urcaEroarea('ruta audio s-a schimbat (Bluetooth) — reiau sesiunea cu regula potrivită')
+        urcaEroarea('ruta audio s-a schimbat (Bluetooth) — reiau sesiunea cu regula potrivită', 'transport')
         inchide()
       }
     })

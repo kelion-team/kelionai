@@ -1,7 +1,8 @@
 import { config } from '../config.js'
 import { cheltuialaLunaPeKinduri } from '../db.js'
 import { getSerperBalance } from './serperBalance.js'
-import { openaiHealth } from './openaiResponses.js'
+import { openaiAvailable, openaiHealth } from './openaiResponses.js'
+import { openaiHealthAction, type OpenAIHealthClass } from './openaiHealth.js'
 type Masuratoare<T> =
   | { masurat: true; cum: string; valoare: T; ms: number; la: string }
   | { masurat: false; cum: string; motiv: string; ms: number; la: string }
@@ -42,7 +43,15 @@ export interface CreditAI {
   /** Cât s-a dus luna asta pe el, din jurnalul nostru de costuri. */
   cheltuitLuna: Masuratoare<{ usd: number }>
   /** Cheia răspunde ACUM? (doar unde se poate atinge ieftin) */
-  serveste?: Masuratoare<{ da: boolean; detaliu?: string }>
+  serveste?: Masuratoare<{
+    da: boolean
+    /** HTTP status only; null means the request never reached an HTTP response. */
+    status: number | null
+    /** Closed safe code; never a provider body or message. */
+    clasa: OpenAIHealthClass
+    /** Actionable application-owned text, selected from `clasa`. */
+    detaliu?: string
+  }>
   /** Unde se vede factura, când soldul nu e citibil prin API. */
   facturare?: string
   /** `ramas` e un SOLD REAL citit de la furnizor (Serper /account, RunPod
@@ -57,10 +66,11 @@ export interface CreditAI {
 // Trei stări ONESTE, derivate DOAR din măsurători (regula #1 — niciodată verde
 // fals):
 //   • verde = are credit MĂSURAT (sold citit > 0) SAU servește ACUM
-//   • rosu  = fără credit MĂSURAT (sold citit ≤ 0, ex. RunPod 402/„positive
-//             balance", Serper 0) SAU pingul spune clar că NU servește.
+//   • rosu  = fără credit MĂSURAT (sold citit ≤ 0, ex. 402/Serper 0) SAU
+//             pingul clasifică explicit `insufficient_quota`.
 //   • gri   = NU pot verifica (furnizorul nu are API de sold, cheia lipsește,
-//             citire picată). NU verde — necunoscutul nu se maschează în „e ok".
+//             transportul/modelul/configurația au o problemă ori citirea a
+//             picat). NU verde și NU invitație falsă la reîncărcare.
 // (Starea „roșu pâlpâind" = auto-alimentare eșuată/card gol vine cu auto-alimentarea,
 // nu de aici — becul ăsta raportează doar creditul citit, nu tentativa de plată.)
 export type BecCredit = 'verde' | 'rosu' | 'gri'
@@ -77,7 +87,8 @@ export function beculCredit(c: CreditAI): BecCredit {
   // lumina vine din PINGUL DE VIAȚĂ — servește = are credit — nu din estimare.
   // Estimarea rămâne doar cifra afișată, nu decide culoarea.
   if (c.serveste?.masurat) {
-    return c.serveste.valoare.da ? 'verde' : 'rosu'
+    if (c.serveste.valoare.da) return 'verde'
+    return c.serveste.valoare.clasa === 'insufficient_quota' ? 'rosu' : 'gri'
   }
   // (3) Fallback: un sold (chiar și estimat) citit > 0 → verde; altfel nimic
   // măsurabil → GRI („nu pot verifica"), niciodată verde fals (regula #1).
@@ -141,17 +152,24 @@ async function randSerper(): Promise<CreditAI> {
 // Constructorul are propria stare de worker și nu este prezentat ca sold API.
 
 async function randOpenAI(): Promise<CreditAI> {
-  const cheieConfigurata = Boolean(config.openai.key)
+  // Câmpul istoric se numește `cheieConfigurata`; pentru runtime-ul web el
+  // înseamnă exclusiv cheia API de proiect, nu autentificarea personală ChatGPT.
+  const cheieConfigurata = openaiAvailable()
   const t0 = Date.now()
-  const live = cheieConfigurata ? await openaiHealth().catch(() => null) : null
+  const live = await openaiHealth().catch(() => ({
+    ok: false as const,
+    serving: false as const,
+    status: null,
+    class: 'transport' as const,
+  }))
   const ms = Date.now() - t0
-  const serveste: Masuratoare<{ da: boolean; detaliu?: string }> | undefined = !cheieConfigurata
-    ? undefined
-    : !live
-      ? picat('POST /v1/responses prin calea chatului', 'verificarea a eșuat', ms)
-      : live.ok
-        ? reusit('POST /v1/responses prin calea chatului', { da: live.serving, detaliu: live.reason }, ms)
-        : picat('POST /v1/responses prin calea chatului', live.reason ?? 'eroare necunoscută', ms)
+  const actiune = openaiHealthAction(live.class)
+  const serveste = reusit('POST /v1/responses prin calea chatului', {
+    da: live.serving,
+    status: live.status,
+    clasa: live.class,
+    ...(actiune ? { detaliu: actiune } : {}),
+  }, ms)
   return {
     furnizor: 'OpenAI',
     alimenteaza: 'Creier chat (text + vedere + reasoning)',
@@ -160,7 +178,7 @@ async function randOpenAI(): Promise<CreditAI> {
       'OpenAI nu expune sold prin API',
       cheieConfigurata
         ? 'platform.openai.com nu oferă endpoint de sold; creditul real se vede în dashboard'
-        : 'cheia OPENAI_API_KEY nu e configurată',
+        : 'OPENAI_API_KEY de proiect nu este configurată',
     ),
     cheltuitLuna: await cheltuiala(FELURI_OPENAI),
     serveste,

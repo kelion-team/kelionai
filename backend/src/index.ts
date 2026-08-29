@@ -44,14 +44,18 @@ import { jobsRoutes } from './routes/jobs.js'
 import { offlineRoutes } from './routes/offline.js'
 import { auzRoutes } from './routes/auz.js'
 import { deployRoutes } from './routes/deploy.js'
-import { arhiveazaBuildJobsVechi, cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, deblocheazaJoburileClaimate, getPool, initDb, recordSimptomLive } from './db.js'
+import { arhiveazaBuildJobsVechi, cleanupExpiredAuthState, curataJurnaleVechi, dbEnabled, deblocheazaJoburileClaimate, getPool, initDb, reconciliazaDebitariVocale, recordSimptomLive } from './db.js'
 import { hydrateSession, trustedMutationOrigin } from './session.js'
 import { isOperationalHealthRequest } from './services/operationalHealth.js'
 import { makeLogTee, capturaConsole } from './services/logbuffer.js'
-import { releaseSideEffectsEnabled, shutdownDeactivatedRelease } from './services/releaseActivation.js'
+import {
+  isReleaseProofReady,
+  releaseRuntimeState,
+  releaseSideEffectsEnabled,
+  shutdownDeactivatedRelease,
+} from './services/releaseActivation.js'
 import { curataTextJurnal } from './services/jurnalOperational.js'
 import { expireChatReplayResults } from './services/chatTurnReplay.js'
-import { isSubscriptionMode } from './services/chatgptSubscription.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -230,7 +234,7 @@ async function readinessSnapshot() {
   const requiredConfig = Boolean(
     config.adminEmail
     && config.publicOrigin
-    && (config.openai.key || isSubscriptionMode())
+    && config.openai.key
     && config.openai.luna
     && config.openai.medium
     && config.openai.heavy
@@ -263,13 +267,11 @@ async function readinessSnapshot() {
     && fs.existsSync(config.converterWorker.socket),
   )
   const ready = requiredConfig && database && migrations && browserWorker && converterWorker
+  const release = releaseRuntimeState()
   return {
     ready,
     checks: { config: requiredConfig, database, migrations, browserWorker, converterWorker },
-    release: {
-      candidate: config.release.candidateMode,
-      sideEffectsActive: releaseSideEffectsEnabled(),
-    },
+    release,
   }
 }
 
@@ -292,10 +294,12 @@ const BOOT_AT = new Date().toISOString()
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/release-proof', async (_req, reply) => {
   const snapshot = await readinessSnapshot()
-  const proved = snapshot.ready && snapshot.release.sideEffectsActive && DEPLOY_COMMIT.length === 40
+  const proved = isReleaseProofReady(snapshot.ready, snapshot.release, DEPLOY_COMMIT)
   reply.header('Cache-Control', 'no-store')
   return reply.code(proved ? 200 : 503).send({
     ready: snapshot.ready,
+    candidate: snapshot.release.candidate,
+    sideEffectsActive: snapshot.release.sideEffectsActive,
     release: snapshot.release,
     activeCommit: DEPLOY_COMMIT,
   })
@@ -455,6 +459,42 @@ try {
       })
     }, 60_000)
     constructorWatchdogTimer.unref()
+    let voiceReconciliationTask: Promise<void> | null = null
+    const reconcileVoiceBilling = async (): Promise<void> => {
+      if (!voiceReconciliationTask) {
+        const operation = (async () => {
+          const result = await reconciliazaDebitariVocale()
+          if (result.claimed > 0 || result.pending > 0) {
+            app.log.warn(result, 'voice billing reconciler processed durable operations')
+          }
+        })()
+        let tracked: Promise<void>
+        tracked = operation.finally(() => {
+          if (voiceReconciliationTask === tracked) voiceReconciliationTask = null
+        })
+        voiceReconciliationTask = tracked
+      }
+      let deadline: ReturnType<typeof setTimeout> | null = null
+      try {
+        await Promise.race([
+          voiceReconciliationTask,
+          new Promise<never>((_resolve, reject) => {
+            deadline = setTimeout(() => reject(new Error('voice_billing_reconciliation_timeout')), 8_000)
+          }),
+        ])
+      } finally {
+        if (deadline) clearTimeout(deadline)
+      }
+    }
+    void reconcileVoiceBilling().catch((error) => {
+      app.log.warn({ error: curataTextJurnal(error, 160) }, 'voice billing reconciler failed')
+    })
+    const voiceReconciliationTimer = setInterval(() => {
+      void reconcileVoiceBilling().catch((error) => {
+        app.log.warn({ error: curataTextJurnal(error, 160) }, 'voice billing reconciler failed')
+      })
+    }, 30_000)
+    voiceReconciliationTimer.unref()
     const retentionTimer = setInterval(() => {
       void curataJurnaleVechi().catch(() => undefined)
       void cleanupExpiredAuthState().catch(() => undefined)

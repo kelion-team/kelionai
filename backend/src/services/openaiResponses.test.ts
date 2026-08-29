@@ -1,13 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { toResponsesBody, toResponsesInput } from './openaiResponses.js'
 import type { OrMessage } from './brainContract.js'
-
-// Modul abonament nu e activ în teste — testăm calea cheie API
-vi.mock('./chatgptSubscription.js', () => ({
-  isSubscriptionMode: () => false,
-  hasChatGptSubscription: () => false,
-  getSubscriptionCredentials: async () => null,
-}))
 
 describe('OpenAI Responses adapter', () => {
   it('convertește system, imagini, function calls și rezultate fără să piardă legătura call_id', () => {
@@ -94,6 +87,19 @@ describe('OpenAI Responses adapter', () => {
     const body = toResponsesBody('model-configurat', [{ role: 'user', content: 'salut' }], [], {}, false)
     expect(body.store).toBe(false)
     expect(body.include).toEqual(['reasoning.encrypted_content'])
+  })
+
+  it('nu trimite reasoning pentru un model non-reasoning folosit la probă', () => {
+    const body = toResponsesBody(
+      'gpt-4.1-mini',
+      [{ role: 'user', content: 'ok' }],
+      [],
+      { maxTokens: 8, reasoning: 'none' },
+      false,
+      false,
+    )
+    expect(body.max_output_tokens).toBe(8)
+    expect(body).not.toHaveProperty('reasoning')
   })
 
   it('retrimite exact output items opace înaintea rezultatului uneltei', () => {

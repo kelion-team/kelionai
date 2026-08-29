@@ -208,13 +208,13 @@ export async function systemHealth(): Promise<string> {
   // folosită de chat; nu pretindem un sold pe care furnizorul nu îl expune.
   try {
     const g = await openaiHealth()
-    info.creier = !g.ok ? 'necitibil' : g.serving ? 'OpenAI servește' : `OpenAI NU servește (${g.reason ?? 'necunoscut'})`
-    if (g.ok && !g.serving)
+    info.creier = g.serving ? 'OpenAI servește' : `OpenAI NU servește (${g.class})`
+    if (!g.serving)
       problems.push({
         id: 'creier_sarac',
         grav: 'critic',
-        desc: `OpenAI (creierul unic) nu servește: ${g.reason ?? 'necunoscut'} — chatul se poate opri.`,
-        reparabil: 'doar ownerul poate alimenta/verifica proiectul în platform.openai.com → Billing',
+        desc: `OpenAI (creierul unic) nu servește: ${g.class} — chatul se poate opri.`,
+        reparabil: 'ownerul verifică motivul acționabil din Admin → Credit AI și configurația serverului',
       })
   } catch {
     /* ping unavailable */
