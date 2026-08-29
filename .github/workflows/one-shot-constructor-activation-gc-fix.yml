@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   patch:
+    if: github.event.head_commit.message == 'chore: retry one-shot constructor GC repair'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,7 +28,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Aplică remedierea deterministă și testul de regresie
+      - name: Aplică remedierea și regresia în suita existentă
         shell: bash
         run: |
           set -euo pipefail
@@ -49,59 +50,42 @@ jobs:
           )
           if '$candidate" = "$ACTIVATION_JOURNAL' in body:
               raise SystemExit('contract drift: journal skip already exists')
-          patched_body = body.replace(guard, guard + journal_skip, 1)
-          patched = source[:start] + patched_body + source[end:]
-          script_path.write_text(patched, encoding='utf-8')
+          script_path.write_text(
+              source[:start] + body.replace(guard, guard + journal_skip, 1) + source[end:],
+              encoding='utf-8',
+          )
 
-          workflow_path = Path('.github/workflows/pr-verify.yml')
-          workflow = workflow_path.read_text(encoding='utf-8')
-          anchor = (
-              '            deploy/lib/constructor-publication.test.mjs \\\n'
-              '            deploy/lib/network-config.test.mjs \\\n'
-          )
-          replacement = (
-              '            deploy/lib/constructor-publication.test.mjs \\\n'
-              '            deploy/lib/runtime-config-cutover-gc.test.mjs \\\n'
-              '            deploy/lib/network-config.test.mjs \\\n'
-          )
-          if workflow.count(anchor) != 1:
-              raise SystemExit('contract drift: PR test-list anchor is not unique')
-          workflow_path.write_text(workflow.replace(anchor, replacement, 1), encoding='utf-8')
+          test_path = Path('deploy/lib/constructor-publication.test.mjs')
+          tests = test_path.read_text(encoding='utf-8')
+          title = "test('garbage collectorul activărilor păstrează jurnalul canonic', () => {"
+          if title in tests:
+              raise SystemExit('contract drift: regression test already exists')
+          regression = r'''
+
+          test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
+            const cutover = read('deploy/lib/runtime-config-cutover.sh')
+            const collector = shellFunction(cutover, 'garbage_collect_activations')
+            const existsGuard = '    [ -e "$candidate" ] || continue'
+            const journalSkip = '    [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue'
+            const directoryGuard = '&& [ -d "$candidate" ] && [ ! -L "$candidate" ]'
+
+            assert.equal(collector.split(journalSkip).length - 1, 1,
+              'excluderea jurnalului trebuie să fie exactă și unică')
+            assert.ok(collector.indexOf(existsGuard) < collector.indexOf(journalSkip),
+              'candidatul trebuie să existe înainte de comparație')
+            assert.ok(collector.indexOf(journalSkip) < collector.indexOf(directoryGuard),
+              'jurnalul trebuie exclus înainte de testul de director')
+            assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
+              'snapshoturile reale trebuie curățate în continuare')
+          })
+          '''
+          test_path.write_text(tests.rstrip() + regression, encoding='utf-8')
           PY
-
-          cat > deploy/lib/runtime-config-cutover-gc.test.mjs <<'TEST'
-          import assert from 'node:assert/strict';
-          import { readFileSync } from 'node:fs';
-          import test from 'node:test';
-
-          const source = readFileSync(new URL('./runtime-config-cutover.sh', import.meta.url), 'utf8');
-
-          function extractFunction(name, nextName) {
-            const start = source.indexOf(`${name}() {`);
-            assert.notEqual(start, -1, `${name} lipsește`);
-            const endMarker = `\n}\n\n${nextName}() {`;
-            const end = source.indexOf(endMarker, start);
-            assert.notEqual(end, -1, `${name} nu are limita canonică`);
-            return source.slice(start, end + 2);
-          }
-
-          test('garbage collectorul ignoră jurnalul canonic înainte de validarea directoarelor', () => {
-            const body = extractFunction('garbage_collect_activations', 'garbage_collect_gate_transactions');
-            const existsGuard = '    [ -e "$candidate" ] || continue';
-            const journalSkip = '    [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue';
-            const directoryGuard = '&& [ -d "$candidate" ] && [ ! -L "$candidate" ]';
-
-            assert.equal(body.split(journalSkip).length - 1, 1, 'excluderea jurnalului trebuie să fie exactă și unică');
-            assert.ok(body.indexOf(existsGuard) < body.indexOf(journalSkip), 'candidatul trebuie să existe înainte de comparație');
-            assert.ok(body.indexOf(journalSkip) < body.indexOf(directoryGuard), 'jurnalul trebuie exclus înainte de testul de director');
-            assert.match(body, /remove_activation_dir "\$canonical" \|\| return 1/, 'snapshoturile reale trebuie curățate în continuare');
-          });
-          TEST
 
           cat > docs/operations/CURRENT.md <<'CURRENT'
           # Checkpoint operațional curent
 
-          Actualizat: `2026-08-29T19:39:17Z`
+          Actualizat: `2026-08-29T19:46:00Z`
 
           ## Stare verificată
 
@@ -111,26 +95,28 @@ jobs:
           - Diagnoza VPS a confirmat containerele slotului verde sănătoase și
             răspuns `200` pentru `/livez`, `/readyz` și `/api/version`. Interfața
             publică rămâne disponibilă.
-          - Remedierea ACL pentru Codex CLI este inclusă și publicată în release-ul
-            curent, dar activarea Constructorului nu ajunge încă la proba CLI.
-          - `vps-constructor-control` run `33254987691`, inclusiv relansarea controlată
-            a jobului, și recovery-ul generic run `33255194656` se opresc fail-closed
-            cu mesajul că snapshoturile de activare orfane nu pot fi curățate sigur.
+          - Remedierea ACL pentru Codex CLI este inclusă în release-ul curent, dar
+            activarea Constructorului nu ajunge încă la proba CLI.
+          - `vps-constructor-control` run `33254987691`, inclusiv relansarea
+            controlată, și recovery-ul generic run `33255194656` se opresc
+            fail-closed cu mesajul că snapshoturile de activare orfane nu pot fi
+            curățate sigur.
           - Cauza este deterministă în `runtime-config-cutover.sh`:
             `garbage_collect_activations` iterează globul `constructor-activation.*`,
             care include și fișierul legitim `constructor-activation.journal`.
             Recovery-ul quiesced păstrează intenționat jurnalul, apoi garbage
             collectorul îl respinge fiindcă nu este director.
           - Toate cele trei timere Constructor sunt inactive, iar stamp-ul de
-            execuție este retras. Aceasta păstrează Constructorul fail-closed fără
-            să oprească release-ul web activ.
+            execuție este retras. Constructorul rămâne fail-closed fără să oprească
+            release-ul web activ.
           - Cheia OpenAI API de producție rămâne revocată; chatul și vocea online
             nu sunt declarate funcționale până la configurarea explicită a unei
             chei valide sau a modului suportat „API dezactivat”.
           - Remedierea este pregătită pe ramura
             `fix/constructor-activation-journal-gc-20260829`: exclude numai calea
-            exactă a jurnalului înainte de validarea directoarelor, păstrând
-            refuzul pentru orice alt nod neașteptat, și adaugă test de regresie.
+            exactă a jurnalului înainte de validarea directoarelor, păstrează
+            refuzul pentru orice alt nod neașteptat și adaugă regresia în suita
+            Constructor deja obligatorie în CI.
 
           ## Următorul pas sigur
 
@@ -154,23 +140,20 @@ jobs:
           CURRENT
 
           bash -n deploy/lib/runtime-config-cutover.sh
-          node --test deploy/lib/runtime-config-cutover-gc.test.mjs
+          node --test deploy/lib/constructor-publication.test.mjs
           node scripts/verifica-sintaxa.mjs
           node scripts/verifica-contract-deploy.mjs
           git diff --check
 
-      - name: Publică schimbarea și elimină workflow-ul temporar
+      - name: Publică numai fișierele de produs
         shell: bash
         run: |
           set -euo pipefail
-          rm -f -- .github/workflows/one-shot-constructor-activation-gc-fix.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add deploy/lib/runtime-config-cutover.sh \
-            deploy/lib/runtime-config-cutover-gc.test.mjs \
-            .github/workflows/pr-verify.yml \
-            docs/operations/CURRENT.md \
-            .github/workflows/one-shot-constructor-activation-gc-fix.yml
+            deploy/lib/constructor-publication.test.mjs \
+            docs/operations/CURRENT.md
           git diff --cached --check
           git commit -m 'fix(constructor): preserve activation journal during GC'
           git push origin HEAD:fix/constructor-activation-journal-gc-20260829
