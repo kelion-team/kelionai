@@ -1,0 +1,393 @@
+name: VPS post-PONR recovery de9
+run-name: post-ponr-recovery-de9-${{ github.sha }}
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      target_commit:
+        description: Commitul de9 fixat pentru această recuperare
+        required: true
+        default: de9fe5f3f081373a23796d83b469651e9c1e33e7
+        type: string
+      release_request_id:
+        description: Identitatea cererii de release fixate
+        required: true
+        default: e5c00af2-1fb9-4daf-a30b-bdfed24d5689
+        type: string
+      failed_release_run_id:
+        description: Runul production eșuat fixat
+        required: true
+        default: '33227925046'
+        type: string
+      ci_run_id:
+        description: Runul CI canonic fixat
+        required: true
+        default: '33227451553'
+        type: string
+      build_run_id:
+        description: Runul build canonic fixat
+        required: true
+        default: '33227641381'
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  verify-incident:
+    if: >-
+      github.ref == 'refs/heads/master' && github.ref_name == 'master' &&
+      ((github.event_name == 'push' && github.event.before == 'de9fe5f3f081373a23796d83b469651e9c1e33e7') ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      hotfix_commit: ${{ steps.provenance.outputs.hotfix_commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verifică identitatea imuabilă și hotfixul unic
+        id: provenance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          DISPATCH_TARGET: ${{ inputs.target_commit }}
+          DISPATCH_REQUEST: ${{ inputs.release_request_id }}
+          DISPATCH_FAILED_RUN: ${{ inputs.failed_release_run_id }}
+          DISPATCH_CI_RUN: ${{ inputs.ci_run_id }}
+          DISPATCH_BUILD_RUN: ${{ inputs.build_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target=de9fe5f3f081373a23796d83b469651e9c1e33e7
+          request=e5c00af2-1fb9-4daf-a30b-bdfed24d5689
+          failed_run=33227925046
+          ci_run=33227451553
+          build_run=33227641381
+          if [ "$EVENT_NAME" = push ]; then
+            [ "$EVENT_BEFORE" = "$target" ]
+          else
+            [ "$EVENT_NAME" = workflow_dispatch ]
+            [ "$DISPATCH_TARGET" = "$target" ]
+            [ "$DISPATCH_REQUEST" = "$request" ]
+            [ "$DISPATCH_FAILED_RUN" = "$failed_run" ]
+            [ "$DISPATCH_CI_RUN" = "$ci_run" ]
+            [ "$DISPATCH_BUILD_RUN" = "$build_run" ]
+          fi
+          [ "$GITHUB_REF" = refs/heads/master ] && [ "$GITHUB_REF_NAME" = master ]
+          hotfix=$(git rev-parse HEAD)
+          [[ "$hotfix" =~ ^[0-9a-f]{40}$ ]]
+          [ "$hotfix" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD^)" = "$target" ]
+          [ "$(git rev-list --count "$target..$hotfix")" -eq 1 ]
+          [ "$(git rev-list --parents -n 1 "$hotfix" | awk '{print NF}')" -eq 2 ]
+          remote_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          [ "$remote_master" = "$hotfix" ]
+
+          [ -z "$(git diff --name-only --no-renames --diff-filter=D "$target" "$hotfix")" ]
+          mapfile -t changed < <(git diff --name-only --no-renames "$target" "$hotfix")
+          [ "${#changed[@]}" -ge 5 ]
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .github/workflows/vps-post-ponr-recovery.yml|\
+              .github/workflows/vps-recovery.yml|\
+              .github/workflows/vps-auto-merge-chore-prs.yml|\
+              deploy/deploy.sh|\
+              deploy/instaleaza-constructor.sh|\
+              deploy/lib/runtime-config-cutover.sh|\
+              deploy/lib/release-rollback.test.mjs|\
+              deploy/lib/constructor-publication.test.mjs|\
+              docs/operations/CURRENT.md) ;;
+              *) echo "::error::Fișier în afara allowlistului hotfix: $path"; exit 1 ;;
+            esac
+          done
+          for required in \
+            .github/workflows/vps-post-ponr-recovery.yml \
+            .github/workflows/vps-recovery.yml \
+            deploy/deploy.sh \
+            deploy/instaleaza-constructor.sh \
+            deploy/lib/runtime-config-cutover.sh; do
+            git diff --quiet "$target" "$hotfix" -- "$required" \
+              && { echo "::error::Hotfixul nu modifică $required"; exit 1; }
+            [ -f "$required" ] && [ ! -L "$required" ]
+          done
+
+          deadline=$((SECONDS + 9900))
+          hotfix_ci_id=''
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            hotfix_ci_runs=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/pr-verify.yml/runs?branch=master&event=push&per_page=100")
+            hotfix_ci_matches=$(jq -c --arg sha "$hotfix" '
+              [.workflow_runs[] | select(
+                .head_sha == $sha and .head_branch == "master" and .event == "push" and
+                (.path == ".github/workflows/pr-verify.yml" or
+                 (.path | startswith(".github/workflows/pr-verify.yml@"))))]
+            ' <<<"$hotfix_ci_runs")
+            hotfix_ci_count=$(jq -r 'length' <<<"$hotfix_ci_matches")
+            case "$hotfix_ci_count" in
+              0) sleep 30; continue ;;
+              1) ;;
+              *) echo '::error::Există mai multe runuri CI push pentru hotfixul exact.'; exit 1 ;;
+            esac
+            hotfix_ci_id=$(jq -er '.[0].id' <<<"$hotfix_ci_matches")
+            hotfix_ci_conclusion=$(jq -r '.[0].conclusion // ""' <<<"$hotfix_ci_matches")
+            case "$hotfix_ci_conclusion" in
+              '') sleep 30 ;;
+              success) break ;;
+              *) echo "::error::CI-ul push exact al hotfixului s-a încheiat cu $hotfix_ci_conclusion."; exit 1 ;;
+            esac
+          done
+          [[ "$hotfix_ci_id" =~ ^[1-9][0-9]*$ ]] \
+            || { echo '::error::CI-ul push exact al hotfixului nu a apărut în timp util.'; exit 1; }
+          hotfix_ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${hotfix_ci_id}")
+          jq -e --argjson id "$hotfix_ci_id" --arg sha "$hotfix" '
+            .id == $id and .head_sha == $sha and .head_branch == "master" and
+            .event == "push" and .conclusion == "success" and
+            (.path == ".github/workflows/pr-verify.yml" or
+             (.path | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$hotfix_ci" >/dev/null
+          hotfix_ci_jobs=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${hotfix_ci_id}/jobs?filter=latest&per_page=100")
+          jq -e '
+            .total_count == 3 and
+            ([.jobs[] | select(.conclusion == "success") | .name] | unique | sort) ==
+              ["container-isolation", "release-train-preflight", "verify"]
+          ' <<<"$hotfix_ci_jobs" >/dev/null
+
+          release=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${failed_run}")
+          jq -e \
+            --argjson id "$failed_run" \
+            --arg sha "$target" \
+            --arg title "production-${request}-${target}-${ci_run}-${build_run}" '
+              .id == $id and .head_sha == $sha and .head_branch == "master" and
+              .event == "workflow_dispatch" and .conclusion == "failure" and
+              (.path == ".github/workflows/deploy.yml" or
+               (.path | startswith(".github/workflows/deploy.yml@"))) and
+              .display_title == $title
+            ' <<<"$release" >/dev/null
+
+          ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run}")
+          jq -e --argjson id "$ci_run" --arg sha "$target" '
+            .id == $id and .head_sha == $sha and .head_branch == "master" and
+            .event == "push" and .conclusion == "success" and
+            (.path == ".github/workflows/pr-verify.yml" or
+             (.path | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$ci" >/dev/null
+          ci_jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run}/jobs?filter=latest&per_page=100")
+          jq -e '
+            .total_count == 3 and
+            ([.jobs[] | select(.conclusion == "success") | .name] | unique | sort) ==
+              ["container-isolation", "release-train-preflight", "verify"]
+          ' <<<"$ci_jobs" >/dev/null
+
+          build=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run}")
+          jq -e \
+            --argjson id "$build_run" \
+            --arg sha "$target" \
+            --arg title "build-release-${ci_run}-${target}" '
+              .id == $id and .head_sha == $sha and .head_branch == "master" and
+              .event == "workflow_run" and .conclusion == "success" and
+              (.path == ".github/workflows/build-images.yml" or
+               (.path | startswith(".github/workflows/build-images.yml@"))) and
+              .display_title == $title
+            ' <<<"$build" >/dev/null
+          printf 'hotfix_commit=%s\n' "$hotfix" >> "$GITHUB_OUTPUT"
+
+  recover:
+    if: needs.verify-incident.result == 'success' && github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    needs: verify-incident
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify-incident.outputs.hotfix_commit }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-images-de9fe5f3f081373a23796d83b469651e9c1e33e7
+          path: release-manifest
+          github-token: ${{ github.token }}
+          run-id: '33227641381'
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Verifică manifestele și semnăturile fixate
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target=de9fe5f3f081373a23796d83b469651e9c1e33e7
+          ci_run=33227451553
+          [ -f release-manifest/images.json ] && [ ! -L release-manifest/images.json ]
+          [ -f release-manifest/codex-gates.json ] && [ ! -L release-manifest/codex-gates.json ]
+          jq -e --arg sha "$target" --argjson source "$ci_run" '
+            type == "object" and .schema == 1 and .commit == $sha and
+            .sourceRunId == $source and
+            (.images | type == "object" and length == 5) and
+            (.images | keys | sort) ==
+              ["app", "browser", "browser-egress", "converter-gateway", "converter-parser"]
+          ' release-manifest/images.json >/dev/null
+          jq -e --arg sha "$target" --argjson source "$ci_run" '
+            type == "object" and .schema == 1 and .commit == $sha and
+            .sourceRunId == $source and (.image | type == "string")
+          ' release-manifest/codex-gates.json >/dev/null
+
+          [ -n "$REGISTRY_TOKEN" ]
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cleanup_registry() { docker logout ghcr.io >/dev/null 2>&1 || true; }
+          trap cleanup_registry EXIT
+          identity="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-images\\.yml@refs/heads/master$"
+          registry_repo=${GITHUB_REPOSITORY,,}
+          for component in app browser browser-egress converter-gateway converter-parser; do
+            ref=$(jq -er --arg component "$component" '.images[$component]' release-manifest/images.json)
+            prefix="ghcr.io/$registry_repo/$component@sha256:"
+            case "$ref" in "$prefix"*) ;; *) exit 1 ;; esac
+            [[ "${ref#"$prefix"}" =~ ^[0-9a-f]{64}$ ]]
+            cosign verify \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --annotations "git_sha=$target" \
+              "$ref" >/dev/null
+          done
+          gate_ref=$(jq -er '.image' release-manifest/codex-gates.json)
+          gate_prefix="ghcr.io/$registry_repo/codex-gates@sha256:"
+          case "$gate_ref" in "$gate_prefix"*) ;; *) exit 1 ;; esac
+          [[ "${gate_ref#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
+          cosign verify \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --annotations "git_sha=$target" \
+            "$gate_ref" >/dev/null
+
+      - name: Împachetează codul hotfix și manifestele de9
+        env:
+          HOTFIX_COMMIT: ${{ needs.verify-incident.outputs.hotfix_commit }}
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$HOTFIX_COMMIT" ]
+          [ "$(git rev-parse HEAD^)" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]
+          for input in deploy config/product.json release-manifest/images.json release-manifest/codex-gates.json; do
+            [ -e "$input" ] && [ ! -L "$input" ]
+          done
+          source_date_epoch=$(git show -s --format=%ct "$HOTFIX_COMMIT")
+          tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owner \
+            -czf "$RUNNER_TEMP/post-ponr-recovery.tar.gz" \
+            deploy config/product.json release-manifest/images.json release-manifest/codex-gates.json
+          chmod 0600 "$RUNNER_TEMP/post-ponr-recovery.tar.gz"
+
+      - name: Închide tranzacția post-PONR pe VPS
+        env:
+          HOTFIX_COMMIT: ${{ needs.verify-incident.outputs.hotfix_commit }}
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          target=de9fe5f3f081373a23796d83b469651e9c1e33e7
+          request=e5c00af2-1fb9-4daf-a30b-bdfed24d5689
+          failed_run=33227925046
+          ci_run=33227451553
+          build_run=33227641381
+          [ "$(git rev-parse HEAD)" = "$HOTFIX_COMMIT" ]
+          [ "$(git rev-parse HEAD^)" = "$target" ]
+          current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          [ "$current_master" = "$HOTFIX_COMMIT" ]
+          [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [ -n "$REGISTRY_TOKEN" ] && [ -n "$VPS_HOST" ] && [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          archive="$RUNNER_TEMP/post-ponr-recovery.tar.gz"
+          [ -f "$archive" ] && [ ! -L "$archive" ]
+
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          remote_archive="/root/kelion/runtime/post-ponr-recovery.${GITHUB_RUN_ID}.tar.gz"
+          cleanup() {
+            ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
+              "rm -f -- '$remote_archive'; docker logout ghcr.io >/dev/null 2>&1 || true" \
+              >/dev/null 2>&1 || true
+            rm -f -- "$key_file" "$known_hosts"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+
+          printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "[ -d /root/kelion/runtime ] && [ ! -L /root/kelion/runtime ] && [ \"\$(stat -Lc '%u:%g:%a' /root/kelion/runtime)\" = '0:10050:750' ] && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
+          scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$target" "$request" "$failed_run" "$ci_run" "$build_run" "$remote_archive" <<'REMOTE'
+          set -euo pipefail
+          target=$1
+          request=$2
+          failed_run=$3
+          ci_run=$4
+          build_run=$5
+          archive=$6
+          [ "$target" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]
+          [ "$request" = e5c00af2-1fb9-4daf-a30b-bdfed24d5689 ]
+          [ "$failed_run" = 33227925046 ]
+          [ "$ci_run" = 33227451553 ]
+          [ "$build_run" = 33227641381 ]
+          [[ "$archive" =~ ^/root/kelion/runtime/post-ponr-recovery\.[1-9][0-9]*\.tar\.gz$ ]]
+          [ -f "$archive" ] && [ ! -L "$archive" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$archive")" = '0:0:600:1' ]
+          work=$(mktemp -d /root/kelion/runtime/post-ponr.XXXXXX)
+          entries=$(mktemp /root/kelion/runtime/post-ponr-entries.XXXXXX)
+          cleanup_remote() {
+            rm -f -- "$archive" "$entries"
+            case "$work" in /root/kelion/runtime/post-ponr.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
+          }
+          trap cleanup_remote EXIT
+          tar -tzf "$archive" > "$entries"
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' "$entries"; then exit 1; fi
+          tar --extract --gzip --file "$archive" --directory="$work" --no-same-owner --no-same-permissions
+          [ -f "$work/deploy/deploy.sh" ] && [ ! -L "$work/deploy/deploy.sh" ]
+          [ -f "$work/release-manifest/images.json" ] && [ ! -L "$work/release-manifest/images.json" ]
+          [ -f "$work/release-manifest/codex-gates.json" ] && [ ! -L "$work/release-manifest/codex-gates.json" ]
+          KELION_RELEASE_APPROVED=1 \
+          KELION_RECOVER_LOST_POST_PONR=1 \
+          KELION_RELEASE_REQUEST_ID="$request" \
+          KELION_RELEASE_WORKFLOW_RUN_ID="$failed_run" \
+          KELION_CI_RUN_ID="$ci_run" \
+          KELION_BUILD_RUN_ID="$build_run" \
+            bash "$work/deploy/deploy.sh" "$target" "$work/release-manifest/images.json" release
+          REMOTE
+
+      - name: Dovadă externă exactă de9
+        run: |
+          set -euo pipefail
+          target=de9fe5f3f081373a23796d83b469651e9c1e33e7
+          origin=$(jq -er '.publicAppOrigin | select(type == "string")' config/product.json)
+          proof=$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 12 --max-redirs 0 \
+            "$origin/api/release-proof")
+          jq -e --arg expected "$target" '
+            .ready == true and .release.sideEffectsActive == true and
+            ((.release.candidate // false) == false) and .activeCommit == $expected
+          ' <<<"$proof" >/dev/null
