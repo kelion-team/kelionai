@@ -2371,22 +2371,28 @@ test('recovery-ul post-PONR este legat de incident, artefacte semnate și dovada
   const workflow = read('.github/workflows/vps-post-ponr-recovery.yml')
   const mergePolicy = read('.github/workflows/vps-auto-merge-chore-prs.yml')
   const target = 'de9fe5f3f081373a23796d83b469651e9c1e33e7'
+  const recoveryBase = 'afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3'
   assert.match(workflow, /name: VPS post-PONR recovery de9/)
   assert.doesNotMatch(workflow, /actions:\s*write|route-to-master|auto_routed_to_master/)
   assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
   assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
   assert.match(workflow, /environment: production/)
   assert.match(workflow, new RegExp(`target=${target}[\\s\\S]*request=e5c00af2-1fb9-4daf-a30b-bdfed24d5689[\\s\\S]*failed_run=33227925046[\\s\\S]*ci_run=33227451553[\\s\\S]*build_run=33227641381`))
-  assert.match(workflow, /git rev-parse HEAD\^\)" = "\$target"[\s\S]*git rev-list --count "\$target\.\.\$hotfix"\)" -eq 1[\s\S]*remote_master[\s\S]*"\$remote_master" = "\$hotfix"/)
-  assert.match(workflow, /\.github\/workflows\/vps-auto-merge-chore-prs\.yml/)
+  assert.match(workflow, new RegExp(`recovery_base=${recoveryBase}[\\s\\S]*EVENT_BEFORE" = "\\$recovery_base"`))
+  assert.match(workflow, /verify-incident:[\s\S]*fetch-depth: 3/)
+  assert.match(workflow, /git rev-parse HEAD\^\)" = "\$recovery_base"[\s\S]*git rev-parse "\$recovery_base\^"\)" = "\$target"[\s\S]*git rev-list --count "\$recovery_base\.\.\$hotfix"\)" -eq 1[\s\S]*remote_master[\s\S]*"\$remote_master" = "\$hotfix"/)
+  assert.match(workflow, /"\$\{#changed\[@\]\}" -eq 7[\s\S]*vps-auto-merge-chore-prs\.yml[\s\S]*vps-recovery\.yml[\s\S]*Dockerfile\.gates[\s\S]*deploy\/lib\/codex-boundary\.test\.mjs/)
   for (const path of [
     '.github/workflows/vps-post-ponr-recovery.yml',
     '.github/workflows/vps-recovery.yml',
+    'Dockerfile.gates',
+    'deploy/lib/codex-boundary.test.mjs',
     'deploy/lib/release-rollback.test.mjs',
   ]) {
     assert.ok(mergePolicy.includes(`"${path}"`), `merge-policy trebuie să permită ${path}`)
   }
   assert.match(workflow, /actions\/runs\/\$\{failed_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "failure"[\s\S]*workflows\/deploy\.yml/)
+  assert.match(workflow, /failed_recovery_run=33238849810[\s\S]*actions\/runs\/\$\{failed_recovery_run\}[\s\S]*\.head_sha == \$sha[\s\S]*workflows\/vps-post-ponr-recovery\.yml/)
   assert.match(workflow, /actions\/runs\/\$\{ci_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "success"[\s\S]*\["container-isolation", "release-train-preflight", "verify"\]/)
   assert.match(workflow, /actions\/runs\/\$\{build_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "success"[\s\S]*workflows\/build-images\.yml/)
   const hotfixCiStart = workflow.indexOf('deadline=$((SECONDS + 9900))')
@@ -2405,7 +2411,17 @@ test('recovery-ul post-PONR este legat de incident, artefacte semnate și dovada
   assert.match(workflow, /gate_ref=.*codex-gates\.json[\s\S]*cosign verify[\s\S]*"\$gate_ref"/)
   assert.match(workflow, /KELION_RELEASE_APPROVED=1[\s\S]*KELION_RECOVER_LOST_POST_PONR=1[\s\S]*KELION_RELEASE_REQUEST_ID="\$request"[\s\S]*KELION_RELEASE_WORKFLOW_RUN_ID="\$failed_run"[\s\S]*KELION_CI_RUN_ID="\$ci_run"[\s\S]*KELION_BUILD_RUN_ID="\$build_run"/)
   assert.doesNotMatch(workflow, /install -d[^\n]*\/root\/kelion\/runtime/)
-  assert.match(workflow, /stat -Lc '%u:%g:%a' \/root\/kelion\/runtime[\s\S]*0:10050:750/)
+  assert.match(workflow, /runtime_metadata=\$\(stat -Lc '%u:%g:%a' \/root\/kelion\/runtime\)[\s\S]*\[ "\$runtime_uid" = 0 \]\n\s+\[\[ "\$runtime_gid" =~ \^\[0-9\]\+\$ \]\]\n\s+\[\[ "\$runtime_mode" =~ \^\[0-7\]\{3,4\}\$ \]\][\s\S]*8#\$runtime_mode & 0022[\s\S]*post_ponr_preflight runtime_metadata=/)
+  assert.doesNotMatch(workflow, /\[ "\$runtime_uid" = 0 \] &&/)
+  assert.match(workflow, /remote_stage="\/root\/kelion-post-ponr\.\$\{GITHUB_RUN_ID\}"[\s\S]*remote_docker_config="\$remote_stage\/docker-config"/)
+  assert.match(workflow, /DOCKER_CONFIG='\$remote_docker_config' docker login[\s\S]*post_ponr_preflight ghcr=authenticated/)
+  assert.match(workflow, /post_ponr_preflight_failed phase=[\s\S]*post_ponr_remote_failed phase=/)
+  assert.equal((workflow.match(/trap 'on_err "\$LINENO" "\$\?"' ERR/g) ?? []).length, 2,
+    'ambele shell-uri remote trebuie să captureze linia și codul comenzii care a eșuat')
+  assert.doesNotMatch(workflow, /^\s+\[[^\n]*\]\s*&&/m,
+    'aserțiunile standalone nu pot folosi AND-list, deoarece Bash errexit le-ar putea ignora')
+  assert.match(workflow, /DOCKER_CONFIG="\$docker_config"[\s\S]*KELION_RELEASE_APPROVED=1/)
+  assert.match(workflow, /DOCKER_CONFIG="\$docker_config" docker logout[\s\S]*rm -rf -- "\$stage"/)
   assert.match(workflow, /\/api\/release-proof[\s\S]*\.ready == true[\s\S]*\.release\.sideEffectsActive == true[\s\S]*\.release\.candidate \/\/ false\) == false[\s\S]*\.activeCommit == \$expected/)
 })
 
@@ -2418,7 +2434,11 @@ test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperul
   assert.doesNotMatch(workflow.slice(0, classify), /^concurrency:/m)
   assert.match(workflow.slice(recover), /concurrency:\n\s+group: production-release/)
   assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
-  assert.match(workflow, /BEFORE_SHA[\s\S]*de9fe5f3f081373a23796d83b469651e9c1e33e7[\s\S]*execute=false/)
+  assert.match(workflow, /BEFORE_SHA[\s\S]*de9fe5f3f081373a23796d83b469651e9c1e33e7\|afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3[\s\S]*execute=false/)
+  assert.match(workflow, /RECOVERY_DEFERRED: tranziția incidentului aparține workflow-ului post-PONR dedicat/)
+  assert.doesNotMatch(workflow, /\[ -n "\$VPS_HOST" \] &&/)
+  assert.match(workflow, /\[ -f \/root\/kelion\/bin\/runtime-config-cutover\.sh \]\n\s+\[ ! -L \/root\/kelion\/bin\/runtime-config-cutover\.sh \][\s\S]*\[ -f \/root\/kelion\/config\/compose\.production\.yml \]\n\s+\[ ! -L \/root\/kelion\/config\/compose\.production\.yml \]/)
+  assert.doesNotMatch(workflow, /\[ -f \/root\/kelion\/(?:bin\/runtime-config-cutover\.sh|config\/compose\.production\.yml) \]\s*\\\n\s*&&/)
   const journal = workflow.indexOf('journal=/root/kelion/runtime/destructive-cutover-recovery.json')
   const defer = workflow.indexOf('RECOVERY_DEFERRED: există un jurnal distructiv valid', journal)
   const exit = workflow.indexOf('exit 0', defer)

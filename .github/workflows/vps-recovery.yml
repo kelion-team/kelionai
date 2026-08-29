@@ -23,13 +23,16 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = push ] \
-            && [ "$BEFORE_SHA" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]; then
-            echo 'execute=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::RECOVERY_DEFERRED: tranziția de9 -> hotfix aparține workflow-ului post-PONR dedicat.'
-          else
-            echo 'execute=true' >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = push ]; then
+            case "$BEFORE_SHA" in
+              de9fe5f3f081373a23796d83b469651e9c1e33e7|afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3)
+                echo 'execute=false' >> "$GITHUB_OUTPUT"
+                echo '::notice::RECOVERY_DEFERRED: tranziția incidentului aparține workflow-ului post-PONR dedicat.'
+                exit 0
+                ;;
+            esac
           fi
+          echo 'execute=true' >> "$GITHUB_OUTPUT"
 
   recover:
     if: needs.classify.outputs.execute == 'true' && github.ref == 'refs/heads/master' && github.ref_name == 'master'
@@ -50,7 +53,10 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
-          [ -n "$VPS_HOST" ] && [ "$VPS_USER" = root ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ -n "$VPS_HOST" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST_KEY" ]
+          [ -n "$SSH_KEY" ]
           umask 077
           key_file=$(mktemp)
           known_hosts=$(mktemp)
@@ -144,12 +150,12 @@ jobs:
             && [ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/9")" = '0:0:600:1' ] \
             && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ] \
             || { echo 'RECOVERY_INVALID: lock-ul s-a schimbat înainte de recovery' >&2; exit 1; }
-          [ -f /root/kelion/bin/runtime-config-cutover.sh ] \
-            && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
-            && [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500:1' ]
-          [ -f /root/kelion/config/compose.production.yml ] \
-            && [ ! -L /root/kelion/config/compose.production.yml ] \
-            && [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/config/compose.production.yml)" = '0:0:444:1' ]
+          [ -f /root/kelion/bin/runtime-config-cutover.sh ]
+          [ ! -L /root/kelion/bin/runtime-config-cutover.sh ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500:1' ]
+          [ -f /root/kelion/config/compose.production.yml ]
+          [ ! -L /root/kelion/config/compose.production.yml ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/config/compose.production.yml)" = '0:0:444:1' ]
           # Jurnalul poate apărea cât timp așteptăm lock-ul. Reverificarea sub
           # lock este ultima operație înaintea helperului generic.
           if defer_for_destructive_journal; then
