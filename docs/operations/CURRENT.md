@@ -1,47 +1,59 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T20:25:53Z`
+Actualizat: `2026-08-29T20:36:15Z`
 
 ## Stare verificată
 
-- Ținta unică de producție este `master`, la
-  `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
-- Release-ul de producție `33272696377` a eșuat înainte de schimbarea
-  versiunii live: helperul persistent vechi a refuzat jurnalul legitim de
-  activare înainte să poată instala helperul corect din bundle.
-- Candidatul `93f3b4103b2542b96db484d3dda3f2b0e02abb04` instalează atomic
-  helperul candidat, după validarea unității, numai când există un jurnal de
-  recovery; apoi rulează recovery-ul sub lock. Hosturile fără jurnal păstrează
-  ordinea normală de bootstrap.
-- Același candidat închide corect o tură de chat fără cheie OpenAI cu
-  `503 brain_not_configured`, înainte de debitare și SSE. Replay-urile
-  finalizate și vocea ambientală își păstrează căile fail-closed existente.
-- Validările locale ale candidatului au trecut: backend (typecheck, lint și
-  1.438 teste), frontend (build, lint și 306 teste), porțile statice, testele
-  worker/Constructor, preflight-ul release train și CodeQL.
-- Scanul Gitleaks al arborelui/bundle-ului și al diferenței
-  `origin/master..HEAD` este curat. Scanul întregului istoric încă detectează
-  două credentiale legacy Kimi/GLM, cu entropie ridicată, în documente deja
-  șterse; ele trebuie revocate de operator înainte de release. Nu se rescrie
-  istoria și nu se adaugă excepții care ar ascunde problema.
-- Reluarea validării Docker/container-isolation este în curs. `VPS release
-  verifier` pentru `master` a rămas fail-closed după release-ul eșuat, fără
-  dovezi pentru branch protection, deploy și verificarea live.
-- O cheie OpenAI de proiect validă rămâne necesară pentru chatul și vocea
-  online. Un avertisment pentru cheie revocată, credit insuficient, plată
-  pending sau citire nereușită este un semnal real și nu trebuie ascuns.
-- Nu există o dovadă nouă a versiunii live din această sesiune.
+- `master` este `154de473b27b760d8bdf6a503850a8018e862f7e`; verificarea sa
+  completă este încă în curs.
+- Release run `33272696377` a validat candidatul și semnăturile, dar s-a
+  oprit înainte de point-of-no-return. Release-ul public anterior a rămas
+  activ.
+- Cauza confirmată este un bootstrap deadlock în `deploy.sh`: înainte să
+  instaleze helperul reparat, deploy-ul cere helperului live vechi să
+  recupereze `constructor-activation.journal`. Generația veche include
+  jurnalul în globul `constructor-activation.*` și refuză recovery-ul.
+- `master` conține remedierea one-shot, dublu pin-uită, pentru acel deadlock.
+  Ea acceptă numai helperul live și candidatul cunoscute, un jurnal schema 2
+  pentru `activate-worker-publisher` și absența jurnalelor concurente.
+  Migrarea rulează helperul candidat numai dintr-o copie temporară
+  root-only, reia explicit operația jurnalizată, dovedește ștergerea
+  jurnalului/pendingului/snapshotului, apoi quiesce din nou Constructorul.
+  Helperul live nu este înlocuit înaintea dovezii.
+- Candidatul curent păstrează remedierea upstream pentru recovery și adaugă
+  `503 brain_not_configured` înainte de SSE și debitare pentru chatul fără
+  cheie OpenAI; replay-urile terminale și vocea ambientală își păstrează
+  căile fail-closed.
+- Backendul (typecheck, lint, 1.438 teste), frontendul (build, lint, 306
+  teste), porțile statice, worker/Constructor, preflightul și CodeQL au
+  trecut pe baza anterioară; trainul sincronizat necesită revalidare.
+- `container-isolation` oficial pentru baza anterioară a trecut. Reproducerea
+  locală este blocată de un certificat TLS extern, auto-semnat, în container;
+  verificarea TLS nu va fi slăbită.
+- Gitleaks pentru arbore/bundle și diferența candidatului este curat.
+  Istoricul complet conține două credentiale legacy Kimi/GLM în documente
+  șterse; operatorul trebuie să le revoce înainte de release. Istoria nu se
+  rescrie și nu se introduc excepții care ar ascunde problema.
+- Constructorul rămâne fail-closed; timerele sunt inactive până la
+  recovery/deploy reușit și la probele Codex CLI.
+- Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
+  separată de release și Constructor.
+- Nu există o dovadă nouă a versiunii live în această sesiune.
 
 ## Următorul pas sigur
 
-1. Revocă credentialele Kimi/GLM istorice în secret store-ul furnizorilor și
-   păstrează dovada de revocare în canalul securizat, nu în repository.
-2. Colectează rezultatul container-isolation; dacă trece, deschide și
-   integrează release train-ul numai pe verde.
-3. Confirmă release-ul automat pentru noul `master` cu health și
-   `/api/release-proof`; acceptă deploy-ul numai dacă commitul live coincide.
-4. Rotește cheia OpenAI project-scoped în secret store, fără a o introduce în
-   cod sau documentație, apoi verifică chatul text, vocea live și starea
-   OpenAI din admin.
-5. După recovery reușit, reactivează Constructorul și acceptă starea numai
-   după probele Codex, worker, publisher și release.
+1. Finalizează trainul sincronizat și rulează porțile complete numai după ce
+   `master` este verde.
+2. Revocă credentialele Kimi/GLM istorice în secret store-urile furnizorilor;
+   păstrează dovada numai în canalul securizat.
+3. Îmbină prin rebase numai pe verde și publică noul `master`.
+4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
+   Constructor pentru starea timerelor și proba `codex --version`.
+5. Activează release-ul Constructor numai după worker/publisher sănătoase și
+   rotește cheia OpenAI în secret store înainte de verificarea chatului/voce.
+
+## Legături canonice
+
+- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
+- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33272696377>
+- Versiune live: <https://kelionai.app/api/release-proof>
