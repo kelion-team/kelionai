@@ -749,6 +749,8 @@ jobs:
               replacement["CONSTRUCTOR_RETRY_MAX_SECONDS"] = retry_max
               replacement["CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"] = retry_external
               replacement["CONSTRUCTOR_REQUIRED_CHECKS"] = required_checks
+              replacement["GITHUB_RELEASE_OAUTH_TOKEN_FILE"] = "/run/secrets/github-release-oauth-token"
+              replacement["GOOGLE_TTS_VOICE"] = "Charon"
               order[1] = "CODEX_WORKER_ENABLED"
               order[2] = "CONSTRUCTOR_PUBLISHER_ENABLED"
               order[3] = "CONSTRUCTOR_RELEASE_ENABLED"
@@ -756,10 +758,12 @@ jobs:
               order[5] = "CONSTRUCTOR_RETRY_MAX_SECONDS"
               order[6] = "CONSTRUCTOR_EXTERNAL_RETRY_SECONDS"
               order[7] = "CONSTRUCTOR_REQUIRED_CHECKS"
+              order[8] = "GITHUB_RELEASE_OAUTH_TOKEN_FILE"
+              order[9] = "GOOGLE_TTS_VOICE"
             }
             $1 in replacement { if (!written[$1]++) print $1 "=" replacement[$1]; next }
             { print }
-            END { for (i = 1; i <= 7; i++) if (!written[order[i]]) print order[i] "=" replacement[order[i]] }
+            END { for (i = 1; i <= 9; i++) if (!written[order[i]]) print order[i] "=" replacement[order[i]] }
           ' "$runtime_file" > "$cutover_stage/files/runtime.env"
           chmod 0600 "$cutover_stage/files/runtime.env"
           printf '%s\n' runtime.env >> "$cutover_stage/manifest"
