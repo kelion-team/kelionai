@@ -91,8 +91,22 @@ ROOT=/root/kelion
 RUNTIME_ROOT=$ROOT/runtime
 PUBLICATION_LOCK=$ROOT/publicare.lock
 INSTALL_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
+DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
+
+# Installerul nu poate interpreta ori consuma recovery-ul DB/release. Orice
+# inode la calea fixă (inclusiv symlink sau fișier corupt) blochează toate
+# mutațiile Constructor până când operația de release care îl deține se încheie.
+guard_destructive_cutover_recovery_absent() {
+  [ ! -e "$DESTRUCTIVE_RECOVERY_JOURNAL" ] \
+    && [ ! -L "$DESTRUCTIVE_RECOVERY_JOURNAL" ]
+}
+guard_destructive_cutover_recovery_absent || {
+  echo 'recovery destructiv de release activ; instalarea Constructor este refuzată' >&2
+  constructor_install_failure_line=$LINENO
+  exit 1
+}
 install -d -o root -g root -m 0755 "$ROOT"
 
 set_constructor_install_phase publication-lock
@@ -128,6 +142,11 @@ acquire_publication_lock() {
   export KELION_CUTOVER_LOCK_HELD=1
 }
 acquire_publication_lock || { echo 'lock-ul de publicare nu poate fi dobândit și dovedit pe FD9' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+guard_destructive_cutover_recovery_absent || {
+  echo 'recovery destructiv de release detectat sub publication lock; instalarea Constructor este refuzată' >&2
+  constructor_install_failure_line=$LINENO
+  exit 1
+}
 set_constructor_install_phase identity-layout
 
 install_atomic() {
@@ -1046,7 +1065,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=8594a0f946fc8037d61a9693ce84a0f32da1be3a3a6daa5c2a60295750748021
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal

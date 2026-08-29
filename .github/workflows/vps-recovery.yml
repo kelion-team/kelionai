@@ -2,41 +2,161 @@ name: VPS Recovery
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  recover:
+  classify:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      VPS_HOST: ${{ vars.VPS_HOST }}
-      VPS_USER: ${{ vars.VPS_USER }}
-      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
-      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      execute: ${{ steps.decision.outputs.execute }}
     steps:
-      - name: Recovery pe VPS
+      - name: Separă recovery-ul unic post-PONR
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          if [ "$EVENT_NAME" = push ] \
+            && [ "$BEFORE_SHA" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]; then
+            echo 'execute=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::RECOVERY_DEFERRED: tranziția de9 -> hotfix aparține workflow-ului post-PONR dedicat.'
+          else
+            echo 'execute=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  recover:
+    if: needs.classify.outputs.execute == 'true' && github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    needs: classify
+    concurrency:
+      group: production-release
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions: {}
+    steps:
+      - name: Recovery generic pe VPS
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$VPS_HOST" ] && [ "$VPS_USER" = root ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           umask 077
-          key_file=$(mktemp); known_hosts=$(mktemp)
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
           trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
           printf '%s\n' "$SSH_KEY" > "$key_file"
           printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
           chmod 0600 "$key_file" "$known_hosts"
           ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
               -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
-              "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
-            set -euo pipefail
-            [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ]
-            exec 9>/root/kelion/publicare.lock
-            flock -n 9
-            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
-              --recover-only /root/kelion/config/compose.production.yml \
-              --leave-constructor-quiesced
-            echo RECOVERY_OK
-          EOF
+              "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          defer_for_destructive_journal() {
+            local journal=/root/kelion/runtime/destructive-cutover-recovery.json
+            if [ ! -e "$journal" ] && [ ! -L "$journal" ]; then
+              return 1
+            fi
+            [ -f "$journal" ] && [ ! -L "$journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$journal")" = '0:0:600:1' ] \
+              || { echo 'RECOVERY_INVALID: jurnalul distructiv are ACL sau tip nesigur' >&2; exit 1; }
+            jq -e '
+              type == "object" and
+              (keys | sort) == ([
+                "activeRuntimeContainers", "activeSlot", "caddyfileSnapshot", "commit",
+                "dbRestoreRequired", "inactiveSlot", "legacyRuntimeContainers",
+                "migrationContractBefore", "oldMarker", "oldUpstream", "oldUpstreamPresent",
+                "phase", "pointOfNoReturn", "previousVersion", "schema", "updatedAt"
+              ] | sort) and
+              .schema == 1 and
+              (.commit | strings | test("^[0-9a-f]{40}$")) and
+              (.pointOfNoReturn | type) == "boolean" and
+              (.dbRestoreRequired | type) == "boolean" and
+              ((.phase == "maintenance" and .pointOfNoReturn == false and
+                  .dbRestoreRequired == false) or
+               ((.phase == "before-migrator" or .phase == "database-migrated" or
+                  .phase == "restore-in-progress") and .pointOfNoReturn == false and
+                  .dbRestoreRequired == true) or
+               ((.phase == "database-restored" or .phase == "rolled-back") and
+                  .pointOfNoReturn == false and .dbRestoreRequired == false) or
+               (.phase == "point-of-no-return" and .pointOfNoReturn == true and
+                  .dbRestoreRequired == true) or
+               (.phase == "completed" and .pointOfNoReturn == true and
+                  .dbRestoreRequired == false)) and
+              (.previousVersion | strings | test("^[0-9a-f]{7,40}$")) and
+              (.migrationContractBefore | strings | length > 0) and
+              ((.activeSlot == "legacy" and .inactiveSlot == "blue" and
+                  .oldMarker == "legacy" and .activeRuntimeContainers == [] and
+                  (.legacyRuntimeContainers | type == "array" and length >= 1 and length <= 3 and
+                    length == (unique | length) and index("kelionai-app") != null and
+                    all(.[]; . == "kelionai-app" or . == "omniroute" or . == "kelionai-coqui"))) or
+               ((.activeSlot == "blue" or .activeSlot == "green") and
+                  (.inactiveSlot == "blue" or .inactiveSlot == "green") and
+                  .activeSlot != .inactiveSlot and
+                  (.oldMarker | strings | test("^[0-9a-f]{40}$")) and
+                  (.oldMarker as $old | .previousVersion as $version | $old | startswith($version)) and
+                  (.activeRuntimeContainers | type == "array" and length == 5 and
+                    length == (unique | length) and
+                    all(.[]; type == "string" and test("^[0-9a-f]{12,64}$"))) and
+                  .legacyRuntimeContainers == [])) and
+              (.oldUpstreamPresent | type) == "boolean" and
+              (.oldUpstream | type) == "string" and
+              (.caddyfileSnapshot | strings |
+                (. == "" or test("^/root/kelion/runtime/caddyfile-rollback\\.[A-Za-z0-9]+$"))) and
+              (.updatedAt | strings | fromdateiso8601 | type) == "number"
+            ' "$journal" >/dev/null \
+              || { echo 'RECOVERY_INVALID: jurnalul distructiv este malformat' >&2; exit 1; }
+            echo 'RECOVERY_DEFERRED: există un jurnal distructiv valid; recovery-ul generic nu mută starea.'
+            return 0
+          }
+          if defer_for_destructive_journal; then
+            exit 0
+          fi
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ] \
+            || { echo 'RECOVERY_INVALID: lock-ul de publicare nu este canonic' >&2; exit 1; }
+          # Recovery-ul nu creează, nu normalizează și nu trunchiază lock-ul.
+          # FD-ul read-only este suficient pentru flock(2) exclusiv pe Linux.
+          exec 9<"$publication_lock"
+          publication_fd_path=$(readlink "/proc/$$/fd/9") \
+            || { echo 'RECOVERY_INVALID: FD9 nu poate fi citit' >&2; exit 1; }
+          [ "$publication_fd_path" = "$publication_lock" ] \
+            && [ -f "/proc/$$/fd/9" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/9")" = '0:0:600:1' ] \
+            || { echo 'RECOVERY_INVALID: FD9 nu indică lock-ul canonic' >&2; exit 1; }
+          publication_fd_identity=$(stat -Lc '%d:%i' "/proc/$$/fd/9") \
+            || { echo 'RECOVERY_INVALID: identitatea FD9 nu poate fi citită' >&2; exit 1; }
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ] \
+            || { echo 'RECOVERY_INVALID: pathul și FD9 indică lock-uri diferite' >&2; exit 1; }
+          flock -n 9
+          [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/9")" = '0:0:600:1' ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ] \
+            || { echo 'RECOVERY_INVALID: lock-ul s-a schimbat înainte de recovery' >&2; exit 1; }
+          [ -f /root/kelion/bin/runtime-config-cutover.sh ] \
+            && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500:1' ]
+          [ -f /root/kelion/config/compose.production.yml ] \
+            && [ ! -L /root/kelion/config/compose.production.yml ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/config/compose.production.yml)" = '0:0:444:1' ]
+          # Jurnalul poate apărea cât timp așteptăm lock-ul. Reverificarea sub
+          # lock este ultima operație înaintea helperului generic.
+          if defer_for_destructive_journal; then
+            exit 0
+          fi
+          KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+            --recover-only /root/kelion/config/compose.production.yml \
+            --leave-constructor-quiesced
+          echo RECOVERY_OK
+          REMOTE

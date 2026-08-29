@@ -455,6 +455,7 @@ test('recovery-ul distructiv persistă faza și ignoră semnale repetate', () =>
   ordered(writeJournal, [
     ['fișierul temporar', 'mktemp "$RUNTIME_ROOT/destructive-cutover-recovery.XXXXXX"'],
     ['serializarea JSON', 'jq -n'],
+    ['ownerul root-only', 'chown root:root "$temporary"'],
     ['ACL-ul root-only', 'chmod 0600 "$temporary"'],
     ['publicarea atomică', 'mv -f -- "$temporary" "$RECOVERY_JOURNAL"'],
     ['sincronizarea durabilă', 'sync_recovery_path "$RECOVERY_JOURNAL" file'],
@@ -468,6 +469,180 @@ test('recovery-ul distructiv persistă faza și ignoră semnale repetate', () =>
   assert.ok(rollback.indexOf('clear_recovery_journal') < rollback.indexOf('recovery_armed=0'))
   assert.ok(exitHandler.indexOf("trap '' HUP INT TERM") < exitHandler.indexOf('rollback_switch'))
   assert.doesNotMatch(exitHandler, /trap - HUP INT TERM/)
+})
+
+test('receiptul PONR autentic permite proba candidatului, iar orice abatere oprește curl-ul', {
+  skip: bashAvailable ? false : 'Bash nu este disponibil pentru proba comportamentală',
+}, () => {
+  const script = `
+set -euo pipefail
+${'write_recovery_journal'}() {${body('write_recovery_journal')}
+}
+${'mark_point_of_no_return'}() {${body('mark_point_of_no_return')}
+}
+${'prepared_candidate_destructive_journal_proof'}() {${body('prepared_candidate_destructive_journal_proof')}
+}
+${'prepared_candidate_public_live_proof'}() {${body('prepared_candidate_public_live_proof')}
+}
+RUNTIME_ROOT=$(mktemp -d)
+RECOVERY_JOURNAL="$RUNTIME_ROOT/destructive-cutover-recovery.json"
+PRODUCT_FILE="$RUNTIME_ROOT/product.json"
+CURL_LOG="$RUNTIME_ROOT/curl.log"
+CANONICAL="$RUNTIME_ROOT/canonical.json"
+COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+active_slot=blue
+inactive_slot=green
+old_marker=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+previous_version_before=bbbbbbb
+migration_contract_before=contract-v1
+previous_caddyfile_snapshot="$RUNTIME_ROOT/caddyfile-rollback.snapshot"
+old_upstream='reverse_proxy app-blue:8080'
+old_upstream_present=1
+active_runtime_containers=(111111111111 222222222222)
+legacy_runtime_running=()
+db_restore_required=0
+destructive_cutover=1
+point_of_no_return=0
+resume_destructive_recovery=0
+recover_pre_ponr_destructive=0
+printf '%s\n' '{"publicAppOrigin":"https://kelion.invalid"}' > "$PRODUCT_FILE"
+: > "$CURL_LOG"
+sync_recovery_path() { return 0; }
+# Runnerul CI este non-root. Simulăm exclusiv ownerul 0:0, dar păstrăm din
+# filesystem mode-ul și nlink-ul reale, astfel încât probele negative ACL,
+# symlink și hardlink să rămână comportamentale.
+chown() {
+  [ "$#" -eq 2 ] && [ "$1" = root:root ] && [ -f "$2" ] && [ ! -L "$2" ]
+}
+stat() {
+  [ "$#" -eq 3 ] && [ "$1" = -Lc ] && [ "$2" = '%u:%g:%a:%h' ] || return 1
+  local acl
+  acl=$(command stat -Lc '%a:%h' "$3") || return 1
+  printf '0:0:%s\n' "$acl"
+}
+curl() {
+  local url="\${!#}"
+  printf '%s\n' "$url" >> "$CURL_LOG"
+  case "$url" in
+    */api/version) printf '%s\n' '{"v":"aaaaaaa"}' ;;
+    */readyz) printf '%s\n' '{"ready":true,"release":{"candidate":true,"sideEffectsActive":false}}' ;;
+    *) return 1 ;;
+  esac
+}
+restore_canonical() {
+  rm -f -- "$RECOVERY_JOURNAL"
+  cp -- "$CANONICAL" "$RECOVERY_JOURNAL"
+  chmod 0600 "$RECOVERY_JOURNAL"
+}
+mutate_canonical() {
+  local filter=$1 temporary
+  temporary=$(mktemp "$RUNTIME_ROOT/mutated.XXXXXX")
+  jq "$filter" "$CANONICAL" > "$temporary"
+  chmod 0600 "$temporary"
+  mv -f -- "$temporary" "$RECOVERY_JOURNAL"
+}
+expect_rejected_before_curl() {
+  local label=$1
+  : > "$CURL_LOG"
+  if prepared_candidate_public_live_proof; then
+    printf 'accepted invalid receipt: %s\n' "$label" >&2
+    return 1
+  fi
+  [ ! -s "$CURL_LOG" ]
+}
+
+mark_point_of_no_return
+[ "$point_of_no_return" = 1 ]
+[ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ]
+[ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ]
+cp -- "$RECOVERY_JOURNAL" "$CANONICAL"
+chmod 0600 "$CANONICAL"
+: > "$CURL_LOG"
+prepared_candidate_public_live_proof
+[ "$(wc -l < "$CURL_LOG")" -eq 2 ]
+
+mutate_canonical '.commit="cccccccccccccccccccccccccccccccccccccccc"'
+expect_rejected_before_curl commit
+mutate_canonical '.phase="database-migrated"'
+expect_rejected_before_curl phase
+mutate_canonical '.pointOfNoReturn=false'
+expect_rejected_before_curl ponr
+
+restore_canonical
+chmod 0644 "$RECOVERY_JOURNAL"
+expect_rejected_before_curl acl
+
+rm -f -- "$RECOVERY_JOURNAL"
+ln -s "$CANONICAL" "$RECOVERY_JOURNAL"
+expect_rejected_before_curl symlink
+
+rm -f -- "$RECOVERY_JOURNAL"
+ln "$CANONICAL" "$RECOVERY_JOURNAL"
+expect_rejected_before_curl hardlink
+
+rm -f -- "$RECOVERY_JOURNAL"
+expect_rejected_before_curl absent-at-ponr
+
+rm -f -- "$CANONICAL" "$CURL_LOG" "$PRODUCT_FILE"
+rmdir "$RUNTIME_ROOT"
+`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
+test('exit-ul post-PONR armează roll-forward înainte de scheduler și păstrează jurnalele', {
+  skip: bashAvailable ? false : 'Bash nu este disponibil pentru proba comportamentală',
+}, () => {
+  const script = `
+set -uo pipefail
+${'on_release_exit'}() {${body('on_release_exit')}
+}
+RUNTIME_ROOT=$(mktemp -d)
+RECOVERY_JOURNAL="$RUNTIME_ROOT/destructive-cutover-recovery.json"
+CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL="$RUNTIME_ROOT/constructor-deploy-quiesce.journal"
+CALLS="$RUNTIME_ROOT/calls.log"
+printf '%s\n' recovery > "$RECOVERY_JOURNAL"
+printf '%s\n' quiesce > "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"
+: > "$CALLS"
+recovery_armed=1
+release_cutover_committed=0
+release_rollforward_only=0
+point_of_no_return=1
+gate_matches_active_release=1
+release_request_state=started
+release_pre_ponr_restored=0
+constructor_release_quiesced=1
+cleanup_migration_proof_copy() { return 0; }
+classify_gate_prepared_failure() { return 0; }
+recover_schedule_after_point_of_no_return() {
+  printf 'scheduler:%s:%s\n' "$release_rollforward_only" "$gate_matches_active_release" >> "$CALLS"
+}
+forbidden() {
+  printf 'forbidden:%s\n' "$1" >> "$CALLS"
+  return 1
+}
+rollback_switch() { forbidden rollback; }
+constructor_deploy_quiesce_snapshot_matches_previous() { forbidden quiesce-restore-proof; }
+write_release_request_ledger() { forbidden ledger-write; }
+constructor_gate_matches_candidate() { forbidden gate-candidate-proof; }
+restore_constructor_after_release() { forbidden constructor-restore; }
+cleanup_caddyfile_snapshot() { forbidden proxy-cleanup; }
+finalize_rolled_back_recovery_journal() { forbidden receipt-cleanup; }
+
+set +e
+( false; on_release_exit )
+status=$?
+set -e
+[ "$status" -eq 1 ]
+[ "$(cat "$CALLS")" = 'scheduler:1:0' ]
+[ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ]
+[ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]
+
+rm -f -- "$RECOVERY_JOURNAL" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" "$CALLS"
+rmdir "$RUNTIME_ROOT"
+`
+  const result = spawnSync(bashExecutable, ['-c', script], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
 })
 
 test('rollback-ul este dezarmat numai după versiunea JSON publică exactă', () => {

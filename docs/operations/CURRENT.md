@@ -1,58 +1,97 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T01:34:37Z`
+Actualizat: `2026-08-29T06:28:13Z`
 
 ## Stare verificată
 
 - Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
 - Vârful `master` este
-  `88e295581ee7f1508884d376c76f5eb968c17771` (PR `#1504`). CI exact
-  `33225442208`, scanarea exactă `33225442237` și buildul OCI exact
-  `33225642455` sunt verzi.
-- PR `#1504` a eliminat byte-ul `CR` din unitatea sync și a mutat validarea
-  strictă a celor opt surse systemd înainte de intentul durabil sau quiesce.
-  Configurarea VPS `33226027350` a trecut `published-validation`, `commit` și
-  contractul runtime live pe SHA-ul exact; cele cinci containere active au
-  revenit healthy, iar Constructorul a rămas instalat fără markere de activare.
-- Release-ul canonic `33225988793`, request
-  `d7d324f8-0dfb-4413-b6b9-125b9defe9c1`, a eșuat inițial înaintea
-  configurării pe `runtime.env` legacy. Retry-ul aceleiași cereri a trecut
-  validarea runtime, manifestul și semnăturile, apoi s-a oprit fail-closed
-  înainte de PONR în preflight-ul read-only al handoff-urilor Constructor.
-- Cauza exactă a celui de-al doilea refuz este incompatibilitatea SQL cu schema
-  Constructor v1: predicatul legacy folosea parametrii `$1,$2,$3,$4,$7`, dar
-  trimitea șapte valori. PostgreSQL a refuzat parametrul nefolosit `$5` cu
-  `42P18`, înainte ca query-ul de numărare să ruleze. Mesajul generic despre
-  handoff-uri nedrenate nu dovedește existența unor joburi blocante.
-- Remedierea curentă păstrează predicatele de ownership fail-closed, dar trimite
-  exact cinci parametri contigui pe schema v1 și șapte pe schema v2. Regresia
-  execută query-ul extras din deploy pe ambele scheme PGlite și verifică un
-  handoff curent plus unul străin. Suita Constructor relevantă este verde
-  `80/80`; `bash -n`, sintaxa Node și `git diff --check` sunt verzi.
-- Recovery-ul pre-PONR a păstrat traficul și DB fără cutover. Producția este
-  sănătoasă pe `baf00aee68206ebdf259143fd9b71813fd6a5c02`:
-  `/api/version`, `/readyz`, `/livez` și `/health` răspund 200, readiness-ul și
-  side effects sunt active, iar `/api/release-proof` rămâne 404.
-- Avertismentele GitHub despre acțiuni Node.js 20 forțate pe Node.js 24 nu au
-  cauzat refuzurile. Migrarea acțiunilor rămâne separată până când producția
-  este stabilă pe noul vârf.
+  `de9fe5f3f081373a23796d83b469651e9c1e33e7` (PR `#1506`). CI exact
+  `33227451553`, scanarea exactă `33227451542`, recovery-ul VPS exact
+  `33227451578` și buildul OCI exact `33227641381` sunt verzi; imaginile celor
+  cinci roluri sunt semnate pentru acest SHA.
+- Dispatchul release `33227921235` a validat tupla exactă. Release-ul canonic
+  `33227925046`, request
+  `e5c00af2-1fb9-4daf-a30b-bdfed24d5689`, a trecut drainul SQL, restaurarea
+  verificată a backupului, migrațiile, cele cinci containere candidate și
+  probele SSRF/converter. După PONR s-a oprit fail-closed la dovada publică a
+  candidatului pregătit.
+- Cauza exactă este o contradicție în validarea locală: dovada candidatului
+  respingea orice jurnal distructiv, deși `mark_point_of_no_return` tocmai
+  publicase jurnalul autentic al aceluiași release. Refuzul s-a produs înainte
+  de primul `curl`; avertismentele Node.js 20/24 și Caddy nu l-au cauzat.
+- Handlerul de ieșire post-PONR nu arma simultan `release_rollforward_only=1`
+  și nu retrăgea `gate_matches_active_release`. Recovery-ul Constructor generic
+  a consumat astfel snapshotul quiesce/proxy care trebuia păstrat pentru
+  continuarea release-ului.
+- Configurarea `33227955270` a fost apoi refuzată înaintea primei mutații: markerul
+  activ păstrat este versiunea veche `baf00aee68206ebdf259143fd9b71813fd6a5c02`,
+  iar proxy-ul și slotul `blue` servesc candidatul `de9fe5f...`. Guardul de
+  restart a detectat corect această stare mixtă post-PONR.
+- Diagnoza read-only `33228316533` și inventarul spool `33228583946` confirmă un
+  singur jurnal `runtime-config-cutover.journal`, schema 1/faza `prepared`, cu
+  exact cele 11 intrări așteptate. Toate țintele live sunt încă byte-identice cu
+  backupurile; nu a existat mutație runtime/config. Markerul ready și activarea
+  lipsesc, iar `constructor-unit-migration.pending` canonic este prezent și
+  trebuie păstrat.
+- Producția rămâne fail-closed pe candidatul exact `de9fe5f...`: cele cinci
+  containere `blue` și proxy-ul sunt healthy; `/api/version`, `/readyz`,
+  `/livez` și `/health` răspund 200. `/api/release-proof` răspunde 503 cu
+  `activeCommit=de9fe5f...`, `candidate=true` și `sideEffectsActive=false`.
+  Serviciile și timerele Constructor sunt inactive.
+- Workflow-urile generice de recovery, rerun, configure, set-env și rollback nu
+  pot închide sigur această stare și nu trebuie rulate. Recovery-ul permis este
+  exclusiv fix-forward, legat de tuplele și artefactele exacte de mai sus.
+- Hotfixul dedicat este publicat în PR `#1509` ca un singur copil direct al
+  `de9fe5f...`. Primul run
+  `merge-policy` a identificat fail-closed cele trei căi recovery noi absente
+  din allowlist; commitul unic este amendat cu allowlistul și regresia aferentă.
+  Primul `verify` a expus și o presupunere root-only în harnessul noii regresii,
+  nu în codul de producție: runnerul non-root nu putea executa `chown 0:0`.
+  Harnessul simulează acum numai ownerul, păstrând mode-ul și nlink-ul reale
+  pentru probele ACL/symlink/hardlink. Pe SHA-ul `77c9916...`, `verify`,
+  `container-isolation`, `current-tree` și `merge-policy` au trecut, dar
+  review-ul GitHub a identificat corect un TOCTOU: recovery-ul generic verifica
+  jurnalul distructiv numai înainte de `flock`. Patchul curent îl reverifică
+  sub lock chiar înainte de helper și cere un lock existent, root-only, deschis
+  read-only, cu identitatea path↔FD probată înainte și după `flock`.
+  Backendul este verde `1334/1334`, frontendul `297/297`, matricea
+  statică/deploy `205/205`, iar buildul, lintul, self-testele workerilor și
+  porțile de contract sunt verzi. Workflow-ul dedicat așteaptă și CI-ul push
+  exact al hotfixului înaintea primei mutații VPS; scanarea de secrete și
+  porțile containerizate rămân obligatorii în PR.
 
 ## Următorul pas sigur
 
-1. Publică fixul parametrilor v1/v2 și regresia PGlite numai prin PR; cere
-   toate check-urile protejate și merge prin rebase.
-2. După merge, cere CI și build OCI verzi pentru noul vârf exact `master`, apoi
-   rulează o singură configurare `configure-constructor` pe aceeași tuplă.
-3. Rulează release-ul canonic pentru noul SHA și acceptă-l numai după dovada
-   externă cu SHA integral, `/readyz=200` și side effects active.
-4. Închide issue-urile verifierului numai după dovada exactă live; nu interpreta
-   mesajul generic de drain ca inventar DB și nu ocoli preflight-ul.
+1. Cere toate porțile protejate pe commitul unic din PR `#1509` și merge numai
+   prin rebase; nu modifica manual VPS-ul.
+2. Workflow-ul generic `VPS Recovery` trebuie să împartă mutexul
+   `production-release` și să se oprească/defer-e înaintea helperului când
+   există jurnalul distructiv. Installerul trebuie să refuze aceeași stare atât
+   înainte de prima mutație, cât și după dobândirea lockului.
+3. După merge, rulează workflow-ul auditat post-PONR numai de pe `master`, cu
+   target `de9fe5f...`, requestul și runurile exacte de mai sus. El poate șterge
+   tranzacția runtime numai după allowlistul exact de 11, ACL/nlink, comparația
+   byte cu backupurile, topologia/imaginile semnate și dovada stării mixte.
+   Pending-ul Constructor rămâne intact.
+4. Acceptă recovery-ul numai după `/api/release-proof=200`, SHA integral
+   `de9fe5f...`, `ready=true` și `sideEffectsActive=true`. Abia apoi lasă
+   release-ul normal al SHA-ului hotfix din `master` să ruleze și repetă dovada
+   externă exactă pentru acel SHA.
+5. Închide issue-ul verifierului `#1507` și sentinelul `#1508` numai după dovada
+   live finală. Migrarea acțiunilor Node.js 24 rămâne separată până la
+   stabilizarea producției.
 
 ## Legături canonice
 
-- PR contract bytes systemd: <https://github.com/kelion-team/kelionai/pull/1504>
-- Configurare exactă reușită: <https://github.com/kelion-team/kelionai/actions/runs/33226027350>
-- CI exact `88e2955`: <https://github.com/kelion-team/kelionai/actions/runs/33225442208>
-- Build OCI exact `88e2955`: <https://github.com/kelion-team/kelionai/actions/runs/33225642455>
-- Release canonic refuzat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33225988793>
-- Issue verifier curent: <https://github.com/kelion-team/kelionai/issues/1505>
+- PR recovery post-PONR: <https://github.com/kelion-team/kelionai/pull/1509>
+- PR-ul candidatului curent: <https://github.com/kelion-team/kelionai/pull/1506>
+- CI exact `de9fe5f`: <https://github.com/kelion-team/kelionai/actions/runs/33227451553>
+- Build OCI exact `de9fe5f`: <https://github.com/kelion-team/kelionai/actions/runs/33227641381>
+- Dispatch release exact: <https://github.com/kelion-team/kelionai/actions/runs/33227921235>
+- Release canonic post-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33227925046>
+- Configurare refuzată fără mutație: <https://github.com/kelion-team/kelionai/actions/runs/33227955270>
+- Diagnoză topologie read-only: <https://github.com/kelion-team/kelionai/actions/runs/33228316533>
+- Inventar spool read-only: <https://github.com/kelion-team/kelionai/actions/runs/33228583946>
+- Issue verifier deschis: <https://github.com/kelion-team/kelionai/issues/1507>
+- Issue sentinel deschis: <https://github.com/kelion-team/kelionai/issues/1508>

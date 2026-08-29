@@ -8,6 +8,8 @@ die() { printf 'runtime-cutover: %s\n' "$1" >&2; exit 1; }
 recover_only=0
 validate_only=0
 leave_constructor_quiesced=0
+discard_unmutated_prepared=0
+discard_target_commit=''
 boot_recovery=${KELION_RECOVERY_BOOT:-0}
 case "$boot_recovery" in 0|1) ;; *) die 'KELION_RECOVERY_BOOT trebuie 0 sau 1' ;; esac
 activation_resume_operation=${KELION_ACTIVATION_RESUME_OPERATION:-}
@@ -32,6 +34,16 @@ validation_logical=''
 validation_file=''
 compose_file=''
 case "${1:-}" in
+  --discard-unmutated-prepared)
+    [ "$#" -eq 3 ] \
+      || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-prepared COMMIT COMPOSE_FILE'
+    [[ "$2" =~ ^[0-9a-f]{40}$ ]] || die 'commitul recovery este invalid'
+    discard_unmutated_prepared=1
+    discard_target_commit=$2
+    recover_only=1
+    leave_constructor_quiesced=1
+    compose_file=$3
+    ;;
   --recover-only)
     [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$3" = --leave-constructor-quiesced ]; } \
       || die 'utilizare: runtime-config-cutover.sh --recover-only COMPOSE_FILE [--leave-constructor-quiesced]'
@@ -185,7 +197,7 @@ if [ "$validate_only" = 0 ]; then
   [ -f "$compose_file" ] && [ ! -L "$compose_file" ] || die 'compose.production.yml lipsește sau este symlink'
 fi
 
-for tool in awk cmp curl dirname docker flock getent grep jq mktemp od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
+for tool in awk cmp curl dirname docker find flock getent grep jq mktemp od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
   command -v "$tool" >/dev/null 2>&1 || die "lipsește utilitarul $tool"
 done
 
@@ -2115,6 +2127,351 @@ recover_interrupted_cutover() {
   remove_transaction_after_durable_journal_clear "$recovery_root" || printf 'runtime-cutover: avertisment: tranzacția recuperată a rămas root-only\n' >&2
 }
 
+# Închiderea de urgență este deliberat mai îngustă decât recovery-ul generic:
+# acceptă numai tranzacția `prepared` cunoscută, ale cărei unsprezece ținte nu
+# au fost mutate deloc. Release-ul candidat trebuie să fie deja complet și
+# izolat în slotul țintă, în timp ce markerul activ și toate bytes-urile config
+# rămân generația veche. Funcția nu restaurează și nu publică nimic; după toate
+# dovezile șterge durabil doar jurnalul runtime și directorul lui de tranzacție.
+discard_unmutated_prepared_cutover() {
+  local target_commit=$1 selected_compose=$2 recovery_root rollback_manifest recovery_compose backups_root
+  local logical present extra backup active_before active_version active_slot target_slot path expected actual
+  local caddy_snapshot upstream_snapshot expected_old_upstream_sha expected_target_upstream_sha
+  local observed_top_level observed_backups observed_manifest proxy_health proxy_policy role id image
+  local target_output role_output rollback_manifest_sha recovery_compose_sha
+  local manifest_count=0
+  local -a manifest_logicals=() target_ids=() role_ids=()
+  local -A seen=()
+  local -A allowed=(
+    [app-secret.codex-worker-secret]=1
+    [app-secret.constructor-publisher-secret]=1
+    [app-secret.constructor-release-secret]=1
+    [worker-secret.github-worker-token]=1
+    [publisher-secret.github-publisher-token]=1
+    [release-secret.github-release-token]=1
+    [gate-secret.github-ghcr-read-token]=1
+    [constructor-config.codex-worker.env]=1
+    [constructor-config.constructor-publisher.env]=1
+    [constructor-config.constructor-release.env]=1
+    [runtime.env]=1
+  )
+
+  # Din acest punct, orice refuz trebuie să lase jurnalul și tranzacția pentru
+  # investigație/retry. Cleanup-ul nu are voie să deducă o generație restaurabilă.
+  recovery_in_progress=1
+  [ "$discard_unmutated_prepared" = 1 ] && [ "$recover_only" = 1 ] \
+    && [ "$leave_constructor_quiesced" = 1 ] \
+    || die 'modul discard cere recovery-only cu Constructor quiesced'
+  [[ "$target_commit" =~ ^[0-9a-f]{40}$ ]] && [ "$target_commit" = "$discard_target_commit" ] \
+    || die 'commitul discard nu corespunde invocației autentificate'
+  [ "$selected_compose" = "$compose_file" ] \
+    && [ "$selected_compose" = "$CONFIG_ROOT/compose.production.yml" ] \
+    || die 'compose-ul discard nu este calea live fixă a invocației autentificate'
+
+  validate_deploy_quiesce_journal \
+    || die 'jurnalul deploy nu este autentic pentru discard'
+  [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul deploy lipsește sau are inode/ACL nesigur'
+  deploy_quiesce_owned_by_caller \
+    || die 'ownerul recovery nu corespunde jurnalului deploy'
+  [ "$deploy_owner_commit" = "$target_commit" ] \
+    || die 'ownerul recovery nu corespunde commitului țintă'
+  jq -e --arg commit "$target_commit" '
+    (keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+      "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema"] | sort) and
+    .schema == 2 and .phase == "active-prepared" and .commit == $commit and
+    (.activeBefore | strings | test("^[0-9a-f]{40}$")) and .activeBefore != $commit and
+    (.activeVersionBefore | strings | test("^[0-9a-f]{7,40}$")) and
+    (.activeBefore as $old | .activeVersionBefore as $version | $old | startswith($version)) and
+    .legacyContainers == [] and .legacyRestartPolicies == {} and
+    (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+    (.proxyIntent | keys | sort) == (["activeSlotBefore","caddyfilePresent","caddyfileSha256",
+      "caddyfileSnapshot","legacyProxyRestartPolicy","legacyProxyWasRunning","managedProxyWasRunning",
+      "oldUpstreamPresent","oldUpstreamSha256","oldUpstreamSnapshot","targetCaddyfileSha256",
+      "targetSlot","targetUpstreamSha256"] | sort) and
+    (.proxyIntent.activeSlotBefore == "blue" or .proxyIntent.activeSlotBefore == "green") and
+    (.proxyIntent.targetSlot == "blue" or .proxyIntent.targetSlot == "green") and
+    .proxyIntent.activeSlotBefore != .proxyIntent.targetSlot and
+    .proxyIntent.managedProxyWasRunning == true and .proxyIntent.legacyProxyWasRunning == false and
+    .proxyIntent.legacyProxyRestartPolicy == null and
+    .proxyIntent.caddyfilePresent == true and .proxyIntent.oldUpstreamPresent == true
+  ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'jurnalul deploy nu descrie exact generația active-prepared recuperabilă'
+  deploy_quiesce_generation_proof \
+    || die 'markerul vechi și gate-urile nu corespund generației active-prepared'
+
+  validate_unit_migration_pending \
+    || die 'bariera unit-only este nesigură în recovery'
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only exactă lipsește în recovery'
+  for path in "$READY_STAMP" "$ACTIVATION_PENDING" "$ACTIVATION_JOURNAL" "$GATE_JOURNAL"; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] \
+      || die "capabilitate Constructor neașteptată în recovery: $path"
+  done
+  for path in "${constructor_markers[@]}"; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] \
+      || die "marker Constructor neașteptat în recovery: $path"
+  done
+  wait_for_live_constructor_units_quiesced \
+    || die 'Constructor nu este exact instalat, inactiv și dezactivat în recovery'
+
+  [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul runtime prepared lipsește sau este nesigur'
+  jq -e '
+    (keys | sort) == ["phase","schema","transactionRoot"] and
+    .schema == 1 and .phase == "prepared" and
+    (.transactionRoot | strings | test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$"))
+  ' "$JOURNAL" >/dev/null || die 'jurnalul runtime nu este exact schema 1 prepared'
+  recovery_root=$(jq -er '.transactionRoot' "$JOURNAL") \
+    || die 'directorul tranzacției nu poate fi citit'
+  transaction_root=$recovery_root
+  [ -d "$recovery_root" ] && [ ! -L "$recovery_root" ] \
+    && [ "$(realpath -e -- "$recovery_root")" = "$recovery_root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$recovery_root")" = '0:0:700' ] \
+    || die 'directorul tranzacției prepared este nesigur'
+  rollback_manifest=$recovery_root/rollback-manifest
+  recovery_compose=$recovery_root/recovery-compose.yml
+  backups_root=$recovery_root/backups
+  observed_top_level=$(find "$recovery_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul tranzacției prepared nu poate fi citit'
+  [ "$observed_top_level" = $'backups:d\nrecovery-compose.yml:f\nrollback-manifest:f' ] \
+    || die 'tranzacția prepared conține noduri top-level neașteptate'
+  [ -d "$backups_root" ] && [ ! -L "$backups_root" ] \
+    && [ "$(realpath -e -- "$backups_root")" = "$backups_root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$backups_root")" = '0:0:700' ] \
+    || die 'directorul backupurilor prepared este nesigur'
+  [ -f "$rollback_manifest" ] && [ ! -L "$rollback_manifest" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$rollback_manifest")" = '0:0:600:1' ] \
+    || die 'manifestul prepared este nesigur'
+  [ -f "$recovery_compose" ] && [ ! -L "$recovery_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$recovery_compose")" = '0:0:600:1' ] \
+    || die 'compose-ul prepared este nesigur'
+  [ -f "$selected_compose" ] && [ ! -L "$selected_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$selected_compose")" = '0:0:444:1' ] \
+    && cmp -s -- "$recovery_compose" "$selected_compose" \
+    || die 'compose-ul live nu este byte-identic cu snapshotul prepared'
+  rollback_manifest_sha=$(sha256sum "$rollback_manifest" | awk '{print $1}') \
+    || die 'hashul manifestului prepared nu poate fi citit'
+  recovery_compose_sha=$(sha256sum "$recovery_compose" | awk '{print $1}') \
+    || die 'hashul compose-ului prepared nu poate fi citit'
+
+  while IFS=$'\t' read -r logical present extra; do
+    [ -n "$logical" ] && [ -z "$extra" ] && [ "$present" = 1 ] \
+      || die 'manifestul prepared conține o intrare invalidă sau absentă'
+    [ -n "${allowed[$logical]:-}" ] && [ -z "${seen[$logical]:-}" ] \
+      || die 'manifestul prepared conține o intrare extra sau duplicată'
+    seen[$logical]=1
+    manifest_logicals+=("$logical")
+    manifest_count=$((manifest_count + 1))
+    map_logical "$logical"
+    backup=$backups_root/$logical
+    [ -f "$backup" ] && [ ! -L "$backup" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$backup")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      || die "backupul prepared are inode/ACL invalid: $logical"
+    [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && cmp -s -- "$mapped_target" "$backup" \
+      || die "ținta live nu este byte-identică cu backupul prepared: $logical"
+  done < "$rollback_manifest"
+  [ "$manifest_count" -eq 11 ] \
+    || die 'manifestul prepared nu conține exact cele unsprezece intrări'
+  observed_manifest=$(printf '%s\n' "${manifest_logicals[@]}" | LC_ALL=C sort) \
+    || die 'manifestul prepared nu poate fi ordonat'
+  expected=$(printf '%s\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'allowlistul prepared nu poate fi ordonat'
+  [ "$observed_manifest" = "$expected" ] \
+    || die 'manifestul prepared nu corespunde allowlistului exact'
+  observed_backups=$(find "$backups_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul backupurilor prepared nu poate fi citit'
+  expected=$(printf '%s:f\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'inventarul așteptat al backupurilor nu poate fi construit'
+  [ "$observed_backups" = "$expected" ] \
+    || die 'directorul backupurilor prepared conține noduri extra sau lipsă'
+
+  active_before=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'markerul vechi nu poate fi citit'
+  active_version=$(jq -er '.activeVersionBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'versiunea veche nu poate fi citită'
+  active_slot=$(jq -er '.proxyIntent.activeSlotBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'slotul vechi nu poate fi citit'
+  target_slot=$(jq -er '.proxyIntent.targetSlot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'slotul țintă nu poate fi citit'
+  [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/release-state/active")" = '0:10050:640:1' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/release-state/active")" -eq 1 ] \
+    && grep -qx "$active_before" "$RUNTIME_ROOT/release-state/active" \
+    && [ "${active_before:0:${#active_version}}" = "$active_version" ] \
+    || die 'markerul activ nu este exact generația veche jurnalizată'
+
+  caddy_snapshot=$(jq -er '.proxyIntent.caddyfileSnapshot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'snapshotul Caddyfile nu poate fi citit'
+  upstream_snapshot=$(jq -er '.proxyIntent.oldUpstreamSnapshot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'snapshotul upstream vechi nu poate fi citit'
+  [ -f "$caddy_snapshot" ] && [ ! -L "$caddy_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$caddy_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$(jq -er '.proxyIntent.caddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    || die 'snapshotul Caddyfile vechi nu corespunde jurnalului'
+  [ -f "$upstream_snapshot" ] && [ ! -L "$upstream_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$upstream_snapshot")" = '0:0:600:1' ] \
+    || die 'snapshotul upstream vechi este nesigur'
+  expected_old_upstream_sha=$(printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$active_slot" \
+    | sha256sum | awk '{print $1}') || die 'hashul upstream vechi nu poate fi construit'
+  [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$expected_old_upstream_sha" ] \
+    && [ "$expected_old_upstream_sha" = "$(jq -er '.proxyIntent.oldUpstreamSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ "$(tail -c 1 -- "$upstream_snapshot" | od -An -t u1 | tr -d '[:space:]')" = 10 ] \
+    || die 'snapshotul upstream vechi nu are bytes/newline canonice'
+
+  [ -f "$ROOT/proxy/Caddyfile" ] && [ ! -L "$ROOT/proxy/Caddyfile" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/proxy/Caddyfile")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$ROOT/proxy/Caddyfile" | awk '{print $1}')" = "$(jq -er '.proxyIntent.targetCaddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    || die 'Caddyfile-ul live nu corespunde bytes-urilor țintă jurnalizate'
+  path=$ROOT/proxy/upstream/kelion-upstream.caddy
+  [ -f "$path" ] && [ ! -L "$path" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$path")" = '0:0:644:1' ] \
+    || die 'upstream-ul live este nesigur'
+  expected_target_upstream_sha=$(printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$target_slot" \
+    | sha256sum | awk '{print $1}') || die 'hashul upstream țintă nu poate fi construit'
+  actual=$(sha256sum "$path" | awk '{print $1}') || die 'hashul upstream live nu poate fi citit'
+  [ "$actual" = "$expected_target_upstream_sha" ] \
+    && [ "$actual" = "$(jq -er '.proxyIntent.targetUpstreamSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ "$(tail -c 1 -- "$path" | od -An -t u1 | tr -d '[:space:]')" = 10 ] \
+    || die 'upstream-ul live nu are bytes/hash/newline canonice pentru slotul țintă'
+
+  [ "$(docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null)" = true ] \
+    || die 'proxy-ul managed nu rulează'
+  proxy_health=$(docker inspect -f '{{.State.Health.Status}}' kelion-proxy 2>/dev/null) \
+    || die 'health-ul proxy-ului managed nu poate fi citit'
+  proxy_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' kelion-proxy 2>/dev/null) \
+    || die 'restart policy-ul proxy-ului managed nu poate fi citit'
+  [ "$proxy_health" = healthy ] && [ "$proxy_policy" = unless-stopped ] \
+    || die 'proxy-ul managed nu este healthy cu restart policy canonic'
+  if docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true; then
+    die 'proxy-ul legacy rulează simultan cu proxy-ul managed'
+  fi
+
+  target_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$target_slot") \
+    || die 'inventarul Docker al slotului țintă nu poate fi citit integral'
+  [ -z "$target_output" ] || mapfile -t target_ids <<<"$target_output"
+  [ "${#target_ids[@]}" -eq 5 ] \
+    || die 'slotul țintă nu conține exact cinci containere managed'
+  for role in app browser-worker browser-egress converter-gateway converter-parser; do
+    role_ids=()
+    role_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+      --filter "label=com.kelion.slot=$target_slot" --filter "label=com.kelion.role=$role") \
+      || die "inventarul Docker al rolului țintă nu poate fi citit integral: $role"
+    [ -z "$role_output" ] || mapfile -t role_ids <<<"$role_output"
+    [ "${#role_ids[@]}" -eq 1 ] || die "rolul țintă nu este unic: $role"
+    id=${role_ids[0]}
+    [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] \
+      && [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ] \
+      && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id")" = unless-stopped ] \
+      && [ "$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$id")" = "$target_commit" ] \
+      || die "containerul țintă nu este healthy/running/canonic: $role"
+    image=$(docker inspect -f '{{.Config.Image}}' "$id") \
+      || die "imaginea containerului țintă nu poate fi citită: $role"
+    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
+      || die "containerul țintă nu folosește o imagine immutable: $role"
+  done
+
+  # Ultima verificare înainte de prima și singura mutație confirmă că ownerul,
+  # markerul, bytes-urile și topologia nu s-au schimbat sub publication lock.
+  jq -e --arg commit "$target_commit" \
+    '.schema == 2 and .phase == "active-prepared" and .commit == $commit' \
+    "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'faza jurnalului deploy s-a schimbat înainte de commitul discard'
+  deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof \
+    || die 'generația active-prepared s-a schimbat înainte de commitul discard'
+  observed_top_level=$(find "$recovery_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul tranzacției nu poate fi recitit înainte de discard'
+  [ "$observed_top_level" = $'backups:d\nrecovery-compose.yml:f\nrollback-manifest:f' ] \
+    && [ "$(sha256sum "$rollback_manifest" | awk '{print $1}')" = "$rollback_manifest_sha" ] \
+    && [ "$(sha256sum "$recovery_compose" | awk '{print $1}')" = "$recovery_compose_sha" ] \
+    && cmp -s -- "$recovery_compose" "$selected_compose" \
+    || die 'tranzacția/compose-ul s-a schimbat înainte de commitul discard'
+  expected=$(printf '%s:f\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'inventarul backupurilor nu poate fi reconstruit înainte de discard'
+  observed_backups=$(find "$backups_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul backupurilor nu poate fi recitit înainte de discard'
+  [ "$observed_backups" = "$expected" ] \
+    || die 'inventarul backupurilor s-a schimbat înainte de commitul discard'
+  for logical in "${manifest_logicals[@]}"; do
+    map_logical "$logical"
+    backup=$backups_root/$logical
+    [ -f "$backup" ] && [ ! -L "$backup" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$backup")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && cmp -s -- "$mapped_target" "$backup" \
+      || die "backupul sau ținta live s-a schimbat înainte de discard: $logical"
+  done
+  [ -f "$caddy_snapshot" ] && [ ! -L "$caddy_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$caddy_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$(jq -er '.proxyIntent.caddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ -f "$upstream_snapshot" ] && [ ! -L "$upstream_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$upstream_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$expected_old_upstream_sha" ] \
+    || die 'snapshoturile proxy s-au schimbat înainte de commitul discard'
+  [ -f "$ROOT/proxy/Caddyfile" ] && [ ! -L "$ROOT/proxy/Caddyfile" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/proxy/Caddyfile")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$ROOT/proxy/Caddyfile" | awk '{print $1}')" = "$(jq -er '.proxyIntent.targetCaddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ -f "$path" ] && [ ! -L "$path" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$path")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$path" | awk '{print $1}')" = "$expected_target_upstream_sha" ] \
+    || die 'bytes-urile proxy live s-au schimbat înainte de commitul discard'
+  [ "$(docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null)" = true ] \
+    && [ "$(docker inspect -f '{{.State.Health.Status}}' kelion-proxy 2>/dev/null)" = healthy ] \
+    && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' kelion-proxy 2>/dev/null)" = unless-stopped ] \
+    || die 'proxy-ul managed s-a schimbat înainte de commitul discard'
+  target_ids=()
+  target_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$target_slot") \
+    || die 'inventarul final Docker al slotului țintă nu poate fi citit integral'
+  [ -z "$target_output" ] || mapfile -t target_ids <<<"$target_output"
+  [ "${#target_ids[@]}" -eq 5 ] \
+    || die 'slotul țintă s-a schimbat înainte de commitul discard'
+  for role in app browser-worker browser-egress converter-gateway converter-parser; do
+    role_ids=()
+    role_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+      --filter "label=com.kelion.slot=$target_slot" --filter "label=com.kelion.role=$role") \
+      || die "inventarul final Docker al rolului nu poate fi citit integral: $role"
+    [ -z "$role_output" ] || mapfile -t role_ids <<<"$role_output"
+    [ "${#role_ids[@]}" -eq 1 ] || die "rolul s-a schimbat înainte de discard: $role"
+    id=${role_ids[0]}
+    [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] \
+      && [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ] \
+      && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id")" = unless-stopped ] \
+      && [ "$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$id")" = "$target_commit" ] \
+      || die "containerul s-a schimbat înainte de discard: $role"
+  done
+  [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg root "$recovery_root" \
+      '.schema == 1 and .phase == "prepared" and .transactionRoot == $root' "$JOURNAL" >/dev/null \
+    || die 'jurnalul runtime s-a schimbat înainte de commitul discard'
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only s-a schimbat înainte de commitul discard'
+  wait_for_live_constructor_units_quiesced \
+    || die 'Constructor nu a rămas quiesced înainte de commitul discard'
+  clear_journal || die 'jurnalul runtime prepared nu a putut fi șters durabil'
+  remove_transaction_after_durable_journal_clear "$recovery_root" \
+    || die 'tranzacția runtime prepared nu a putut fi eliminată după unlink durabil'
+  transaction_root=''
+  recovery_in_progress=0
+  units_quiesced=0
+  config_consistent=1
+  backend_consistent=1
+  operation_succeeded=1
+}
+
 garbage_collect_transactions() {
   local candidate canonical
   for candidate in "$RUNTIME_ROOT"/runtime-config-txn.*; do
@@ -2283,6 +2640,10 @@ cleanup_cutover() {
 }
 trap cleanup_cutover EXIT
 
+# Modul special armează cleanup-ul fail-closed înaintea oricărui validator.
+# Un owner/jurnal invalid nu poate ajunge la cleanup-ul tranzacțional generic.
+if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi
+
 # Recover-only este și bariera de boot. Oprește mai întâi orice generație
 # detectabilă, inclusiv unități legacy ori un set 1..5 fără proveniență. Acest
 # pas nu repară fișiere fără jurnal; doar elimină side-effect-urile înaintea
@@ -2325,6 +2686,11 @@ if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
     units_quiesced=0
     die 'jurnal deploy activ: recovery/reactivare refuzată fără owner și dovadă de generație exactă'
   fi
+fi
+
+if [ "$discard_unmutated_prepared" = 1 ]; then
+  discard_unmutated_prepared_cutover "$discard_target_commit" "$compose_file"
+  exit 0
 fi
 
 if ! ensure_constructor_marker_root_durable; then

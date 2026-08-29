@@ -2367,6 +2367,222 @@ test('recovery-ul distructiv pre-PONR restaurează DB/runtime/proxy înainte de 
   assert.doesNotMatch(rollback, /clear_recovery_journal/)
 })
 
+test('recovery-ul post-PONR este legat de incident, artefacte semnate și dovada externă exactă', () => {
+  const workflow = read('.github/workflows/vps-post-ponr-recovery.yml')
+  const mergePolicy = read('.github/workflows/vps-auto-merge-chore-prs.yml')
+  const target = 'de9fe5f3f081373a23796d83b469651e9c1e33e7'
+  assert.match(workflow, /name: VPS post-PONR recovery de9/)
+  assert.doesNotMatch(workflow, /actions:\s*write|route-to-master|auto_routed_to_master/)
+  assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
+  assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
+  assert.match(workflow, /environment: production/)
+  assert.match(workflow, new RegExp(`target=${target}[\\s\\S]*request=e5c00af2-1fb9-4daf-a30b-bdfed24d5689[\\s\\S]*failed_run=33227925046[\\s\\S]*ci_run=33227451553[\\s\\S]*build_run=33227641381`))
+  assert.match(workflow, /git rev-parse HEAD\^\)" = "\$target"[\s\S]*git rev-list --count "\$target\.\.\$hotfix"\)" -eq 1[\s\S]*remote_master[\s\S]*"\$remote_master" = "\$hotfix"/)
+  assert.match(workflow, /\.github\/workflows\/vps-auto-merge-chore-prs\.yml/)
+  for (const path of [
+    '.github/workflows/vps-post-ponr-recovery.yml',
+    '.github/workflows/vps-recovery.yml',
+    'deploy/lib/release-rollback.test.mjs',
+  ]) {
+    assert.ok(mergePolicy.includes(`"${path}"`), `merge-policy trebuie să permită ${path}`)
+  }
+  assert.match(workflow, /actions\/runs\/\$\{failed_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "failure"[\s\S]*workflows\/deploy\.yml/)
+  assert.match(workflow, /actions\/runs\/\$\{ci_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "success"[\s\S]*\["container-isolation", "release-train-preflight", "verify"\]/)
+  assert.match(workflow, /actions\/runs\/\$\{build_run\}[\s\S]*\.head_sha == \$sha[\s\S]*\.conclusion == "success"[\s\S]*workflows\/build-images\.yml/)
+  const hotfixCiStart = workflow.indexOf('deadline=$((SECONDS + 9900))')
+  const incidentProof = workflow.indexOf('release=$(gh api', hotfixCiStart)
+  const firstVpsMutation = workflow.indexOf('name: Închide tranzacția post-PONR pe VPS')
+  assert.ok(hotfixCiStart >= 0 && incidentProof > hotfixCiStart && firstVpsMutation > incidentProof,
+    'CI-ul push exact al hotfixului trebuie dovedit înaintea oricărei mutații VPS')
+  const hotfixCi = workflow.slice(hotfixCiStart, incidentProof)
+  assert.match(hotfixCi, /actions\/workflows\/pr-verify\.yml\/runs\?branch=master&event=push/)
+  assert.match(hotfixCi, /\.head_sha == \$sha[\s\S]*\.head_branch == "master"[\s\S]*\.event == "push"/)
+  assert.match(hotfixCi, /hotfix_ci_conclusion[\s\S]*success\) break[\s\S]*actions\/runs\/\$\{hotfix_ci_id\}\/jobs/)
+  assert.match(hotfixCi, /\["container-isolation", "release-train-preflight", "verify"\]/)
+  assert.match(workflow, /actions\/download-artifact@[0-9a-f]{40}[\s\S]*release-images-de9fe5f3f081373a23796d83b469651e9c1e33e7[\s\S]*run-id: '33227641381'/)
+  assert.match(workflow, /\.images \| keys \| sort[\s\S]*\["app", "browser", "browser-egress", "converter-gateway", "converter-parser"\]/)
+  assert.match(workflow, /for component in app browser browser-egress converter-gateway converter-parser[\s\S]*cosign verify[\s\S]*--annotations "git_sha=\$target"/)
+  assert.match(workflow, /gate_ref=.*codex-gates\.json[\s\S]*cosign verify[\s\S]*"\$gate_ref"/)
+  assert.match(workflow, /KELION_RELEASE_APPROVED=1[\s\S]*KELION_RECOVER_LOST_POST_PONR=1[\s\S]*KELION_RELEASE_REQUEST_ID="\$request"[\s\S]*KELION_RELEASE_WORKFLOW_RUN_ID="\$failed_run"[\s\S]*KELION_CI_RUN_ID="\$ci_run"[\s\S]*KELION_BUILD_RUN_ID="\$build_run"/)
+  assert.doesNotMatch(workflow, /install -d[^\n]*\/root\/kelion\/runtime/)
+  assert.match(workflow, /stat -Lc '%u:%g:%a' \/root\/kelion\/runtime[\s\S]*0:10050:750/)
+  assert.match(workflow, /\/api\/release-proof[\s\S]*\.ready == true[\s\S]*\.release\.sideEffectsActive == true[\s\S]*\.release\.candidate \/\/ false\) == false[\s\S]*\.activeCommit == \$expected/)
+})
+
+test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperului și îl reverifică sub lock', () => {
+  const workflow = read('.github/workflows/vps-recovery.yml')
+  assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
+  const classify = workflow.indexOf('  classify:')
+  const recover = workflow.indexOf('  recover:', classify)
+  assert.ok(classify >= 0 && recover > classify)
+  assert.doesNotMatch(workflow.slice(0, classify), /^concurrency:/m)
+  assert.match(workflow.slice(recover), /concurrency:\n\s+group: production-release/)
+  assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
+  assert.match(workflow, /BEFORE_SHA[\s\S]*de9fe5f3f081373a23796d83b469651e9c1e33e7[\s\S]*execute=false/)
+  const journal = workflow.indexOf('journal=/root/kelion/runtime/destructive-cutover-recovery.json')
+  const defer = workflow.indexOf('RECOVERY_DEFERRED: există un jurnal distructiv valid', journal)
+  const exit = workflow.indexOf('exit 0', defer)
+  const helper = workflow.indexOf('KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh', exit)
+  assert.ok(journal >= 0 && defer > journal && exit > defer && helper > exit,
+    'jurnalul distructiv trebuie autentificat și defer-at înainte de orice helper generic')
+  const lock = workflow.indexOf('flock -n 9', exit)
+  const helperValidation = workflow.indexOf('[ -f /root/kelion/bin/runtime-config-cutover.sh ]', lock)
+  const lockedRecheck = workflow.indexOf('if defer_for_destructive_journal; then', helperValidation)
+  assert.ok(lock > exit && helperValidation > lock && lockedRecheck > helperValidation && helper > lockedRecheck,
+    'jurnalul distructiv trebuie reverificat sub publication lock imediat înaintea helperului generic')
+  const lockSetup = workflow.slice(exit, helperValidation)
+  assert.match(lockSetup, /publication_lock=\/root\/kelion\/publicare\.lock[\s\S]*0:0:600:1/)
+  assert.match(lockSetup, /exec 9<"\$publication_lock"[\s\S]*readlink "\/proc\/\$\$\/fd\/9"/)
+  assert.match(lockSetup, /publication_fd_identity=.*%d:%i[\s\S]*flock -n 9[\s\S]*publication_fd_identity/)
+  assert.doesNotMatch(lockSetup, /exec 9>|exec 9<>|chown|chmod/)
+  assert.equal((workflow.match(/if defer_for_destructive_journal; then/g) ?? []).length, 2)
+  const guardDefinition = workflow.slice(
+    workflow.indexOf('defer_for_destructive_journal() {'),
+    workflow.indexOf('if defer_for_destructive_journal; then'),
+  )
+  assert.doesNotMatch(guardDefinition, /\brm\b|\bmv\b|\binstall\b|--recover-only/)
+  const guard = workflow.slice(journal, helper)
+  assert.match(guard, /stat -Lc '%u:%g:%a:%h'[\s\S]*0:0:600:1/)
+  assert.match(guard, /\.phase == "maintenance"[\s\S]*\.dbRestoreRequired == false/)
+  assert.match(guard, /\.phase == "point-of-no-return"[\s\S]*\.pointOfNoReturn == true[\s\S]*\.dbRestoreRequired == true/)
+  assert.match(guard, /\.phase == "completed"[\s\S]*\.pointOfNoReturn == true[\s\S]*\.dbRestoreRequired == false/)
+  assert.match(guard, /\.activeRuntimeContainers \| type == "array" and length == 5/)
+  assert.doesNotMatch(guard, /rm -f -- "\$journal"|rm -rf|--recover-only/)
+})
+
+test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstrează pending-ul', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const discard = shellFunction(cutover, 'discard_unmutated_prepared_cutover')
+  const allowlistBlock = discard.match(/local -A allowed=\(([\s\S]*?)\n  \)/)
+  assert.ok(allowlistBlock, 'allowlistul special nu poate fi extras')
+  const allowlist = [...allowlistBlock[1].matchAll(/\[([^\]]+)\]=1/g)].map((entry) => entry[1])
+  assert.deepEqual(allowlist, [
+    'app-secret.codex-worker-secret',
+    'app-secret.constructor-publisher-secret',
+    'app-secret.constructor-release-secret',
+    'worker-secret.github-worker-token',
+    'publisher-secret.github-publisher-token',
+    'release-secret.github-release-token',
+    'gate-secret.github-ghcr-read-token',
+    'constructor-config.codex-worker.env',
+    'constructor-config.constructor-publisher.env',
+    'constructor-config.constructor-release.env',
+    'runtime.env',
+  ])
+
+  const pendingBefore = discard.indexOf('validate_unit_migration_pending')
+  const pendingBytesBefore = discard.indexOf("grep -qx 'schema=1'", pendingBefore)
+  const journal = discard.indexOf('.phase == "prepared"', pendingBytesBefore)
+  const composeCmp = discard.indexOf('cmp -s -- "$recovery_compose" "$selected_compose"', journal)
+  const manifest = discard.indexOf("while IFS=$'\\t' read -r logical present extra", composeCmp)
+  const exactCount = discard.indexOf('[ "$manifest_count" -eq 11 ]', manifest)
+  const backupInventory = discard.indexOf('observed_backups=$(find', exactCount)
+  const topology = discard.indexOf('mapfile -t target_ids', backupInventory)
+  const finalOwnerProof = discard.lastIndexOf('deploy_quiesce_owned_by_caller')
+  const pendingFinal = discard.indexOf('[ -f "$UNIT_MIGRATION_PENDING" ]', finalOwnerProof)
+  const quiesceFinal = discard.indexOf('wait_for_live_constructor_units_quiesced', pendingFinal)
+  const clear = discard.indexOf("clear_journal || die 'jurnalul runtime prepared", finalOwnerProof)
+  const remove = discard.indexOf('remove_transaction_after_durable_journal_clear "$recovery_root"', clear)
+  const reset = discard.indexOf('recovery_in_progress=0', remove)
+  assert.ok(pendingBefore >= 0 && pendingBytesBefore > pendingBefore && journal > pendingBytesBefore
+    && composeCmp > journal && manifest > composeCmp && exactCount > manifest
+    && backupInventory > exactCount && topology > backupInventory
+    && finalOwnerProof > topology && pendingFinal > finalOwnerProof && quiesceFinal > pendingFinal
+    && clear > quiesceFinal && remove > clear && reset > remove,
+  'toate dovezile, inclusiv pending/quiesce, precedă unlink-ul, iar resetul urmează remove')
+
+  const manifestChecks = discard.slice(manifest, exactCount)
+  assert.equal((manifestChecks.match(/stat -Lc '%u:%g:%a:%h'/g) ?? []).length, 2,
+    'backupul și ținta live cer ambele ACL plus nlink exact')
+  assert.match(manifestChecks, /\$mapped_owner:\$mapped_group:\$mapped_mode:1[\s\S]*cmp -s -- "\$mapped_target" "\$backup"/)
+  assert.match(discard, /observed_manifest[\s\S]*"\$observed_manifest" = "\$expected"[\s\S]*observed_backups[\s\S]*"\$observed_backups" = "\$expected"/)
+  assert.doesNotMatch(discard, /clear_unit_migration_pending/)
+  assert.doesNotMatch(discard.slice(0, clear), /\b(?:mv|install|rm)\s+(?:-[^\n ]+\s+)*--?[^=]/,
+    'discard-ul nu poate muta, instala sau șterge înaintea commitului unic')
+})
+
+test('refuzul discard-ului armează cleanup fail-closed și păstrează jurnalul plus tranzacția', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const cleanup = shellFunction(cutover, 'cleanup_cutover')
+  const trap = cutover.indexOf('trap cleanup_cutover EXIT')
+  const arm = cutover.indexOf('if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi', trap)
+  const firstRecoveryValidator = cutover.indexOf('retract_runtime_ready_stamp_for_recovery', arm)
+  const deployValidator = cutover.indexOf("validate_deploy_quiesce_journal || die", arm)
+  const specialCall = cutover.indexOf('discard_unmutated_prepared_cutover "$discard_target_commit" "$compose_file"', arm)
+  const genericRecovery = cutover.indexOf('\nrecover_interrupted_gate_refresh\n', specialCall)
+  assert.ok(trap >= 0 && arm > trap && firstRecoveryValidator > arm && deployValidator > arm
+    && specialCall > deployValidator && genericRecovery > specialCall,
+  'guardul special trebuie armat înaintea validatorilor și executat înainte de recovery generic')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-discard-cleanup-'))
+  const journal = join(sandbox, 'runtime-config-cutover.journal')
+  const transaction = join(sandbox, 'runtime-config-txn.Refusal')
+  const calls = join(sandbox, 'calls.log')
+  mkdirSync(transaction)
+  writeFileSync(journal, '{"schema":1,"phase":"prepared"}\n', { mode: 0o600 })
+  writeFileSync(calls, '', { mode: 0o600 })
+  const harness = `set -uo pipefail
+JOURNAL=$1
+transaction_root=$2
+CALLS=$3
+recovery_in_progress=0
+discard_unmutated_prepared=1
+recover_only=1
+mutation_started=0
+operation_succeeded=0
+restart_guarded=0
+units_quiesced=0
+leave_constructor_quiesced=1
+config_consistent=1
+backend_consistent=1
+unit_only_transaction=0
+journal_owned=1
+journal_clear_durable=0
+stage_root=
+stage_canonical=
+prepared=()
+force_quiesce_constructor_units() { printf 'force\\n' >> "$CALLS"; }
+clear_runtime_ready_stamp() { printf 'stamp\\n' >> "$CALLS"; }
+clear_journal() { printf 'CLEAR\\n' >> "$CALLS"; rm -f -- "$JOURNAL"; }
+remove_transaction_after_durable_journal_clear() { printf 'REMOVE\\n' >> "$CALLS"; rmdir "$1"; }
+roll_forward_unit_transaction() { return 1; }
+restore_files() { return 1; }
+recreate_active_release() { return 1; }
+validate_unit_migration_pending() { return 1; }
+wait_for_live_constructor_units_quiesced() { return 1; }
+validate_live_runtime_contract() { return 1; }
+publish_runtime_ready_stamp() { return 1; }
+restore_constructor_timers() { return 1; }
+${cleanup}
+die() { exit 73; }
+validate_deploy_quiesce_journal() { return 1; }
+trap cleanup_cutover EXIT
+if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi
+validate_deploy_quiesce_journal || die`
+  const result = spawnSync(bashExecutable, ['-c', harness, 'discard-cleanup', journal, transaction, calls], { encoding: 'utf8' })
+  assert.notEqual(result.status, 0, result.stderr || result.stdout)
+  assert.equal(existsSync(journal), true, 'jurnalul trebuie păstrat după refuz')
+  assert.equal(existsSync(transaction), true, 'tranzacția trebuie păstrată după refuz')
+  assert.doesNotMatch(readFileSync(calls, 'utf8'), /CLEAR|REMOVE/)
+  rmSync(sandbox, { recursive: true, force: true })
+})
+
+test('installerul refuză recovery-ul distructiv înainte de mutații și din nou sub lock', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const guard = shellFunction(installer, 'guard_destructive_cutover_recovery_absent')
+  assert.match(guard, /! -e "\$DESTRUCTIVE_RECOVERY_JOURNAL"[\s\S]*! -L "\$DESTRUCTIVE_RECOVERY_JOURNAL"/)
+  const guardDefinition = installer.indexOf('guard_destructive_cutover_recovery_absent() {')
+  const firstGuard = installer.indexOf('guard_destructive_cutover_recovery_absent || {', guardDefinition)
+  const firstInstall = installer.indexOf('install -d', firstGuard)
+  const lock = installer.indexOf('acquire_publication_lock || {', firstInstall)
+  const secondGuard = installer.indexOf('guard_destructive_cutover_recovery_absent || {', lock)
+  const identityPhase = installer.indexOf('set_constructor_install_phase identity-layout', secondGuard)
+  assert.ok(firstGuard > guardDefinition && firstInstall > firstGuard && lock > firstInstall
+    && secondGuard > lock && identityPhase > secondGuard,
+  'primul guard precedă primul install -d, iar al doilea urmează imediat publication lock')
+  assert.equal((installer.match(/guard_destructive_cutover_recovery_absent \|\| \{/g) ?? []).length, 2)
+})
+
 test('retragerea cronului legacy are intent durabil și recovery idempotent', () => {
   const deploy = read('deploy/deploy.sh')
   const start = deploy.indexOf('retire_legacy_backup_cron() (')
