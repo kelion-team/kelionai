@@ -499,9 +499,19 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   assert.doesNotMatch(clone, /remote set-url/)
   const secureParent = shellFunction(installer, 'secure_service_parent')
   const secureChild = shellFunction(installer, 'ensure_service_writable_dir')
+  const validateInstallDirectory = shellFunction(installer, 'validate_root_owned_install_directory')
+  const ensureInstallDirectory = shellFunction(installer, 'ensure_root_owned_install_directory')
   const secureHandoff = shellFunction(installer, 'secure_handoff_spool')
   assert.match(secureParent, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown root:root[\s\S]*chmod 0711/)
   assert.match(secureChild, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*chown "[$]owner:[$]group"[\s\S]*chmod 0700/)
+  assert.match(validateInstallDirectory, /! -L "[$]path"[\s\S]*realpath -e -- "[$]path"[\s\S]*stat -Lc '%u:%g'[\s\S]*0022/)
+  assert.match(ensureInstallDirectory, /validate_root_owned_install_directory "[$]parent"[\s\S]*validate_root_owned_install_directory "[$]path"[\s\S]*install -d/)
+  const optValidation = installer.indexOf('validate_root_owned_install_directory /opt')
+  const firstOptMutation = installer.indexOf('ensure_root_owned_install_directory /opt/kelion-codex 0755')
+  assert.ok(optValidation >= 0 && firstOptMutation > optValidation,
+    'layout-ul /opt trebuie validat înaintea primei mutații Constructor')
+  assert.match(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor\/lib 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-codex\/profile-home 0755/)
+  assert.doesNotMatch(installer, /install -d[^\n]*\/opt\/kelion-(?:codex|constructor)/)
   const handoffLockdown = secureHandoff.indexOf('chmod 00750 "$spool"')
   const handoffChildren = secureHandoff.indexOf('for child in ready ack retired')
   assert.ok(secureHandoff.indexOf('stat -Lc \'%u\' "$spool"') >= 0
@@ -705,7 +715,9 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'apply',
     'bundle-contract',
     'codex-cli-install',
+    'codex-cli-layout',
     'codex-cli-link',
+    'codex-cli-permissions',
     'config-stage',
     'cutover-stage',
     'existing-config-contract',
@@ -743,7 +755,9 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   for (const [check, command] of [
     ['package-index', 'apt-get update -qq'],
     ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
+    ['codex-cli-layout', 'validate_codex_cli_directory()'],
     ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
+    ['codex-cli-permissions', 'validate_codex_cli_mounts'],
     ['signing-stale-cleanup', 'for stale_signing_root in'],
     ['signing-key-validation', 'validate_signing_key "$signing_key"'],
     ['signing-key-registration', 'existing_keys=$(curl'],
@@ -757,6 +771,49 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     const commandIndex = remote.indexOf(command, labelIndex)
     assert.ok(labelIndex >= 0 && commandIndex > labelIndex, `${check} trebuie setat înainte de comanda atribuită`)
   }
+
+  const cliInstall = remote.slice(
+    remote.indexOf("constructor_config_check='codex-cli-layout'"),
+    remote.indexOf("constructor_config_check='worker-profile-publication'"),
+  )
+  const layoutIndex = cliInstall.indexOf("constructor_config_check='codex-cli-layout'")
+  const installIndex = cliInstall.indexOf("constructor_config_check='codex-cli-install'")
+  const permissionsIndex = cliInstall.indexOf("constructor_config_check='codex-cli-permissions'")
+  const linkIndex = cliInstall.indexOf("constructor_config_check='codex-cli-link'")
+  assert.ok(layoutIndex >= 0 && layoutIndex < installIndex && installIndex < permissionsIndex && permissionsIndex < linkIndex)
+  assert.match(cliInstall, /validate_codex_cli_directory\(\)[\s\S]*\[ -d "\$path" \] && \[ ! -L "\$path" \] && \[ "\$\(realpath -e "\$path"\)" = "\$path" \]/)
+  assert.match(cliInstall, /stat -c '%u:%g'/)
+  assert.match(cliInstall, /path_mode=\$\(stat -c '%a' "\$path"\)[\s\S]*\[ \$\(\(8#\$path_mode & 0022\)\) -eq 0 \]/)
+  const rootGuard = cliInstall.indexOf('for path in / /opt /opt/kelion-codex; do')
+  const childGuard = cliInstall.indexOf('for path in /opt/kelion-codex/bin /opt/kelion-codex/npm; do')
+  const directoryCreation = cliInstall.indexOf('install -d -o root -g root -m 0755 "$path"')
+  assert.ok(rootGuard >= 0 && rootGuard < childGuard && childGuard < directoryCreation && directoryCreation < installIndex,
+    'părinții existenți trebuie validați înaintea oricărei traversări sau mutații')
+  assert.match(cliInstall, /stat -c '%d'/)
+  assert.match(cliInstall, /validate_codex_cli_mounts\(\)[\s\S]*\/proc\/self\/mountinfo/)
+  assert.ok([...cliInstall.matchAll(/^\s*validate_codex_cli_mounts$/gm)].length >= 2,
+    'mounturile trebuie refuzate înainte și după instalarea npm')
+  assert.match(cliInstall, /\(umask 022; npm install/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty\(\)[\s\S]*match=\$\(find -P \/opt\/kelion-codex\/npm -xdev "\$@" -print -quit\) \|\| return 1/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -user root/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -group root/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty -type f -links \+1/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -type f ! -type d ! -type l/)
+  assert.match(cliInstall, /validate_codex_cli_symlinks\(\)[\s\S]*validate_codex_cli_find_empty -type l ! -path "\$link"[\s\S]*\.\.\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js/)
+  assert.match(cliInstall, /required\) \[ "\$present" -eq 1 \]/)
+  const preMutationPermissions = cliInstall.indexOf('validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022')
+  assert.ok(preMutationPermissions >= 0 && preMutationPermissions < installIndex,
+    'niciun fișier sau director npm nu poate fi writable de group/other înainte de npm')
+  assert.ok(cliInstall.includes('find -P /opt/kelion-codex/npm -xdev \\( -type f -o -type d \\) -exec chmod u=rwX,go=rX {} +'))
+  const noWritableTree = 'validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022'
+  assert.ok(cliInstall.split(noWritableTree).length - 1 >= 2)
+  assert.match(cliInstall, /codex_target=\$\(realpath -e \/opt\/kelion-codex\/bin\/codex\)/)
+  assert.match(cliInstall, /\[ "\$codex_target" = \/opt\/kelion-codex\/npm\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js \]/)
+  assert.doesNotMatch(cliInstall, /ln -sfn/)
+  assert.match(cliInstall, /codex_link_temporary=\$\(mktemp[\s\S]*ln -s \/opt\/kelion-codex\/npm\/bin\/codex "\$codex_link_temporary"[\s\S]*mv -Tf -- "\$codex_link_temporary" "\$codex_link"/)
+  assert.match(remote, /codex_link_temporary=''[\s\S]*cleanup_remote\(\)[\s\S]*\.codex-link[\s\S]*rm -f -- "\$codex_link_temporary"/)
+  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ test -x \/opt\/kelion-codex\/bin\/codex/)
+  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ \/opt\/kelion-codex\/bin\/codex --version/)
 
   const handlerStart = remote.indexOf('report_constructor_config_failure() {')
   const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
