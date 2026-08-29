@@ -2492,6 +2492,9 @@ garbage_collect_activations() {
   local candidate canonical
   for candidate in "$RUNTIME_ROOT"/constructor-activation.*; do
     [ -e "$candidate" ] || continue
+    # Recovery-ul quiesced păstrează intenționat jurnalul canonic. Globul
+    # directorului îl include, dar el nu este un snapshot orfan.
+    [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue
     [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]] \
       && [ -d "$candidate" ] && [ ! -L "$candidate" ] \
       && [ "$(stat -c '%u:%g:%a' "$candidate")" = '0:0:700' ] || return 1
