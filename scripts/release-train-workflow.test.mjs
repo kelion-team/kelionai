@@ -174,15 +174,10 @@ function rootCallName(expression) {
 function criticalDeclarationIsSafe(call, file) {
   const callee = call.expression.getText(file)
   if (/\.(?:skip|only|todo|fails|skipIf|runIf)\b/.test(callee)) return false
-  for (const argument of call.arguments) {
-    if (!ts.isObjectLiteralExpression(argument)) continue
-    for (const property of argument.properties) {
-      const name = property.name && (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name))
-        ? property.name.text
-        : ''
-      if (['skip', 'todo', 'fails'].includes(name)) return false
-    }
-  }
+  if (call.arguments.length < 2 || call.arguments.length > 3) return false
+  const callback = call.arguments[1]
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) return false
+  if (call.arguments[2] && !ts.isNumericLiteral(call.arguments[2])) return false
   for (let ancestor = call.parent; ancestor && !ts.isSourceFile(ancestor); ancestor = ancestor.parent) {
     if (ts.isIfStatement(ancestor)
       || ts.isConditionalExpression(ancestor)
@@ -243,7 +238,7 @@ function runSealedSuites(packageName, suites) {
   const packageRoot = resolve(repositoryRoot, packageName)
   const vitest = resolve(packageRoot, 'node_modules/vitest/vitest.mjs')
   const paths = suites.map((suite) => suite.path.slice(packageName.length + 1))
-  const run = spawnSync(process.execPath, [vitest, 'run', ...paths, '--reporter=json'], {
+  const run = spawnSync(process.execPath, [vitest, 'run', ...paths, '--reporter=json', '--configLoader=runner'], {
     cwd: packageRoot,
     encoding: 'utf8',
     env: { ...process.env, FORCE_COLOR: '0' },
@@ -326,6 +321,10 @@ test('regression seal rejects expected failures, disabled options and unreachabl
   const hidden = [
     "it.fails('sealed', () => undefined)",
     "it('sealed', { skip: true }, () => undefined)",
+    "const options = { fails: true }; it('sealed', options, () => { throw new Error('expected') })",
+    "const options = { fails: true }; it('sealed', { ...options }, () => { throw new Error('expected') })",
+    "const brokenCallback = () => { throw new Error('expected') }; it('sealed', false ? brokenCallback : () => undefined)",
+    "const callback = () => undefined; it('sealed', callback)",
     "if (false) { it('sealed', () => undefined) }",
     "false && it('sealed', () => undefined)",
     "function hiddenTest() { it('sealed', () => undefined) }",
@@ -336,6 +335,7 @@ test('regression seal rejects expected failures, disabled options and unreachabl
   }
   for (const source of [
     "it('sealed', () => undefined)",
+    "it('sealed', () => undefined, 30_000)",
     "describe('group', () => { it('sealed', () => undefined) })",
   ]) {
     assert.equal(criticalDeclarations(source, 'synthetic.test.ts').get('sealed')?.every(Boolean), true, source)
