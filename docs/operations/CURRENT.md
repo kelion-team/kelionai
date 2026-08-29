@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T19:49:00Z`
+Actualizat: `2026-08-29T19:52:00Z`
 
 ## Stare verificată
 
@@ -28,7 +28,7 @@ Actualizat: `2026-08-29T19:49:00Z`
   nu sunt declarate funcționale până la configurarea explicită a unei
   chei valide sau a modului suportat „API dezactivat”.
 - Remedierea este pregătită pe ramura
-  `fix/constructor-activation-journal-gc-20260829`: exclude numai calea
+  `chore/constructor-activation-journal-gc-20260829`: exclude numai calea
   exactă a jurnalului înainte de validarea directoarelor, păstrează
   refuzul pentru orice alt nod neașteptat, actualizează pinul SHA-256 al
   helperului compatibil și adaugă regresia în suita Constructor deja
