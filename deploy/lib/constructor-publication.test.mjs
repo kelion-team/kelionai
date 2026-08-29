@@ -1904,10 +1904,21 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
   const runtimeValidator = shellFunction(cutover, 'validate_text_file_bytes')
     .replace('validate_text_file_bytes()', 'validate_runtime_text_file_bytes()')
   const installerValidator = shellFunction(installer, 'validate_systemd_text_file_bytes')
+  const sourceValidator = shellFunction(installer, 'validate_source_systemd_text_files')
   const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
+  assert.match(sourceValidator,
+    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 8/)
   assert.match(verifyCandidateUnits,
-    /validate_systemd_text_file_bytes "\$install_root\/files\/\$\{verify_logicals\[\$index\]\}"/)
+    /local allow_legacy_text=\$\{1:-0\}[\s\S]*case "\$allow_legacy_text" in 0\|1\)[\s\S]*if \[ "\$allow_legacy_text" = 0 \]; then[\s\S]*validate_systemd_text_file_bytes/)
   assert.match(mergePolicy, /"deploy\/systemd\/kelion-constructor-sync\.service"/)
+
+  const transaction = installer.slice(installer.indexOf('set_constructor_install_phase recovery-preflight'))
+  const sourceProof = transaction.indexOf('validate_source_systemd_text_files')
+  const stage = transaction.indexOf('stage_install_transaction')
+  const quiesce = transaction.indexOf('quiesce_before_install')
+  const supersede = transaction.indexOf('verify_candidate_units 1')
+  assert.ok(sourceProof >= 0 && sourceProof < stage && stage < quiesce && supersede > quiesce,
+    'bytes sunt validate înainte de intent/quiesce, iar numai candidatul legacy autentificat poate fi supersedat')
 
   const result = spawnSync(bashExecutable, ['-s', '--', ...unitPaths], {
     input: `set -euo pipefail

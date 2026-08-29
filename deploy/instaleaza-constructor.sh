@@ -789,8 +789,22 @@ validate_systemd_text_file_bytes() {
   [ "$last_byte" = 10 ]
 }
 
+validate_source_systemd_text_files() {
+  local index logical count=0
+  for index in "${!install_logicals[@]}"; do
+    logical=${install_logicals[$index]}
+    case "$logical" in
+      systemd-*)
+        validate_systemd_text_file_bytes "${install_sources[$index]}" || return 1
+        count=$((count + 1))
+        ;;
+    esac
+  done
+  [ "$count" -eq 8 ]
+}
+
 verify_candidate_units() {
-  local verify_root=$install_root/verify index result=0 verify_help
+  local allow_legacy_text=${1:-0} verify_root=$install_root/verify index result=0 verify_help
   local -a verify_logicals=(
     systemd-recovery.kelion-runtime-config-recovery.service
     systemd-sync.kelion-constructor-sync.service
@@ -813,6 +827,7 @@ verify_candidate_units() {
   )
   local -a verify_paths=()
 
+  case "$allow_legacy_text" in 0|1) ;; *) return 1 ;; esac
   verify_help=$(systemd-analyze verify --help 2>&1) || return 1
   grep -q -- '--recursive-errors=' <<<"$verify_help" \
     || { echo 'systemd-analyze nu poate valida recursiv dependențele candidate' >&2; return 1; }
@@ -823,8 +838,10 @@ verify_candidate_units() {
     install -d -o root -g root -m 0700 "$verify_root"
   fi
   for index in "${!verify_logicals[@]}"; do
-    validate_systemd_text_file_bytes "$install_root/files/${verify_logicals[$index]}" \
-      || return 1
+    if [ "$allow_legacy_text" = 0 ]; then
+      validate_systemd_text_file_bytes "$install_root/files/${verify_logicals[$index]}" \
+        || return 1
+    fi
     verify_paths+=("$verify_root/${verify_names[$index]}")
     install_atomic "$install_root/files/${verify_logicals[$index]}" \
       "${verify_paths[$index]}" root root 0600
@@ -1107,6 +1124,9 @@ for journal in "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/con
     || { echo "recovery Constructor activ; instalarea este refuzată: $journal" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 
+validate_source_systemd_text_files \
+  || { echo 'sursa unităților systemd încalcă contractul strict de bytes' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
   load_install_transaction \
@@ -1157,7 +1177,10 @@ if [ "$resume_different_source" = 1 ]; then
     runtime-helper compose-production; do
     validate_published_candidate "$logical"
   done
-  verify_candidate_units
+  # O generație veche, deja autentificată și quiesced, poate proveni dinaintea
+  # porții stricte de bytes. systemd-analyze o dovedește numai pentru a permite
+  # supersedarea; noua sursă a trecut deja contractul strict înainte de intent.
+  verify_candidate_units 1
   supersede_quiesced_install_transaction
   resume_different_source=0
 fi

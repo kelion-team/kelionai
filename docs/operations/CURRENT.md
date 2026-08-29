@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T00:50:44Z`
+Actualizat: `2026-08-29T00:58:45Z`
 
 ## Stare verificată
 
@@ -24,7 +24,8 @@ Actualizat: `2026-08-29T00:50:44Z`
   `validate_live_constructor_sync_unit` închide contractul live. Este singurul
   caracter de control interzis din cele opt unități systemd canonice.
 - Remedierea curentă elimină byte-ul `CR`, verifică același contract strict de
-  bytes în installer înainte de publicare și rulează validatorii reali pe toate
+  bytes în installer înainte de orice intent durabil sau quiesce și rulează
+  validatorii reali pe toate
   cele opt unități în regresie. PR `#1504` publică remedierea și adaugă exact
   unitatea sync în scope-ul VPS permis de merge-policy. Suita relevantă este verde `80/80`;
   `bash -n`, verificarea workflow-urilor, sintaxei, hardcodărilor și
