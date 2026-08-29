@@ -10,7 +10,7 @@ test('prinde configurări și adaptoare ale furnizorilor retrași', () => {
   assert.deepEqual(furnizoriRetrasiInLinie("fetch('http://127.0.0.1:11434/api/tags')"), ['ollama-transport'])
   assert.deepEqual(furnizoriRetrasiInLinie("fetch('http://localhost:19000/api/generate')"), ['ollama-transport'])
   assert.deepEqual(furnizoriRetrasiInLinie("fetch('http://localhost:19000/api/chat')"), ['ollama-transport'])
-  assert.deepEqual(furnizoriRetrasiInLinie("fetch('http://host.docker.internal:19000/api/version')"), ['ollama-transport'])
+  assert.deepEqual(furnizoriRetrasiInLinie("fetch('http://host.docker.internal:19000/api/generate')"), ['ollama-transport'])
   assert.deepEqual(furnizoriRetrasiInLinie("model: 'veo-3.1-generate'"), ['veo'])
   assert.deepEqual(furnizoriRetrasiInLinie('const CHIRP_MODEL = env()'), ['chirp'])
   assert.deepEqual(furnizoriRetrasiInLinie('COQUI_URL=http://speech:5100'), ['coqui-server'])
