@@ -41,7 +41,7 @@ describe('commands — camera', () => {
     // Bug real: `"stream":false` (cuvântul „stream") + `"role":"user"` (cuvântul
     // „user") păcăleau detectorul → „camera frontală". Inputul tehnic merge la creier.
     expect(interpretDeviceCommand(
-      'time curl -s -m 90 http://127.0.0.1:11434/api/chat -d \'{"model":"qwen2.5-coder:7b","messages":[{"role":"user","content":"DONE"}],"stream":false}\'',
+      'time curl -s -m 90 https://example.invalid/api/chat -d \'{"model":"test-model","messages":[{"role":"user","content":"DONE"}],"stream":false}\'',
     )).toBeNull()
     expect(interpretDeviceCommand('git commit --amend')).toBeNull()
     expect(interpretDeviceCommand('{"stream": true, "role": "user"}')).toBeNull()
@@ -84,7 +84,7 @@ describe('commands — confirmarea rostită', () => {
     expect(deviceAck({ camera: 'off' }, true)).not.toBe(deviceAck({ camera: 'off' }, false))
   })
   it('operațiile pe monitor rămân TĂCUTE (acțiunea e feedback-ul)', () => {
-    expect(deviceAck({ screen: { op: 'closeAll' } }, true)).toBe('')
+    expect(deviceAck({ screen: { op: 'closeAll' }, true)).toBe('')
   })
 })
 
