@@ -1,0 +1,304 @@
+name: one-shot-deploy-activation-gc-bootstrap
+
+on:
+  push:
+    branches:
+      - chore/deploy-activation-gc-bootstrap-20260829
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-deploy-activation-gc-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'bootstrap-one-shot-deploy-activation-gc-repair'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: chore/deploy-activation-gc-bootstrap-20260829
+          persist-credentials: true
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Aplică bootstrapul dublu pin-uit și regresia
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          deploy_path = Path('deploy/deploy.sh')
+          deploy = deploy_path.read_text(encoding='utf-8')
+          start_marker = '# Jurnalele runtime/activare sunt recuperate cu helperul instalat care le-a\n'
+          end_marker = '# Upgrade atomic și fsync al recovery gate-ului de boot înainte de orice altă\n'
+          start = deploy.index(start_marker)
+          end = deploy.index(end_marker, start)
+          old_block = deploy[start:end]
+          if old_block.count("recovery-ul runtime/activare cu helperul existent a eșuat") != 1:
+              raise SystemExit('contract drift: blocul recovery pre-upgrade nu este unic')
+
+          replacement = r'''# Jurnalele runtime/activare sunt recuperate în mod normal cu helperul care le-a
+          # creat. Excepția de mai jos este o migrare one-shot, dublu pin-uită,
+          # pentru generația care a inclus jurnalul canonic în globul directoarelor
+          # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
+          # runtime/gate/deploy journals mixte.
+          readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
+          readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=cd93ea4f7474f9336e22755799a8fa0fc4894ee3ebdab8ca64075a60a58a2b47
+
+          recover_runtime_activation_before_upgrade() {
+            local live_helper=$ROOT/bin/runtime-config-cutover.sh
+            local live_compose=$ROOT/config/compose.production.yml
+            local candidate_helper=$BUNDLE_DIR/lib/runtime-config-cutover.sh
+            local activation_journal=$RUNTIME_ROOT/constructor-activation.journal
+            local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
+            local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal
+            local live_sha candidate_sha recovery_helper activation_operation=''
+            local temporary='' status=0 cleanup_failed=0 use_compatible_activation_resume=0
+            local incompatible activation_candidate
+
+            [ -f "$live_helper" ] && [ ! -L "$live_helper" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$live_helper")" = '0:0:500:1' ] \
+              || return 1
+            [ -f "$live_compose" ] && [ ! -L "$live_compose" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$live_compose")" = '0:0:444:1' ] \
+              || return 1
+            live_sha=$(sha256sum "$live_helper" | awk '{print $1}') || return 1
+            recovery_helper=$live_helper
+
+            if { [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; } \
+              && [ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]; then
+              for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; do
+                [ ! -e "$incompatible" ] && [ ! -L "$incompatible" ] || return 1
+              done
+              [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+                || return 1
+              activation_operation=$(jq -er '
+                select(.schema == 2 and
+                  (.phase == "prepared" or .phase == "quiesced" or .phase == "applied") and
+                  .operation == "activate-worker-publisher" and
+                  (.activationRoot | strings |
+                    test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))) |
+                .operation
+              ' "$activation_journal") || return 1
+              [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
+              candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
+              [ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] || return 1
+
+              temporary=$(mktemp /run/kelion-activation-recovery-helper.XXXXXX) || return 1
+              if ! install -o root -g root -m 0500 "$candidate_helper" "$temporary" \
+                || [ -L "$temporary" ] \
+                || [ "$(stat -Lc '%u:%g:%a:%h' "$temporary")" != '0:0:500:1' ] \
+                || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] \
+                || ! fsync_release_artifact "$temporary" file; then
+                rm -f -- "$temporary" || true
+                return 1
+              fi
+              recovery_helper=$temporary
+              use_compatible_activation_resume=1
+            fi
+
+            exec 9>&8 || status=1
+            if [ "$status" = 0 ] && [ "$use_compatible_activation_resume" = 1 ]; then
+              if KELION_CUTOVER_LOCK_HELD=1 \
+                KELION_ACTIVATION_RESUME_OPERATION="$activation_operation" \
+                bash "$recovery_helper" --recover-only "$live_compose"; then
+                if [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+                  && [ ! -e /run/kelion/constructor-activation.pending ] \
+                  && [ ! -L /run/kelion/constructor-activation.pending ]; then
+                  if KELION_CUTOVER_LOCK_HELD=1 \
+                    bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+                    status=0
+                  else
+                    status=$?
+                  fi
+                else
+                  status=1
+                fi
+              else
+                status=$?
+              fi
+              if [ "$status" = 0 ]; then
+                for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*; do
+                  if [ -e "$activation_candidate" ] || [ -L "$activation_candidate" ]; then
+                    status=1
+                    break
+                  fi
+                done
+              fi
+              if [ "$status" = 0 ]; then
+                [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+                  && [ ! -L /run/kelion/runtime-config-recovery.ready ] || status=1
+              fi
+            elif [ "$status" = 0 ]; then
+              if KELION_CUTOVER_LOCK_HELD=1 \
+                KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+                KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+                "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+                status=0
+              else
+                status=$?
+              fi
+            fi
+            exec 9>&- || cleanup_failed=1
+
+            if [ -n "$temporary" ]; then
+              rm -f -- "$temporary" || cleanup_failed=1
+              fsync_release_artifact /run directory || cleanup_failed=1
+            fi
+            [ "$status" = 0 ] && [ "$cleanup_failed" = 0 ]
+          }
+
+          if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+            || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
+            || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+            recover_runtime_activation_before_upgrade \
+              || die 'recovery-ul runtime/activare pre-upgrade a eșuat fail-closed'
+          fi
+
+          '''
+          deploy_path.write_text(deploy[:start] + replacement + deploy[end:], encoding='utf-8')
+
+          test_path = Path('deploy/lib/constructor-publication.test.mjs')
+          tests = test_path.read_text(encoding='utf-8')
+          title = "test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {"
+          if title in tests:
+              raise SystemExit('contract drift: regresia bootstrap există deja')
+          regression = r'''
+
+          test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
+            const deploy = read('deploy/deploy.sh')
+            const cutover = read('deploy/lib/runtime-config-cutover.sh')
+            const recovery = shellFunction(deploy, 'recover_runtime_activation_before_upgrade')
+
+            assert.match(deploy,
+              /LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e/)
+            const compatiblePin = deploy.match(
+              /COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=([0-9a-f]{64})/)?.[1]
+            assert.equal(compatiblePin, createHash('sha256').update(cutover).digest('hex'),
+              'helperul candidat trebuie pin-uit la bytes exacți')
+
+            const livePin = recovery.indexOf(
+              '[ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]')
+            const mixedRuntimeRefusal = recovery.indexOf(
+              'for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"', livePin)
+            const journalAcl = recovery.indexOf("0:0:600:1", mixedRuntimeRefusal)
+            const workerOnly = recovery.indexOf('.operation == "activate-worker-publisher"', journalAcl)
+            const rootAllowlist = recovery.indexOf('constructor-activation\\\\.[A-Za-z0-9]+', workerOnly)
+            const candidatePin = recovery.indexOf(
+              '[ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]', rootAllowlist)
+            const temporaryCopy = recovery.indexOf(
+              'mktemp /run/kelion-activation-recovery-helper.XXXXXX', candidatePin)
+            const durableCopy = recovery.indexOf('fsync_release_artifact "$temporary" file', temporaryCopy)
+            const explicitResume = recovery.indexOf(
+              'KELION_ACTIVATION_RESUME_OPERATION="$activation_operation"', durableCopy)
+            const resumeRun = recovery.indexOf(
+              'bash "$recovery_helper" --recover-only "$live_compose";', explicitResume)
+            const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', resumeRun)
+            const requiesce = recovery.indexOf(
+              'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced', journalGone)
+            const orphanProof = recovery.indexOf(
+              'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', requiesce)
+            const readyAbsent = recovery.indexOf(
+              '[ ! -e /run/kelion/runtime-config-recovery.ready ]', orphanProof)
+            const cleanup = recovery.indexOf('rm -f -- "$temporary"', readyAbsent)
+
+            assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && journalAcl > mixedRuntimeRefusal
+              && workerOnly > journalAcl && rootAllowlist > workerOnly && candidatePin > rootAllowlist
+              && temporaryCopy > candidatePin && durableCopy > temporaryCopy
+              && explicitResume > durableCopy && resumeRun > explicitResume && journalGone > resumeRun
+              && requiesce > journalGone && orphanProof > requiesce && readyAbsent > orphanProof
+              && cleanup > readyAbsent,
+            'fallback-ul trebuie să fie pur, dublu pin-uit, explicit, requiesced și curățat')
+            assert.match(recovery,
+              /elif \[ "\$status" = 0 \]; then[\s\S]*"\$recovery_helper" --recover-only "\$live_compose" --leave-constructor-quiesced/,
+              'orice alt helper trebuie să-și recupereze propriile jurnale')
+            assert.doesNotMatch(recovery,
+              /install_recovery_artifact[\s\S]*runtime-config-cutover|mv -f --[^\n]*ROOT\/bin\/runtime-config-cutover/,
+              'migrarea one-shot nu poate înlocui helperul live înainte de recovery')
+
+            const mainStart = deploy.indexOf('# Jurnalele runtime/activare sunt recuperate în mod normal')
+            const call = deploy.indexOf('\n  recover_runtime_activation_before_upgrade \\\n', mainStart)
+            const persistentUpgrade = deploy.indexOf(
+              '# Upgrade atomic și fsync al recovery gate-ului de boot', call)
+            assert.ok(mainStart >= 0 && call > mainStart && persistentUpgrade > call,
+              'recovery-ul one-shot trebuie să se încheie înaintea upgrade-ului persistent')
+          })
+          '''
+          test_path.write_text(tests.rstrip() + regression, encoding='utf-8')
+          PY
+
+          cat > docs/operations/CURRENT.md <<'CURRENT'
+          # Checkpoint operațional curent
+
+          Actualizat: `2026-08-29T20:18:00Z`
+
+          ## Stare verificată
+
+          - `master` este `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
+            CI-ul post-merge și buildul celor cinci imagini OCI au trecut, iar
+            digesturile au fost semnate.
+          - Release run `33272696377` a validat candidatul și semnăturile, dar s-a
+            oprit înainte de point-of-no-return. Release-ul public anterior a rămas
+            activ.
+          - Cauza nouă este un bootstrap deadlock în `deploy.sh`: înainte să
+            instaleze helperul reparat, deploy-ul cere helperului live vechi să
+            recupereze `constructor-activation.journal`. Generația veche include
+            jurnalul în globul `constructor-activation.*` și refuză recovery-ul.
+          - Migrarea pregătită pe ramura
+            `chore/deploy-activation-gc-bootstrap-20260829` este one-shot și dublu
+            pin-uită. Acceptă numai helperul live `ce136f…`, candidatul `cd93ea…`,
+            un jurnal schema 2 pentru `activate-worker-publisher` și absența
+            oricărui jurnal runtime, gate sau deploy concurent.
+          - Migrarea rulează helperul candidat numai dintr-o copie temporară
+            root-only, reia explicit operația jurnalizată, dovedește ștergerea
+            jurnalului/pendingului/snapshotului, apoi quiesce din nou Constructorul.
+            Helperul live nu este înlocuit înaintea dovezii.
+          - Constructorul rămâne fail-closed; timerele sunt inactive până la
+            recovery/deploy reușit și la probele Codex CLI.
+          - Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
+            separată de release și Constructor.
+
+          ## Următorul pas sigur
+
+          1. Rulează toate porțile PR pentru bootstrapul dublu pin-uit.
+          2. Îmbină prin rebase numai pe verde și publică noul `master`.
+          3. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
+             Constructor pentru starea timerelor și proba `codex --version`.
+          4. Activează release-ul Constructor numai după worker/publisher sănătoase.
+
+          ## Legături canonice
+
+          - Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
+          - Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33272696377>
+          - Versiune live: <https://kelionai.app/api/release-proof>
+          CURRENT
+
+          bash -n deploy/deploy.sh
+          node --test \
+            --test-name-pattern='deploy-ul migrează one-shot numai deadlockul GC al activării' \
+            deploy/lib/constructor-publication.test.mjs
+          node scripts/verifica-sintaxa.mjs
+          node scripts/verifica-contract-deploy.mjs
+          git diff --check
+
+      - name: Publică numai fișierele de produs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy/deploy.sh \
+            deploy/lib/constructor-publication.test.mjs \
+            docs/operations/CURRENT.md
+          git diff --cached --check
+          git commit -m 'fix(deploy): bootstrap activation GC recovery safely'
+          git push origin HEAD:chore/deploy-activation-gc-bootstrap-20260829
