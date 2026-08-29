@@ -84,7 +84,7 @@ describe('commands — confirmarea rostită', () => {
     expect(deviceAck({ camera: 'off' }, true)).not.toBe(deviceAck({ camera: 'off' }, false))
   })
   it('operațiile pe monitor rămân TĂCUTE (acțiunea e feedback-ul)', () => {
-    expect(deviceAck({ screen: { op: 'closeAll' }, true)).toBe('')
+    expect(deviceAck({ screen: { op: 'closeAll' } }, true)).toBe('')
   })
 })
 
