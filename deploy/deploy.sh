@@ -1641,50 +1641,62 @@ try {
     "release_candidate_receipt_sha256", "release_intent_receipt_sha256",
   ]
   const hasV2Schema = v2Columns.every((name) => columns.has(name))
-  const ownershipPredicate = hasV2Schema ? `
-        COALESCE(
-          p.release_protocol_version = 2
-          AND p.release_request_id = $3::uuid
-          AND p.release_target_sha = $4
-          AND p.merged_commit_sha = $4
-          AND p.release_target_receipt_sha256 IS NOT NULL
-          AND p.release_ci_run_id = $5::bigint
-          AND p.release_build_run_id = $6::bigint
-          AND p.release_artifact_id IS NOT NULL
-          AND p.release_candidate_receipt_sha256 IS NOT NULL
-          AND p.release_intent_receipt_sha256 IS NOT NULL
-          AND (p.release_workflow_run_id IS NULL OR p.release_workflow_run_id = $7::bigint),
-          false
-        )
-  ` : `
-        COALESCE(
-          p.release_request_id = $3::uuid
-          AND p.merged_commit_sha = $4
-          AND p.release_workflow_run_id = $7::bigint
-          AND p.release_dispatch_receipt_sha256 IS NOT NULL,
-          false
-        )
-  `
+  const sharedOwnershipValues = [
+    "running",
+    ["merged", "release_dispatched"],
+    process.env.KELION_RELEASE_REQUEST_ID,
+    process.env.KELION_RELEASE_COMMIT_SHA,
+  ]
+  const ownership = hasV2Schema ? {
+    predicate: `
+          COALESCE(
+            p.release_protocol_version = 2
+            AND p.release_request_id = $3::uuid
+            AND p.release_target_sha = $4::text
+            AND p.merged_commit_sha = $4::text
+            AND p.release_target_receipt_sha256 IS NOT NULL
+            AND p.release_ci_run_id = $5::bigint
+            AND p.release_build_run_id = $6::bigint
+            AND p.release_artifact_id IS NOT NULL
+            AND p.release_candidate_receipt_sha256 IS NOT NULL
+            AND p.release_intent_receipt_sha256 IS NOT NULL
+            AND (p.release_workflow_run_id IS NULL OR p.release_workflow_run_id = $7::bigint),
+            false
+          )
+    `,
+    values: [
+      ...sharedOwnershipValues,
+      process.env.KELION_RELEASE_CI_RUN_ID,
+      process.env.KELION_RELEASE_BUILD_RUN_ID,
+      process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
+    ],
+  } : {
+    predicate: `
+          COALESCE(
+            p.release_request_id = $3::uuid
+            AND p.merged_commit_sha = $4::text
+            AND p.release_workflow_run_id = $5::bigint
+            AND p.release_dispatch_receipt_sha256 IS NOT NULL,
+            false
+          )
+    `,
+    values: [
+      ...sharedOwnershipValues,
+      process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
+    ],
+  }
   const result = await client.query(`
     WITH in_flight AS (
-      SELECT (${ownershipPredicate}) AS is_current
+      SELECT (${ownership.predicate}) AS is_current
         FROM build_jobs b
         JOIN constructor_pipeline p ON p.job_id = b.id
-       WHERE b.status = $1
+       WHERE b.status = $1::text
          AND b.constructor_stage = ANY($2::text[])
     )
     SELECT count(*) FILTER (WHERE is_current IS NOT TRUE)::integer AS blocking,
            count(*) FILTER (WHERE is_current IS TRUE)::integer AS current
       FROM in_flight
-  `, [
-    "running",
-    ["merged", "release_dispatched"],
-    process.env.KELION_RELEASE_REQUEST_ID,
-    process.env.KELION_RELEASE_COMMIT_SHA,
-    process.env.KELION_RELEASE_CI_RUN_ID,
-    process.env.KELION_RELEASE_BUILD_RUN_ID,
-    process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
-  ])
+  `, ownership.values)
   const row = result.rows[0]
   process.stdout.write(`${row?.blocking ?? "invalid"}:${row?.current ?? "invalid"}`)
 } finally {
