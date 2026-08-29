@@ -1,11 +1,11 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T20:36:15Z`
+Actualizat: `2026-08-29T20:39:18Z`
 
 ## Stare verificată
 
-- `master` este `154de473b27b760d8bdf6a503850a8018e862f7e`; verificarea sa
-  completă este încă în curs.
+- `master` este `154de473b27b760d8bdf6a503850a8018e862f7e`; toate cele trei
+  joburi `pr-verify`, inclusiv `container-isolation`, au trecut.
 - Release run `33272696377` a validat candidatul și semnăturile, dar s-a
   oprit înainte de point-of-no-return. Release-ul public anterior a rămas
   activ.
@@ -25,8 +25,8 @@ Actualizat: `2026-08-29T20:36:15Z`
   cheie OpenAI; replay-urile terminale și vocea ambientală își păstrează
   căile fail-closed.
 - Backendul (typecheck, lint, 1.438 teste), frontendul (build, lint, 306
-  teste), porțile statice, worker/Constructor, preflightul și CodeQL au
-  trecut pe baza anterioară; trainul sincronizat necesită revalidare.
+  teste), porțile statice, worker/Constructor, preflightul și testele de
+  recovery (113) au trecut pentru trainul sincronizat.
 - `container-isolation` oficial pentru baza anterioară a trecut. Reproducerea
   locală este blocată de un certificat TLS extern, auto-semnat, în container;
   verificarea TLS nu va fi slăbită.
@@ -42,14 +42,13 @@ Actualizat: `2026-08-29T20:36:15Z`
 
 ## Următorul pas sigur
 
-1. Finalizează trainul sincronizat și rulează porțile complete numai după ce
-   `master` este verde.
-2. Revocă credentialele Kimi/GLM istorice în secret store-urile furnizorilor;
+1. Revocă credentialele Kimi/GLM istorice în secret store-urile furnizorilor;
    păstrează dovada numai în canalul securizat.
-3. Îmbină prin rebase numai pe verde și publică noul `master`.
-4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
+2. Deschide trainul ca PR, rulează o singură dată poarta completă pentru
+   candidatul exact și îmbină prin rebase numai pe verde.
+3. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
    Constructor pentru starea timerelor și proba `codex --version`.
-5. Activează release-ul Constructor numai după worker/publisher sănătoase și
+4. Activează release-ul Constructor numai după worker/publisher sănătoase și
    rotește cheia OpenAI în secret store înainte de verificarea chatului/voce.
 
 ## Legături canonice
