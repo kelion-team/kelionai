@@ -68,6 +68,7 @@ jobs:
             "deploy/constructor-publisher.mjs",
             "deploy/deploy.sh",
             "deploy/instaleaza-constructor.sh",
+            "deploy/systemd/kelion-constructor-sync.service",
             "deploy/constructor-release.env.example",
             "deploy/constructor-publisher.env.example",
             "deploy/kelionai.env.example",

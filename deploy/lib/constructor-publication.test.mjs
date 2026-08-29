@@ -1900,12 +1900,14 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
   ].map((unit) => join(root, 'deploy', 'systemd', unit))
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const installer = read('deploy/instaleaza-constructor.sh')
+  const mergePolicy = read('.github/workflows/vps-auto-merge-chore-prs.yml')
   const runtimeValidator = shellFunction(cutover, 'validate_text_file_bytes')
     .replace('validate_text_file_bytes()', 'validate_runtime_text_file_bytes()')
   const installerValidator = shellFunction(installer, 'validate_systemd_text_file_bytes')
   const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
   assert.match(verifyCandidateUnits,
     /validate_systemd_text_file_bytes "\$install_root\/files\/\$\{verify_logicals\[\$index\]\}"/)
+  assert.match(mergePolicy, /"deploy\/systemd\/kelion-constructor-sync\.service"/)
 
   const result = spawnSync(bashExecutable, ['-s', '--', ...unitPaths], {
     input: `set -euo pipefail
