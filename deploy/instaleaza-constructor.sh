@@ -407,6 +407,33 @@ ensure_service_writable_dir() {
   sync -f "$path" && sync -f "$parent"
 }
 
+validate_root_owned_install_directory() {
+  local path=$1 path_mode
+  [ -d "$path" ] && [ ! -L "$path" ] \
+    && [ "$(realpath -e -- "$path")" = "$path" ] \
+    && [ "$(stat -Lc '%u:%g' "$path")" = '0:0' ] || return 1
+  path_mode=$(stat -Lc '%a' "$path") || return 1
+  [ $((8#$path_mode & 0022)) -eq 0 ]
+}
+
+ensure_root_owned_install_directory() {
+  local path=$1 mode=$2 parent
+  case "$path" in
+    /opt/kelion-codex|/opt/kelion-codex/profile-home|/opt/kelion-constructor|/opt/kelion-constructor/lib) ;;
+    *) return 1 ;;
+  esac
+  parent=$(dirname -- "$path")
+  validate_root_owned_install_directory "$parent" || return 1
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    validate_root_owned_install_directory "$path" || return 1
+  else
+    install -d -o root -g root -m "$mode" "$path" || return 1
+  fi
+  chown root:root "$path" && chmod "$mode" "$path" || return 1
+  [ "$(stat -Lc '%u:%g:%a' "$path")" = "0:0:${mode#0}" ] || return 1
+  sync -f "$path" && sync -f "$parent"
+}
+
 secure_handoff_spool() {
   local prefix=${1:-} var_lib=/var/lib spool child
   if [ -n "$prefix" ]; then
@@ -456,8 +483,12 @@ ensure_user kelion-release /var/lib/kelion-release
 usermod -a -G kelion-handoff kelion-codex
 usermod -a -G kelion-handoff kelion-publisher
 
-install -d -o root -g root -m 0755 /opt/kelion-codex /opt/kelion-constructor /opt/kelion-constructor/lib
-install -d -o root -g root -m 0755 /opt/kelion-codex/profile-home
+validate_root_owned_install_directory /
+validate_root_owned_install_directory /opt
+ensure_root_owned_install_directory /opt/kelion-codex 0755
+ensure_root_owned_install_directory /opt/kelion-constructor 0755
+ensure_root_owned_install_directory /opt/kelion-constructor/lib 0755
+ensure_root_owned_install_directory /opt/kelion-codex/profile-home 0755
 secure_service_parent /var/lib/kelion-codex
 secure_service_parent /var/lib/kelion-publisher
 secure_service_parent /var/lib/kelion-release
