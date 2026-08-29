@@ -779,6 +779,16 @@ validate_published_candidate() {
     && cmp -s -- "$candidate" "$install_target"
 }
 
+validate_systemd_text_file_bytes() {
+  local file=$1 original_size clean_size last_byte
+  [ -s "$file" ] && [ "$(stat -c '%s' "$file")" -le 65536 ] || return 1
+  original_size=$(wc -c < "$file")
+  clean_size=$(LC_ALL=C tr -d '\000-\011\013-\037\177' < "$file" | wc -c)
+  [ "$original_size" -eq "$clean_size" ] || return 1
+  last_byte=$(tail -c 1 -- "$file" | od -An -t u1 | tr -d '[:space:]')
+  [ "$last_byte" = 10 ]
+}
+
 verify_candidate_units() {
   local verify_root=$install_root/verify index result=0 verify_help
   local -a verify_logicals=(
@@ -813,6 +823,8 @@ verify_candidate_units() {
     install -d -o root -g root -m 0700 "$verify_root"
   fi
   for index in "${!verify_logicals[@]}"; do
+    validate_systemd_text_file_bytes "$install_root/files/${verify_logicals[$index]}" \
+      || return 1
     verify_paths+=("$verify_root/${verify_names[$index]}")
     install_atomic "$install_root/files/${verify_logicals[$index]}" \
       "${verify_paths[$index]}" root root 0600

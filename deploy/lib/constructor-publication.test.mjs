@@ -1887,6 +1887,40 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
   assert.match(quiescePostconditions, /ActiveState[\s\S]*systemctl list-jobs --no-legend --plain/)
 })
 
+test('toate unitățile systemd publicate respectă contractul strict de bytes text', () => {
+  const unitPaths = [
+    'kelion-runtime-config-recovery.service',
+    'kelion-constructor-sync.service',
+    'kelion-codex-worker.timer',
+    'kelion-constructor-publisher.timer',
+    'kelion-constructor-release.timer',
+    'kelion-codex-worker.service',
+    'kelion-constructor-publisher.service',
+    'kelion-constructor-release.service',
+  ].map((unit) => join(root, 'deploy', 'systemd', unit))
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const runtimeValidator = shellFunction(cutover, 'validate_text_file_bytes')
+    .replace('validate_text_file_bytes()', 'validate_runtime_text_file_bytes()')
+  const installerValidator = shellFunction(installer, 'validate_systemd_text_file_bytes')
+  const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
+  assert.match(verifyCandidateUnits,
+    /validate_systemd_text_file_bytes "\$install_root\/files\/\$\{verify_logicals\[\$index\]\}"/)
+
+  const result = spawnSync(bashExecutable, ['-s', '--', ...unitPaths], {
+    input: `set -euo pipefail
+${runtimeValidator}
+${installerValidator}
+for file in "$@"; do
+  validate_runtime_text_file_bytes "$file"
+  validate_systemd_text_file_bytes "$file"
+done
+`,
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+})
+
 test('recovery-ul de boot așteaptă bounded backendul și rămâne fail-closed la timeout', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const waiter = shellFunction(cutover, 'wait_for_activation_backend_ready')
