@@ -42,7 +42,7 @@ jobs:
   verify-incident:
     if: >-
       github.ref == 'refs/heads/master' && github.ref_name == 'master' &&
-      ((github.event_name == 'push' && github.event.before == 'de9fe5f3f081373a23796d83b469651e9c1e33e7') ||
+      ((github.event_name == 'push' && github.event.before == 'afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3') ||
        github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
           persist-credentials: false
 
       - name: Verifică identitatea imuabilă și hotfixul unic
@@ -71,12 +71,14 @@ jobs:
         run: |
           set -euo pipefail
           target=de9fe5f3f081373a23796d83b469651e9c1e33e7
+          recovery_base=afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3
+          failed_recovery_run=33238849810
           request=e5c00af2-1fb9-4daf-a30b-bdfed24d5689
           failed_run=33227925046
           ci_run=33227451553
           build_run=33227641381
           if [ "$EVENT_NAME" = push ]; then
-            [ "$EVENT_BEFORE" = "$target" ]
+            [ "$EVENT_BEFORE" = "$recovery_base" ]
           else
             [ "$EVENT_NAME" = workflow_dispatch ]
             [ "$DISPATCH_TARGET" = "$target" ]
@@ -85,42 +87,45 @@ jobs:
             [ "$DISPATCH_CI_RUN" = "$ci_run" ]
             [ "$DISPATCH_BUILD_RUN" = "$build_run" ]
           fi
-          [ "$GITHUB_REF" = refs/heads/master ] && [ "$GITHUB_REF_NAME" = master ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           hotfix=$(git rev-parse HEAD)
           [[ "$hotfix" =~ ^[0-9a-f]{40}$ ]]
           [ "$hotfix" = "$GITHUB_SHA" ]
-          [ "$(git rev-parse HEAD^)" = "$target" ]
-          [ "$(git rev-list --count "$target..$hotfix")" -eq 1 ]
+          [ "$(git rev-parse HEAD^)" = "$recovery_base" ]
+          [ "$(git rev-parse "$recovery_base^")" = "$target" ]
+          [ "$(git rev-list --count "$recovery_base..$hotfix")" -eq 1 ]
           [ "$(git rev-list --parents -n 1 "$hotfix" | awk '{print NF}')" -eq 2 ]
           remote_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
           [ "$remote_master" = "$hotfix" ]
 
-          [ -z "$(git diff --name-only --no-renames --diff-filter=D "$target" "$hotfix")" ]
-          mapfile -t changed < <(git diff --name-only --no-renames "$target" "$hotfix")
-          [ "${#changed[@]}" -ge 5 ]
+          [ -z "$(git diff --name-only --no-renames --diff-filter=D "$recovery_base" "$hotfix")" ]
+          mapfile -t changed < <(git diff --name-only --no-renames "$recovery_base" "$hotfix")
+          [ "${#changed[@]}" -eq 7 ]
           for path in "${changed[@]}"; do
             case "$path" in
+              .github/workflows/vps-auto-merge-chore-prs.yml|\
               .github/workflows/vps-post-ponr-recovery.yml|\
               .github/workflows/vps-recovery.yml|\
-              .github/workflows/vps-auto-merge-chore-prs.yml|\
-              deploy/deploy.sh|\
-              deploy/instaleaza-constructor.sh|\
-              deploy/lib/runtime-config-cutover.sh|\
-              deploy/lib/release-rollback.test.mjs|\
+              Dockerfile.gates|\
+              deploy/lib/codex-boundary.test.mjs|\
               deploy/lib/constructor-publication.test.mjs|\
               docs/operations/CURRENT.md) ;;
               *) echo "::error::Fișier în afara allowlistului hotfix: $path"; exit 1 ;;
             esac
           done
           for required in \
+            .github/workflows/vps-auto-merge-chore-prs.yml \
             .github/workflows/vps-post-ponr-recovery.yml \
             .github/workflows/vps-recovery.yml \
-            deploy/deploy.sh \
-            deploy/instaleaza-constructor.sh \
-            deploy/lib/runtime-config-cutover.sh; do
-            git diff --quiet "$target" "$hotfix" -- "$required" \
+            Dockerfile.gates \
+            deploy/lib/codex-boundary.test.mjs \
+            deploy/lib/constructor-publication.test.mjs \
+            docs/operations/CURRENT.md; do
+            git diff --quiet "$recovery_base" "$hotfix" -- "$required" \
               && { echo "::error::Hotfixul nu modifică $required"; exit 1; }
-            [ -f "$required" ] && [ ! -L "$required" ]
+            [ -f "$required" ]
+            [ ! -L "$required" ]
           done
 
           deadline=$((SECONDS + 9900))
@@ -164,6 +169,14 @@ jobs:
             ([.jobs[] | select(.conclusion == "success") | .name] | unique | sort) ==
               ["container-isolation", "release-train-preflight", "verify"]
           ' <<<"$hotfix_ci_jobs" >/dev/null
+
+          failed_recovery=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${failed_recovery_run}")
+          jq -e --argjson id "$failed_recovery_run" --arg sha "$recovery_base" '
+            .id == $id and .head_sha == $sha and .head_branch == "master" and
+            .event == "push" and .conclusion == "failure" and
+            (.path == ".github/workflows/vps-post-ponr-recovery.yml" or
+             (.path | startswith(".github/workflows/vps-post-ponr-recovery.yml@")))
+          ' <<<"$failed_recovery" >/dev/null
 
           release=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${failed_run}")
           jq -e \
@@ -237,8 +250,10 @@ jobs:
           set -euo pipefail
           target=de9fe5f3f081373a23796d83b469651e9c1e33e7
           ci_run=33227451553
-          [ -f release-manifest/images.json ] && [ ! -L release-manifest/images.json ]
-          [ -f release-manifest/codex-gates.json ] && [ ! -L release-manifest/codex-gates.json ]
+          [ -f release-manifest/images.json ]
+          [ ! -L release-manifest/images.json ]
+          [ -f release-manifest/codex-gates.json ]
+          [ ! -L release-manifest/codex-gates.json ]
           jq -e --arg sha "$target" --argjson source "$ci_run" '
             type == "object" and .schema == 1 and .commit == $sha and
             .sourceRunId == $source and
@@ -284,9 +299,10 @@ jobs:
         run: |
           set -euo pipefail
           [ "$(git rev-parse HEAD)" = "$HOTFIX_COMMIT" ]
-          [ "$(git rev-parse HEAD^)" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]
+          [ "$(git rev-parse HEAD^)" = afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3 ]
           for input in deploy config/product.json release-manifest/images.json release-manifest/codex-gates.json; do
-            [ -e "$input" ] && [ ! -L "$input" ]
+            [ -e "$input" ]
+            [ ! -L "$input" ]
           done
           source_date_epoch=$(git show -s --format=%ct "$HOTFIX_COMMIT")
           tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owner \
@@ -311,66 +327,171 @@ jobs:
           ci_run=33227451553
           build_run=33227641381
           [ "$(git rev-parse HEAD)" = "$HOTFIX_COMMIT" ]
-          [ "$(git rev-parse HEAD^)" = "$target" ]
+          [ "$(git rev-parse HEAD^)" = afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3 ]
           current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
           [ "$current_master" = "$HOTFIX_COMMIT" ]
           [[ "$GITHUB_ACTOR" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [ -n "$REGISTRY_TOKEN" ] && [ -n "$VPS_HOST" ] && [ "$VPS_USER" = root ]
-          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ -n "$REGISTRY_TOKEN" ]
+          [ -n "$VPS_HOST" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST_KEY" ]
+          [ -n "$SSH_KEY" ]
           archive="$RUNNER_TEMP/post-ponr-recovery.tar.gz"
-          [ -f "$archive" ] && [ ! -L "$archive" ]
+          [ -f "$archive" ]
+          [ ! -L "$archive" ]
 
           umask 077
-          key_file=$(mktemp)
-          known_hosts=$(mktemp)
-          remote_archive="/root/kelion/runtime/post-ponr-recovery.${GITHUB_RUN_ID}.tar.gz"
+          key_file=''
+          known_hosts=''
+          remote_stage="/root/kelion-post-ponr.${GITHUB_RUN_ID}"
+          remote_archive="$remote_stage/recovery.tar.gz"
+          remote_docker_config="$remote_stage/docker-config"
           cleanup() {
-            ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
-              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes "$VPS_USER@$VPS_HOST" \
-              "rm -f -- '$remote_archive'; docker logout ghcr.io >/dev/null 2>&1 || true" \
-              >/dev/null 2>&1 || true
+            if [ -n "$key_file" ] && [ -s "$key_file" ] \
+              && [ -n "$known_hosts" ] && [ -s "$known_hosts" ]; then
+              ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+                -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+                -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$VPS_USER@$VPS_HOST" \
+                bash -s -- "$remote_stage" >/dev/null 2>&1 <<'CLEANUP' || true
+          set -euo pipefail
+          stage=$1
+          [[ "$stage" =~ ^/root/kelion-post-ponr\.[1-9][0-9]*$ ]]
+          if [ -e "$stage" ] || [ -L "$stage" ]; then
+            [ -d "$stage" ]
+            [ ! -L "$stage" ]
+            [ "$(realpath -e -- "$stage")" = "$stage" ]
+            [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+            docker_config="$stage/docker-config"
+            if [ -d "$docker_config" ] && [ ! -L "$docker_config" ]; then
+              DOCKER_CONFIG="$docker_config" docker logout ghcr.io >/dev/null 2>&1 || true
+            fi
+            rm -rf -- "$stage"
+          fi
+          CLEANUP
+            fi
             rm -f -- "$key_file" "$known_hosts"
           }
           trap cleanup EXIT
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
           printf '%s\n' "$SSH_KEY" > "$key_file"
           printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
           chmod 0600 "$key_file" "$known_hosts"
           ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
 
-          printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-            "[ -d /root/kelion/runtime ] && [ ! -L /root/kelion/runtime ] && [ \"\$(stat -Lc '%u:%g:%a' /root/kelion/runtime)\" = '0:10050:750' ] && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_stage" <<'PREFLIGHT'
+          set -Eeuo pipefail
+          phase=runtime-metadata
+          on_err() {
+            failed_line=$1
+            rc=$2
+            printf 'post_ponr_preflight_failed phase=%s line=%s exit=%s\n' "$phase" "$failed_line" "$rc" >&2
+            exit "$rc"
+          }
+          trap 'on_err "$LINENO" "$?"' ERR
+          stage=$1
+          [[ "$stage" =~ ^/root/kelion-post-ponr\.[1-9][0-9]*$ ]]
+          [ -d /root/kelion/runtime ]
+          [ ! -L /root/kelion/runtime ]
+          [ "$(realpath -e -- /root/kelion/runtime)" = /root/kelion/runtime ]
+          runtime_metadata=$(stat -Lc '%u:%g:%a' /root/kelion/runtime)
+          IFS=: read -r runtime_uid runtime_gid runtime_mode <<<"$runtime_metadata"
+          [ "$runtime_uid" = 0 ]
+          [[ "$runtime_gid" =~ ^[0-9]+$ ]]
+          [[ "$runtime_mode" =~ ^[0-7]{3,4}$ ]]
+          (( (8#$runtime_mode & 0022) == 0 ))
+          printf 'post_ponr_preflight runtime_metadata=%s\n' "$runtime_metadata"
+          phase=stage
+          [ ! -e "$stage" ]
+          [ ! -L "$stage" ]
+          install -d -o root -g root -m 0700 "$stage" "$stage/docker-config"
+          [ -d "$stage" ]
+          [ ! -L "$stage" ]
+          [ "$(realpath -e -- "$stage")" = "$stage" ]
+          [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+          [ -d "$stage/docker-config" ]
+          [ ! -L "$stage/docker-config" ]
+          [ "$(realpath -e -- "$stage/docker-config")" = "$stage/docker-config" ]
+          [ "$(stat -Lc '%u:%g:%a' "$stage/docker-config")" = '0:0:700' ]
+          printf '%s\n' 'post_ponr_preflight stage=ready'
+          PREFLIGHT
+
+          if ! printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "DOCKER_CONFIG='$remote_docker_config' docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" \
+            >/dev/null; then
+            echo '::error::Autentificarea GHCR izolată pe VPS a eșuat.'
+            exit 1
+          fi
+          printf '%s\n' 'post_ponr_preflight ghcr=authenticated'
           scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
-            "$target" "$request" "$failed_run" "$ci_run" "$build_run" "$remote_archive" <<'REMOTE'
-          set -euo pipefail
+            "$target" "$request" "$failed_run" "$ci_run" "$build_run" \
+            "$remote_stage" "$remote_archive" "$remote_docker_config" <<'REMOTE'
+          set -Eeuo pipefail
+          phase=arguments
+          on_err() {
+            failed_line=$1
+            rc=$2
+            printf 'post_ponr_remote_failed phase=%s line=%s exit=%s\n' "$phase" "$failed_line" "$rc" >&2
+            exit "$rc"
+          }
+          trap 'on_err "$LINENO" "$?"' ERR
           target=$1
           request=$2
           failed_run=$3
           ci_run=$4
           build_run=$5
-          archive=$6
+          stage=$6
+          archive=$7
+          docker_config=$8
           [ "$target" = de9fe5f3f081373a23796d83b469651e9c1e33e7 ]
           [ "$request" = e5c00af2-1fb9-4daf-a30b-bdfed24d5689 ]
           [ "$failed_run" = 33227925046 ]
           [ "$ci_run" = 33227451553 ]
           [ "$build_run" = 33227641381 ]
-          [[ "$archive" =~ ^/root/kelion/runtime/post-ponr-recovery\.[1-9][0-9]*\.tar\.gz$ ]]
-          [ -f "$archive" ] && [ ! -L "$archive" ] \
-            && [ "$(stat -Lc '%u:%g:%a:%h' "$archive")" = '0:0:600:1' ]
-          work=$(mktemp -d /root/kelion/runtime/post-ponr.XXXXXX)
-          entries=$(mktemp /root/kelion/runtime/post-ponr-entries.XXXXXX)
+          [[ "$stage" =~ ^/root/kelion-post-ponr\.[1-9][0-9]*$ ]]
+          [ -d "$stage" ]
+          [ ! -L "$stage" ]
+          [ "$(realpath -e -- "$stage")" = "$stage" ]
+          [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+          [ "$archive" = "$stage/recovery.tar.gz" ]
+          [ "$docker_config" = "$stage/docker-config" ]
+          [ -d "$docker_config" ]
+          [ ! -L "$docker_config" ]
+          [ "$(realpath -e -- "$docker_config")" = "$docker_config" ]
+          [ "$(stat -Lc '%u:%g:%a' "$docker_config")" = '0:0:700' ]
+          [ -f "$archive" ]
+          [ ! -L "$archive" ]
+          [ "$(realpath -e -- "$archive")" = "$archive" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$archive")" = '0:0:600:1' ]
           cleanup_remote() {
-            rm -f -- "$archive" "$entries"
-            case "$work" in /root/kelion/runtime/post-ponr.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
+            DOCKER_CONFIG="$docker_config" docker logout ghcr.io >/dev/null 2>&1 || true
+            case "$stage" in
+              /root/kelion-post-ponr.[1-9][0-9]*)
+                if [ -d "$stage" ] && [ ! -L "$stage" ] \
+                  && [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]; then
+                  rm -rf -- "$stage"
+                fi
+                ;;
+            esac
           }
           trap cleanup_remote EXIT
+          phase=archive
+          work=$(mktemp -d "$stage/work.XXXXXX")
+          entries=$(mktemp "$stage/entries.XXXXXX")
           tar -tzf "$archive" > "$entries"
           if grep -Eq '(^/|(^|/)\.\.(/|$))' "$entries"; then exit 1; fi
+          phase=extract
           tar --extract --gzip --file "$archive" --directory="$work" --no-same-owner --no-same-permissions
-          [ -f "$work/deploy/deploy.sh" ] && [ ! -L "$work/deploy/deploy.sh" ]
-          [ -f "$work/release-manifest/images.json" ] && [ ! -L "$work/release-manifest/images.json" ]
-          [ -f "$work/release-manifest/codex-gates.json" ] && [ ! -L "$work/release-manifest/codex-gates.json" ]
+          [ -f "$work/deploy/deploy.sh" ]
+          [ ! -L "$work/deploy/deploy.sh" ]
+          [ -f "$work/release-manifest/images.json" ]
+          [ ! -L "$work/release-manifest/images.json" ]
+          [ -f "$work/release-manifest/codex-gates.json" ]
+          [ ! -L "$work/release-manifest/codex-gates.json" ]
+          phase=deploy
+          DOCKER_CONFIG="$docker_config" \
           KELION_RELEASE_APPROVED=1 \
           KELION_RECOVER_LOST_POST_PONR=1 \
           KELION_RELEASE_REQUEST_ID="$request" \
@@ -378,6 +499,8 @@ jobs:
           KELION_CI_RUN_ID="$ci_run" \
           KELION_BUILD_RUN_ID="$build_run" \
             bash "$work/deploy/deploy.sh" "$target" "$work/release-manifest/images.json" release
+          phase=complete
+          printf '%s\n' 'post_ponr_remote recovery=complete'
           REMOTE
 
       - name: Dovadă externă exactă de9

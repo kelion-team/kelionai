@@ -68,12 +68,15 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
 })
 
-test('imaginea de porți include runtime-urile cerute de testele de publicare', () => {
+test('imaginea de porți include runtime-urile cerute de testele de publicare și recovery', () => {
   const dockerfile = read('Dockerfile.gates')
+  const appRuntime = read('Dockerfile').split('FROM ${NODE_IMAGE} AS runtime').at(-1)
   const gates = read('deploy/gates/run-gates.sh')
 
-  assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git openssh-client python3/)
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git jq openssh-client python3/)
+  assert.doesNotMatch(appRuntime, /\bjq\b/)
   assert.match(gates, /deploy\/lib\/constructor-publication\.test\.mjs/)
+  assert.match(gates, /deploy\/lib\/release-rollback\.test\.mjs/)
 })
 
 test('controlul Constructorului arhivează numai intrările versionate, cu preflight fail-closed', () => {
