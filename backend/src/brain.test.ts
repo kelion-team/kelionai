@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 
 import { config } from './config.js'
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
-import { OpenAIProviderRequestError } from './services/openaiResponses.js'
+import { isOpenAIProviderThrottleError, OpenAIProviderRequestError } from './services/openaiResponses.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
   it('nu propagă un 429 pe scară după retry-ul unic al adaptorului', () => {
@@ -22,13 +22,24 @@ describe('Expertul fiabil — clasificarea erorilor', () => {
   })
 })
 
-describe('Chatul nu amplifică un 429 OpenAI', () => {
-  it('oprește reluarea și ambele plase de model după clasificarea providerului', () => {
-    const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
-    expect(chat).toContain('const provider429 = isOpenAIProviderThrottleError(ge)')
-    expect(chat).toContain('const potiRelua = !provider429')
-    expect(chat).toContain('if (opresteFallbackProvider429) break')
-    expect(chat.match(/!opresteFallbackProvider429/g)).toHaveLength(2)
+describe('Politica terminală partajată de chat și brain', () => {
+  it('oprește scara pe marcajul separat fără să transforme eroarea locală în 429', async () => {
+    const localError = Object.assign(new Error('provider_usage_write_failed'), {
+      rateLimitRetryConsumed: true as const,
+    })
+    const tried: string[] = []
+
+    expect(isOpenAIProviderThrottleError(localError)).toBe(true)
+    await expect(runBrainLadder(
+      ['m1', 'm2'],
+      async (model) => {
+        tried.push(model)
+        throw localError
+      },
+      { sleep: () => Promise.resolve() },
+    )).rejects.toBe(localError)
+    expect(localError).not.toHaveProperty('status')
+    expect(tried).toEqual(['m1'])
   })
 })
 
