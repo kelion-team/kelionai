@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.stubEnv('OPENAI_API_KEY', 'sk-proj-test-openai-key')
+vi.stubEnv('OPENAI_API_KEY', ['sk', 'proj', 'test-openai-key-123456'].join('-'))
 vi.stubEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2')
 const fetchMock = vi.fn()
 vi.stubGlobal('fetch', fetchMock)

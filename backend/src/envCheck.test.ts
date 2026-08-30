@@ -11,6 +11,7 @@ vi.mock('./config.js', () => ({
   ENV_ALIASES: {
     databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
     openaiKey: ['OPENAI_API_KEY'],
+    openaiAdminKey: ['OPENAI_ADMIN_KEY'],
     sessionSecret: ['SESSION_SECRET'],
     googleTokenEncryptionKey: ['GOOGLE_TOKEN_ENCRYPTION_KEY'],
     serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
@@ -36,6 +37,8 @@ describe('env-check secret minimisation', () => {
 
   afterEach(() => {
     delete process.env.OPENAI_API_KEY
+    delete process.env.OPENAI_ADMIN_KEY
+    delete process.env.OPENAI_ADMIN_KEY_FILE
     delete process.env.SERPER_API_KEY
     delete process.env.SERPER_KEY
     delete process.env.KELION_ALT_KEY

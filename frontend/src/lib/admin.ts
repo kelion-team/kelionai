@@ -2,9 +2,13 @@
 // PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
 // and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
 // import, so it vanishes at compile time — it adds nothing to the bundle.
-import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+import type {
+  MoneyCircuit,
+  OpenAIAdminSnapshot,
+  UserActivityRow,
+} from '../../../backend/src/shared/api-types'
 import { apiFetch } from './transport'
-export type { MoneyCircuit, UserActivityRow }
+export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
 
 export const ADMIN_TABS = [
   'finance',
@@ -52,6 +56,9 @@ export interface Finance {
   masurat: number
   estimat: number
   felul: Record<string, 'masurat' | 'estimat'>
+  /** Official provider Costs/Usage measurement. Independent from inference
+   * health and from the local application journal above. */
+  providerOpenAI: OpenAIAdminSnapshot
 }
 
 

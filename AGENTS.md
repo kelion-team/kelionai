@@ -26,9 +26,16 @@ secrete sau presupuneri din conversație.
 - Adminul este determinat doar din identitatea Google verificată pe server și
   emailul configurat. Vocea și fața sunt funcții opționale de personalizare,
   nu factori de autentificare sau autorizare.
-- Codex Constructor rulează într-un worker separat, autentificat exclusiv prin
-  clientul oficial `codex login`. Web-ul doar pune joburi validate în coadă și
-  afișează starea; nu implementează OAuth OpenAI și nu execută shell/Git.
+- Cheia project-scoped `OPENAI_API_KEY` este unica identitate de inferență:
+  alimentează Responses, Realtime și media prin backend și autentifică
+  Constructorul prin clientul oficial `codex login --with-api-key`, cu cheia
+  transmisă numai pe stdin. Constructorul rulează într-un worker separat;
+  web-ul doar pune joburi validate în coadă și afișează starea, fără chei,
+  OAuth OpenAI sau execuție shell/Git în procesul aplicației.
+- `OPENAI_ADMIN_KEY` este o credențială distinctă, montată numai în backend-ul
+  Kelion Admin pentru endpointurile OpenAI de administrare (costuri, usage și
+  diagnostic). Nu poate fi folosită pentru inferență, Realtime, media sau
+  Constructor și nu ajunge niciodată în browser, loguri ori răspunsuri API.
 - Pentru admin, debitul Kelion este întotdeauna zero. Costul real OpenAI este
   înregistrat separat ca cheltuială internă; nu este amestecat cu portofelul.
 - La fiecare alimentare eligibilă a unui client, politica este exact 75% credit

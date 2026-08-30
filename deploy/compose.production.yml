@@ -18,6 +18,7 @@ services:
     environment:
       BIND_HOST: 0.0.0.0
       OPENAI_API_KEY_FILE: /run/secrets/openai-project-key
+      OPENAI_ADMIN_KEY_FILE: /run/secrets/openai-admin-key
       SESSION_SECRET_FILE: /run/secrets/session-secret
       GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google-client-secret
       GOOGLE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google-token-encryption-key
@@ -59,6 +60,10 @@ services:
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-project-key
         target: /run/secrets/openai-project-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-admin-key
+        target: /run/secrets/openai-admin-key
         read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/session-secret
