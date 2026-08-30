@@ -5,53 +5,21 @@ export const INCIDENT_MARKER = '<!-- kelion-vps-remediation-incident:v1 -->'
 export const MAX_L1_ATTEMPTS = 2
 export const MAX_L2_ATTEMPTS = 1
 export const DEFAULT_FEEDBACK_TIMEOUT_MINUTES = 20
-export const OPENAI_UNIFIED_ONCE_PR_NUMBER = 1538 // hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
+export const OPENAI_UNIFIED_ONCE_PR_NUMBER = 1541 // hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
 export const OPENAI_UNIFIED_ONCE_REPOSITORY = 'kelion-team/kelionai' // hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
-export const OPENAI_UNIFIED_ONCE_BRANCH = 'chore/openai-unified-credentials-20260830'
+export const OPENAI_UNIFIED_ONCE_BRANCH = 'chore/postdeploy-openai-verifier-cleanup-20260830'
 export const OPENAI_UNIFIED_ONCE_FILES = Object.freeze([
-  '.github/workflows/pr-verify.yml',
+  '.github/workflows/vps-auto-merge-chore-prs.yml',
   '.github/workflows/vps-codex-login.yml',
   '.github/workflows/vps-run.yml',
-  '.github/workflows/vps-set-env.yml',
-  'AGENTS.md',
-  'backend/.env.example',
-  'backend/src/config.ts',
-  'backend/src/envCheck.test.ts',
-  'backend/src/openaiAdmin.test.ts',
-  'backend/src/openaiAdminConfig.test.ts',
-  'backend/src/openaiAdminStatus.test.ts',
-  'backend/src/routes/admin.ts',
-  'backend/src/services/codexWorker.ts',
-  'backend/src/services/diagnosticConstructor.ts',
-  'backend/src/services/envCheck.ts',
-  'backend/src/services/imageCost.test.ts',
-  'backend/src/services/manual.ts',
-  'backend/src/services/openaiAdmin.ts',
-  'backend/src/shared/api-types.ts',
-  'config/runtime-contract.json',
-  'deploy/DEPLOY.md',
-  'deploy/RUNBOOKS.md',
   'deploy/codex-worker.mjs',
-  'deploy/codex-worker.profile.toml',
-  'deploy/compose.production.yml',
-  'deploy/deploy.sh',
-  'deploy/instaleaza-constructor.sh',
-  'deploy/kelionai.env.example',
   'deploy/lib/codex-boundary.test.mjs',
-  'deploy/lib/constructor-publication.test.mjs',
-  'deploy/lib/runtime-config-cutover.sh',
-  'deploy/systemd/kelion-codex-worker.service',
-  'docs/FRONTEND-LIVE-TEST-MATRIX.md',
   'docs/operations/CURRENT.md',
-  'docs/operations/DELIVERY-RULES-AND-ROADMAP.md',
-  'frontend/src/adminProductContract.test.ts',
-  'frontend/src/components/admin/AdminBani.tsx',
-  'frontend/src/components/admin/AdminProductie.tsx',
-  'frontend/src/components/admin/shared.tsx',
-  'frontend/src/lib/admin.ts',
-  'frontend/src/pages/Stage.tsx',
-  'scripts/verifica-contract-deploy.mjs',
-  'scripts/verifica-contract-deploy.test.mjs',
+  'scripts/lib/vps-pr-remediation.mjs',
+  'scripts/lib/vps-release-verification.mjs',
+  'scripts/vps-pr-remediator.mjs',
+  'scripts/vps-pr-remediator.test.mjs',
+  'scripts/vps-release-verifier.test.mjs',
 ])
 
 export const MONITORED_FILES = Object.freeze([
