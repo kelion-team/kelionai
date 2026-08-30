@@ -3248,7 +3248,7 @@ test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
     'candidatul trebuie să existe înainte de comparație')
   assert.ok(collector.indexOf(journalSkip) < collector.indexOf(directoryGuard),
     'jurnalul trebuie exclus înainte de testul de director')
-  assert.match(collector, /constructor-activation\\\.\[A-Za-z0-9._-\]\+/,
+  assert.ok(collector.includes('constructor-activation\\.[A-Za-z0-9._-]+$'),
     'GC-ul trebuie să accepte și snapshoturi legacy validate strict din runtime')
   assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
     'snapshoturile reale trebuie curățate în continuare')
