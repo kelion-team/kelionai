@@ -56,6 +56,10 @@ const EXEC_ENABLED = process.env.CODEX_WORKER_EXEC_ENABLED === '1'
 const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const CODEX_VERSION = 'codex-cli 0.149.1'
 const PROFILE_NAME = 'kelion-worker'
+const CODEX_API_AUTH_CONFIG_ARGS = Object.freeze([
+  '-c', 'forced_login_method="api"',
+  '-c', 'cli_auth_credentials_store="file"',
+])
 const PROJECT_KEY_CREDENTIAL = 'openai-project-key'
 const PROJECT_KEY_PREFIX = Buffer.from('sk-proj-', 'ascii')
 const PROJECT_KEY_FINGERPRINT = '.openai-project-key.sha256'
@@ -323,11 +327,11 @@ function loadProjectKeyCredential() {
 }
 
 export function codexApiLoginArgs() {
-  return ['login', '--with-api-key']
+  return [...CODEX_API_AUTH_CONFIG_ARGS, 'login', '--with-api-key']
 }
 
 function codexLoginStatusArgs() {
-  return ['login', 'status']
+  return [...CODEX_API_AUTH_CONFIG_ARGS, 'login', 'status']
 }
 
 export function isCodexProjectKeyStatus(value) {
@@ -1200,8 +1204,12 @@ async function selfTest() {
   }
   if (args.includes('--sandbox') || args.at(-1) !== '-') fail('Argumentele Codex nu selectează exclusiv profilul fix și stdin')
   const loginArgs = codexApiLoginArgs()
-  if (loginArgs.join(' ') !== 'login --with-api-key') {
-    fail('Loginul Codex nu folosește exclusiv stdin API-key')
+  if (loginArgs.join(' ') !== '-c forced_login_method="api" -c cli_auth_credentials_store="file" login --with-api-key') {
+    fail('Loginul Codex nu fixează API-key și cache-ul file înainte de subcomandă')
+  }
+  const loginStatusArgs = codexLoginStatusArgs()
+  if (loginStatusArgs.join(' ') !== '-c forced_login_method="api" -c cli_auth_credentials_store="file" login status') {
+    fail('Statusul Codex nu citește determinist cache-ul API-key din fișier')
   }
   if (!isCodexProjectKeyStatus(Buffer.from('Logged in using an API key - sk-proj-***xxxxx\n', 'ascii'))) {
     fail('Statusul API-key Codex valid nu este recunoscut')

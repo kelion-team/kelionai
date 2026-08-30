@@ -37,7 +37,10 @@ jobs:
               HOME=/var/lib/kelion-codex-auth \
               CODEX_HOME=/var/lib/kelion-codex-auth \
               PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex login --with-api-key \
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login --with-api-key \
               < "$credential" >/dev/null 2>&1; then
               echo 'Autentificarea Codex project-scoped a eșuat' >&2
               exit 1
@@ -46,6 +49,9 @@ jobs:
               HOME=/var/lib/kelion-codex-auth \
               CODEX_HOME=/var/lib/kelion-codex-auth \
               PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex login status >/dev/null 2>&1
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login status >/dev/null 2>&1
             echo 'codex-api-login=ready'
           EOF

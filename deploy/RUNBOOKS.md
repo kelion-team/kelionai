@@ -153,7 +153,10 @@ același boundary host-only, nu WebSocket public.
    cache-ului eșuează, workerul execută echivalentul sigur:
 
    ```bash
-   /opt/kelion-codex/bin/codex login --with-api-key \
+   /opt/kelion-codex/bin/codex \
+     -c 'forced_login_method="api"' \
+     -c 'cli_auth_credentials_store="file"' \
+     login --with-api-key \
      < "$CREDENTIALS_DIRECTORY/openai-project-key"
    ```
 
@@ -161,7 +164,8 @@ același boundary host-only, nu WebSocket public.
    substituție de comandă, `set -x`, `--with-access-token`, device-auth sau
    login ChatGPT. Workflow-ul `vps-codex-login.yml` poate reînnoi manual același
    cache fără ca GitHub Actions să primească vreodată cheia OpenAI.
-5. Workerul verifică `codex login status` și publică atomic, cu mod `0600` și
+5. Workerul verifică statusul cu aceleași două override-uri `-c`, plasate
+   înainte de `login status`, și publică atomic, cu mod `0600` și
    `fsync`, numai fingerprintul SHA-256 privat din auth home. Fișierele
    `auth.json` și `.openai-project-key.sha256` rămân accesibile exclusiv
    identității workerului; fingerprintul evită relogarea la fiecare minut.
