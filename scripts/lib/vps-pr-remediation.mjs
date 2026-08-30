@@ -5,6 +5,18 @@ export const INCIDENT_MARKER = '<!-- kelion-vps-remediation-incident:v1 -->'
 export const MAX_L1_ATTEMPTS = 2
 export const MAX_L2_ATTEMPTS = 1
 export const DEFAULT_FEEDBACK_TIMEOUT_MINUTES = 20
+export const OPENAI_UNIFIED_ONCE_PR_NUMBER = 1541 // hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
+export const OPENAI_UNIFIED_ONCE_REPOSITORY = 'kelion-team/kelionai' // hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
+export const OPENAI_UNIFIED_ONCE_BRANCH = 'chore/postdeploy-openai-verifier-cleanup-20260830'
+export const OPENAI_UNIFIED_ONCE_FILES = Object.freeze([
+  '.github/workflows/vps-codex-login.yml',
+  '.github/workflows/vps-run.yml',
+  'deploy/codex-worker.mjs',
+  'deploy/lib/codex-boundary.test.mjs',
+  'docs/operations/CURRENT.md',
+  'scripts/lib/vps-release-verification.mjs',
+  'scripts/vps-release-verifier.test.mjs',
+])
 
 export const MONITORED_FILES = Object.freeze([
   '.github/workflows/deploy.yml',
@@ -181,7 +193,29 @@ export function parseStateComment(body, identity) {
   }
 }
 
-export function isMonitoredScope(files) {
+export function isOpenaiUnifiedOneShotScope(files, identity = {}) {
+  if (
+    identity.prNumber !== OPENAI_UNIFIED_ONCE_PR_NUMBER
+    || identity.repository !== OPENAI_UNIFIED_ONCE_REPOSITORY
+    || identity.headRepo !== OPENAI_UNIFIED_ONCE_REPOSITORY
+    || identity.headRef !== OPENAI_UNIFIED_ONCE_BRANCH
+    || !Array.isArray(files)
+    || files.length !== OPENAI_UNIFIED_ONCE_FILES.length
+  ) return false
+  if (files.some((entry) => (
+    !entry
+    || typeof entry !== 'object'
+    || typeof entry.filename !== 'string'
+    || typeof entry.status !== 'string'
+    || entry.status === 'renamed'
+    || entry.previous_filename != null
+  ))) return false
+  const names = files.map((entry) => entry.filename)
+  if (new Set(names).size !== names.length) return false
+  return names.toSorted().every((file, index) => file === OPENAI_UNIFIED_ONCE_FILES[index])
+}
+
+export function isMonitoredScope(files, identity = {}) {
   if (!Array.isArray(files) || files.length === 0) return false
   if (files.some((entry) => (
     entry
@@ -194,7 +228,7 @@ export function isMonitoredScope(files) {
     if (MONITORED_FILES.includes(String(file))) return true
     return file === '.github/workflows/vps-seed-slots.yml' && status === 'removed'
   })
-  return normalScope
+  return normalScope || isOpenaiUnifiedOneShotScope(files, identity)
 }
 
 export function assertL2DiffSafe(files, patchBytes) {
