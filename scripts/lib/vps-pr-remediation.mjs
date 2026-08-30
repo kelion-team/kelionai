@@ -19,6 +19,7 @@ export const MONITORED_FILES = Object.freeze([
   'deploy/RUNBOOKS.md',
   'deploy/deploy.sh',
   'deploy/lib/constructor-publication.test.mjs',
+  'deploy/lib/runtime-config-cutover.sh',
   'deploy/upgrade-constructor.sh',
   'docs/operations/CURRENT.md',
   'scripts/lib/vps-pr-remediation.mjs',
