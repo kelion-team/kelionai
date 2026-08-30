@@ -306,6 +306,15 @@ INSTRUCTIONS
       }
     }
   },
+  "agent": {
+    "private-ai-smoke": {
+      "description": "Bounded installation probe for the pinned local provider",
+      "mode": "primary",
+      "prompt": "This is a bounded installation probe. Use no tools and reply with exactly OK.",
+      "steps": 1,
+      "permission": {"*": "deny"}
+    }
+  },
   "permission": {
     "*": "ask",
     "read": "allow",
@@ -528,24 +537,44 @@ start_and_verify() {
 
   (
     cd "$PRIVATE_AI_WORKSPACE"
-    timeout --signal=TERM --kill-after=30s 300 runuser -u "$PRIVATE_AI_USER" -- env -i \
+    timeout --signal=TERM --kill-after=30s 900 runuser -u "$PRIVATE_AI_USER" -- env -i \
       HOME="$PRIVATE_AI_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin \
       XDG_CACHE_HOME="$PRIVATE_AI_CACHE" \
       XDG_DATA_HOME="${PRIVATE_AI_HOME}/.local/share" \
       OPENCODE_DISABLE_PROJECT_CONFIG=true \
       OPENCODE_DISABLE_LSP_DOWNLOAD=true \
-      OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=256 \
+      OPENCODE_DISABLE_MODELS_FETCH=true \
+      OPENCODE_DISABLE_AUTOUPDATE=true \
+      OPENCODE_DISABLE_DEFAULT_PLUGINS=true \
+      OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=32 \
       CI=1 NO_COLOR=1 \
       "${PRIVATE_AI_BIN}/opencode" run \
+        --format json \
+        --agent private-ai-smoke \
         --model "llama.cpp/${MODEL_ALIAS}" \
-        $'/no_think\nReply only with OK.' \
+        'Reply only with OK.' \
         > "${PRIVATE_AI_STATE}/opencode-e2e.txt"
   )
-  grep -Eq '(^|[^[:alpha:]])OK([^[:alpha:]]|$)' "${PRIVATE_AI_STATE}/opencode-e2e.txt" \
-    || fail "The OpenCode to local-model end-to-end test returned no verified answer."
+  jq -e -s '
+    any(.[]; .type == "step_start") and
+    any(.[]; .type == "step_finish") and
+    any(.[]; .type == "text" and ((.part.text // "") | test("(^|[^[:alpha:]])OK([^[:alpha:]]|$)")))
+  ' "${PRIVATE_AI_STATE}/opencode-e2e.txt" >/dev/null \
+    || fail "The bounded OpenCode to local-model end-to-end test returned no verified answer."
   chown "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" "${PRIVATE_AI_STATE}/opencode-e2e.txt"
   chmod 0600 "${PRIVATE_AI_STATE}/opencode-e2e.txt"
+
+  local config_candidate
+  config_candidate=$(mktemp "${PRIVATE_AI_HOME}/.config/opencode/opencode.json.candidate.XXXXXX")
+  jq 'del(.agent["private-ai-smoke"])' \
+    "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" > "$config_candidate"
+  chown root:"$PRIVATE_AI_GROUP" "$config_candidate"
+  chmod 0640 "$config_candidate"
+  mv -f -- "$config_candidate" "${PRIVATE_AI_HOME}/.config/opencode/opencode.json"
+  sync -f "${PRIVATE_AI_HOME}/.config/opencode/opencode.json"
+  jq -e '(.agent // {} | has("private-ai-smoke") | not)' \
+    "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" >/dev/null
 
   systemctl enable private-ai-web.service
   systemctl restart private-ai-web.service
