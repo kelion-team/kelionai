@@ -528,20 +528,22 @@ start_and_verify() {
 
   (
     cd "$PRIVATE_AI_WORKSPACE"
-    timeout 900 runuser -u "$PRIVATE_AI_USER" -- env -i \
+    timeout --signal=TERM --kill-after=30s 300 runuser -u "$PRIVATE_AI_USER" -- env -i \
       HOME="$PRIVATE_AI_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin \
       XDG_CACHE_HOME="$PRIVATE_AI_CACHE" \
       XDG_DATA_HOME="${PRIVATE_AI_HOME}/.local/share" \
       OPENCODE_DISABLE_PROJECT_CONFIG=true \
       OPENCODE_DISABLE_LSP_DOWNLOAD=true \
+      OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=256 \
+      CI=1 NO_COLOR=1 \
       "${PRIVATE_AI_BIN}/opencode" run \
         --model "llama.cpp/${MODEL_ALIAS}" \
-        "Reply only with OK." \
+        $'/no_think\nReply only with OK.' \
         > "${PRIVATE_AI_STATE}/opencode-e2e.txt"
   )
-  [ -s "${PRIVATE_AI_STATE}/opencode-e2e.txt" ] \
-    || fail "The OpenCode to local-model end-to-end test returned no output."
+  grep -Eq '(^|[^[:alpha:]])OK([^[:alpha:]]|$)' "${PRIVATE_AI_STATE}/opencode-e2e.txt" \
+    || fail "The OpenCode to local-model end-to-end test returned no verified answer."
   chown "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" "${PRIVATE_AI_STATE}/opencode-e2e.txt"
   chmod 0600 "${PRIVATE_AI_STATE}/opencode-e2e.txt"
 
