@@ -10,6 +10,10 @@ validate_only=0
 leave_constructor_quiesced=0
 discard_unmutated_prepared=0
 discard_target_commit=''
+discard_unmutated_gate_prepared=0
+discard_gate_request_id=''
+discard_gate_commit=''
+discard_gate_active_commit=''
 boot_recovery=${KELION_RECOVERY_BOOT:-0}
 case "$boot_recovery" in 0|1) ;; *) die 'KELION_RECOVERY_BOOT trebuie 0 sau 1' ;; esac
 activation_resume_operation=${KELION_ACTIVATION_RESUME_OPERATION:-}
@@ -46,6 +50,21 @@ validation_logical=''
 validation_file=''
 compose_file=''
 case "${1:-}" in
+  --discard-unmutated-gate-prepared)
+    [ "$#" -eq 5 ] \
+      || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-gate-prepared REQUEST_ID COMMIT ACTIVE_COMMIT COMPOSE_FILE'
+    [[ "$2" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] \
+      || die 'requestul discard gate este invalid'
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || die 'commitul discard gate este invalid'
+    [[ "$4" =~ ^[0-9a-f]{40}$ ]] || die 'commitul activ așteptat pentru discard gate este invalid'
+    [ "$3" != "$4" ] || die 'commitul candidat și commitul activ al discardului gate trebuie să difere'
+    discard_unmutated_gate_prepared=1
+    discard_gate_request_id=$2
+    discard_gate_commit=$3
+    discard_gate_active_commit=$4
+    recover_only=1
+    compose_file=$5
+    ;;
   --discard-unmutated-prepared)
     [ "$#" -eq 3 ] \
       || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-prepared COMMIT COMPOSE_FILE'
@@ -79,6 +98,7 @@ case "${1:-}" in
 esac
 if [ -n "$activation_resume_operation" ]; then
   [ "$recover_only" = 1 ] && [ "$discard_unmutated_prepared" = 0 ] \
+    && [ "$discard_unmutated_gate_prepared" = 0 ] \
     || die 'resume-ul activării este permis numai în recover-only generic'
   if [ "$leave_constructor_quiesced" = 1 ]; then
     [ "$activation_resume_operation" = activate-worker-publisher ] \
@@ -205,6 +225,7 @@ GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
 DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
 UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
 ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
@@ -262,7 +283,7 @@ if [ "$validate_only" = 0 ]; then
   [ -f "$compose_file" ] && [ ! -L "$compose_file" ] || die 'compose.production.yml lipsește sau este symlink'
 fi
 
-for tool in awk cmp curl dirname docker find flock getent grep jq mktemp od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
+for tool in awk cmp curl dirname docker find findmnt flock getent grep jq mktemp mountpoint od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
   command -v "$tool" >/dev/null 2>&1 || die "lipsește utilitarul $tool"
 done
 
@@ -299,9 +320,6 @@ if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then
     && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
     && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
     || die 'bariera unit-only existentă este nesigură'
-  if [ "$constructor_upgrade_owner" != 1 ] && [ "$recover_only" = 1 ]; then
-    die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'
-  fi
 fi
 
 fsync_path() {
@@ -556,48 +574,122 @@ deploy_quiesce_owned_by_caller() {
   ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null
 }
 
+# Pending-ul unit-only este folosit atât de upgrade-ul Constructor, cât și de
+# release-ul care publică cele șase unități înainte de refresh-ul gate-ului.
+# Ownerul upgrade-ului este autentificat de outer journal mai sus. Orice alt
+# recover-only poate trece de această barieră numai ca owner exact al jurnalului
+# deploy, sub lock moștenit, într-una dintre cele două faze canonice. Operația
+# incident este separată și nu poate publica ready înaintea dovezii ei complete.
+strict_pending_deploy_recovery_owner() {
+  local phase
+  [ "$recover_only" = 1 ] && [ "$boot_recovery" = 0 ] \
+    && [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] \
+    && validate_deploy_quiesce_journal \
+    && [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    && deploy_quiesce_owned_by_caller \
+    || return 1
+  phase=$(jq -er '.phase' "$DEPLOY_QUIESCE_JOURNAL") || return 1
+  if [ "$discard_unmutated_gate_prepared" = 1 ]; then
+    [ "$leave_constructor_quiesced" = 0 ] && [ "$deploy_quiesce_proof" = 1 ] \
+      && [ "$phase" = gate-prepared ] \
+      && [ "$deploy_owner_request_id" = "$discard_gate_request_id" ] \
+      && [ "$deploy_owner_commit" = "$discard_gate_commit" ] \
+      && jq -e --arg requestId "$discard_gate_request_id" --arg commit "$discard_gate_commit" \
+        --arg active "$discard_gate_active_commit" '
+          .schema == 2 and .phase == "gate-prepared" and
+          .requestId == $requestId and .commit == $commit and .activeBefore == $active
+        ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null
+    return
+  fi
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    [ "$deploy_quiesce_proof" = 0 ] && [ "$phase" = gate-prepared ] \
+      && { { [ -f "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$GATE_JOURNAL")" = '0:0:600:1' ] \
+            && jq -e --arg commit "$deploy_owner_commit" '
+              .schema == 1 and .commit == $commit and
+              (.helperSha256 | strings | test("^[0-9a-f]{64}$")) and
+              (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$"))
+            ' "$GATE_JOURNAL" >/dev/null; } \
+        || { [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+            && deploy_quiesce_generation_proof target; }; }
+    return
+  fi
+  [ "$deploy_quiesce_proof" = 1 ] && [ "$phase" = gate-committed ] \
+    && [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+    && deploy_quiesce_generation_proof committed
+}
+
 deploy_quiesce_generation_proof() {
-  local phase active_expected active_observed expected actual index
+  local scope=${1:-either} phase active_expected active_observed expected actual index
   local -a keys=(worker publisher release)
+  local -a proof_configs=(
+    "$CONFIG_ROOT/codex-worker.env"
+    "$CONFIG_ROOT/constructor-publisher.env"
+    "$CONFIG_ROOT/constructor-release.env"
+  )
+  case "$scope" in either|old|target|committed) ;; *) return 1 ;; esac
   [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/release-state/active")" = '0:10050:640:1' ] \
     && [ "$(wc -l < "$RUNTIME_ROOT/release-state/active")" -eq 1 ] || return 1
   phase=$(jq -er '.phase' "$DEPLOY_QUIESCE_JOURNAL") || return 1
   active_observed=$(sed -n '1p' "$RUNTIME_ROOT/release-state/active") || return 1
-  if active_expected=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL" 2>/dev/null) \
+  if [ "$scope" != committed ] \
+    && active_expected=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL" 2>/dev/null) \
     && [ "$active_observed" = "$active_expected" ]; then
-    for index in "${!constructor_configs[@]}"; do
+    for index in "${!proof_configs[@]}"; do
       expected=$(jq -er --arg key "${keys[$index]}" '.gateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
       if [ "$expected" = absent ]; then
-        [ ! -e "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] || return 1
+        [ ! -e "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] || return 1
       else
-        [ -f "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] \
-          && [ "$(stat -Lc '%u:%g:%a:%h' "${constructor_configs[$index]}")" = '0:0:640:1' ] || return 1
-        actual=$(sha256sum "${constructor_configs[$index]}" | awk '{print $1}') || return 1
+        [ -f "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] \
+          && [ "$(stat -Lc '%u:%g:%a:%h' "${proof_configs[$index]}")" = '0:0:640:1' ] || return 1
+        actual=$(sha256sum "${proof_configs[$index]}" | awk '{print $1}') || return 1
         [ "$actual" = "$expected" ] || return 1
       fi
     done
     return 0
   fi
-  [ "$phase" = gate-committed ] || return 1
+  [ "$scope" != old ] || return 1
+  if [ "$scope" = target ]; then
+    [ "$phase" = gate-prepared ] || return 1
+  else
+    [ "$phase" = gate-committed ] || return 1
+  fi
   active_expected=$(jq -er '.commit' "$DEPLOY_QUIESCE_JOURNAL") || return 1
   [ "$active_observed" = "$active_expected" ] || return 1
-  for index in "${!constructor_configs[@]}"; do
-    expected=$(jq -er --arg key "${keys[$index]}" '.committedGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
-    if [ "$expected" = absent ]; then
-      [ ! -e "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] || return 1
+  for index in "${!proof_configs[@]}"; do
+    if [ "$scope" = target ]; then
+      expected=$(jq -er --arg key "${keys[$index]}" '.targetGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
     else
-      [ -f "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] \
-        && [ "$(stat -Lc '%u:%g:%a:%h' "${constructor_configs[$index]}")" = '0:0:640:1' ] || return 1
-      actual=$(sha256sum "${constructor_configs[$index]}" | awk '{print $1}') || return 1
+      expected=$(jq -er --arg key "${keys[$index]}" '.committedGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
+    fi
+    if [ "$expected" = absent ]; then
+      [ ! -e "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] || return 1
+    else
+      [ -f "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "${proof_configs[$index]}")" = '0:0:640:1' ] || return 1
+      actual=$(sha256sum "${proof_configs[$index]}" | awk '{print $1}') || return 1
       [ "$actual" = "$expected" ] || return 1
     fi
   done
 }
 
+if [ -f "$UNIT_MIGRATION_PENDING" ] && [ "$constructor_upgrade_owner" != 1 ] \
+  && [ "$recover_only" = 1 ]; then
+  strict_pending_deploy_recovery_owner \
+    || die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'
+fi
+
 clear_deploy_quiesce_journal() {
   [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] || return 1
   rm -f -- "$DEPLOY_QUIESCE_JOURNAL" || return 1
+  # După unlink, vectorul live a fost deja validat, ready publicat și timerele
+  # reconciliate. Un fsync eșuat trebuie raportat, dar cleanup-ul nu mai are
+  # voie să oprească un Constructor ownerless. La power-loss jurnalul fie
+  # rămâne absent, fie reapare integral și operația exactă poate fi reluată.
+  deploy_quiesce_journal_unlinked=1
+  recovery_in_progress=0
   fsync_path "$RUNTIME_ROOT"
 }
 
@@ -742,6 +834,7 @@ journal_clear_durable=0
 activation_barrier_pending=0
 gate_journal_clear_durable=0
 recovery_in_progress=0
+deploy_quiesce_journal_unlinked=0
 
 group_id() {
   local group=$1 record
@@ -1882,6 +1975,312 @@ recover_interrupted_gate_refresh() {
   fi
 }
 
+validate_unmutated_gate_transaction() {
+  local gate_root=$1 expected_helper_sha=${2:-} helper_sha observed expected index source actual
+  local -a gate_names=(codex-worker.env constructor-publisher.env constructor-release.env)
+  local -a gate_logicals=(constructor-config.codex-worker.env constructor-config.constructor-publisher.env constructor-config.constructor-release.env)
+  local -a gate_keys=(worker publisher release)
+  [[ "$gate_root" =~ ^/root/kelion/runtime/(constructor-gate-txn\.[A-Za-z0-9]+|constructor-gate-discarded\.[0-9a-f]{40}\.[0-9a-f]{64})$ ]] \
+    && [ -d "$gate_root" ] && [ ! -L "$gate_root" ] \
+    && [ "$(realpath -e -- "$gate_root")" = "$gate_root" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$gate_root")" = '0:0:700' ] \
+    || return 1
+  observed=$(find "$gate_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || return 1
+  expected=$'new:d\nrecovery-compose.yml:f\nrecovery-helper.sh:f'
+  [ "$observed" = "$expected" ] || return 1
+  [ -d "$gate_root/new" ] && [ ! -L "$gate_root/new" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$gate_root/new")" = '0:0:700' ] \
+    && [ -f "$gate_root/recovery-helper.sh" ] && [ ! -L "$gate_root/recovery-helper.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$gate_root/recovery-helper.sh")" = '0:0:500:1' ] \
+    && [ -f "$gate_root/recovery-compose.yml" ] && [ ! -L "$gate_root/recovery-compose.yml" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$gate_root/recovery-compose.yml")" = '0:0:444:1' ] \
+    && cmp -s -- "$gate_root/recovery-compose.yml" "$compose_file" \
+    || return 1
+  helper_sha=$(sha256sum "$gate_root/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ -z "$expected_helper_sha" ] || [ "$helper_sha" = "$expected_helper_sha" ] || return 1
+  observed=$(find "$gate_root/new" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || return 1
+  expected=$'codex-worker.env:f\nconstructor-publisher.env:f\nconstructor-release.env:f'
+  [ "$observed" = "$expected" ] || return 1
+  for index in "${!gate_names[@]}"; do
+    source=$gate_root/new/${gate_names[$index]}
+    [ -f "$source" ] && [ ! -L "$source" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$source")" = '0:0:600:1' ] \
+      && validate_env_file "$source" "${gate_logicals[$index]}" \
+      || return 1
+    expected=$(jq -er --arg key "${gate_keys[$index]}" '.targetGateSha256[$key]' \
+      "$DEPLOY_QUIESCE_JOURNAL") || return 1
+    actual=$(sha256sum "$source" | awk '{print $1}') || return 1
+    [ "$actual" = "$expected" ] || return 1
+  done
+}
+
+validate_discarded_gate_tombstone() {
+  local candidate=$1 failed_commit=$2 canonical expected_helper_sha
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-gate-discarded\.([0-9a-f]{40})\.([0-9a-f]{64})$ ]] \
+    || return 1
+  [ "${BASH_REMATCH[1]}" = "$failed_commit" ] || return 1
+  expected_helper_sha=${BASH_REMATCH[2]}
+  [ -d "$candidate" ] && [ ! -L "$candidate" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$candidate")" = '0:0:700' ] \
+    || return 1
+  canonical=$(realpath -e -- "$candidate") || return 1
+  [ "$canonical" = "$candidate" ] \
+    && validate_unmutated_gate_transaction "$candidate" "$expected_helper_sha"
+}
+
+remove_discarded_gate_tombstone() {
+  local candidate=$1 failed_commit=$2 helper_sha gc_root foreign
+  validate_discarded_gate_tombstone "$candidate" "$failed_commit" || return 1
+  helper_sha=$(sha256sum "$candidate/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  gc_root=$RUNTIME_ROOT/constructor-gate-gc.$failed_commit.$helper_sha
+  for foreign in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$foreign" ] && [ ! -L "$foreign" ] || return 1
+  done
+  [ ! -e "$gc_root" ] && [ ! -L "$gc_root" ] || return 1
+  # Tombstone-ul este încă integral și autentificat înainte de rename. După
+  # rename+fsync, numele GC din directorul runtime root-only devine autoritatea
+  # durabilă pentru cleanup și nu mai este interpretat ca recovery data. Un
+  # SIGKILL în rm poate lăsa conținut parțial; retry-ul autentifică din nou
+  # operandul GC și îi fixează identitatea device:inode înainte de ștergere.
+  mv -T -- "$candidate" "$gc_root" || return 1
+  fsync_path "$RUNTIME_ROOT" || return 1
+  remove_discarded_gate_gc "$gc_root" "$failed_commit"
+}
+
+validate_discarded_gate_gc() {
+  local candidate=$1 failed_commit=$2 canonical candidate_device runtime_device mount_rc mount_target
+  local mount_targets
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-gate-gc\.([0-9a-f]{40})\.[0-9a-f]{64}$ ]] \
+    || return 1
+  [ "${BASH_REMATCH[1]}" = "$failed_commit" ] || return 1
+  [ -d "$candidate" ] && [ ! -L "$candidate" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$candidate")" = '0:0:700' ] \
+    || return 1
+  canonical=$(realpath -e -- "$candidate") || return 1
+  [ "$canonical" = "$candidate" ] || return 1
+  candidate_device=$(stat -Lc '%d' -- "$candidate") || return 1
+  runtime_device=$(stat -Lc '%d' -- "$RUNTIME_ROOT") || return 1
+  [ "$candidate_device" = "$runtime_device" ] || return 1
+  command -v mountpoint >/dev/null 2>&1 || return 1
+  if mountpoint -q -- "$candidate"; then
+    return 1
+  else
+    mount_rc=$?
+    [ "$mount_rc" -eq 32 ] || return 1
+  fi
+  # `--one-file-system` oprește filesystem-uri străine, dar nu un bind mount pe
+  # același st_dev. Inventarul raw al mount namespace-ului trebuie să fie
+  # disponibil și nu poate conține operandul sau vreun descendent al lui.
+  mount_targets=$(findmnt -n -r -o TARGET) || return 1
+  while IFS= read -r mount_target; do
+    case "$mount_target" in
+      "$candidate"|"$candidate"/*) return 1 ;;
+    esac
+  done <<< "$mount_targets"
+}
+
+remove_discarded_gate_gc() {
+  local candidate=$1 failed_commit=$2 identity_before identity_after
+  identity_before=$(stat -Lc '%d:%i' -- "$candidate") || return 1
+  validate_discarded_gate_gc "$candidate" "$failed_commit" || return 1
+  identity_after=$(stat -Lc '%d:%i' -- "$candidate") || return 1
+  [ "$identity_after" = "$identity_before" ] || return 1
+  rm -rf --one-file-system -- "$candidate" || return 1
+  fsync_path "$RUNTIME_ROOT"
+}
+
+withdraw_gate_transaction_durably() {
+  local gate_root=$1 failed_commit=$2 helper_sha tombstone
+  helper_sha=$(sha256sum "$gate_root/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  tombstone=$RUNTIME_ROOT/constructor-gate-discarded.$failed_commit.$helper_sha
+  [ ! -e "$tombstone" ] && [ ! -L "$tombstone" ] || return 1
+  validate_unmutated_gate_transaction "$gate_root" "$helper_sha" || return 1
+  mv -T -- "$gate_root" "$tombstone" || return 1
+  fsync_path "$RUNTIME_ROOT" || return 1
+  remove_discarded_gate_tombstone "$tombstone" "$failed_commit"
+}
+
+# Recovery-ul incidentului gate-prepared este deliberat mai îngust decât
+# recovery-ul generic. Dovedește că refresh-ul nu a mutat niciun byte live,
+# retrage durabil numai intenția gate și tranzacția ei, apoi lasă fluxul
+# recover-only standard să consume pending-ul, să publice ready/timerele și să
+# șteargă outer journal numai după încă o dovadă a generației vechi.
+discard_unmutated_gate_prepared_refresh() {
+  local expected_request=$1 failed_commit=$2 expected_active=$3 selected_compose=$4
+  local gate_root='' helper_sha='' gate_journal_sha='' candidate pending_present=0 count=0
+  local -a candidates=() tombstones=() gc_roots=()
+  recovery_in_progress=1
+  [ "$discard_unmutated_gate_prepared" = 1 ] && [ "$recover_only" = 1 ] \
+    && [ "$leave_constructor_quiesced" = 0 ] && [ "$boot_recovery" = 0 ] \
+    && [ "$deploy_quiesce_proof" = 1 ] \
+    || die 'discardul gate-prepared cere recovery strict cu dovadă și fără boot'
+  [ "$expected_request" = "$discard_gate_request_id" ] \
+    && [ "$failed_commit" = "$discard_gate_commit" ] \
+    && [ "$expected_active" = "$discard_gate_active_commit" ] \
+    && [ "$selected_compose" = "$compose_file" ] \
+    && [ "$selected_compose" = "$CONFIG_ROOT/compose.production.yml" ] \
+    || die 'tupla invocației discard gate nu este exactă'
+  [ "$deploy_owner_request_id" = "$expected_request" ] \
+    && [ "$deploy_owner_commit" = "$failed_commit" ] \
+    && deploy_quiesce_owned_by_caller \
+    || die 'ownerul discardului gate nu corespunde jurnalului deploy'
+  jq -e --arg requestId "$expected_request" --arg commit "$failed_commit" \
+    --arg active "$expected_active" '
+      (keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+        "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema",
+        "targetGateSha256"] | sort) and
+      .schema == 2 and .phase == "gate-prepared" and
+      .requestId == $requestId and .commit == $commit and .activeBefore == $active and
+      .activeBefore != .commit and
+      (.activeBefore as $old | .activeVersionBefore as $version | $old | startswith($version)) and
+      .legacyContainers == [] and .legacyRestartPolicies == {} and
+      (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+      (.targetGateSha256 | keys | sort) == ["publisher","release","worker"]
+    ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'outer journal nu este incidentul gate-prepared exact'
+  deploy_quiesce_generation_proof old \
+    || die 'markerul activ sau hashurile gate live nu sunt generația veche exactă'
+  validate_unit_migration_pending || die 'pending-ul unit-only este nesigur'
+  if [ -f "$UNIT_MIGRATION_PENDING" ]; then pending_present=1; fi
+  validate_live_constructor_units_quiesced \
+    || die 'pending-ul și bariera fizică Constructor nu sunt exacte'
+  for candidate in "$JOURNAL" "$ACTIVATION_JOURNAL" "$ACTIVATION_PENDING" "$READY_STAMP" \
+    "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'discardul gate refuză un jurnal/stamp concurent'
+  done
+
+  if [ -e "$GATE_JOURNAL" ] || [ -L "$GATE_JOURNAL" ]; then
+    [ "$pending_present" = 1 ] \
+      || die 'jurnalul gate nu poate fi retras după consumarea pending-ului'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-discarded.*; do
+      [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+        || die 'jurnalul gate și tombstone-ul nu pot coexista'
+    done
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+      [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+        || die 'jurnalul gate și cleanup-ul GC nu pot coexista'
+    done
+    [ -f "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$GATE_JOURNAL")" = '0:0:600:1' ] \
+      && jq -e --arg commit "$failed_commit" '
+        (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+        .schema == 1 and .commit == $commit and
+        (.helperSha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$"))
+      ' "$GATE_JOURNAL" >/dev/null \
+      || die 'jurnalul gate al incidentului este nesigur'
+    gate_root=$(jq -er '.transactionRoot' "$GATE_JOURNAL")
+    helper_sha=$(jq -er '.helperSha256' "$GATE_JOURNAL")
+    gate_journal_sha=$(sha256sum "$GATE_JOURNAL" | awk '{print $1}')
+    validate_unmutated_gate_transaction "$gate_root" "$helper_sha" \
+      || die 'tranzacția gate nu dovedește candidatul jurnalizat intact'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-txn.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tranzacție gate dangling'; continue; }
+      [ "$candidate" = "$gate_root" ] \
+        || die 'un director gate străin blochează discardul incidentului'
+      count=$((count + 1))
+    done
+    [ "$count" -eq 1 ] || die 'inventarul tranzacțiilor gate nu este exact'
+
+    # Ultima probă înaintea primei mutații. Ordinea unlink+fsync înainte de
+    # ștergerea txn face orice crash fail-closed, dar reluabil.
+    [ "$(sha256sum "$GATE_JOURNAL" | awk '{print $1}')" = "$gate_journal_sha" ] \
+      && validate_unmutated_gate_transaction "$gate_root" "$helper_sha" \
+      && deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof old \
+      && validate_live_constructor_units_quiesced \
+      || die 'starea incidentului s-a schimbat înainte de commitul discard gate'
+    rm -f -- "$GATE_JOURNAL" || die 'jurnalul gate nu a putut fi retras'
+    fsync_path "$RUNTIME_ROOT" || die 'retragerea jurnalului gate nu este durabilă'
+    withdraw_gate_transaction_durably "$gate_root" "$failed_commit" \
+      || die 'tranzacția gate nu a putut fi retrasă durabil după jurnal'
+  else
+    # Reluare după un crash între unlink, rename-ul durabil și ștergerea txn.
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-discarded.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tombstone gate dangling'; continue; }
+      validate_discarded_gate_tombstone "$candidate" "$failed_commit" \
+        || die 'tombstone-ul tranzacției gate este nesigur sau corupt'
+      tombstones+=("$candidate")
+    done
+    [ "${#tombstones[@]}" -le 1 ] \
+      || die 'mai multe tombstone-uri gate fac reluarea ambiguă'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'cleanup gate GC dangling'; continue; }
+      validate_discarded_gate_gc "$candidate" "$failed_commit" \
+        || die 'cleanup-ul gate GC este străin sau are inode nesigur'
+      gc_roots+=("$candidate")
+    done
+    [ "${#gc_roots[@]}" -le 1 ] \
+      || die 'mai multe directoare gate GC fac reluarea ambiguă'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-txn.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tranzacție gate dangling'; continue; }
+      validate_unmutated_gate_transaction "$candidate" '' \
+        || die 'un director gate orfan nu corespunde exact incidentului'
+      candidates+=("$candidate")
+    done
+    [ "${#candidates[@]}" -le 1 ] \
+      || die 'mai multe tranzacții gate candidate fac reluarea ambiguă'
+    [ "$(( ${#tombstones[@]} + ${#candidates[@]} + ${#gc_roots[@]} ))" -le 1 ] \
+      || die 'inventarele txn/tombstone/GC gate fac reluarea ambiguă'
+    if [ "${#candidates[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'o tranzacție gate orfană nu poate coexista cu pending consumat'
+      withdraw_gate_transaction_durably "${candidates[0]}" "$failed_commit" \
+        || die 'tranzacția gate orfană nu a putut fi retrasă durabil'
+    elif [ "${#tombstones[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'un tombstone gate nu poate coexista cu pending consumat'
+      remove_discarded_gate_tombstone "${tombstones[0]}" "$failed_commit" \
+        || die 'tombstone-ul gate nu a putut fi șters durabil'
+    elif [ "${#gc_roots[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'un cleanup gate GC nu poate coexista cu pending consumat'
+      remove_discarded_gate_gc "${gc_roots[0]}" "$failed_commit" \
+        || die 'cleanup-ul gate GC nu a putut fi reluat durabil'
+    fi
+  fi
+
+  # Inclusiv reluarea care observă deja journal/txn absente persistă explicit
+  # absența lor înainte să permită consumarea pending-ului.
+  for candidate in \
+    "$RUNTIME_ROOT"/constructor-gate-txn.* \
+    "$RUNTIME_ROOT"/constructor-gate-discarded.* \
+    "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'un artefact gate a reapărut înainte de finalizarea discardului'
+  done
+  fsync_path "$RUNTIME_ROOT" \
+    || die 'absența artefactelor gate nu a putut fi persistată la reluare'
+  # Fsync-ul este ultima operație care poate ceda/reporni între dovada absenței
+  # și consumarea pending-ului. Repetăm inventarul după el, astfel încât niciun
+  # artefact resurrectat/concurent să nu primească implicit autoritate.
+  for candidate in \
+    "$RUNTIME_ROOT"/constructor-gate-txn.* \
+    "$RUNTIME_ROOT"/constructor-gate-discarded.* \
+    "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'un artefact gate a reapărut după fsync-ul final al discardului'
+  done
+  [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+    && deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof old \
+    && validate_unit_migration_pending \
+    && validate_live_constructor_units_quiesced \
+    || die 'postcondiția discardului gate nu păstrează generația veche quiesced'
+  if [ "$pending_present" = 1 ]; then
+    [ -f "$UNIT_MIGRATION_PENDING" ] \
+      || die 'discardul gate a consumat prematur pending-ul'
+  else
+    [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+      && validate_live_runtime_contract \
+      || die 'reluarea post-discard fără pending nu are contractul live exact'
+  fi
+}
+
 recover_interrupted_activation() {
   local activation_root operation phase state_file type name first second extra index marker timer service restored state failed=0 count=0
   local wants_dir=/etc/systemd/system/timers.target.wants wants_link origin
@@ -2759,7 +3158,9 @@ trap cleanup_cutover EXIT
 
 # Modul special armează cleanup-ul fail-closed înaintea oricărui validator.
 # Un owner/jurnal invalid nu poate ajunge la cleanup-ul tranzacțional generic.
-if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi
+if [ "$discard_unmutated_prepared" = 1 ] || [ "$discard_unmutated_gate_prepared" = 1 ]; then
+  recovery_in_progress=1
+fi
 
 # Recover-only este și bariera de boot. Oprește mai întâi orice generație
 # detectabilă, inclusiv unități legacy ori un set 1..5 fără proveniență. Acest
@@ -2787,7 +3188,10 @@ if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
     deploy_quiesce_authorized=1
   elif [ "$recover_only" = 1 ] && [ "$leave_constructor_quiesced" = 0 ] \
     && [ "$deploy_quiesce_proof" = 1 ] && deploy_quiesce_owned_by_caller \
-    && deploy_quiesce_generation_proof; then
+    && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
+          && deploy_quiesce_generation_proof old; } \
+      || { [ "$discard_unmutated_gate_prepared" = 0 ] \
+          && deploy_quiesce_generation_proof committed; }; }; then
     # Numai ownerul tuplei poate publica stamp-ul și șterge jurnalul, după ce
     # active+gate corespund exact snapshotului vechi sau commitului gate nou.
     deploy_quiesce_authorized=1
@@ -2809,7 +3213,6 @@ if [ "$discard_unmutated_prepared" = 1 ]; then
   discard_unmutated_prepared_cutover "$discard_target_commit" "$compose_file"
   exit 0
 fi
-
 if ! ensure_constructor_marker_root_durable; then
   force_quiesce_constructor_units 1 || true
   clear_runtime_ready_stamp || true
@@ -2818,6 +3221,10 @@ fi
 if [ -n "$activation_resume_operation" ] \
   && [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]; then
   die 'resume-ul activării cere jurnalul durabil existent'
+fi
+if [ "$discard_unmutated_gate_prepared" = 1 ]; then
+  discard_unmutated_gate_prepared_refresh \
+    "$discard_gate_request_id" "$discard_gate_commit" "$discard_gate_active_commit" "$compose_file"
 fi
 recover_interrupted_gate_refresh
 recover_interrupted_activation
@@ -2852,7 +3259,11 @@ if [ "$recover_only" = 1 ]; then
       || die 'unitățile nu sunt sigur quiesced sub bariera pending'
     if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
       if [ "$deploy_quiesce_proof" = 1 ] && deploy_quiesce_owned_by_caller \
-        && deploy_quiesce_generation_proof && validate_live_runtime_contract; then
+        && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
+              && deploy_quiesce_generation_proof old; } \
+          || { [ "$discard_unmutated_gate_prepared" = 0 ] \
+              && deploy_quiesce_generation_proof committed; }; } \
+        && validate_live_runtime_contract; then
         clear_unit_migration_pending \
           || die 'bariera unit-only nu a putut fi consumată după dovada strictă a deploy-ului'
       else
