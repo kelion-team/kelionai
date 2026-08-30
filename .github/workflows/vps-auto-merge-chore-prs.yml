@@ -51,6 +51,7 @@ jobs:
           [ "$(jq -r '.state' <<<"$pr")" = open ]
           [ "$(jq -r '.draft' <<<"$pr")" = false ]
           head_ref=$(jq -r '.head.ref' <<<"$pr")
+          head_repo=$(jq -r '.head.repo.full_name // ""' <<<"$pr")
 
           allowed='[
             ".github/workflows/deploy.yml",
@@ -88,11 +89,70 @@ jobs:
             "scripts/vps-release-verifier.test.mjs",
             "scripts/verifica-workflow-uri-sigure.mjs"
           ]'
+          openai_unified_once='[
+            ".github/workflows/pr-verify.yml",
+            ".github/workflows/vps-codex-login.yml",
+            ".github/workflows/vps-run.yml",
+            ".github/workflows/vps-set-env.yml",
+            "AGENTS.md",
+            "backend/.env.example",
+            "backend/src/config.ts",
+            "backend/src/envCheck.test.ts",
+            "backend/src/openaiAdmin.test.ts",
+            "backend/src/openaiAdminConfig.test.ts",
+            "backend/src/openaiAdminStatus.test.ts",
+            "backend/src/routes/admin.ts",
+            "backend/src/services/codexWorker.ts",
+            "backend/src/services/diagnosticConstructor.ts",
+            "backend/src/services/envCheck.ts",
+            "backend/src/services/imageCost.test.ts",
+            "backend/src/services/manual.ts",
+            "backend/src/services/openaiAdmin.ts",
+            "backend/src/shared/api-types.ts",
+            "config/runtime-contract.json",
+            "deploy/DEPLOY.md",
+            "deploy/RUNBOOKS.md",
+            "deploy/codex-worker.mjs",
+            "deploy/codex-worker.profile.toml",
+            "deploy/compose.production.yml",
+            "deploy/deploy.sh",
+            "deploy/instaleaza-constructor.sh",
+            "deploy/kelionai.env.example",
+            "deploy/lib/codex-boundary.test.mjs",
+            "deploy/lib/constructor-publication.test.mjs",
+            "deploy/lib/runtime-config-cutover.sh",
+            "deploy/systemd/kelion-codex-worker.service",
+            "docs/FRONTEND-LIVE-TEST-MATRIX.md",
+            "docs/operations/CURRENT.md",
+            "docs/operations/DELIVERY-RULES-AND-ROADMAP.md",
+            "frontend/src/adminProductContract.test.ts",
+            "frontend/src/components/admin/AdminBani.tsx",
+            "frontend/src/components/admin/AdminProductie.tsx",
+            "frontend/src/components/admin/shared.tsx",
+            "frontend/src/lib/admin.ts",
+            "frontend/src/pages/Stage.tsx",
+            "scripts/verifica-contract-deploy.mjs",
+            "scripts/verifica-contract-deploy.test.mjs"
+          ]'
           files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate --jq '.[].filename' | jq -R -s 'split("\n") | map(select(length > 0))')
           is_vps=$(jq -r --argjson allowed "$allowed" 'any(.[]; . as $file | $allowed | index($file) != null)' <<<"$files")
           if [ "$is_vps" = true ]; then
             [[ "$head_ref" == chore/* ]]
-            jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+            openai_unified_exception=false
+            if [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] \
+              && [ "$head_repo" = kelion-team/kelionai ] \
+              && [ "$head_ref" = chore/openai-unified-credentials-20260830 ] \
+              && jq -e --argjson expected "$openai_unified_once" '
+                length == ($expected | length) and
+                length == (unique | length) and
+                ($expected | length) == ($expected | unique | length) and
+                sort == ($expected | sort)
+              ' <<<"$files" >/dev/null; then
+              openai_unified_exception=true
+            fi
+            if [ "$openai_unified_exception" != true ]; then
+              jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+            fi
           fi
 
           owner=${GITHUB_REPOSITORY%%/*}
