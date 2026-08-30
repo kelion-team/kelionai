@@ -46,13 +46,25 @@ jobs:
               echo 'Autentificarea Codex project-scoped a eșuat' >&2
               exit 1
             fi
-            runuser -u kelion-codex -- env -i \
+            codex_auth_status=''
+            if ! codex_auth_status=$(runuser -u kelion-codex -- env -i \
               HOME=/var/lib/kelion-codex-auth \
               CODEX_HOME=/var/lib/kelion-codex-auth \
               PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
               /opt/kelion-codex/bin/codex \
               -c 'forced_login_method="api"' \
               -c 'cli_auth_credentials_store="file"' \
-              login status >/dev/null 2>&1
+              login status 2>&1); then
+              codex_auth_status=''
+              echo 'Cache-ul Codex nu poate fi citit după autentificare' >&2
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -ne 1 ] \
+              || ! LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"; then
+              codex_auth_status=''
+              echo 'Cache-ul Codex nu confirmă autentificarea project-scoped' >&2
+              exit 1
+            fi
+            codex_auth_status=''
             echo 'codex-api-login=ready'
           EOF

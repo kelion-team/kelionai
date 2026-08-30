@@ -15,10 +15,10 @@ const protection = {
 }
 const healthy = {
   version: { status: 200, body: { v: sha.slice(0, 7) } },
-  ready: { status: 200, body: { ready: true, checks: { config: true, database: true, migrations: true }, release: { candidate: true, sideEffectsActive: true } } },
+  ready: { status: 200, body: { ready: true, checks: { config: true, database: true, migrations: true }, release: { candidate: false, sideEffectsActive: true } } },
   live: { status: 200, body: { status: 'alive' } },
   health: { status: 200, body: { status: 'ok' } },
-  proof: { status: 200, body: { ready: true, activeCommit: sha, release: { sideEffectsActive: true } } },
+  proof: { status: 200, body: { ready: true, activeCommit: sha, release: { candidate: false, sideEffectsActive: true } } },
 }
 
 test('matricea QA are owner, deadline, dovadă și negative test fail-closed pentru fiecare poartă', () => {
@@ -48,6 +48,19 @@ test('live-ul cere commit exact, toate health checks și release-proof independe
     const broken = structuredClone(healthy)
     broken[key].status = 503
     assert.equal(evaluateLiveSample(broken, sha).ok, false)
+  }
+})
+
+test('live-ul cere starea activă și respinge starea legitimă doar pre-PONR', () => {
+  for (const key of ['ready', 'proof']) {
+    const expectedMissing = key === 'ready' ? 'readiness' : 'release-proof'
+    const candidate = structuredClone(healthy)
+    candidate[key].body.release.candidate = true
+    assert.deepEqual(evaluateLiveSample(candidate, sha), { ok: false, missing: [expectedMissing] })
+
+    const inactive = structuredClone(healthy)
+    inactive[key].body.release.sideEffectsActive = false
+    assert.deepEqual(evaluateLiveSample(inactive, sha), { ok: false, missing: [expectedMissing] })
   }
 })
 
