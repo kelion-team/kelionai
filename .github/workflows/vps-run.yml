@@ -129,14 +129,14 @@ jobs:
           set -Eeuo pipefail
           systemctl is-active --quiet private-ai-llm.service
           systemctl is-active --quiet private-ai-web.service
-          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:18080'
-          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:14096'
-          curl --fail --silent --max-time 10 http://127.0.0.1:18080/health >/dev/null
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+          curl --fail --silent --max-time 10 http://127.0.0.1:24080/health >/dev/null
           . /etc/private-ai/opencode.env
           [ -n "${OPENCODE_SERVER_USERNAME:-}" ] && [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]
           printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" \
             | curl --config - --fail --silent --max-time 10 \
-            http://127.0.0.1:14096/global/health \
+            http://127.0.0.1:24096/global/health \
             | jq -e '.healthy == true' >/dev/null
           unset OPENCODE_SERVER_PASSWORD
           runuser -u privateai -- env -i \
