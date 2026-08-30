@@ -1,0 +1,238 @@
+name: private-ai-install-repair
+
+on:
+  push:
+    branches:
+      - ops/private-ai-install-20260830
+    paths:
+      - .github/private-ai/install-private-ai.sh
+      - .github/workflows/private-ai-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-ai-install-repair
+  cancel-in-progress: false
+
+jobs:
+  resume-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Reia instalarea într-un serviciu detașat
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          installer=.github/private-ai/install-private-ai.sh
+          bash -n "$installer"
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=4
+          )
+
+          installer_sha=$(sha256sum "$installer" | awk '{print $1}')
+          [[ "$installer_sha" =~ ^[0-9a-f]{64}$ ]]
+          remote_upload="/root/private-ai-installer.upload.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_upload"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_upload" "$installer_sha" <<'REMOTE'
+          set -Eeuo pipefail
+          upload=$1
+          expected=$2
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          [ "$(sha256sum "$upload" | awk '{print $1}')" = "$expected" ]
+
+          state=$(systemctl show private-ai-install-resume.service -p ActiveState --value 2>/dev/null || true)
+          if [ "$state" = activating ] || [ "$state" = active ]; then
+            rm -f -- "$upload"
+            printf 'DETACHED_INSTALL_ALREADY_RUNNING=yes STATE=%s\n' "$state"
+            exit 0
+          fi
+
+          printf 'REPAIR_MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
+          legacy=()
+          orphans=()
+          for proc in /proc/[0-9]*; do
+            [ -r "$proc/cmdline" ] || continue
+            pid=${proc##*/}
+            while IFS= read -r -d '' arg; do
+              if [[ "$arg" =~ ^/root/private-ai-installer\.[0-9]+\.[0-9]+\.sh$ ]]; then
+                legacy+=("$pid")
+                break
+              fi
+            done < "$proc/cmdline" || true
+            if [ "$(readlink -f "$proc/exe" 2>/dev/null || true)" = /opt/private-ai/bin/llama-cli ]; then
+              orphans+=("$pid")
+            fi
+          done
+          if [ "${#legacy[@]}" -gt 0 ] || [ "${#orphans[@]}" -gt 0 ]; then
+            printf 'UNMANAGED_INSTALL_CONFLICT legacy=%s llama=%s\n' \
+              "${legacy[*]:-none}" "${orphans[*]:-none}" >&2
+            rm -f -- "$upload"
+            exit 75
+          fi
+
+          install -d -o root -g root -m 0700 /opt/private-ai/installer
+          release="/opt/private-ai/installer/${expected}.sh"
+          install -o root -g root -m 0700 "$upload" "$release"
+          rm -f -- "$upload"
+          [ "$(sha256sum "$release" | awk '{print $1}')" = "$expected" ]
+
+          systemctl stop private-ai-install-resume.service 2>/dev/null || true
+          systemctl reset-failed private-ai-install-resume.service 2>/dev/null || true
+          cat > /etc/systemd/system/private-ai-install-resume.service <<UNIT
+          [Unit]
+          Description=Resume private AI installation reliably
+          After=network-online.target
+          Wants=network-online.target
+          ConditionPathExists=/etc/private-ai/.installer-id
+          ConditionPathExists=!/etc/private-ai/.install-complete
+          StartLimitIntervalSec=6h
+          StartLimitBurst=4
+
+          [Service]
+          Type=oneshot
+          UMask=0077
+          ExecStart=/usr/bin/flock --nonblock /run/lock/private-ai-install-resume.lock $release --resume-model
+          Restart=on-failure
+          RestartSec=60
+          TimeoutStartSec=12h
+          KillMode=control-group
+          RemainAfterExit=yes
+          StandardOutput=append:/root/private-ai-install-resume.log
+          StandardError=append:/root/private-ai-install-resume.log
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          chmod 0644 /etc/systemd/system/private-ai-install-resume.service
+          if [ -e /root/private-ai-install-resume.log ]; then
+            mv -- /root/private-ai-install-resume.log \
+              "/root/private-ai-install-resume.log.$(date -u +%Y%m%dT%H%M%SZ)"
+          fi
+          : > /root/private-ai-install-resume.log
+          chmod 0600 /root/private-ai-install-resume.log
+          systemctl daemon-reload
+          systemd-analyze verify /etc/systemd/system/private-ai-install-resume.service
+          systemctl enable private-ai-install-resume.service
+          systemctl start --no-block private-ai-install-resume.service
+          state=$(systemctl show private-ai-install-resume.service -p ActiveState --value)
+          case "$state" in active|activating) ;; *) exit 1 ;; esac
+          printf 'DETACHED_INSTALL_STARTED=yes SHA256=%s\n' "$expected"
+          REMOTE
+
+          completed=0
+          for attempt in $(seq 1 360); do
+            if ! status=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          active=$(systemctl show private-ai-install-resume.service -p ActiveState --value)
+          sub=$(systemctl show private-ai-install-resume.service -p SubState --value)
+          result=$(systemctl show private-ai-install-resume.service -p Result --value)
+          exit_status=$(systemctl show private-ai-install-resume.service -p ExecMainStatus --value)
+          main_pid=$(systemctl show private-ai-install-resume.service -p MainPID --value)
+          restarts=$(systemctl show private-ai-install-resume.service -p NRestarts --value)
+          cache_bytes=$(du -sb /srv/private-ai/models 2>/dev/null | awk '{print $1}' || true)
+          if [ -f /var/lib/private-ai/model.ready ]; then ready=yes; else ready=no; fi
+          if [ -f /etc/private-ai/.install-complete ]; then complete=yes; else complete=no; fi
+          llm=$(systemctl is-active private-ai-llm.service 2>/dev/null || true)
+          web=$(systemctl is-active private-ai-web.service 2>/dev/null || true)
+          last=$(tail -n 1 /root/private-ai-install-resume.log 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig' \
+            | tr '\n\r' ' ' | cut -c1-240)
+          printf 'AT=%s ACTIVE=%s SUB=%s RESULT=%s EXIT=%s PID=%s RESTARTS=%s MODEL_READY=%s COMPLETE=%s LLM=%s WEB=%s CACHE_BYTES=%s LAST=%s\n' \
+            "$(date -u +%FT%TZ)" "$active" "$sub" "$result" "$exit_status" \
+            "$main_pid" "$restarts" "$ready" "$complete" "$llm" "$web" \
+            "${cache_bytes:-missing}" "$last"
+          REMOTE
+            ); then
+              printf 'STATUS_SSH_RETRY=%s\n' "$attempt"
+              sleep 30
+              continue
+            fi
+            printf '%s\n' "$status"
+            if grep -Eq 'MODEL_READY=yes COMPLETE=yes LLM=active WEB=active' <<<"$status"; then
+              completed=1
+              break
+            fi
+            if grep -q 'ACTIVE=failed' <<<"$status"; then
+              break
+            fi
+            sleep 30
+          done
+
+          if [ "$completed" -ne 1 ]; then
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+              "systemctl status private-ai-install-resume.service --no-pager || true; tail -n 160 /root/private-ai-install-resume.log || true"
+            exit 1
+          fi
+
+          verification=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          systemctl is-active --quiet private-ai-llm.service
+          systemctl is-active --quiet private-ai-web.service
+          test -f /var/lib/private-ai/model.ready
+          test -f /etc/private-ai/.install-complete
+          test ! -L /etc/private-ai/.install-complete
+          test "$(stat -c '%U:%G:%a' /etc/private-ai/.install-complete)" = 'root:root:600'
+          grep -qx 'installer_id=private-ai-contabo-v1' /etc/private-ai/.install-complete
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+          curl --fail --silent --max-time 10 http://127.0.0.1:24080/health >/dev/null
+          model_id=$(curl --fail --silent --max-time 30 http://127.0.0.1:24080/v1/models \
+            | jq -er '.data | select(type=="array" and length==1) | .[0].id')
+          request=$(jq -cn --arg model "$model_id" \
+            '{model:$model,messages:[{role:"user",content:"Reply exactly: LLAMA_OK"}],chat_template_kwargs:{enable_thinking:false},max_tokens:32,temperature:0}')
+          curl --fail --silent --max-time 600 \
+            http://127.0.0.1:24080/v1/chat/completions \
+            -H 'Content-Type: application/json' -d "$request" \
+            | jq -e '.choices[0].message.content | contains("LLAMA_OK")' >/dev/null
+          . /etc/private-ai/opencode.env
+          printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" \
+            | curl --config - --fail --silent --max-time 10 \
+              http://127.0.0.1:24096/global/health \
+            | jq -e '.healthy == true' >/dev/null
+          printf 'BASE_INSTALL_VERIFIED_AT=%s\n' "$(date -u +%FT%TZ)"
+          printf 'MODEL_STORAGE='; du -sh /srv/private-ai/models | awk '{print $1}'
+          printf 'PRIVATE_AI_BASE_VERIFIED=yes\n'
+          REMOTE
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            'systemctl disable private-ai-install-resume.service >/dev/null'
+          printf '%s\n' "$verification"
+          {
+            printf '%s\n' '### Private AI — verificare măsurată pe VPS'
+            printf '%s\n' '```text'
+            printf '%s\n' "$verification"
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
