@@ -51,10 +51,6 @@ jobs:
           [ "$(jq -r '.state' <<<"$pr")" = open ]
           [ "$(jq -r '.draft' <<<"$pr")" = false ]
           head_ref=$(jq -r '.head.ref' <<<"$pr")
-          head_repo=$(jq -r '.head.repo.full_name // ""' <<<"$pr")
-          readonly openai_unified_pr_number=1541 # hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
-          readonly openai_unified_repository=kelion-team/kelionai # hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
-          readonly openai_unified_branch=chore/postdeploy-openai-verifier-cleanup-20260830
 
           allowed='[
             ".github/workflows/deploy.yml",
@@ -71,6 +67,7 @@ jobs:
             ".github/workflows/vps-release-verifier.yml",
             ".github/workflows/vps-set-env.yml",
             "Dockerfile.gates",
+            "deploy/RUNBOOKS.md",
             "deploy/constructor-release.mjs",
             "deploy/constructor-publisher.mjs",
             "deploy/deploy.sh",
@@ -83,6 +80,7 @@ jobs:
             "deploy/lib/constructor-publication.test.mjs",
             "deploy/lib/release-rollback.test.mjs",
             "deploy/lib/runtime-config-cutover.sh",
+            "deploy/upgrade-constructor.sh",
             "docs/operations/CURRENT.md",
             "scripts/lib/vps-pr-remediation.mjs",
             "scripts/lib/vps-release-verification.mjs",
@@ -91,15 +89,6 @@ jobs:
             "scripts/vps-release-verifier.mjs",
             "scripts/vps-release-verifier.test.mjs",
             "scripts/verifica-workflow-uri-sigure.mjs"
-          ]'
-          openai_unified_once='[
-            ".github/workflows/vps-codex-login.yml",
-            ".github/workflows/vps-run.yml",
-            "deploy/codex-worker.mjs",
-            "deploy/lib/codex-boundary.test.mjs",
-            "docs/operations/CURRENT.md",
-            "scripts/lib/vps-release-verification.mjs",
-            "scripts/vps-release-verifier.test.mjs"
           ]'
           file_entries=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate \
             --jq '.[] | {filename, status, previous_filename: (.previous_filename // null)}' | jq -s '.')
@@ -113,22 +102,7 @@ jobs:
           if [ "$is_vps" = true ]; then
             [[ "$head_ref" == chore/* ]]
             jq -e 'all(.[]; .status != "renamed" and .previous_filename == null)' <<<"$file_entries" >/dev/null
-            openai_unified_exception=false
-            if [ "$pr_number" = "$openai_unified_pr_number" ] \
-              && [ "$GITHUB_REPOSITORY" = "$openai_unified_repository" ] \
-              && [ "$head_repo" = "$openai_unified_repository" ] \
-              && [ "$head_ref" = "$openai_unified_branch" ] \
-              && jq -e --argjson expected "$openai_unified_once" '
-                length == ($expected | length) and
-                length == (unique | length) and
-                ($expected | length) == ($expected | unique | length) and
-                sort == ($expected | sort)
-              ' <<<"$files" >/dev/null; then
-              openai_unified_exception=true
-            fi
-            if [ "$openai_unified_exception" != true ]; then
-              jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
-            fi
+            jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
           fi
 
           owner=${GITHUB_REPOSITORY%%/*}
