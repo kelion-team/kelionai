@@ -238,13 +238,26 @@ export function isOpenaiUnifiedOneShotScope(files, identity = {}) {
     || !Array.isArray(files)
     || files.length !== OPENAI_UNIFIED_ONCE_FILES.length
   ) return false
-  const names = files.map((entry) => typeof entry === 'string' ? entry : entry?.filename)
-  if (names.some((file) => typeof file !== 'string') || new Set(names).size !== names.length) return false
+  if (files.some((entry) => (
+    !entry
+    || typeof entry !== 'object'
+    || typeof entry.filename !== 'string'
+    || typeof entry.status !== 'string'
+    || entry.status === 'renamed'
+    || entry.previous_filename != null
+  ))) return false
+  const names = files.map((entry) => entry.filename)
+  if (new Set(names).size !== names.length) return false
   return names.toSorted().every((file, index) => file === OPENAI_UNIFIED_ONCE_FILES[index])
 }
 
 export function isMonitoredScope(files, identity = {}) {
   if (!Array.isArray(files) || files.length === 0) return false
+  if (files.some((entry) => (
+    entry
+    && typeof entry === 'object'
+    && (entry.status === 'renamed' || entry.previous_filename != null)
+  ))) return false
   const normalScope = files.every((entry) => {
     const file = typeof entry === 'string' ? entry : entry?.filename
     const status = typeof entry === 'string' ? null : entry?.status
