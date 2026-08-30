@@ -10,6 +10,7 @@ jobs:
   login:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: production
     env:
       VPS_HOST: ${{ vars.VPS_HOST }}
       VPS_USER: ${{ vars.VPS_USER }}

@@ -50,6 +50,12 @@ describe('admin product contract', () => {
     expect(admin).toContain('nu există credit anticipat sau verificare manuală')
   })
 
+  it('renders both OpenAI provider period bounds in UTC', () => {
+    const admin = source('components/admin/AdminBani.tsx')
+    expect(admin).toContain("new Date(finance.providerOpenAI.period.start).toLocaleString('ro-RO', { timeZone: 'UTC' })")
+    expect(admin).toContain("new Date(finance.providerOpenAI.period.end).toLocaleString('ro-RO', { timeZone: 'UTC' })")
+  })
+
   it('afișează numai scara automată OpenAI, fără ramuri custom retrase', () => {
     const admin = source('components/admin/AdminProductie.tsx')
     const contract = source('lib/admin.ts')

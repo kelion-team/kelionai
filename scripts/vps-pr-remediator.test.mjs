@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   MAX_L1_ATTEMPTS,
+  MONITORED_FILES,
   appendAudit,
   assertL2DiffSafe,
   classifySnapshot,
@@ -53,9 +55,54 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'added' }]), false)
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'modified' }]), false)
   assert.equal(isMonitoredScope(['scripts/verifica-workflow-uri-sigure.mjs']), true)
+  assert.equal(isMonitoredScope(['deploy/upgrade-constructor.sh']), true)
+  assert.equal(isMonitoredScope(['deploy/RUNBOOKS.md']), true)
+  assert.equal(isMonitoredScope(['deploy/deploy.sh']), true)
+  assert.equal(isMonitoredScope(['deploy/instaleaza-constructor.sh']), true)
+  assert.equal(isMonitoredScope(['deploy/lib/constructor-publication.test.mjs']), true)
+  assert.equal(isMonitoredScope(['deploy/lib/runtime-config-cutover.sh']), true)
+  assert.equal(isMonitoredScope(['docs/operations/CURRENT.md']), true)
+  assert.equal(isMonitoredScope([
+    '.github/workflows/vps-run.yml',
+    '.github/workflows/vps-set-env.yml',
+    'deploy/upgrade-constructor.sh',
+    'deploy/RUNBOOKS.md',
+    'deploy/deploy.sh',
+    'deploy/instaleaza-constructor.sh',
+    'deploy/lib/constructor-publication.test.mjs',
+    'deploy/lib/runtime-config-cutover.sh',
+  ]), true)
+  assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'renamed', previous_filename: 'legacy.yml' }]), false)
+  assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'modified', previous_filename: 'legacy.yml' }]), false)
   assert.equal(isMonitoredScope(['backend/src/index.ts']), false)
   assert.deepEqual(assertL2DiffSafe(['.github/workflows/vps-run.yml'], 100), ['.github/workflows/vps-run.yml'])
   assert.throws(() => assertL2DiffSafe(['deploy/deploy.sh'], 100), /neautorizată/)
+})
+
+test('workflow-ul merge-policy păstrează allowlist-ul canonic fără excepții consumate', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/vps-auto-merge-chore-prs.yml', import.meta.url), 'utf8')
+  const encoded = /allowed='(\[[\s\S]*?\n          \])'\n          file_entries=/.exec(workflow)?.[1]
+  assert.ok(encoded)
+  const allowed = JSON.parse(encoded)
+  assert.equal(new Set(allowed).size, allowed.length)
+  assert.equal(allowed.includes('deploy/upgrade-constructor.sh'), true)
+  assert.equal(allowed.includes('deploy/RUNBOOKS.md'), true)
+  assert.equal(allowed.includes('deploy/instaleaza-constructor.sh'), true)
+  assert.equal(allowed.includes('deploy/lib/constructor-publication.test.mjs'), true)
+  assert.equal(allowed.includes('deploy/lib/runtime-config-cutover.sh'), true)
+  assert.equal(allowed.includes('docs/operations/CURRENT.md'), true)
+  assert.equal(MONITORED_FILES.every((file) => allowed.includes(file)), true)
+  assert.doesNotMatch(workflow, /openai_unified|OPENAI_UNIFIED_ONCE|postdeploy-openai-verifier-cleanup/)
+  assert.equal(workflow.match(/pulls\/\$pr_number\/files\?per_page=100/g)?.length, 1)
+  assert.ok(workflow.includes("--jq '.[] | {filename, status, previous_filename: (.previous_filename // null)}' | jq -s '.'"))
+  const isVpsStart = workflow.indexOf('is_vps=$(jq -r')
+  const vpsBranchStart = workflow.indexOf('if [ "$is_vps" = true ]', isVpsStart)
+  const renameGuard = workflow.indexOf("jq -e 'all(.[]; .status != \"renamed\" and .previous_filename == null)' <<<\"$file_entries\"", vpsBranchStart)
+  const allowlistGuard = workflow.indexOf('jq -e --argjson allowed "$allowed"', vpsBranchStart)
+  assert.ok(isVpsStart >= 0 && vpsBranchStart > isVpsStart)
+  assert.match(workflow.slice(isVpsStart, vpsBranchStart), /index\(\$entry\.filename\)/)
+  assert.match(workflow.slice(isVpsStart, vpsBranchStart), /index\(\$entry\.previous_filename\)/)
+  assert.ok(renameGuard > vpsBranchStart && allowlistGuard > renameGuard)
 })
 
 test('clasificarea prioritizează conflictul, sincronizarea și review threads', () => {

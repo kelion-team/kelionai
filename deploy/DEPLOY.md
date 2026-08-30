@@ -2,8 +2,10 @@
 
 Producția se publică numai dintr-un commit integral din `master` care are
 `pr-verify` verde și imagini OCI construite din același commit, fixate prin
-digest și semnate keyless. Publicarea este manuală, în mediul GitHub
-`production`; nu există cron care urmărește și publică un `master` mobil.
+digest și semnate keyless. `release-dispatch` pornește automat workflow-ul
+auditat `production-release` numai după CI și build verzi pentru vârful exact
+din `master`; mutatorul rulează în mediul GitHub `production`. Nu există cron
+care urmărește și publică un `master` mobil.
 
 ## Surse de adevăr
 
@@ -30,8 +32,10 @@ Containerul web nu montează repository-ul sau `/root/kelion`.
 2. `build-images` acceptă numai un run `push` verde pe `master`, construiește
    imaginile din SHA-ul exact, le publică prin digest și emite manifestul
    semnat.
-3. `production-release` pornește numai prin dispatch manual autorizat, cere SHA integral și folosește mediul `production`. Verifică runul
-   CI, runul de build, manifestul și semnăturile înainte de SSH.
+3. `release-dispatch` verifică buildul verde pentru vârful curent din `master`
+   și lansează `production-release` printr-un dispatch auditat. Acesta cere SHA
+   integral, rulează în mediul `production` și verifică runul CI, runul de
+   build, manifestul și semnăturile înainte de SSH.
 4. `deploy.sh` planifică migrările și capturează slotul, proxy-ul, upstreamul,
    markerul, containerele și Caddyfile-ul înainte de orice mutație DB. Pentru o
    migrare distructivă pune proxy-ul managed în maintenance 503; la primul

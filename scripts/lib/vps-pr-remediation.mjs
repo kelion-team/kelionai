@@ -16,6 +16,13 @@ export const MONITORED_FILES = Object.freeze([
   '.github/workflows/vps-run.yml',
   '.github/workflows/vps-release-verifier.yml',
   '.github/workflows/vps-set-env.yml',
+  'deploy/RUNBOOKS.md',
+  'deploy/deploy.sh',
+  'deploy/instaleaza-constructor.sh',
+  'deploy/lib/constructor-publication.test.mjs',
+  'deploy/lib/runtime-config-cutover.sh',
+  'deploy/upgrade-constructor.sh',
+  'docs/operations/CURRENT.md',
   'scripts/lib/vps-pr-remediation.mjs',
   'scripts/lib/vps-release-verification.mjs',
   'scripts/vps-pr-remediator.mjs',
@@ -183,6 +190,11 @@ export function parseStateComment(body, identity) {
 
 export function isMonitoredScope(files) {
   if (!Array.isArray(files) || files.length === 0) return false
+  if (files.some((entry) => (
+    entry
+    && typeof entry === 'object'
+    && (entry.status === 'renamed' || entry.previous_filename != null)
+  ))) return false
   return files.every((entry) => {
     const file = typeof entry === 'string' ? entry : entry?.filename
     const status = typeof entry === 'string' ? null : entry?.status
