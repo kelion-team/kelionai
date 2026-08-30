@@ -157,10 +157,13 @@ type ProductConfig = {
   githubRepository: string
   supportEmail: string
   nativeScheme: string
+  constructorNativeScheme: string
   nativeOrigins: string[]
-  nativeRedirects: { ios: string; desktop: string }
+  nativeRedirects: { ios: string; desktop: string; constructorDesktop: string }
   androidApplicationId: string
   iosBundleId: string
+  desktopBundleId: string
+  constructorDesktopBundleId: string
 }
 
 function loadProductConfig(): ProductConfig {
@@ -173,6 +176,8 @@ function loadProductConfig(): ProductConfig {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(parsed.supportEmail ?? ''))) throw new Error('support_email_invalid')
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(parsed.githubRepository ?? ''))) throw new Error('repository_invalid')
     if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(String(parsed.nativeScheme ?? ''))) throw new Error('native_scheme_invalid')
+    if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(String(parsed.constructorNativeScheme ?? ''))
+      || parsed.constructorNativeScheme === parsed.nativeScheme) throw new Error('constructor_native_scheme_invalid')
     if (!Array.isArray(parsed.nativeOrigins) || parsed.nativeOrigins.length === 0) throw new Error('native_origins_invalid')
     const nativeOriginStrings = parsed.nativeOrigins.map((raw) => String(raw))
     const nativeOrigins = nativeOriginStrings.map((raw) => new URL(raw))
@@ -184,15 +189,20 @@ function loadProductConfig(): ProductConfig {
     }
     const iosRedirect = new URL(String(parsed.nativeRedirects?.ios ?? ''))
     const desktopRedirect = new URL(String(parsed.nativeRedirects?.desktop ?? ''))
+    const constructorDesktopRedirect = new URL(String(parsed.nativeRedirects?.constructorDesktop ?? ''))
     if (iosRedirect.origin !== origin.origin || iosRedirect.pathname !== '/auth/native/complete' || iosRedirect.search || iosRedirect.hash) {
       throw new Error('native_ios_redirect_invalid')
     }
     if (desktopRedirect.protocol !== `${parsed.nativeScheme}:` || desktopRedirect.hostname !== 'auth' || desktopRedirect.pathname !== '/native/complete') {
       throw new Error('native_desktop_redirect_invalid')
     }
-    if (![parsed.androidApplicationId, parsed.iosBundleId].every((v) => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/.test(String(v ?? '')))) {
+    if (constructorDesktopRedirect.protocol !== `${parsed.constructorNativeScheme}:` || constructorDesktopRedirect.hostname !== 'auth' || constructorDesktopRedirect.pathname !== '/native/complete') {
+      throw new Error('constructor_native_desktop_redirect_invalid')
+    }
+    if (![parsed.androidApplicationId, parsed.iosBundleId, parsed.desktopBundleId, parsed.constructorDesktopBundleId].every((v) => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/.test(String(v ?? '')))) {
       throw new Error('package_id_invalid')
     }
+    if (parsed.constructorDesktopBundleId === parsed.desktopBundleId) throw new Error('constructor_package_id_not_distinct')
     return parsed as ProductConfig
   } catch {
     throw new Error('config/product.json lipsește sau este invalid')

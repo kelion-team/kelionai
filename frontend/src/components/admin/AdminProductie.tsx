@@ -39,7 +39,7 @@ import {
 
 // ── CONSTRUCTOR tab ─────────────────────────────────────────────────────────
 
-export function AdminConstructor() {
+export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?: boolean } = {}) {
   const A = adminStrings()
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
   const [buildArchive, setBuildArchive] = useState<{
@@ -434,9 +434,11 @@ export function AdminConstructor() {
             </div>
           )}
           <div className="admin-constructor-meta">
-            Creier cloud: <b>OpenAI</b>. Constructor:{' '}
+            {dedicatedClient
+              ? <><b>Worker privat: OpenCode + Qwen local (llama.cpp)</b> · coada canonică <b>build_jobs</b>. Stare:{' '}</>
+              : <>Creier cloud: <b>OpenAI</b>. Constructor:{' '}</>}
             {constructorId == null ? 'se citește de pe server…'
-              : constructorAcceptingWork === true ? <><b>Codex worker</b> — {constructorId.motiv}</>
+              : constructorAcceptingWork === true ? <><b>{dedicatedClient ? 'OpenCode worker' : 'Codex worker'}</b> — {constructorId.motiv}</>
               : <>{constructorId.motiv}</>}
           </div>
         </div>
@@ -475,7 +477,7 @@ export function AdminConstructor() {
         )}
       </div>
 
-      <div className="admin-card" style={{ marginTop: 12 }}>
+      {!dedicatedClient && <div className="admin-card" style={{ marginTop: 12 }}>
         <div className="admin-card-head">Agent specializat</div>
         <p className="chat-hint">Creează un agent prin același sistem A2A și aceeași sesiune admin, fără o consolă paralelă.</p>
         <form onSubmit={(event) => void addCustomAgent(event)}>
@@ -496,7 +498,7 @@ export function AdminConstructor() {
           </button>
         </form>
         {agentMsg && <div className="chat-hint" role="status">{agentMsg}</div>}
-      </div>
+      </div>}
 
       <div className="admin-card" style={{ marginTop: 12 }}>
         <div className="admin-card-head admin-card-head-row">

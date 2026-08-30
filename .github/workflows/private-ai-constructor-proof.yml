@@ -1,0 +1,486 @@
+name: private-ai-constructor-production-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: ID-ul unui ordin pilot deja creat în Admin; acest workflow nu creează și nu revendică ordine
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  prove-local-constructor:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validează contractul workerului fără acces la producție
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node deploy/codex-worker.mjs --self-test
+          grep -q "const OPENCODE_BIN" deploy/codex-worker.mjs
+          grep -q "'/api/internal/codex/jobs/claim'" deploy/codex-worker.mjs
+          ! grep -Eq 'KELION_LOCAL_QWEN_WRAPPER|codex-real|CODEX_BIN|login --with-api-key' \
+            deploy/codex-worker.mjs
+
+      - name: Leagă receiptul, executorul local și claim-ul din build_jobs
+        shell: bash
+        env:
+          PROOF_JOB_ID: ${{ inputs.job_id }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [[ "$PROOF_JOB_ID" =~ ^[1-9][0-9]{0,18}$ ]]
+          [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+
+          installer=.github/private-ai/install-private-ai.sh
+          worker=deploy/codex-worker.mjs
+          [ -f "$installer" ] && [ -f "$worker" ]
+          bash -n "$installer"
+          expected_worker_sha=$(sha256sum "$worker" | awk '{print $1}')
+          [[ "$expected_worker_sha" =~ ^[0-9a-f]{64}$ ]]
+
+          mapfile -t base_contract < <(node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const source = readFileSync('.github/private-ai/install-private-ai.sh', 'utf8')
+          for (const name of [
+            'INSTALLER_ID', 'LLAMA_CPP_REF', 'OPENCODE_VERSION',
+            'MODEL_REPO', 'MODEL_QUANT', 'MODEL_ALIAS',
+          ]) {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const matches = [...source.matchAll(new RegExp(`^readonly ${escaped}="([^"]+)"$`, 'gm'))]
+            if (matches.length !== 1) process.exit(1)
+            process.stdout.write(`${matches[0][1]}\n`)
+          }
+          NODE
+          )
+          [ "${#base_contract[@]}" -eq 6 ]
+          expected_installer=${base_contract[0]}
+          expected_llama_ref=${base_contract[1]}
+          expected_opencode_version=${base_contract[2]}
+          expected_model_repo=${base_contract[3]}
+          expected_model_quant=${base_contract[4]}
+          expected_model_alias=${base_contract[5]}
+          [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
+          [[ "$expected_llama_ref" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$expected_model_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_model_quant" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_model_alias" =~ ^[A-Za-z0-9_.-]+$ ]]
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+
+          proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$expected_worker_sha" \
+            "$expected_installer" \
+            "$expected_llama_ref" \
+            "$expected_opencode_version" \
+            "$expected_model_repo" \
+            "$expected_model_quant" \
+            "$expected_model_alias" \
+            "$GITHUB_REPOSITORY" \
+            "$PROOF_JOB_ID" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+
+          expected_worker_sha=$1
+          expected_installer=$2
+          expected_llama_ref=$3
+          expected_opencode_version=$4
+          expected_model_repo=$5
+          expected_model_quant=$6
+          expected_model_alias=$7
+          expected_repository=$8
+          proof_job_id=$9
+          [[ "$expected_worker_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
+          [[ "$expected_llama_ref" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$expected_model_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_model_quant" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_model_alias" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$proof_job_id" =~ ^[1-9][0-9]{0,18}$ ]]
+
+          proof_tmp=$(mktemp -d /run/kelion-constructor-proof.XXXXXX)
+          cleanup_remote() { rm -rf -- "$proof_tmp"; }
+          trap cleanup_remote EXIT
+
+          # Receiptul bazei este imuabil, cu schema și valorile fixate de
+          # installerul verificat din același checkout ca acest workflow.
+          base_receipt=/etc/private-ai/.install-complete
+          [ -f "$base_receipt" ] && [ ! -L "$base_receipt" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$base_receipt")" = '0:0:600:1' ]
+          mapfile -t receipt_lines < "$base_receipt"
+          [ "${#receipt_lines[@]}" -eq 6 ]
+          [ "${receipt_lines[0]}" = "installer_id=$expected_installer" ]
+          [[ "${receipt_lines[1]}" =~ ^completed_at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$ ]]
+          completed_at=${BASH_REMATCH[1]}
+          [ "$(date -u -d "$completed_at" +%FT%TZ)" = "$completed_at" ]
+          [ "$(date -u -d "$completed_at" +%s)" -le "$(( $(date -u +%s) + 60 ))" ]
+          [ "${receipt_lines[2]}" = "llama_cpp_ref=$expected_llama_ref" ]
+          [ "${receipt_lines[3]}" = "opencode_version=$expected_opencode_version" ]
+          [ "${receipt_lines[4]}" = "model_repo=$expected_model_repo" ]
+          [ "${receipt_lines[5]}" = "model_quant=$expected_model_quant" ]
+          base_receipt_sha=$(sha256sum "$base_receipt" | awk '{print $1}')
+          [[ "$base_receipt_sha" =~ ^[0-9a-f]{64}$ ]]
+
+          systemctl is-active --quiet private-ai-llm.service
+          systemctl is-active --quiet private-ai-web.service
+          test -f /var/lib/private-ai/model.ready
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+          ! ss -ltnH | awk '{print $4}' | grep -Eq '(0\.0\.0\.0|\[::\]):(24080|24096)$'
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:24080/health >/dev/null
+          curl --fail --silent --show-error --max-time 30 \
+            http://127.0.0.1:24080/v1/models \
+            | jq -e --arg model "$expected_model_alias" \
+                '.data | type == "array" and any(.id == $model)' >/dev/null
+
+          # Executorul instalat este workerul OpenCode direct. Un CLI Codex
+          # oficial poate exista separat, dar artefactele wrapperului compat
+          # sunt interzise și serviciul nu are voie să le refere.
+          installed_worker=/opt/kelion-codex/codex-worker.mjs
+          [ -f "$installed_worker" ] && [ ! -L "$installed_worker" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$installed_worker")" = '0:0:555:1' ]
+          [ "$(sha256sum "$installed_worker" | awk '{print $1}')" = "$expected_worker_sha" ]
+          grep -q "const OPENCODE_BIN" "$installed_worker"
+          grep -q "'/api/internal/codex/jobs/claim'" "$installed_worker"
+          ! grep -Eq 'KELION_LOCAL_QWEN_WRAPPER|codex-real|CODEX_BIN|login --with-api-key' \
+            "$installed_worker"
+
+          forbidden_artifacts=(
+            /opt/kelion-codex/bin/codex-real
+            /opt/private-ai/bin/opencode-constructor-root
+            /etc/private-ai/local-codex-compat-key
+            /etc/sudoers.d/kelion-local-qwen-constructor
+            /etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
+          )
+          for artifact in "${forbidden_artifacts[@]}"; do
+            [ ! -e "$artifact" ] && [ ! -L "$artifact" ]
+          done
+          canonical_codex=/opt/kelion-codex/bin/codex
+          if [ -e "$canonical_codex" ] || [ -L "$canonical_codex" ]; then
+            ! grep -aEq 'KELION_LOCAL_QWEN_WRAPPER|local-qwen-compat|opencode-constructor-root' \
+              "$canonical_codex"
+          fi
+
+          systemctl is-enabled --quiet kelion-codex-worker.timer
+          systemctl is-active --quiet kelion-codex-worker.timer
+          worker_active_state=$(systemctl show kelion-codex-worker.service -p ActiveState --value)
+          worker_sub_state=$(systemctl show kelion-codex-worker.service -p SubState --value)
+          main_pid=$(systemctl show kelion-codex-worker.service -p MainPID --value)
+          worker_invocation_id=$(systemctl show kelion-codex-worker.service -p InvocationID --value)
+          [ "$worker_active_state" = activating ]
+          [ "$worker_sub_state" = start ]
+          [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]
+          [[ "$worker_invocation_id" =~ ^[0-9a-f]{32}$ ]]
+          systemctl cat kelion-codex-worker.service > "$proof_tmp/worker.unit"
+          grep -Fq 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
+            "$proof_tmp/worker.unit"
+          grep -Fq 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' \
+            "$proof_tmp/worker.unit"
+          grep -Fq 'LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret' \
+            "$proof_tmp/worker.unit"
+          if grep -Eq 'CODEX_BIN=|CODEX_HOME=|openai-project-key|codex-real|opencode-constructor-root' \
+            "$proof_tmp/worker.unit"; then
+            printf '%s\n' 'Serviciul worker încă referă adaptorul Codex retras.' >&2
+            exit 1
+          fi
+          [ "$(systemctl show kelion-codex-worker.service -p NoNewPrivileges --value)" = no ]
+          [ "$(systemctl show kelion-codex-worker.service -p ProtectSystem --value)" = no ]
+          [ "$(systemctl show kelion-codex-worker.service -p ProtectHome --value)" = no ]
+
+          worker_env=/root/kelion/config/codex-worker.env
+          [ -f "$worker_env" ] && [ ! -L "$worker_env" ]
+          grep -qx 'CODEX_WORKER_EXEC_ENABLED=1' "$worker_env"
+          grep -qx 'KELION_CODEX_API=http://127.0.0.1:18079' "$worker_env"
+          grep -qx "KELION_GITHUB_REPOSITORY=$expected_repository" "$worker_env"
+          gate_image=$(sed -n 's/^KELION_CODEX_GATE_IMAGE=//p' "$worker_env")
+          [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$worker_env")" -eq 1 ]
+          [[ "$gate_image" =~ ^ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+/codex-gates@sha256:[0-9a-f]{64}$ ]]
+
+          opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
+          [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
+          [ "$(stat -Lc '%U:%G:%a:%h' "$opencode_config")" = 'root:privateai:640:1' ]
+          jq -e --arg model "llama.cpp/$expected_model_alias" '
+            . as $config |
+            $config.autoupdate == false and $config.share == "disabled" and
+            $config.model == $model and ($config.small_model // $config.model) == $model and
+            $config.enabled_providers == ["llama.cpp"] and
+            ($config.provider | keys) == ["llama.cpp"] and
+            $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+            $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+            (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+              "webfetch", "websearch", "external_directory"]
+             | all(. as $permission; $config.permission[$permission] == "allow"))
+          ' "$opencode_config" >/dev/null
+
+          final_receipt=/etc/private-ai/.constructor-finalized
+          [ -f "$final_receipt" ] && [ ! -L "$final_receipt" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$final_receipt")" = '0:0:600:1' ]
+          mapfile -t final_lines < "$final_receipt"
+          [ "${#final_lines[@]}" -eq 15 ]
+          [ "${final_lines[0]}" = 'schema=1' ]
+          [ "${final_lines[1]}" = 'executor=opencode' ]
+          [ "${final_lines[2]}" = "opencode_version=$expected_opencode_version" ]
+          [ "${final_lines[3]}" = "model=llama.cpp/$expected_model_alias" ]
+          [ "${final_lines[4]}" = "worker_sha256=$expected_worker_sha" ]
+          config_sha=$(sha256sum "$opencode_config" | awk '{print $1}')
+          [ "${final_lines[5]}" = "config_sha256=$config_sha" ]
+          [[ "${final_lines[6]}" =~ ^verified_at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$ ]]
+          final_verified_at=${BASH_REMATCH[1]}
+          [ "$(date -u -d "$final_verified_at" +%FT%TZ)" = "$final_verified_at" ]
+          [ "${final_lines[7]}" = 'base_verified=yes' ]
+          [ "${final_lines[8]}" = 'executor_e2e=passed' ]
+          [ "${final_lines[9]}" = 'hmac_heartbeat_e2e=passed' ]
+          [[ "${final_lines[10]}" =~ ^claim_e2e=(no_claimable_job|pipeline_active|claimed)$ ]]
+          [ "${final_lines[11]}" = 'full_host_sudo_probe=uid0' ]
+          [ "${final_lines[12]}" = 'web_full_host_probe=uid0' ]
+          [ "${final_lines[13]}" = 'queue_worker_started=yes' ]
+          [ "${final_lines[14]}" = 'web_loopback_only=yes' ]
+          final_receipt_sha=$(sha256sum "$final_receipt" | awk '{print $1}')
+          [[ "$final_receipt_sha" =~ ^[0-9a-f]{64}$ ]]
+
+          opencode_version=$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
+            HOME=/var/lib/kelion-codex \
+            XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+            PATH=/opt/private-ai/bin:/usr/bin:/bin \
+            /opt/private-ai/bin/opencode --version)
+          [ "$opencode_version" = "$expected_opencode_version" ]
+          root_identity=$(runuser -u kelion-codex -- env -i \
+            PATH=/usr/bin:/bin /usr/bin/sudo -n -u root -- /usr/bin/id -u)
+          [ "$root_identity" = 0 ]
+          runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i PATH=/usr/bin:/bin \
+            /usr/bin/node "$installed_worker" --self-test >/dev/null
+
+          [ "$(systemctl show kelion-codex-worker.service -p ActiveState --value)" = activating ]
+          [ "$(systemctl show kelion-codex-worker.service -p SubState --value)" = start ]
+          [ "$(systemctl show kelion-codex-worker.service -p MainPID --value)" = "$main_pid" ]
+          [ "$(systemctl show kelion-codex-worker.service -p InvocationID --value)" = "$worker_invocation_id" ]
+          [ -r "/proc/$main_pid/cmdline" ]
+          mapfile -d '' -t worker_argv < "/proc/$main_pid/cmdline"
+          [ "${worker_argv[0]}" = /usr/bin/node ]
+          [ "${worker_argv[1]}" = /opt/kelion-codex/codex-worker.mjs ]
+          [ "${worker_argv[2]}" = --once ]
+
+          upstream=/root/kelion/proxy/upstream/kelion-upstream.caddy
+          [ -f "$upstream" ] && [ ! -L "$upstream" ]
+          case "$(cat "$upstream")" in
+            $'reverse_proxy app-blue:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}') active_slot=blue ;;
+            $'reverse_proxy app-green:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}') active_slot=green ;;
+            *) printf '%s\n' 'Slotul activ nu poate fi determinat canonic.' >&2; exit 1 ;;
+          esac
+          mapfile -t app_containers < <(docker ps \
+            --filter 'label=com.kelion.managed=true' \
+            --filter 'label=com.kelion.role=app' \
+            --filter "label=com.kelion.slot=$active_slot" \
+            --format '{{.ID}}')
+          [ "${#app_containers[@]}" -eq 1 ]
+          app_container=${app_containers[0]}
+          [ "$(docker inspect --format '{{.State.Running}}' "$app_container")" = true ]
+          [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$app_container")" = healthy ]
+
+          # Singura citire a cozii se execută într-o tranzacție PostgreSQL
+          # READ ONLY din containerul live. Nu apelăm endpointul de claim și nu
+          # introducem vreun job diagnostic.
+          queue_evidence=$(docker exec -i "$app_container" \
+            node --input-type=module - "$proof_job_id" <<'NODE'
+          import { readFileSync } from 'node:fs'
+          import { createRequire } from 'node:module'
+
+          const jobId = process.argv[2] ?? ''
+          if (!/^[1-9][0-9]{0,18}$/.test(jobId)) process.exit(2)
+          const databaseUrl = readFileSync('/run/secrets/database-url', 'utf8')
+          if (!databaseUrl.endsWith('\n') || databaseUrl.slice(0, -1).includes('\n') || databaseUrl.includes('\r')) process.exit(3)
+          const require = createRequire('/app/backend/package.json')
+          const { Client } = require('pg')
+          const client = new Client({
+            connectionString: databaseUrl.slice(0, -1),
+            connectionTimeoutMillis: 10_000,
+            statement_timeout: 10_000,
+            application_name: 'kelion-local-constructor-read-only-proof',
+          })
+          await client.connect()
+          try {
+            await client.query('BEGIN TRANSACTION READ ONLY')
+            await client.query("SET LOCAL statement_timeout = '10s'")
+            const result = await client.query(`
+              SELECT b.id::text AS "jobId", b.status,
+                     b.constructor_stage AS stage,
+                     b.codex_task_id AS "taskId",
+                     b.attempts::integer,
+                     b.execution_cycle::integer AS "executionCycle",
+                     b.updated_at AS "updatedAt",
+                     b.progress = 'OpenCode/Qwen local execută ordinul cu acces complet la host'
+                       AS "openCodePhase",
+                     b.branch, b.pr_url AS "prUrl", b.commit_sha AS commit,
+                     b.live_version AS "liveVersion",
+                     (SELECT count(*)::integer
+                        FROM constructor_activity_events e
+                       WHERE e.job_id=b.id
+                         AND e.execution_cycle=b.execution_cycle
+                         AND e.activity_key='claimed') AS "claimedEvents",
+                     (SELECT count(*)::integer FROM build_jobs
+                       WHERE status='running') AS "runningJobs",
+                     EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=b.id)
+                       AS "pipelineExists"
+                FROM build_jobs b
+               WHERE b.id=$1::bigint AND b.arhivat=false
+            `, [jobId])
+            const heartbeatResult = await client.query(`
+              SELECT value, updated_at AS "storedAt", clock_timestamp() AS "dbNow"
+                FROM kv_state WHERE key='codex_worker_status_v1'
+            `)
+            await client.query('COMMIT')
+            const row = result.rows[0]
+            const heartbeatRow = heartbeatResult.rows[0]
+            if (!row || !heartbeatRow) process.exit(4)
+            if (row.status !== 'running' || !['accepted', 'working'].includes(row.stage)) process.exit(5)
+            if (!/^codex-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(row.taskId ?? '')) process.exit(6)
+            if (!Number.isInteger(row.attempts) || row.attempts < 1
+              || !Number.isInteger(row.executionCycle) || row.executionCycle < 0
+              || !Number.isInteger(row.claimedEvents) || row.claimedEvents < 1
+              || row.runningJobs !== 1) process.exit(7)
+            if (row.openCodePhase !== true || row.pipelineExists !== false) process.exit(8)
+            if ([row.branch, row.prUrl, row.commit, row.liveVersion].some((value) => value !== null)) process.exit(9)
+
+            let heartbeat
+            try { heartbeat = JSON.parse(heartbeatRow.value) } catch { process.exit(10) }
+            if (!heartbeat || typeof heartbeat !== 'object' || Array.isArray(heartbeat)) process.exit(11)
+            const allowedHeartbeatKeys = new Set(['status', 'at', 'taskUrl', 'detail', 'internalCostUsdMicros'])
+            if (Object.keys(heartbeat).some((key) => !allowedHeartbeatKeys.has(key)) || heartbeat.status !== 'busy') process.exit(12)
+            const heartbeatAt = Date.parse(heartbeat.at)
+            const dbNow = new Date(heartbeatRow.dbNow).getTime()
+            const jobUpdatedAt = new Date(row.updatedAt).getTime()
+            const storedAt = new Date(heartbeatRow.storedAt).getTime()
+            if (!Number.isFinite(heartbeatAt) || new Date(heartbeatAt).toISOString() !== heartbeat.at
+              || !Number.isFinite(dbNow) || !Number.isFinite(jobUpdatedAt) || !Number.isFinite(storedAt)) process.exit(13)
+            const heartbeatAgeMs = dbNow - heartbeatAt
+            const jobAgeMs = dbNow - jobUpdatedAt
+            if (heartbeatAgeMs < -30_000 || heartbeatAgeMs > 180_000
+              || jobAgeMs < -30_000 || jobAgeMs > 180_000
+              || Math.abs(storedAt - heartbeatAt) > 10_000) process.exit(14)
+
+            process.stdout.write(JSON.stringify({
+              schema: 1,
+              kind: 'kelion-local-constructor-claim-proof',
+              measuredAt: new Date(dbNow).toISOString(),
+              queue: 'build_jobs',
+              jobId: row.jobId,
+              taskId: row.taskId,
+              executionCycle: row.executionCycle,
+              stage: row.stage,
+              claimedEvents: row.claimedEvents,
+              heartbeat: 'busy',
+              heartbeatAt: heartbeat.at,
+              executor: 'opencode-local-qwen',
+              publicationSideEffects: false,
+            }))
+          } catch (error) {
+            await client.query('ROLLBACK').catch(() => undefined)
+            throw error
+          } finally {
+            await client.end()
+          }
+          NODE
+          )
+          printf '%s' "$queue_evidence" | jq -e \
+            --arg job "$proof_job_id" \
+            '.schema == 1 and .queue == "build_jobs" and .jobId == $job and
+             .executor == "opencode-local-qwen" and .publicationSideEffects == false' \
+            >/dev/null
+
+          task_id=$(printf '%s' "$queue_evidence" | jq -er '.taskId')
+          state_dir="/var/lib/kelion-codex/jobs/${task_id}-${proof_job_id}"
+          [ -d "$state_dir" ] && [ ! -L "$state_dir" ]
+          job_receipt="$state_dir/job.json"
+          [ -f "$job_receipt" ] && [ ! -L "$job_receipt" ]
+          [ "$(stat -Lc '%U:%G:%a:%h' "$job_receipt")" = 'kelion-codex:kelion-codex:600:1' ]
+          jq -e --arg job "$proof_job_id" --arg task "$task_id" '
+            (keys | sort) == ["baseCommit", "createdAt", "executor", "jobId", "taskId"] and
+            .jobId == $job and .taskId == $task and
+            .executor == "opencode-local-qwen" and
+            (.baseCommit | test("^[0-9a-f]{40}$")) and
+            (.createdAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+          ' "$job_receipt" >/dev/null
+
+          [ "$(systemctl show kelion-codex-worker.service -p ActiveState --value)" = activating ]
+          [ "$(systemctl show kelion-codex-worker.service -p SubState --value)" = start ]
+          [ "$(systemctl show kelion-codex-worker.service -p MainPID --value)" = "$main_pid" ]
+          [ "$(systemctl show kelion-codex-worker.service -p InvocationID --value)" = "$worker_invocation_id" ]
+          control_group=$(systemctl show kelion-codex-worker.service -p ControlGroup --value)
+          [[ "$control_group" == /system.slice/* ]]
+          [ -r "/sys/fs/cgroup${control_group}/cgroup.procs" ]
+          opencode_process=0
+          while IFS= read -r pid; do
+            [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+            if [ "$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)" = /opt/private-ai/bin/opencode ]; then
+              opencode_process=1
+            fi
+          done < "/sys/fs/cgroup${control_group}/cgroup.procs"
+          [ "$opencode_process" -eq 1 ]
+
+          queue_receipt_sha=$(printf '%s' "$queue_evidence" | jq -cS . | sha256sum | awk '{print $1}')
+          [[ "$queue_receipt_sha" =~ ^[0-9a-f]{64}$ ]]
+          printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
+          printf 'BASE_RECEIPT_SHA256=%s\n' "$base_receipt_sha"
+          printf 'FINAL_RECEIPT_SHA256=%s\n' "$final_receipt_sha"
+          printf 'WORKER_SHA256=%s\n' "$expected_worker_sha"
+          printf 'QUEUE_RECEIPT_SHA256=%s\n' "$queue_receipt_sha"
+          printf 'JOB_ID=%s\n' "$proof_job_id"
+          printf 'QUEUE=build_jobs\n'
+          printf 'EXECUTOR=opencode-local-qwen\n'
+          printf 'HEARTBEAT_AND_CLAIM_VERIFIED=yes\n'
+          printf 'PUBLICATION_SIDE_EFFECTS=absent_at_measurement\n'
+          printf 'LOCAL_CONSTRUCTOR_PROOF=verified\n'
+          REMOTE
+          )
+
+          printf '%s\n' "$proof"
+          {
+            printf '%s\n' '### Constructor local — dovadă de producție'
+            printf '%s\n' 'Workflow-ul a observat un ordin pilot deja existent; nu a creat, revendicat, publicat sau lansat niciun serviciu.'
+            printf '%s\n' '```text'
+            printf '%s\n' "$proof"
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"

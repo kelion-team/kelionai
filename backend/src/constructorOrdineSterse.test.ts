@@ -20,6 +20,7 @@ vi.mock('./config.js', () => ({
 }))
 
 const {
+  advanceCodexBuildJob,
   archiveBuildJobsByScope,
   cancelBuildJob,
   deleteBuildJob,
@@ -225,7 +226,15 @@ describe('controalele țintite păstrează tranziția canonică', () => {
 
   it('anularea persistă statusul, etapa, progresul și desprinde taskul workerului', async () => {
     const running = await snapshot(2)
+    const oldTaskId = 'codex-123e4567-e89b-42d3-a456-426614174000'
     await expect(cancelBuildJob(2, running)).resolves.toEqual({ ok: true })
+    await expect(database.query<{ status: string; constructor_stage: string; progress: string; codex_task_id: string | null }>(
+      'SELECT status, constructor_stage, progress, codex_task_id FROM build_jobs WHERE id=2',
+    )).resolves.toMatchObject({
+      rows: [{ status: 'cancelled', constructor_stage: 'cancelled', progress: 'cancelled_by_admin', codex_task_id: null }],
+    })
+    await expect(advanceCodexBuildJob(2, oldTaskId, { event: 'progress', progress: 'late-after-cancel' }))
+      .resolves.toBeNull()
     await expect(database.query<{ status: string; constructor_stage: string; progress: string; codex_task_id: string | null }>(
       'SELECT status, constructor_stage, progress, codex_task_id FROM build_jobs WHERE id=2',
     )).resolves.toMatchObject({

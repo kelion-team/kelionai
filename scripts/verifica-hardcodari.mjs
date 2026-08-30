@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 
 const RADACINA = fileURLToPath(new URL('..', import.meta.url))
 const EXTENSII = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.sh', '.py', '.rs', '.java', '.toml'])
-const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/']
+const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/', 'constructor-desktop/']
 const CONFIG_CENTRAL = new Set([
   'config/product.json',
   'backend/.env.example',

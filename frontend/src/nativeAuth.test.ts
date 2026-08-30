@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nativeCallbackParameters, validateNativeAuthorizeUrl } from './lib/nativeAuth'
+import { nativeCallbackParameters, usesTauriSecureStore, validateNativeAuthorizeUrl } from './lib/nativeAuth'
 
 const token = 'A'.repeat(43)
 const state = 'B'.repeat(32)
@@ -11,10 +11,19 @@ describe('native auth protocol boundary', () => {
     expect(() => validateNativeAuthorizeUrl(`https://kelionai.app/auth/native/authorize?request=${token}&next=https://evil.test`)).toThrow(/invalid/)
   })
 
-  it('separă strict callbackurile iOS și desktop și refuză parametri suplimentari', () => {
+  it('separă strict callbackurile iOS, Kelion desktop și Constructor desktop', () => {
     expect(nativeCallbackParameters(`https://kelionai.app/auth/native/complete?code=${token}&state=${state}`, 'ios')).toEqual({ code: token, state })
     expect(nativeCallbackParameters(`kelionai://auth/native/complete?code=${token}&state=${state}`, 'desktop')).toEqual({ code: token, state })
     expect(nativeCallbackParameters(`kelionai://auth/native/complete?code=${token}&state=${state}&token=leak`, 'desktop')).toBeNull()
     expect(nativeCallbackParameters(`https://kelionai.app/auth/native/complete?code=${token}&state=${state}`, 'desktop')).toBeNull()
+    expect(nativeCallbackParameters(`kelion-constructor://auth/native/complete?code=${token}&state=${state}`, 'constructor-desktop')).toEqual({ code: token, state })
+    expect(nativeCallbackParameters(`kelionai://auth/native/complete?code=${token}&state=${state}`, 'constructor-desktop')).toBeNull()
+  })
+
+  it('folosește același secure store Tauri pentru ambele aplicații desktop', () => {
+    expect(usesTauriSecureStore('desktop')).toBe(true)
+    expect(usesTauriSecureStore('constructor-desktop')).toBe(true)
+    expect(usesTauriSecureStore('ios')).toBe(false)
+    expect(usesTauriSecureStore(null)).toBe(false)
   })
 })

@@ -1,0 +1,138 @@
+name: constructor-desktop-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Commitul integral, deja verde pe master
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: constructor-desktop-release
+  cancel-in-progress: false
+
+jobs:
+  package-windows:
+    if: >-
+      github.repository == 'kelion-team/kelionai' &&
+      github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verifică sursa master și CI-ul exact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'release_sha invalid' }
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'checkout diferit de release_sha' }
+          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
+          if ($master -ne $env:RELEASE_SHA) { throw 'release_sha nu este capul master' }
+          $success = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&status=completed&per_page=20" --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+          if ([int]$success -lt 1) { throw 'Commitul nu are pr-verify verde.' }
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            constructor-desktop/package-lock.json
+
+      - name: Instalează toolchain-ul Rust fixat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustc --version
+          cargo --version
+
+      - name: Verifică autentificarea și contractul aceleiași cozi
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm --prefix backend ci --no-audit --no-fund
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix constructor-desktop ci --no-audit --no-fund
+          npm --prefix backend run typecheck
+          npm --prefix backend test -- src/nativeAuthSecurity.test.ts
+          npm --prefix frontend test -- src/nativeAuth.test.ts src/constructorDesktopContract.test.ts
+          node scripts/verifica-clienti-nativi.mjs
+
+      - name: Construiește instalatoarele Windows MSI și NSIS
+        shell: pwsh
+        run: npm --prefix constructor-desktop run build
+
+      - name: Verifică pachetele și scrie manifestul măsurat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $nsis = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)
+          $msi = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/msi' -Filter '*.msi' -File)
+          if ($nsis.Count -ne 1) { throw "Așteptat un NSIS, găsite $($nsis.Count)" }
+          if ($msi.Count -ne 1) { throw "Așteptat un MSI, găsite $($msi.Count)" }
+          7z t $nsis[0].FullName | Out-Null
+          $extract = Join-Path $env:RUNNER_TEMP 'constructor-msi-extract'
+          $process = Start-Process msiexec.exe -ArgumentList @('/a', $msi[0].FullName, '/qn', "TARGETDIR=$extract") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Validarea MSI a eșuat: $($process.ExitCode)" }
+          if (-not (Get-ChildItem $extract -Recurse -Filter '*.exe')) { throw 'MSI-ul nu conține executabilul Constructor.' }
+          New-Item -ItemType Directory -Force 'constructor-desktop/artifact' | Out-Null
+          Copy-Item $nsis[0].FullName 'constructor-desktop/artifact/'
+          Copy-Item $msi[0].FullName 'constructor-desktop/artifact/'
+          $files = Get-ChildItem 'constructor-desktop/artifact/*' | Sort-Object Name
+          $manifest = [ordered]@{
+            schema = 1
+            product = 'Kelion Constructor'
+            commit = $env:RELEASE_SHA
+            api = (Get-Content 'config/product.json' | ConvertFrom-Json).publicAppOrigin
+            queueEndpoint = '/api/admin/constructor'
+            packages = @($files | ForEach-Object {
+              [ordered]@{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content 'constructor-desktop/artifact/manifest.json' -Encoding utf8
+          if ($manifest.packages.Count -ne 2) { throw 'Manifestul nu conține ambele pachete.' }
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Semnează proveniența fiecărui pachet
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $packages = @(Get-ChildItem 'constructor-desktop/artifact' -File | Where-Object { $_.Extension -in '.exe', '.msi' })
+          if ($packages.Count -ne 2) { throw "Așteptate două pachete pentru semnare, găsite $($packages.Count)" }
+          $packages | ForEach-Object {
+            cosign sign-blob --yes --bundle "$($_.FullName).sigstore.json" $_.FullName
+          }
+          $signatures = @(Get-ChildItem 'constructor-desktop/artifact' -Filter '*.sigstore.json' -File)
+          if ($signatures.Count -ne 2) { throw "Așteptate două dovezi Sigstore, găsite $($signatures.Count)" }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kelion-constructor-windows-${{ inputs.release_sha }}
+          path: constructor-desktop/artifact/
+          if-no-files-found: error
+          retention-days: 30

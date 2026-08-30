@@ -908,7 +908,7 @@ export async function getOrCreateClientStorageId(email: string): Promise<string>
   return r.rows[0].storage_id
 }
 
-export type NativePlatform = 'ios' | 'desktop'
+export type NativePlatform = 'ios' | 'desktop' | 'constructor-desktop'
 
 export interface NativeAuthRequestRecord {
   id: string
@@ -946,9 +946,14 @@ export async function createNativeAuthRequest(input: {
 
 function nativeAuthRecord(row: Record<string, unknown> | undefined): NativeAuthRequestRecord | null {
   if (!row) return null
+  const platform = row.platform === 'ios'
+    ? 'ios'
+    : row.platform === 'constructor-desktop'
+      ? 'constructor-desktop'
+      : 'desktop'
   return {
     id: String(row.id),
-    platform: row.platform === 'ios' ? 'ios' : 'desktop',
+    platform,
     installId: String(row.install_id),
     clientState: String(row.client_state),
     clientCodeChallenge: String(row.client_code_challenge),
