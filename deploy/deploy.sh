@@ -1750,8 +1750,40 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
   [ -f "$gate_recovery_journal" ] && [ ! -L "$gate_recovery_journal" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_journal")" = '0:0:600' ] \
     || die 'jurnalul gate existent este nesigur'
-  gate_recovery_root=$(jq -er 'select(.schema == 1 and (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
+  gate_recovery_root=$(jq -er 'select(
+    (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+    .schema == 1 and (.commit | strings | test("^[0-9a-f]{40}$")) and
+    (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and
+    (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
     || die 'jurnalul gate existent este invalid'
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul gate nu are outer journal canonic pentru owner'
+  gate_recovery_owner_request_id=$(jq -er '
+    select((keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+      "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema",
+      "targetGateSha256"] | sort) and
+      .schema == 2 and .phase == "gate-prepared" and
+      (.requestId | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) and
+      (.commit | strings | test("^[0-9a-f]{40}$")) and
+      (.activeBefore | strings | test("^([0-9a-f]{40}|legacy)$")) and
+      (.activeVersionBefore | strings | test("^[0-9a-f]{7,40}$")) and
+      (.legacyContainers | type == "array") and (.legacyRestartPolicies | type == "object") and
+      (.proxyIntent | type == "object") and
+      (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.gateSha256.worker,.gateSha256.publisher,.gateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent"))) and
+      (.targetGateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.targetGateSha256.worker,.targetGateSha256.publisher,.targetGateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent")))) | .requestId
+  ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica requestul owner'
+  gate_recovery_owner_commit=$(jq -er '.commit' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica commitul owner'
+  [ "$gate_recovery_owner_request_id" = "$KELION_RELEASE_REQUEST_ID" ] \
+    && [ "$gate_recovery_owner_commit" = "$COMMIT_SHA" ] \
+    && [ "$(jq -er '.commit' "$gate_recovery_journal")" = "$gate_recovery_owner_commit" ] \
+    || die 'tupla ownerului gate nu corespunde outer/gate/current release'
   [ -d "$gate_recovery_root" ] && [ ! -L "$gate_recovery_root" ] \
     && [ "$(realpath -e -- "$gate_recovery_root")" = "$gate_recovery_root" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root")" = '0:0:700' ] \
@@ -1766,7 +1798,10 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root/recovery-compose.yml")" = '0:0:444' ] \
     || die 'compose-ul jurnalizat pentru gate este nesigur'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$gate_recovery_owner_request_id" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$gate_recovery_owner_commit" \
+    "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
     || die 'recovery-ul gate jurnalizat a eșuat'
   exec 9>&-
 fi
@@ -1777,7 +1812,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=4730d9f189770fafd23b4dec1807e889a62bbe357fc8e8b3f153e216bf71eaad
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
 
 validate_compatible_activation_blocker() {
   local blocker=$1
@@ -4282,7 +4317,10 @@ refresh_constructor_gate() (
         && [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
         && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ]; then
         exec 9>&8
-        if KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
+        if KELION_CUTOVER_LOCK_HELD=1 \
+          KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+          KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+          "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
           config_consistent=1
           journal_written=0
         else
@@ -4436,7 +4474,10 @@ refresh_constructor_gate() (
     && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
     || die 'compose-ul persistent de recovery gate lipsește sau are ACL invalid'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
   exec 9>&-
   journal_written=0
   assert_constructor_env_value "$worker_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
