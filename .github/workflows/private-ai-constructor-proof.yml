@@ -268,7 +268,7 @@ jobs:
             ($config.provider["llama.cpp"].options | has("apiKey") | not) and
             (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
               "webfetch", "websearch", "external_directory"]
-             | all(. as $permission; $config.permission[$permission] == "allow"))
+             | all(.[]; $config.permission[.] == "allow"))
           ' "$opencode_config" >/dev/null
 
           final_receipt=/etc/private-ai/.constructor-finalized
