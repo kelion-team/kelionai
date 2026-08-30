@@ -197,7 +197,12 @@ async function snapshot(number) {
     pr,
     prNodeId: reviews.prNodeId,
     files,
-    scopeValid: isMonitoredScope(fileEntries),
+    scopeValid: isMonitoredScope(fileEntries, {
+      prNumber: pr.number,
+      repository,
+      headRepo: pr.head.repo?.full_name ?? '',
+      headRef: pr.head.ref,
+    }),
     draft: pr.draft,
     mergeable: pr.mergeable,
     mergeableState: pr.mergeable_state,

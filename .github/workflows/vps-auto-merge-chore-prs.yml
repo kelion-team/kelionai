@@ -52,6 +52,9 @@ jobs:
           [ "$(jq -r '.draft' <<<"$pr")" = false ]
           head_ref=$(jq -r '.head.ref' <<<"$pr")
           head_repo=$(jq -r '.head.repo.full_name // ""' <<<"$pr")
+          readonly openai_unified_pr_number=1538 # hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
+          readonly openai_unified_repository=kelion-team/kelionai # hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
+          readonly openai_unified_branch=chore/openai-unified-credentials-20260830
 
           allowed='[
             ".github/workflows/deploy.yml",
@@ -139,8 +142,10 @@ jobs:
           if [ "$is_vps" = true ]; then
             [[ "$head_ref" == chore/* ]]
             openai_unified_exception=false
-            if [ "$head_repo" = "$GITHUB_REPOSITORY" ] \
-              && [ "$head_ref" = chore/openai-unified-credentials-20260830 ] \
+            if [ "$pr_number" = "$openai_unified_pr_number" ] \
+              && [ "$GITHUB_REPOSITORY" = "$openai_unified_repository" ] \
+              && [ "$head_repo" = "$openai_unified_repository" ] \
+              && [ "$head_ref" = "$openai_unified_branch" ] \
               && jq -e --argjson expected "$openai_unified_once" '
                 length == ($expected | length) and
                 length == (unique | length) and
