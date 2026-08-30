@@ -132,8 +132,13 @@ jobs:
           ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:18080'
           ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:14096'
           curl --fail --silent --max-time 10 http://127.0.0.1:18080/health >/dev/null
-          curl --fail --silent --max-time 10 http://127.0.0.1:14096/global/health \
+          . /etc/private-ai/opencode.env
+          [ -n "${OPENCODE_SERVER_USERNAME:-}" ] && [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]
+          printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" \
+            | curl --config - --fail --silent --max-time 10 \
+            http://127.0.0.1:14096/global/health \
             | jq -e '.healthy == true' >/dev/null
+          unset OPENCODE_SERVER_PASSWORD
           runuser -u privateai -- env -i \
             HOME=/srv/private-ai/home \
             PATH=/usr/local/bin:/usr/bin:/bin \
