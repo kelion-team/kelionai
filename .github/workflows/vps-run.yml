@@ -74,18 +74,16 @@ jobs:
       VPS_USER: ${{ vars.VPS_USER }}
       VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      REPO_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - name: Instalează și verifică agentul AI privat
+      - name: Instalează și verifică AI privat independent
         run: |
           set -Eeuo pipefail
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
-          [ "${#REPO_TOKEN}" -ge 32 ]
           installer=.github/private-ai/install-private-ai.sh
           [ -f "$installer" ] && bash -n "$installer"
 
@@ -122,11 +120,30 @@ jobs:
           fi
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f -- '$remote_installer'"
 
-          printf '%s\n' "$REPO_TOKEN" \
-            | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" /opt/private-ai/bin/configure-kelion-access
 
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
           set -Eeuo pipefail
+          # Keep the private AI runtime independent from Kelion.
+          if [ -e /srv/private-ai/workspace/kelionai ]; then
+            [ -d /srv/private-ai/workspace/kelionai/.git ] || { echo 'Refusing to delete an unverified workspace path.' >&2; exit 1; }
+            origin=$(runuser -u privateai -- git -C /srv/private-ai/workspace/kelionai config --get remote.origin.url 2>/dev/null || true)
+            case "$origin" in
+              *github.com/kelion-team/kelionai*) ;;
+              *) echo 'Refusing to delete a workspace with an unexpected origin.' >&2; exit 1 ;;
+            esac
+            rm -rf -- /srv/private-ai/workspace/kelionai
+          fi
+          rm -f -- /opt/private-ai/bin/configure-kelion-access
+          rm -f -- /srv/private-ai/home/.git-credentials /srv/private-ai/home/.netrc
+          rm -rf -- /srv/private-ai/home/.ssh
+          runuser -u privateai -- git config --global --unset-all credential.helper >/dev/null 2>&1 || true
+          runuser -u privateai -- git config --global --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+          if runuser -u privateai -- git config --global --name-only --get-regexp '(credential|extraheader|insteadof)' 2>/dev/null | grep -q .; then
+            echo 'A forbidden global Git credential rule remains.' >&2
+            exit 1
+          fi
+          chown -R privateai:privateai /srv/private-ai/home /srv/private-ai/workspace
+
           systemctl is-active --quiet private-ai-llm.service
           systemctl is-active --quiet private-ai-web.service
           ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
@@ -138,11 +155,37 @@ jobs:
             | curl --config - --fail --silent --max-time 10 \
             http://127.0.0.1:24096/global/health \
             | jq -e '.healthy == true' >/dev/null
-          unset OPENCODE_SERVER_PASSWORD
-          runuser -u privateai -- env -i \
-            HOME=/srv/private-ai/home \
-            PATH=/usr/local/bin:/usr/bin:/bin \
-            git -C /srv/private-ai/workspace/kelionai ls-remote --exit-code origin HEAD >/dev/null
+          [ ! -e /srv/private-ai/workspace/kelionai ]
+          [ ! -e /opt/private-ai/bin/configure-kelion-access ]
+          ! systemctl cat private-ai-llm.service private-ai-web.service | grep -qi kelion
+          forbidden='(KELION|CONSTRUCTOR_SYNC_GITHUB_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|GEMINI_API_KEY|AZURE_OPENAI_API_KEY|AWS_ACCESS_KEY_ID|OPENROUTER_API_KEY|GROQ_API_KEY|MISTRAL_API_KEY|COHERE_API_KEY|DEEPSEEK_API_KEY|XAI_API_KEY|TOGETHER_API_KEY|FIREWORKS_API_KEY|x-access-token|github_pat_|ghp_)'
+          if grep -RIlE "$forbidden" /etc/private-ai /srv/private-ai/home 2>/dev/null | grep -q .; then
+            echo 'Forbidden external-provider or Kelion credential material remains.' >&2
+            exit 1
+          fi
+          for unit in private-ai-llm.service private-ai-web.service; do
+            p=$(systemctl show "$unit" -p MainPID --value)
+            [ "$p" -gt 1 ]
+            if tr '\0' '\n' < "/proc/$p/environ" | cut -d= -f1 | grep -Eq "$forbidden"; then
+              echo "Forbidden environment name in $unit." >&2
+              exit 1
+            fi
+          done
+          model_id=$(curl --fail --silent --max-time 30 http://127.0.0.1:24080/v1/models | jq -er '.data | select(type=="array" and length==1) | .[0].id')
+          request=$(jq -cn --arg model "$model_id" '{model:$model,messages:[{role:"user",content:"Reply exactly: LLAMA_OK"}],chat_template_kwargs:{enable_thinking:false},max_tokens:32,temperature:0.7}')
+          curl --fail --silent --max-time 600 http://127.0.0.1:24080/v1/chat/completions -H 'Content-Type: application/json' -d "$request" | jq -e '.choices[0].message.content | contains("LLAMA_OK")' >/dev/null
+          tool_request=$(jq -cn --arg model "$model_id" '{model:$model,messages:[{role:"user",content:"Call health_probe exactly once with value OK. Do not answer in text."}],tools:[{type:"function",function:{name:"health_probe",description:"Local health probe",parameters:{type:"object",properties:{value:{type:"string"}},required:["value"]}}}],tool_choice:"required",chat_template_kwargs:{enable_thinking:false},max_tokens:256,temperature:0.7}')
+          curl --fail --silent --max-time 600 http://127.0.0.1:24080/v1/chat/completions -H 'Content-Type: application/json' -d "$tool_request" | jq -e '.choices[0].message.tool_calls[0].function.name=="health_probe"' >/dev/null
+          auth_config=$(mktemp)
+          trap 'rm -f -- "$auth_config"' EXIT
+          printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" > "$auth_config"
+          chmod 0600 "$auth_config"
+          oc_config=$(curl --config "$auth_config" --fail --silent --max-time 30 http://127.0.0.1:24096/config)
+          printf '%s' "$oc_config" | jq -e '(.enabled_providers | type=="array" and length==1)' >/dev/null
+          local_id=$(printf '%s' "$oc_config" | jq -er '.enabled_providers[0]')
+          printf '%s' "$oc_config" | jq -e --arg id "$local_id" --arg model "$model_id" '(.provider[$id].npm=="@ai-sdk/openai-compatible") and (.provider[$id].options.baseURL | test("^http://127\\.0\\.0\\.1:24080/v1/?$")) and (.model==($id+"/"+$model)) and ((.small_model // .model)==($id+"/"+$model))' >/dev/null
+          unset OPENCODE_SERVER_PASSWORD oc_config
+
           printf '%s\n' PRIVATE_AI_INSTALLATION_VERIFIED
           REMOTE
 
