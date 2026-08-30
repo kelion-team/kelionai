@@ -521,9 +521,10 @@ start_and_verify() {
   local response
   response=$(curl --fail --silent --show-error --max-time 600 \
     -H 'Content-Type: application/json' \
-    -d '{"model":"qwen3.6-35b-a3b-local","messages":[{"role":"user","content":"Reply only with OK."}],"max_tokens":8,"temperature":0}' \
+    -d '{"model":"qwen3.6-35b-a3b-local","messages":[{"role":"user","content":"Reply only with OK."}],"chat_template_kwargs":{"enable_thinking":false},"max_tokens":32,"temperature":0}' \
     "http://127.0.0.1:${LLAMA_PORT}/v1/chat/completions")
-  printf '%s' "$response" | jq -e '.choices[0].message.content | length > 0' >/dev/null
+  printf '%s' "$response" \
+    | jq -e '.choices[0].message.content | type == "string" and contains("OK")' >/dev/null
 
   (
     cd "$PRIVATE_AI_WORKSPACE"
