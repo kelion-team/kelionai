@@ -58,6 +58,7 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['deploy/upgrade-constructor.sh']), true)
   assert.equal(isMonitoredScope(['deploy/RUNBOOKS.md']), true)
   assert.equal(isMonitoredScope(['deploy/deploy.sh']), true)
+  assert.equal(isMonitoredScope(['deploy/instaleaza-constructor.sh']), true)
   assert.equal(isMonitoredScope(['deploy/lib/constructor-publication.test.mjs']), true)
   assert.equal(isMonitoredScope(['deploy/lib/runtime-config-cutover.sh']), true)
   assert.equal(isMonitoredScope(['docs/operations/CURRENT.md']), true)
@@ -67,6 +68,7 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
     'deploy/upgrade-constructor.sh',
     'deploy/RUNBOOKS.md',
     'deploy/deploy.sh',
+    'deploy/instaleaza-constructor.sh',
     'deploy/lib/constructor-publication.test.mjs',
     'deploy/lib/runtime-config-cutover.sh',
   ]), true)
@@ -85,6 +87,7 @@ test('workflow-ul merge-policy păstrează allowlist-ul canonic fără excepții
   assert.equal(new Set(allowed).size, allowed.length)
   assert.equal(allowed.includes('deploy/upgrade-constructor.sh'), true)
   assert.equal(allowed.includes('deploy/RUNBOOKS.md'), true)
+  assert.equal(allowed.includes('deploy/instaleaza-constructor.sh'), true)
   assert.equal(allowed.includes('deploy/lib/constructor-publication.test.mjs'), true)
   assert.equal(allowed.includes('deploy/lib/runtime-config-cutover.sh'), true)
   assert.equal(allowed.includes('docs/operations/CURRENT.md'), true)
