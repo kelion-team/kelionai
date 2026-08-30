@@ -1223,18 +1223,22 @@ jobs:
                 printf '%s=disabled\n' "$marker"
               fi
             done
-            codex_auth_status=$(runuser -u kelion-codex -- env -i \
+            codex_auth_status=''
+            if codex_auth_status=$(runuser -u kelion-codex -- env -i \
               HOME=/var/lib/kelion-codex-auth \
               CODEX_HOME=/var/lib/kelion-codex-auth \
               PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
               /opt/kelion-codex/bin/codex \
               -c 'forced_login_method="api"' \
               -c 'cli_auth_credentials_store="file"' \
-              login status 2>/dev/null || :)
-            case "$codex_auth_status" in
-              'Logged in using an API key - sk-proj-'*) echo 'codex-auth=ready' ;;
-              *) echo 'codex-auth=required' ;;
-            esac
+              login status 2>&1) \
+              && [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -eq 1 ] \
+              && LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"; then
+              echo 'codex-auth=ready'
+            else
+              echo 'codex-auth=required'
+            fi
+            codex_auth_status=''
             assert_backend_side_effects_active
           }
           case "$operation" in

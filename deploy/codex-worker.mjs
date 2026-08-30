@@ -347,20 +347,24 @@ export function isCodexProjectKeyStatus(value) {
   return logicalLength > API_LOGIN_STATUS_PREFIX.length
 }
 
+export function codexProjectKeyStatusResultReady(result) {
+  const output = Buffer.isBuffer(result?.stderr) ? result.stderr : Buffer.alloc(0)
+  try {
+    return !result?.error && result?.status === 0 && isCodexProjectKeyStatus(output)
+  } finally {
+    output.fill(0)
+  }
+}
+
 function codexProjectKeyStatusReady() {
   const result = spawnSync(CODEX_BIN, codexLoginStatusArgs(), {
     env: codexParentEnv(),
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'ignore', 'pipe'],
     timeout: 30_000,
     maxBuffer: 4 * 1024,
     windowsHide: true,
   })
-  const output = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.alloc(0)
-  try {
-    return !result.error && result.status === 0 && isCodexProjectKeyStatus(output)
-  } finally {
-    output.fill(0)
-  }
+  return codexProjectKeyStatusResultReady(result)
 }
 
 function cachedProjectKeyFingerprint() {
@@ -1216,6 +1220,20 @@ async function selfTest() {
   }
   if (isCodexProjectKeyStatus(Buffer.from('Logged in using ChatGPT\n', 'ascii'))) {
     fail('Statusul ChatGPT nu poate valida loginul API-key')
+  }
+  const stderrStatus = Buffer.from('Logged in using an API key - sk-proj-***xxxxx\n', 'ascii')
+  if (!codexProjectKeyStatusResultReady({ status: 0, stderr: stderrStatus })) {
+    fail('Statusul API-key emis de CLI pe stderr nu este recunoscut')
+  }
+  if (stderrStatus.some((byte) => byte !== 0)) {
+    fail('Receiptul statusului API-key nu este zeroizat după validare')
+  }
+  if (codexProjectKeyStatusResultReady({
+    status: 0,
+    stdout: Buffer.from('Logged in using an API key - sk-proj-***xxxxx\n', 'ascii'),
+    stderr: Buffer.alloc(0),
+  })) {
+    fail('Statusul API-key nu poate fi acceptat de pe canalul stdout greșit')
   }
   assertProjectKeyCredential(Buffer.from(`sk-proj-${'x'.repeat(32)}`, 'ascii'))
   for (const invalid of [

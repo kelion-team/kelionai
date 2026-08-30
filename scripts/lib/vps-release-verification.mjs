@@ -83,11 +83,11 @@ export function evaluateLiveSample(sample, commit) {
   const missing = []
   if (sample?.version?.status !== 200 || sample.version.body?.v !== expected) missing.push('live-version')
   const ready = sample?.ready?.body
-  if (sample?.ready?.status !== 200 || ready?.ready !== true || !ready?.checks || Object.values(ready.checks).some((value) => value !== true) || ready?.release?.candidate !== true || ready?.release?.sideEffectsActive !== true) missing.push('readiness')
+  if (sample?.ready?.status !== 200 || ready?.ready !== true || !ready?.checks || Object.values(ready.checks).some((value) => value !== true) || ready?.release?.candidate !== false || ready?.release?.sideEffectsActive !== true) missing.push('readiness')
   if (sample?.live?.status !== 200 || sample.live.body?.status !== 'alive') missing.push('liveness')
   if (sample?.health?.status !== 200 || sample.health.body?.status !== 'ok') missing.push('health')
   const proof = sample?.proof?.body
-  if (sample?.proof?.status !== 200 || proof?.ready !== true || proof?.release?.sideEffectsActive !== true || proof?.activeCommit !== commit) missing.push('release-proof')
+  if (sample?.proof?.status !== 200 || proof?.ready !== true || proof?.release?.candidate !== false || proof?.release?.sideEffectsActive !== true || proof?.activeCommit !== commit) missing.push('release-proof')
   return { ok: missing.length === 0, missing }
 }
 
