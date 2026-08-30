@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T20:18:00Z`
+Actualizat: `2026-08-30T05:39:53Z`
 
 ## Stare verificată
 
@@ -27,14 +27,25 @@ Actualizat: `2026-08-29T20:18:00Z`
   recovery/deploy reușit și la probele Codex CLI.
 - Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
   separată de release și Constructor.
+- Failul jobului `provision` (`actions/runs/33295132843/jobs/99213371892`)
+  a fost corelat cu validarea prea strictă a snapshoturilor
+  `constructor-activation.*`: helperul refuza sufixe legacy validate
+  root-only, ceea ce bloca `garbage_collect_activations`.
+- Corecția locală lărgește allowlist-ul de sufixe pentru snapshoturile
+  `constructor-activation.*` în helperul runtime și actualizează hash-urile
+  pin-uite pentru helperul compatibil (`deploy.sh` și
+  `instaleaza-constructor.sh`), împreună cu testul contractual aferent.
 
 ## Următorul pas sigur
 
-1. Rulează toate porțile PR pentru bootstrapul dublu pin-uit.
-2. Îmbină prin rebase numai pe verde și publică noul `master`.
-3. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
+1. Rulează din nou workflow-ul `provision-production-secrets` pe SHA-ul cu
+   fixul GC + hash pinning și confirmă că jobul `provision` trece.
+2. Rulează porțile PR pentru modificările curente și păstrează doar failurile
+   reproduse local (în prezent, un test existent cere dependența
+   `@electric-sql/pglite` absentă în sandboxul curent).
+3. Îmbină prin rebase numai pe verde și publică noul `master`.
+4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
    Constructor pentru starea timerelor și proba `codex --version`.
-4. Activează release-ul Constructor numai după worker/publisher sănătoase.
 
 ## Legături canonice
 

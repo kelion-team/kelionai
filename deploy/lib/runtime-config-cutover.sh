@@ -532,7 +532,7 @@ remove_transaction_dir() {
 
 remove_activation_dir() {
   local candidate=$1 canonical
-  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]] || return 1
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9._-]+$ ]] || return 1
   [ -d "$candidate" ] && [ ! -L "$candidate" ] || return 1
   canonical=$(realpath -e -- "$candidate") || return 1
   [ "$canonical" = "$candidate" ] || return 1
@@ -2495,7 +2495,7 @@ garbage_collect_activations() {
     # Recovery-ul quiesced păstrează intenționat jurnalul canonic. Globul
     # directorului îl include, dar el nu este un snapshot orfan.
     [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue
-    [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]] \
+    [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9._-]+$ ]] \
       && [ -d "$candidate" ] && [ ! -L "$candidate" ] \
       && [ "$(stat -c '%u:%g:%a' "$candidate")" = '0:0:700' ] || return 1
     canonical=$(realpath -e -- "$candidate") || return 1
