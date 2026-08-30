@@ -14,6 +14,21 @@ import { aiLabel } from './adminHelpers'
 
 // ── FINANCE tab ─────────────────────────────────────────────────────────────
 
+function providerCostsLabel(costs: Finance['providerOpenAI']['costs']): string {
+  if (costs.available && typeof costs.monthUsd === 'number' && Number.isFinite(costs.monthUsd) && costs.monthUsd >= 0) {
+    return `$${costs.monthUsd.toFixed(2)}`
+  }
+  return `⚠ indisponibil (${costs.available ? 'invalid_response' : costs.class})`
+}
+
+function providerUsageLabel(usage: Finance['providerOpenAI']['usage']): string {
+  const values = [usage.requests, usage.inputTokens, usage.outputTokens]
+  if (usage.available && values.every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) {
+    return values.map((value) => (value as number).toLocaleString('ro-RO')).join(' / ')
+  }
+  return `⚠ indisponibil (${usage.available ? 'invalid_response' : usage.class})`
+}
+
 export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: import('../../pages/Stage').BrainCredit | null }) {
   const A = adminStrings()
   const [finance, setFinance] = useState<Finance | null>(null)
@@ -102,6 +117,26 @@ export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: impo
               <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>⚠ Nu pot citi circuitul banilor (starea plăților, costul, autonomia) — citirea a eșuat.</span>
             </div>
           )}
+          <div className="admin-card">
+            <div className="admin-card-head">
+              OpenAI furnizor — {finance.providerOpenAI.scope === 'project' ? 'proiectul Kelion' : 'întreaga organizație'}
+            </div>
+            <div className="fin-row">
+              <span>Costs API · luna curentă</span>
+              <span>
+                {providerCostsLabel(finance.providerOpenAI.costs)}
+              </span>
+            </div>
+            <div className="fin-row">
+              <span>Usage API · cereri / tokeni intrare / tokeni ieșire</span>
+              <span>
+                {providerUsageLabel(finance.providerOpenAI.usage)}
+              </span>
+            </div>
+            <div className="fin-sub">
+              Perioadă UTC: {new Date(finance.providerOpenAI.period.start).toLocaleString('ro-RO')} – {new Date(finance.providerOpenAI.period.end).toLocaleString('ro-RO')}. Cheia Admin este folosită numai pentru aceste citiri; starea chatului rămâne separată.
+            </div>
+          </div>
           <div className="admin-card">
             <div className="admin-card-head">
               Cost per AI — total ${finance.spentUsd.toFixed(2)}

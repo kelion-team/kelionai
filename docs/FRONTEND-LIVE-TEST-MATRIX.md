@@ -183,8 +183,8 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | A10 | Constructor | evaluate/send/cancel/retry/clean | worker Codex, status și progres reale; idempotency și autoritate server |
 | A11 | Agent specializat | create | numai formular React → POST JSON `/api/enterprise/agent-nou`; fără consolă HTML paralelă |
 | A12 | Creier | afișare | OpenAI read-only; trepte din GET, fără selector/POST/KV mutabil |
-| A13 | Codex | heartbeat/setup/task | browser worker: `codex login`; headless: flux oficial `codex login --device-auth`; URL/cod/token nu intră în Kelion DOM/DB/log, task URL oficial noopener |
-| A14 | Codex | cost/capabilități | subscription numai pentru Codex text/reasoning/Constructor; Realtime/TTS/image/video rămân OpenAI API server-side; cost intern separat și debit Kelion admin zero din `/balance` |
+| A13 | Codex | heartbeat/setup/task | workerul reînnoiește cache-ul numai din `openai-project-key`, prin `codex login --with-api-key` pe stdin; cheia/fingerprintul/cache-ul nu intră în Kelion DOM/DB/log, task URL oficial noopener |
+| A14 | Codex | cost/capabilități | aceeași cheie project-scoped deservește backendul și Constructorul prin boundary-uri separate; Realtime/TTS/image/video rămân exclusiv server-side, cost intern separat și debit Kelion admin zero din `/balance` |
 | A15 | VPS/diagnostic | citire/autoverificare | status real, eșec explicit; fără restart/deploy VPS direct din browser |
 
 ## Matrice live — native și securitate

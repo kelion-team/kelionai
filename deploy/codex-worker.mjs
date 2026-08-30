@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Clientul separat al cozii Constructor. Nu conține autentificare OpenAI,
-// token GitHub, push, merge sau deploy. Autentificarea se face interactiv,
-// exclusiv cu CLI-ul oficial `codex login`, în CODEX_HOME-ul acestui worker.
+// Clientul separat al cozii Constructor. Nu conține token GitHub, push, merge
+// sau deploy. Înainte de execuție, CLI-ul oficial își actualizează cache-ul de
+// autentificare din credentiala systemd project-scoped, exclusiv prin stdin.
 
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 import {
@@ -9,6 +9,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -55,6 +56,10 @@ const EXEC_ENABLED = process.env.CODEX_WORKER_EXEC_ENABLED === '1'
 const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const CODEX_VERSION = 'codex-cli 0.149.1'
 const PROFILE_NAME = 'kelion-worker'
+const PROJECT_KEY_CREDENTIAL = 'openai-project-key'
+const PROJECT_KEY_PREFIX = Buffer.from('sk-proj-', 'ascii')
+const PROJECT_KEY_FINGERPRINT = '.openai-project-key.sha256'
+const API_LOGIN_STATUS_PREFIX = Buffer.from('Logged in using an API key - sk-proj-', 'ascii')
 const ADVERSARIAL_SENTINEL = 'KELION-CODEX-ADVERSARIAL-SENTINEL-V1'
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
 const REQUIRED_LAYOUT = Object.freeze({
@@ -110,7 +115,7 @@ function privateLogTail(logPath, maxBytes = 128 * 1024) {
  * din contul workerului. */
 function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
   const source = `${privateLogTail(logPath)}\n${error instanceof Error ? error.message : ''}`
-  if (/credit balance is too low|requires more credits|insufficient.{0,30}credit|payment required|\b402\b/i.test(source)) return 'provider_credit'
+  if (/credit balance is too low|requires more credits|insufficient.{0,30}credit|insufficient_quota|credit_balance_exhausted|project_spend_limit_exceeded|organization_spend_limit_exceeded|payment required|\b402\b/i.test(source)) return 'provider_credit'
   if (/invalid x-api-key|authentication_error|api key not valid|not logged in|unauthorized|\b(?:401|403)\b.{0,80}(?:key|token|auth)/i.test(source)) return 'provider_auth'
   if (result.timedOut || /timed out|timeout|timp.{0,20}depăș/i.test(source)) return 'execution_timeout'
   if (/no changes|working tree clean|fără nicio modificare|nu ai scris nimic/i.test(source)) return 'no_changes'
@@ -271,6 +276,165 @@ function secretPath() {
   if (process.env.CODEX_WORKER_SECRET_FILE) return resolve(process.env.CODEX_WORKER_SECRET_FILE)
   if (process.env.CREDENTIALS_DIRECTORY) return join(process.env.CREDENTIALS_DIRECTORY, 'codex-worker-secret')
   fail('Lipsește credentiala systemd codex-worker-secret')
+}
+
+function projectKeyPath() {
+  if (!process.env.CREDENTIALS_DIRECTORY) fail('Lipsește directorul de credentiale systemd')
+  return join(resolve(process.env.CREDENTIALS_DIRECTORY), PROJECT_KEY_CREDENTIAL)
+}
+
+export function assertProjectKeyCredential(value) {
+  if (!Buffer.isBuffer(value)) fail('Credentiala OpenAI trebuie citită ca bytes')
+  const logicalLength = value.at(-1) === 0x0a ? value.length - 1 : value.length
+  if (logicalLength < PROJECT_KEY_PREFIX.length + 16 || logicalLength > 512) {
+    fail('Credentiala OpenAI project-scoped are lungime invalidă')
+  }
+  if (!value.subarray(0, PROJECT_KEY_PREFIX.length).equals(PROJECT_KEY_PREFIX)) {
+    fail('Credentiala OpenAI nu este project-scoped')
+  }
+  for (let index = 0; index < logicalLength; index += 1) {
+    const byte = value[index]
+    if (byte < 0x21 || byte > 0x7e || byte === 0x0d || byte === 0x0a) {
+      fail('Credentiala OpenAI trebuie să fie o singură valoare ASCII')
+    }
+  }
+  if (value.length !== logicalLength && value.length !== logicalLength + 1) {
+    fail('Credentiala OpenAI conține date după valoarea canonică')
+  }
+}
+
+function loadProjectKeyCredential() {
+  const path = projectKeyPath()
+  const info = lstatSync(path)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
+    fail('Credentiala OpenAI systemd nu este un fișier regulat unic')
+  }
+  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
+    fail('Credentiala OpenAI systemd are permisiuni prea largi')
+  }
+  const value = readFileSync(path)
+  try {
+    assertProjectKeyCredential(value)
+    return value
+  } catch (error) {
+    value.fill(0)
+    throw error
+  }
+}
+
+export function codexApiLoginArgs() {
+  return ['login', '--with-api-key']
+}
+
+function codexLoginStatusArgs() {
+  return ['login', 'status']
+}
+
+export function isCodexProjectKeyStatus(value) {
+  if (!Buffer.isBuffer(value) || value.length <= API_LOGIN_STATUS_PREFIX.length || value.length > API_LOGIN_STATUS_PREFIX.length + 64) {
+    return false
+  }
+  if (!value.subarray(0, API_LOGIN_STATUS_PREFIX.length).equals(API_LOGIN_STATUS_PREFIX)) return false
+  const logicalLength = value.at(-1) === 0x0a ? value.length - 1 : value.length
+  for (let index = API_LOGIN_STATUS_PREFIX.length; index < logicalLength; index += 1) {
+    const byte = value[index]
+    if (byte < 0x21 || byte > 0x7e || byte === 0x0d || byte === 0x0a) return false
+  }
+  return logicalLength > API_LOGIN_STATUS_PREFIX.length
+}
+
+function codexProjectKeyStatusReady() {
+  const result = spawnSync(CODEX_BIN, codexLoginStatusArgs(), {
+    env: codexParentEnv(),
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 30_000,
+    maxBuffer: 4 * 1024,
+    windowsHide: true,
+  })
+  const output = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.alloc(0)
+  try {
+    return !result.error && result.status === 0 && isCodexProjectKeyStatus(output)
+  } finally {
+    output.fill(0)
+  }
+}
+
+function cachedProjectKeyFingerprint() {
+  const path = join(AUTH_HOME, PROJECT_KEY_FINGERPRINT)
+  if (!existsSync(path)) return null
+  const info = lstatSync(path)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
+    fail('Fingerprintul credentialei Codex nu este un fișier regulat unic')
+  }
+  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
+    fail('Fingerprintul credentialei Codex are permisiuni prea largi')
+  }
+  const value = readFileSync(path, 'ascii')
+  return /^[0-9a-f]{64}\n?$/.test(value) ? value.trim() : null
+}
+
+function publishProjectKeyFingerprint(fingerprint) {
+  if (!/^[0-9a-f]{64}$/.test(fingerprint)) fail('Fingerprint OpenAI invalid')
+  const target = join(AUTH_HOME, PROJECT_KEY_FINGERPRINT)
+  const temporary = join(AUTH_HOME, `.${PROJECT_KEY_FINGERPRINT}.${randomUUID()}.tmp`)
+  let descriptor = null
+  try {
+    descriptor = openSync(temporary, 'wx', 0o600)
+    writeFileSync(descriptor, `${fingerprint}\n`, { encoding: 'ascii' })
+    fsyncSync(descriptor)
+    closeSync(descriptor)
+    descriptor = null
+    renameSync(temporary, target)
+    fsyncPath(AUTH_HOME)
+  } finally {
+    if (descriptor !== null) closeSync(descriptor)
+    if (existsSync(temporary)) unlinkSync(temporary)
+  }
+}
+
+function assertCodexAuthCacheMetadata(required) {
+  const path = join(AUTH_HOME, 'auth.json')
+  if (!existsSync(path)) {
+    if (required) fail('Cache-ul Codex auth.json lipsește după login')
+    return false
+  }
+  const info = lstatSync(path)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
+    fail('Cache-ul Codex auth.json nu este un fișier regulat unic')
+  }
+  const uid = process.getuid?.()
+  if (process.platform !== 'win32' && (info.uid !== uid || (info.mode & 0o077) !== 0)) {
+    fail('Cache-ul Codex auth.json are owner sau permisiuni necanonice')
+  }
+  return true
+}
+
+function refreshCodexApiLogin() {
+  const projectKey = loadProjectKeyCredential()
+  try {
+    const fingerprint = createHash('sha256').update(projectKey).digest('hex')
+    assertCodexAuthCacheMetadata(false)
+    if (
+      cachedProjectKeyFingerprint() === fingerprint
+      && codexProjectKeyStatusReady()
+    ) return
+
+    const result = spawnSync(CODEX_BIN, codexApiLoginArgs(), {
+      env: codexParentEnv(),
+      input: projectKey,
+      stdio: ['pipe', 'ignore', 'ignore'],
+      timeout: 30_000,
+      windowsHide: true,
+    })
+    if (result.error || result.status !== 0) fail('Autentificarea Codex cu cheia project-scoped a eșuat')
+    assertCodexAuthCacheMetadata(true)
+    if (!codexProjectKeyStatusReady()) {
+      fail('Cache-ul Codex nu confirmă autentificarea project-scoped')
+    }
+    publishProjectKeyFingerprint(fingerprint)
+  } finally {
+    projectKey.fill(0)
+  }
 }
 
 function loadSecret() {
@@ -603,9 +767,9 @@ function assertEnabledLayout() {
   for (const flag of ['--strict-config', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--profile']) {
     if (!help?.includes(flag)) fail(`CLI-ul Codex nu confirmă flagul obligatoriu ${flag}`)
   }
-  if (!commandOk(CODEX_BIN, ['login', 'status'], undefined, codexParentEnv())) {
-    fail('Rulează interactiv `codex login` ca utilizatorul workerului')
-  }
+  const loginHelp = exactOutput(CODEX_BIN, ['login', '--help'], undefined, codexParentEnv())
+  if (!loginHelp?.includes('--with-api-key')) fail('CLI-ul Codex nu confirmă loginul API-key prin stdin')
+  refreshCodexApiLogin()
 
   if (!existsSync(REPO) || !commandOk('/usr/bin/git', ['rev-parse', '--verify', 'origin/master^{commit}'], REPO, gitSupervisorEnv())) {
     fail('Clona dedicată nu are ref-ul origin/master verificabil')
@@ -1035,6 +1199,30 @@ async function selfTest() {
     if (!args.includes(flag)) fail(`Lipsește flagul Codex fix ${flag}`)
   }
   if (args.includes('--sandbox') || args.at(-1) !== '-') fail('Argumentele Codex nu selectează exclusiv profilul fix și stdin')
+  const loginArgs = codexApiLoginArgs()
+  if (loginArgs.join(' ') !== 'login --with-api-key') {
+    fail('Loginul Codex nu folosește exclusiv stdin API-key')
+  }
+  if (!isCodexProjectKeyStatus(Buffer.from('Logged in using an API key - sk-proj-***xxxxx\n', 'ascii'))) {
+    fail('Statusul API-key Codex valid nu este recunoscut')
+  }
+  if (isCodexProjectKeyStatus(Buffer.from('Logged in using ChatGPT\n', 'ascii'))) {
+    fail('Statusul ChatGPT nu poate valida loginul API-key')
+  }
+  assertProjectKeyCredential(Buffer.from(`sk-proj-${'x'.repeat(32)}`, 'ascii'))
+  for (const invalid of [
+    Buffer.from(`sk-admin-${'x'.repeat(32)}`, 'ascii'),
+    Buffer.from(`sk-proj-${'x'.repeat(16)}\nextra`, 'ascii'),
+    Buffer.from('disabled-placeholder-openai', 'ascii'),
+  ]) {
+    let rejected = false
+    try {
+      assertProjectKeyCredential(invalid)
+    } catch {
+      rejected = true
+    }
+    if (!rejected) fail('Validatorul credentialei Codex acceptă o valoare necanonică')
+  }
   const gateArgs = gateContainerArgs(
     '/var/lib/kelion-codex/jobs/codex-test/worktree',
     'ghcr.io/example/repository/codex-gates@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -1062,6 +1250,16 @@ async function selfTest() {
     if (assertWorkerFailureCode(code) !== code) fail('Catalog worker failure inconsistent')
   }
   if (classifyWorkerFailure(null, 'gate', { timedOut: true }) !== 'execution_timeout') fail('Timeout worker neclasificat')
+  for (const providerCode of [
+    'insufficient_quota',
+    'credit_balance_exhausted',
+    'project_spend_limit_exceeded',
+    'organization_spend_limit_exceeded',
+  ]) {
+    if (classifyWorkerFailure(null, 'codex', {}, new Error(providerCode)) !== 'provider_credit') {
+      fail(`Codul live ${providerCode} nu este clasificat provider_credit`)
+    }
+  }
 
   const claimedJob = {
     jobId: '42',

@@ -1,51 +1,49 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T06:33:28Z`
+Actualizat: `2026-08-30T10:18:20Z`
 
 ## Stare verificată
 
-- `origin/master` este `056c740cc6887158e35e78e860200460a3594ee0`.
-  Release run `33296250851`, job `99216341157`, s-a oprit înainte de
-  point-of-no-return; dovada publică a rămas la
-  `ff6d2e30991b4f35adaf68f4b3a88ada8504d350`.
-- Bootstrap-ul GC a trecut. Eșecul imediat următor a fost
-  `A dependency job for kelion-codex-worker.service failed`, după crearea
-  linkurilor timerelor. `kelion-codex-worker.service` are dependență hard de
-  `kelion-constructor-sync.service`; logul release-ului nu conține însă eroarea
-  leaf a serviciului sync, deci aceasta rămâne necunoscută și nu este declarată
-  reparată.
-- Același eșec de dependență apare și în activarea inițială
-  `33254987691`, job `99107013438`. Mesajul GC care a urmat a fost secundar:
-  activarea a rămas jurnalizată după roll-forward/rollback incomplet.
-- Corecția locală de pe `chore/recover-activation-quiesced-20260830` reia
-  explicit numai activarea worker/publisher acceptată de callerul dublu
-  pin-uit. Helperul publică durabil faza `applied`, apoi
-  `constructor-unit-migration.pending`, și abia după aceea retrage pendingul
-  activării; nu execută `start` sau `enable` în bootstrap.
-- Callerul validează și persistă din nou blockerul root-only exact înainte de
-  unlink, persistă absența jurnalului înainte să șteargă snapshotul și persistă
-  din nou directorul runtime după ștergere. Blockerul rămâne fail-closed și este
-  consumat ulterior numai de cutover-ul strict cu owner și dovadă de generație.
-- Retry-ul pre-upgrade este armat și când a rămas numai blockerul persistent,
-  inclusiv după crash între unlink-ul jurnalului și curățarea snapshotului.
-- Schimbarea nu repară și nu validează credențialele OpenAI/Codex și nu
-  identifică eroarea leaf a sync-ului. Aceste probe rămân separate.
+- `origin/master` și producția sunt încă la
+  `b79fcbe1d732b8f06428fd3e98c09c1a269a399a`. Release-ul canonic
+  `33304034457`, attempt 2, a reușit, iar `/api/release-proof` a confirmat
+  același SHA, `ready=true`, `candidate=false` și `sideEffectsActive=true`.
+- Pe producția curentă, proba chat a primit apoi HTTP/provider
+  `429 insufficient_quota`; Constructorul folosește încă autentificarea
+  ChatGPT separată, iar `OPENAI_ADMIN_KEY` nu are consumator runtime. Acestea
+  nu sunt declarate reparate live.
+- Ramura locală `fix/openai-unified-credentials-20260830`, bazată exact pe
+  `b79fcbe1`, implementează contractul cerut: aceeași cheie project-scoped
+  `OPENAI_API_KEY` pentru backend și Constructor, iar `OPENAI_ADMIN_KEY` numai
+  în backendul Kelion Admin pentru OpenAI Costs/Usage.
+- Constructorul primește `openai-project-key` numai prin systemd
+  `LoadCredential`, rulează clientul oficial `codex login --with-api-key` cu
+  valoarea pe stdin, zeroizează bufferul și păstrează cheia în afara argv,
+  environmentului `codex exec`, browserului și logurilor. Loginul se reface
+  numai la rotație sau cache invalid.
+- Admin key este montată ca `/run/secrets/openai-admin-key` numai în containerul
+  backend. Provisionarea cere familiile distincte `sk-proj-*` și `sk-admin-*`,
+  fără placeholder OpenAI și fără `OPENAI_PROJECT_ID` suplimentar.
+- Verificările schimbării sunt verzi: backend typecheck; testele țintite
+  OpenAI/Admin/Constructor; frontend build, lint și 305 teste; worker self-test;
+  contract deploy; codex boundary; constructor publication 88/88; secret scan.
+  Rularea backend completă paralelă a trecut 1479 teste și a avut numai timeout
+  pe 9 teste PGlite sub contendența locală; fișierele respective se reverifică
+  serial și CI rămâne autoritatea canonică.
 
 ## Următorul pas sigur
 
-1. Încheie porțile locale pentru helper, caller, fault-cuts și hashurile pin-uite;
-   orice lipsă de dependență locală se raportează separat, nu ca succes.
-2. Inspectează diff-ul și publică un PR din ramura `chore/*`; fără push direct
-   în `master` și fără deploy înainte ca toate checkurile obligatorii să fie verzi.
-3. După merge, rulează release-ul pentru noul SHA și confirmă întâi consumarea
-   fail-closed a jurnalului/blockerului, apoi extrage diagnosticul leaf al
-   `kelion-constructor-sync.service` dacă dependency job mai eșuează.
-4. Declară Constructorul funcțional numai după release proof, starea exactă a
-   timerelor/serviciilor și o probă reală a chatului/workerului.
+1. Încheie rerularea serială și orice ultim test țintit după diff-ul final.
+2. Publică un PR din ramura curentă; fără push direct în `master` și fără bypass.
+3. După toate checkurile obligatorii verzi, îmbină prin rebase în `master`.
+4. Rulează `vps-set-env.yml` pe noul `master` ca să monteze ambele secrete,
+   apoi lasă release train-ul canonic să livreze exact SHA-ul merged.
+5. Declară funcțional numai după probe reale separate pentru chat Responses,
+   Realtime, Costs/Usage Admin, heartbeat/login Constructor și un ordin pilot.
 
 ## Legături canonice
 
+- Workflow secrete producție: <https://github.com/kelion-team/kelionai/actions/workflows/vps-set-env.yml>
 - Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33296250851>
-- Job release: <https://github.com/kelion-team/kelionai/actions/runs/33296250851/job/99216341157>
+- Workflow release: <https://github.com/kelion-team/kelionai/actions/workflows/deploy.yml>
 - Versiune live: <https://kelionai.app/api/release-proof>

@@ -88,6 +88,7 @@
     },
     "GOOGLE_CLIENT_SECRET": "google-client-secret",
     "GOOGLE_TOKEN_ENCRYPTION_KEY": "google-token-encryption-key",
+    "OPENAI_ADMIN_KEY": "openai-admin-key",
     "OPENAI_API_KEY": "openai-project-key",
     "REVOLUT_MERCHANT_SECRET_KEY": "revolut-merchant-secret-key",
     "REVOLUT_WEBHOOK_SIGNING_SECRET": "revolut-webhook-signing-secret",

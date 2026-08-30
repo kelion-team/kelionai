@@ -144,22 +144,27 @@ același boundary host-only, nu WebSocket public.
 3. Instalează `deploy/codex-worker.profile.toml` ca
    `/opt/kelion-codex/profile-home/kelion-worker.config.toml`, root-owned și
    read-only. Auth home conține numai starea gestionată de CLI. Profilul impune
-   `forced_login_method="chatgpt"`, `approval_policy="never"`, env allowlist și
+   `forced_login_method="api"`, `approval_policy="never"`, env allowlist și
    rețea oprită pentru comenzile generate.
-4. Ca utilizatorul workerului, rulează interactiv:
+4. Sursa canonică rămâne `/root/kelion/secrets/openai-project-key`, cu metadata
+   `0:10050:0440`. Unitatea workerului o primește numai prin
+   `LoadCredential=openai-project-key:...`; valoarea nu intră în environment,
+   argv sau jurnal. La prima pornire, la rotația cheii ori dacă statusul
+   cache-ului eșuează, workerul execută echivalentul sigur:
 
    ```bash
-   CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login --device-auth
+   /opt/kelion-codex/bin/codex login --with-api-key \
+     < "$CREDENTIALS_DIRECTORY/openai-project-key"
    ```
 
-   Device-code trebuie întâi permis în setările ChatGPT/workspace. Linkul și
-   codul one-time rămân în terminalul operatorului; nu se trimit backendului,
-   browserului Kelion, GitHub Actions sau logurilor. Dacă device-code nu este
-   disponibil, `codex login` folosește browserul și callbackul gestionat de CLI.
-   Nu folosi `--with-api-key`, `--with-access-token` sau external auth tokens.
-5. Verifică `codex login status`. Fișierul `auth.json`, când este folosit ca
-   credential store, se tratează ca o parolă și rămâne accesibil numai
-   identității workerului.
+   Redirecționarea este pe stdin; nu folosi `printenv`, pipe din `cat`,
+   substituție de comandă, `set -x`, `--with-access-token`, device-auth sau
+   login ChatGPT. Workflow-ul `vps-codex-login.yml` poate reînnoi manual același
+   cache fără ca GitHub Actions să primească vreodată cheia OpenAI.
+5. Workerul verifică `codex login status` și publică atomic, cu mod `0600` și
+   `fsync`, numai fingerprintul SHA-256 privat din auth home. Fișierele
+   `auth.json` și `.openai-project-key.sha256` rămân accesibile exclusiv
+   identității workerului; fingerprintul evită relogarea la fiecare minut.
 6. Creează configul dedicat din `deploy/codex-worker.env.example`; el conține
    numai flagul, API-ul loopback, repository-ul public și digestul imaginii de
    porți. HMAC-ul cozii intră exclusiv prin `LoadCredential`.
@@ -171,7 +176,8 @@ același boundary host-only, nu WebSocket public.
 8. Activează în această ordine numai după probe: flagul backend, flagul
    `CODEX_WORKER_EXEC_ENABLED=1`, markerul
    `/etc/kelion/codex-worker.enabled`, apoi timerul. Orice lipsă raportează
-   `setup_required`; nu există fallback la OpenAI API.
+   `setup_required`; nu există fallback la ChatGPT/device-auth sau la alt
+   furnizor.
 
 Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
 sau deploy.
@@ -265,9 +271,11 @@ Restartul aplicației nu redeschide replay-ul: nonce-urile sunt durabile în
 Înainte de cutover se revocă la furnizor cheile AI retrase, tokenurile GitHub
 legacy, parolele VPS/root, credentialele bancare vechi, certificatele mobile
 copiate în env și orice cheie găsită în istoricul Git. PAN/CVC se înlocuiesc, nu
-se mută într-un alt secret store. `OPENAI_ADMIN_KEY` rămâne absentă din aplicație
-și Codex; dacă va exista reconciliere financiară, folosește un proces separat și
-o credentială minimă.
+se mută într-un alt secret store. `OPENAI_ADMIN_KEY` este o credentială minimă
+distinctă, montată numai în backendul Kelion Admin pentru Costs/Usage și
+diagnostic de control-plane. Rămâne absentă din inferență, Realtime, media,
+Constructor, browser, răspunsuri API și loguri; nu poate înlocui
+`openai-project-key`.
 
 Rotația externă cere autoritate explicită și probă pe fiecare integrare.
 Ștergerea unui fișier sau a unui run GitHub nu înlocuiește revocarea.

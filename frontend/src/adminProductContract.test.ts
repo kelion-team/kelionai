@@ -32,11 +32,12 @@ describe('admin product contract', () => {
 
   it('keeps Codex login in the private worker and never renders server setup secrets', () => {
     const admin = source('components/admin/AdminProductie.tsx')
-    expect(admin).toContain('codex login --device-auth')
-    expect(admin).toContain('codex login')
+    expect(admin).toContain('codex login --with-api-key')
+    expect(admin).toContain('openai-project-key')
     expect(admin).not.toContain('{codex.setupInstructions}')
     expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
-    expect(admin).toContain('abonamentul ChatGPT nu este o cheie API')
+    expect(admin).toContain('Aceeași cheie OpenAI project-scoped')
+    expect(admin).toContain('cheia admin de control-plane nu este folosită aici')
     expect(admin).toContain("adminBilling.creditsUsed")
     expect(admin).not.toMatch(/·\s*0\s+credite consumate/i)
   })
