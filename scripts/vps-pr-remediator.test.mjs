@@ -59,6 +59,7 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['deploy/RUNBOOKS.md']), true)
   assert.equal(isMonitoredScope(['deploy/deploy.sh']), true)
   assert.equal(isMonitoredScope(['deploy/lib/constructor-publication.test.mjs']), true)
+  assert.equal(isMonitoredScope(['deploy/lib/runtime-config-cutover.sh']), true)
   assert.equal(isMonitoredScope(['docs/operations/CURRENT.md']), true)
   assert.equal(isMonitoredScope([
     '.github/workflows/vps-run.yml',
@@ -67,7 +68,7 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
     'deploy/RUNBOOKS.md',
     'deploy/deploy.sh',
     'deploy/lib/constructor-publication.test.mjs',
-    'docs/operations/CURRENT.md',
+    'deploy/lib/runtime-config-cutover.sh',
   ]), true)
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'renamed', previous_filename: 'legacy.yml' }]), false)
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'modified', previous_filename: 'legacy.yml' }]), false)
@@ -85,6 +86,7 @@ test('workflow-ul merge-policy păstrează allowlist-ul canonic fără excepții
   assert.equal(allowed.includes('deploy/upgrade-constructor.sh'), true)
   assert.equal(allowed.includes('deploy/RUNBOOKS.md'), true)
   assert.equal(allowed.includes('deploy/lib/constructor-publication.test.mjs'), true)
+  assert.equal(allowed.includes('deploy/lib/runtime-config-cutover.sh'), true)
   assert.equal(allowed.includes('docs/operations/CURRENT.md'), true)
   assert.equal(MONITORED_FILES.every((file) => allowed.includes(file)), true)
   assert.doesNotMatch(workflow, /openai_unified|OPENAI_UNIFIED_ONCE|postdeploy-openai-verifier-cleanup/)
