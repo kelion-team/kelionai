@@ -139,8 +139,7 @@ jobs:
           if [ "$is_vps" = true ]; then
             [[ "$head_ref" == chore/* ]]
             openai_unified_exception=false
-            if [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] \
-              && [ "$head_repo" = kelion-team/kelionai ] \
+            if [ "$head_repo" = "$GITHUB_REPOSITORY" ] \
               && [ "$head_ref" = chore/openai-unified-credentials-20260830 ] \
               && jq -e --argjson expected "$openai_unified_once" '
                 length == ($expected | length) and
