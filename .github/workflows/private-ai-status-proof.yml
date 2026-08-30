@@ -102,12 +102,14 @@ jobs:
           done
           printf 'LLAMA_SERVER_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/llama-server | awk '{print $1}')"
           printf 'OPENCODE_BIN_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')"
-          printf 'LLAMA_CPP_CHECKOUT=%s\n' "$(git -C /opt/private-ai/src/llama.cpp rev-parse HEAD)"
+          printf 'LLAMA_CPP_CHECKOUT=%s\n' "$(runuser -u privateai -- env -i \
+            HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+            git -C /opt/private-ai/src/llama.cpp rev-parse HEAD)"
           llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
           [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]]
           printf 'LLAMA_PROCESS_EXE=%s\n' "$(readlink -f "/proc/$llm_pid/exe")"
           printf '%s\n' '--- LLAMA MODEL MAPS ---'
-          awk '$NF ~ /Qwen3\.6-35B-A3B-Q4_K_M\.gguf$/ { print $NF }' "/proc/$llm_pid/maps" \
+          awk '$NF ~ /^\/srv\/private-ai\/models\// { print $NF }' "/proc/$llm_pid/maps" \
             | sort -u
           resume_group=$(systemctl show private-ai-install-resume.service -p ControlGroup --value 2>/dev/null || true)
           if [ -n "$resume_group" ] && [ -d "/sys/fs/cgroup$resume_group" ]; then
