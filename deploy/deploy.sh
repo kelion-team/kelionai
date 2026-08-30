@@ -1765,7 +1765,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=cd93ea4f7474f9336e22755799a8fa0fc4894ee3ebdab8ca64075a60a58a2b47
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=1e187e2d32e67c76ae77903033d77c5974f1b86ef479c7330f0ca5678b17cab8
 
 recover_runtime_activation_before_upgrade() {
   local live_helper=$ROOT/bin/runtime-config-cutover.sh
