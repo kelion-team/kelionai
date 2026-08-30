@@ -143,6 +143,7 @@ jobs:
           rm -rf -- /srv/private-ai/home/.ssh
           runuser -u privateai -- git config --global --unset-all credential.helper >/dev/null 2>&1 || true
           runuser -u privateai -- git config --global --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+          rm -f -- /srv/private-ai/home/.gitconfig
           if runuser -u privateai -- git config --global --name-only --get-regexp '(credential|extraheader|insteadof)' 2>/dev/null | grep -q .; then
             echo 'A forbidden global Git credential rule remains.' >&2
             exit 1
