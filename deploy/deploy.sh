@@ -1691,6 +1691,18 @@ chmod 0600 "/proc/$$/fd/8"
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'pathul lock-ului a fost schimbat în timpul normalizării'
 flock 8
+[ "$(readlink /proc/$$/fd/8)" = "$PUBLICATION_LOCK" ] \
+  && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8)" = '0:0:600:1' ] \
+  && [ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'lock-ul de publicare s-a schimbat după flock'
+
+CONSTRUCTOR_UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+[ ! -e "$CONSTRUCTOR_UPGRADE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_UPGRADE_JOURNAL" ] \
+  || die 'un upgrade Constructor exterior este pending; release-ul este refuzat'
+[ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  || die 'o barieră unit-only Constructor este pending; release-ul este refuzat'
 
 recover_lost_post_ponr_quiesce \
   || die 'recovery-ul incidentului post-PONR nu a putut dovedi și reconstitui exact starea'
@@ -1765,7 +1777,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=b4c051a4cce6dd9ef317aa855efdbe2198bb54930c604e11c774b4e916b25618
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=bff46932d092d59ff4d836381469ad26afd93a07b9e4767f735431973bd3cf4a
 
 validate_compatible_activation_blocker() {
   local blocker=$1

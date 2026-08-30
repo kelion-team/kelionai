@@ -3437,3 +3437,651 @@ if validate_compatible_activation_blocker "$blocker"; then exit 74; fi`
     rmSync(sandbox, { recursive: true, force: true })
   }
 })
+
+test('upgrade-ul Constructor este o operație workflow izolată de credentialele aplicației', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const stepContaining = (needle) => {
+    const needleIndex = workflow.indexOf(needle)
+    assert.ok(needleIndex >= 0, `workflow-ul trebuie să conțină ${needle}`)
+    const start = workflow.lastIndexOf('\n      - ', needleIndex)
+    const next = workflow.indexOf('\n      - ', needleIndex)
+    const end = next === -1 ? workflow.length : next
+    assert.ok(start >= 0 && end > needleIndex, `pasul care conține ${needle} trebuie delimitat`)
+    return workflow.slice(start, end)
+  }
+
+  const optionStart = workflow.indexOf('        options:')
+  const optionEnd = workflow.indexOf('\n      auto_routed_to_master:', optionStart)
+  assert.ok(optionStart >= 0 && optionEnd > optionStart)
+  const operationOptions = workflow.slice(optionStart, optionEnd)
+  assert.equal(operationOptions.match(/^\s+- upgrade-constructor$/gm)?.length, 1,
+    'upgrade-constructor trebuie să fie o operație explicită și unică')
+
+  const checkout = stepContaining('actions/checkout@')
+  const gate = stepContaining('Leaga imaginea gate de sursa Constructor')
+  for (const prerequisite of [checkout, gate]) {
+    assert.match(prerequisite, /inputs\.operation == 'configure-constructor'/)
+    assert.match(prerequisite, /inputs\.operation == 'upgrade-constructor'/)
+  }
+
+  const controlStart = workflow.indexOf('\n  control:')
+  const stepsStart = workflow.indexOf('\n    steps:', controlStart)
+  assert.ok(controlStart >= 0 && stepsStart > controlStart)
+  const controlPreamble = workflow.slice(controlStart, stepsStart)
+  const configure = stepContaining('Configureaza Constructorul fara activare prematura')
+  const applicationCredentials = new Map([
+    ['CODEX_WORKER_SECRET', 'CODEX_WORKER_SECRET'],
+    ['CONSTRUCTOR_PUBLISHER_SECRET', 'CONSTRUCTOR_PUBLISHER_SECRET'],
+    ['CONSTRUCTOR_RELEASE_SECRET', 'CONSTRUCTOR_RELEASE_SECRET'],
+    ['SYNC_GITHUB_TOKEN', 'CONSTRUCTOR_SYNC_GITHUB_TOKEN'],
+    ['PUBLISHER_GITHUB_TOKEN', 'CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN'],
+    ['RELEASE_GITHUB_TOKEN', 'VPS_GITHUB_TOKEN'],
+    ['GHCR_READ_TOKEN', 'CONSTRUCTOR_GHCR_READ_TOKEN'],
+  ])
+  const controlSecretRefs = [...controlPreamble.matchAll(/\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}/g)]
+    .map((match) => match[1])
+  assert.deepEqual(controlSecretRefs, ['VPS_SSH_KEY'],
+    'job-ul control poate moșteni numai cheia SSH; tokenul GitHub de control este github.token')
+  assert.match(controlPreamble, /^\s+GH_TOKEN: \$\{\{ github\.token \}\}$/m)
+  for (const [environmentName, secretName] of applicationCredentials) {
+    assert.doesNotMatch(controlPreamble, new RegExp(`^\\s+${environmentName}:`, 'm'),
+      `${environmentName} nu poate fi moștenit de toate operațiile control`)
+    assert.ok(configure.includes(`${environmentName}: \${{ secrets.${secretName} }}`),
+      `${environmentName} trebuie injectat numai în pasul configure`)
+  }
+  const audit = stepContaining('Auditeaza identitatea tokenurilor (read-only)')
+  for (const [environmentName, secretName] of [...applicationCredentials].slice(3)) {
+    assert.ok(audit.includes(`${environmentName}: \${{ secrets.${secretName} }}`),
+      `${environmentName} trebuie injectat punctual și în audit-token-identity`)
+  }
+  for (const environmentName of [...applicationCredentials.keys()].slice(0, 3)) {
+    assert.doesNotMatch(audit, new RegExp(`^\\s+${environmentName}:`, 'm'),
+      `audit-token-identity nu are nevoie de ${environmentName}`)
+  }
+
+  const upgradeStep = stepContaining('deploy/upgrade-constructor.sh')
+  assert.match(upgradeStep, /if: inputs\.operation == 'upgrade-constructor'/)
+  assert.match(upgradeStep, /KELION_CONSTRUCTOR_UPGRADE=1/)
+  assert.match(upgradeStep, /KELION_CONSTRUCTOR_SOURCE_COMMIT=/)
+  assert.match(upgradeStep, /bash [^\n]*deploy\/upgrade-constructor\.sh/)
+  assert.match(upgradeStep, /remote_bundle=.*\$\{GITHUB_RUN_ID\}.*\$\{GITHUB_RUN_ATTEMPT\}/)
+  const bundleCleanup = upgradeStep.match(/([a-z_]+)\(\) \{[\s\S]{0,700}?rm -f -- '[\$]remote_bundle'/)?.[1]
+  assert.ok(bundleCleanup, 'bundle-ul remote trebuie eliminat de un cleanup delimitat')
+  assert.ok(upgradeStep.includes(`trap ${bundleCleanup} EXIT`))
+
+  const checkoutCommit = upgradeStep.indexOf('git rev-parse HEAD')
+  const remoteMaster = upgradeStep.indexOf('/git/ref/heads/master', checkoutCommit)
+  const firstCopy = upgradeStep.indexOf('scp ', remoteMaster)
+  const remoteRun = upgradeStep.indexOf('deploy/upgrade-constructor.sh', firstCopy)
+  assert.ok(checkoutCommit >= 0 && remoteMaster > checkoutCommit && firstCopy > remoteMaster && remoteRun > firstCopy,
+    'master trebuie reverificat imediat înainte de primul mutator VPS și înainte de execuția upgrade-ului')
+
+  for (const environmentName of applicationCredentials.keys()) {
+    assert.doesNotMatch(upgradeStep, new RegExp(`\\b${environmentName}\\b`),
+      `pasul upgrade nu poate primi ${environmentName}`)
+  }
+  const explicitSecretRefs = [...upgradeStep.matchAll(/\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}/g)]
+    .map((match) => match[1])
+  assert.ok(explicitSecretRefs.every((name) => name === 'VPS_SSH_KEY'),
+    `upgrade-ul poate primi numai cheia SSH de control, nu ${explicitSecretRefs.join(', ')}`)
+  assert.doesNotMatch(upgradeStep,
+    /\bpayload\b|\bbase64\b|\bapt(?:-get)?\b|\bnpm\b|set\s+-x|printenv|declare\s+-p|export\s+-p/i)
+})
+
+test('dovada release din workflow cere candidate=false și SHA-ul selectat în fresh și recovery', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const upgradeStart = workflow.indexOf('- name: Actualizeaza atomic Constructorul in-place')
+  const upgradeEnd = workflow.indexOf('\n      - name:', upgradeStart + 1)
+  assert.ok(upgradeStart >= 0 && upgradeEnd > upgradeStart)
+  const upgradeStep = workflow.slice(upgradeStart, upgradeEnd)
+  const filterMatch = upgradeStep.match(
+    /jq -e --arg expected "\$source_commit" '([\s\S]*?)' <<<"\$release_proof"/)
+  assert.ok(filterMatch, 'predicatul jq al dovezii release din pasul upgrade trebuie să poată fi extras')
+  const filter = filterMatch[1]
+  assert.match(filter, /\.ready == true/)
+  assert.match(filter, /\.release\.candidate == false/)
+  assert.match(filter, /\.release\.sideEffectsActive == true/)
+  assert.match(filter, /\.activeCommit == \$expected/)
+  assert.doesNotMatch(filter, /candidate\s*\/\//,
+    'absența candidate nu poate fi convertită implicit în false')
+
+  const evaluate = (expected, payload) => spawnSync('jq', ['-e', '--arg', 'expected', expected, filter], {
+    input: `${JSON.stringify(payload)}\n`,
+    encoding: 'utf8',
+  })
+  for (const [mode, expected, mismatch] of [
+    ['fresh', '89abcdef0123456789abcdef0123456789abcdef', '76543210fedcba9876543210fedcba9876543210'],
+    ['recovery', '1234567890abcdef1234567890abcdef12345678', '89abcdef0123456789abcdef0123456789abcdef'],
+  ]) {
+    assert.equal(evaluate(expected, {
+      ready: true,
+      release: { candidate: false, sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să accepte numai SHA-ul selectat exact`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să refuze payloadul fără candidate`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { candidate: true, sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să refuze candidatul pre-PONR`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { candidate: false, sideEffectsActive: true },
+      activeCommit: mismatch,
+    }).status, 0, `${mode} trebuie să refuze un release live de la alt SHA`)
+  }
+  assert.match(upgradeStep,
+    /active_marker=\/root\/kelion\/runtime\/release-state\/active[\s\S]*grep -qx "\$source_commit" "\$active_marker"/,
+    'dovada remote trebuie să lege și markerul activ exact de sursa fresh/recovery')
+})
+
+test('selectorul upgrade folosește master pentru fresh și numai jurnalul strict al unui ancestor pentru recovery', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const step = (name) => {
+    const start = workflow.indexOf(`- name: ${name}`)
+    const next = workflow.indexOf('\n      - name:', start + 1)
+    assert.ok(start >= 0, `pasul ${name} lipsește`)
+    return workflow.slice(start, next < 0 ? workflow.length : next)
+  }
+  const checkoutStart = workflow.indexOf('- uses: actions/checkout@')
+  const checkoutEnd = workflow.indexOf('\n      - name:', checkoutStart)
+  const checkout = workflow.slice(checkoutStart, checkoutEnd)
+  assert.match(checkout, /if: inputs\.operation == 'configure-constructor' \|\| inputs\.operation == 'upgrade-constructor'/)
+  assert.match(checkout, /ref: master[\s\S]*fetch-depth: 0[\s\S]*persist-credentials: false/)
+
+  const selector = step('Selecteaza determinist sursa upgrade-ului Constructor')
+  assert.match(selector, /set -Eeuo pipefail/)
+  const remoteSelectorMatch = selector.match(
+    /journal_source=\$\(ssh[\s\S]*?<<'REMOTE'\n([\s\S]*?)\n\s+REMOTE\n/)
+  assert.ok(remoteSelectorMatch, 'heredoc-ul probei remote trebuie să poată fi extras')
+  const remoteSelector = remoteSelectorMatch[1]
+  assert.doesNotMatch(remoteSelector,
+    /\b(?:rm|mv|cp|install|touch|mkdir|rmdir|truncate|tee|chmod|chown|systemctl|flock|scp|rsync)\b|\btar\s+-x/,
+    'selectorul remote este strict read-only și nu poate lua lock ori modifica VPS-ul')
+  assert.doesNotMatch(remoteSelector,
+    /set\s+-x|printenv|declare\s+-p|export\s+-p|\b(?:SendEnv|AcceptEnv)\b/,
+    'selectorul nu poate exporta sau afișa mediul')
+  assert.deepEqual(remoteSelector.match(/^\s*exec\b.*$/gm)?.map((line) => line.trim()), [
+    'exec 8<"$journal"',
+    'exec 7<"$snapshot_root/state"',
+  ], 'singurele exec-uri remote permise deschid read-only FD-urile pin-uite')
+  for (const credential of [
+    'CODEX_WORKER_SECRET',
+    'CONSTRUCTOR_PUBLISHER_SECRET',
+    'CONSTRUCTOR_RELEASE_SECRET',
+    'SYNC_GITHUB_TOKEN',
+    'PUBLISHER_GITHUB_TOKEN',
+    'RELEASE_GITHUB_TOKEN',
+    'GHCR_READ_TOKEN',
+  ]) {
+    assert.doesNotMatch(selector, new RegExp(`\\b${credential}\\b`),
+      `selectorul nu poate primi ${credential}`)
+  }
+  const master = selector.indexOf('master_commit=$(gh api')
+  const localMaster = selector.indexOf('[ "$(git rev-parse HEAD)" = "$master_commit" ]', master)
+  const remoteProbe = selector.indexOf('journal_source=$(ssh', localMaster)
+  const absent = selector.indexOf('if [ ! -e "$journal" ] && [ ! -L "$journal" ]; then', remoteProbe)
+  const absentResult = selector.indexOf("printf 'none\\n'", absent)
+  const journalFile = selector.indexOf('[ -f "$journal" ] && [ ! -L "$journal" ]', absentResult)
+  const journalAcl = selector.indexOf("0:0:600:1", journalFile)
+  const journalIdentity = selector.indexOf("journal_identity=$(stat -Lc '%d:%i' \"$journal\")", journalAcl)
+  const journalFdOpen = selector.indexOf('exec 8<"$journal"', journalIdentity)
+  const journalFdPath = selector.indexOf('readlink /proc/$$/fd/8', journalFdOpen)
+  const journalFdAcl = selector.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8", journalFdPath)
+  const journalFdIdentity = selector.indexOf("stat -Lc '%d:%i' /proc/$$/fd/8", journalFdAcl)
+  const journalLine = selector.indexOf('wc -l < /proc/$$/fd/8', journalFdIdentity)
+  const journalJq = selector.indexOf('source_commit=$(jq -er', journalLine)
+  const journalPathRecheck = selector.indexOf('[ ! -L "$journal" ]', journalJq)
+  const journalIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$journal\"", journalPathRecheck)
+  const snapshotGuard = selector.indexOf('[ -d "$snapshot_root" ] && [ ! -L "$snapshot_root" ]', journalIdentityRecheck)
+  const snapshotCanonical = selector.indexOf('realpath -e -- "$snapshot_root"', snapshotGuard)
+  const snapshotIdentity = selector.indexOf("snapshot_identity=$(stat -Lc '%d:%i' \"$snapshot_root\")", snapshotCanonical)
+  const stateGuard = selector.indexOf('[ -f "$snapshot_root/state" ] && [ ! -L "$snapshot_root/state" ]', snapshotIdentity)
+  const stateIdentity = selector.indexOf("state_identity=$(stat -Lc '%d:%i' \"$snapshot_root/state\")", stateGuard)
+  const stateFdOpen = selector.indexOf('exec 7<"$snapshot_root/state"', stateIdentity)
+  const stateFdPath = selector.indexOf('readlink /proc/$$/fd/7', stateFdOpen)
+  const stateFdAcl = selector.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/7", stateFdPath)
+  const stateFdIdentity = selector.indexOf("stat -Lc '%d:%i' /proc/$$/fd/7", stateFdAcl)
+  const stateHash = selector.indexOf('sha256sum /proc/$$/fd/7', stateFdIdentity)
+  const statePathRecheck = selector.indexOf('[ ! -L "$snapshot_root/state" ]', stateHash)
+  const stateIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$snapshot_root/state\"", statePathRecheck)
+  const snapshotPathRecheck = selector.indexOf('[ ! -L "$snapshot_root" ]', stateIdentityRecheck)
+  const snapshotIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$snapshot_root\"", snapshotPathRecheck)
+  const oneResult = selector.indexOf('[ "$(printf \'%s\\n\' "$journal_source" | wc -l)" -eq 1 ]', snapshotIdentityRecheck)
+  assert.ok(master >= 0 && localMaster > master && remoteProbe > localMaster && absent > remoteProbe
+    && absentResult > absent && journalFile > absentResult && journalAcl > journalFile
+    && journalIdentity > journalAcl && journalFdOpen > journalIdentity
+    && journalFdPath > journalFdOpen && journalFdAcl > journalFdPath
+    && journalFdIdentity > journalFdAcl && journalLine > journalFdIdentity
+    && journalJq > journalLine && journalPathRecheck > journalJq
+    && journalIdentityRecheck > journalPathRecheck && snapshotGuard > journalIdentityRecheck
+    && snapshotCanonical > snapshotGuard && snapshotIdentity > snapshotCanonical
+    && stateGuard > snapshotIdentity && stateIdentity > stateGuard && stateFdOpen > stateIdentity
+    && stateFdPath > stateFdOpen && stateFdAcl > stateFdPath && stateFdIdentity > stateFdAcl
+    && stateHash > stateFdIdentity && statePathRecheck > stateHash
+    && stateIdentityRecheck > statePathRecheck && snapshotPathRecheck > stateIdentityRecheck
+    && snapshotIdentityRecheck > snapshotPathRecheck && oneResult > snapshotIdentityRecheck,
+  'proba remote trebuie să distingă absența reală de symlink și să citească jurnalul/state prin FD-uri pin-uite, cu dev:ino reverificat')
+
+  const filterMatch = selector.match(/source_commit=\$\(jq -er '([\s\S]*?)' \/proc\/\$\$\/fd\/8\)/)
+  assert.ok(filterMatch, 'schema jq a jurnalului selector trebuie să poată fi extrasă')
+  const journalFilter = filterMatch[1]
+  assert.match(journalFilter, /\.schema == 1 and \.kind == "constructor-upgrade"/)
+  assert.match(journalFilter, /\.phase == "armed" or \.phase == "installed"/)
+  assert.match(journalFilter, /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
+  const ancestor = '1234567890abcdef1234567890abcdef12345678'
+  const validJournal = {
+    schema: 1,
+    kind: 'constructor-upgrade',
+    phase: 'armed',
+    sourceCommit: ancestor,
+    snapshotRoot: '/root/kelion/runtime/constructor-upgrade.Abc123',
+    stateSha256: 'a'.repeat(64),
+  }
+  const evaluateJournal = (journal) => spawnSync('jq', ['-er', journalFilter], {
+    input: `${JSON.stringify(journal)}\n`,
+    encoding: 'utf8',
+  })
+  const accepted = evaluateJournal(validJournal)
+  assert.equal(accepted.status, 0, accepted.stderr)
+  assert.equal(accepted.stdout.trim(), ancestor)
+  for (const malformed of [
+    { ...validJournal, phase: 'complete' },
+    { ...validJournal, sourceCommit: ancestor.slice(0, 7) },
+    { ...validJournal, snapshotRoot: '/tmp/constructor-upgrade.Abc123' },
+    { ...validJournal, stateSha256: 'a'.repeat(63) },
+    { ...validJournal, extra: true },
+  ]) {
+    assert.notEqual(evaluateJournal(malformed).status, 0,
+      'orice abatere de la schema exactă a jurnalului trebuie refuzată')
+  }
+
+  const freshDefault = selector.indexOf('recovery=0', oneResult)
+  const freshCommit = selector.indexOf('source_commit=$master_commit', freshDefault)
+  const recoveryBranch = selector.indexOf('if [ "$journal_source" != none ]; then', freshCommit)
+  const sourceShape = selector.indexOf('[[ "$journal_source" =~ ^[0-9a-f]{40}$ ]]', recoveryBranch)
+  const sourceObject = selector.indexOf('git cat-file -e "$journal_source^{commit}"', sourceShape)
+  const sourceAncestor = selector.indexOf('git merge-base --is-ancestor "$journal_source" "$master_commit"', sourceObject)
+  const recoveryCommit = selector.indexOf('source_commit=$journal_source', sourceAncestor)
+  const recoveryMode = selector.indexOf('recovery=1', recoveryCommit)
+  const checkoutSelected = selector.indexOf('git checkout --detach "$source_commit"', recoveryMode)
+  const verifySelected = selector.indexOf('[ "$(git rev-parse HEAD)" = "$source_commit" ]', checkoutSelected)
+  const publishOutputs = selector.indexOf("printf 'commit=%s\\nmaster=%s\\nrecovery=%s\\n'", verifySelected)
+  assert.ok(freshDefault >= 0 && freshCommit > freshDefault && recoveryBranch > freshCommit
+    && sourceShape > recoveryBranch && sourceObject > sourceShape && sourceAncestor > sourceObject
+    && recoveryCommit > sourceAncestor && recoveryMode > recoveryCommit
+    && checkoutSelected > recoveryMode && verifySelected > checkoutSelected && publishOutputs > verifySelected,
+  'absența trebuie să selecteze master/0, iar jurnalul strict numai un commit existent ancestor și modul 1')
+  assert.doesNotMatch(selector.slice(sourceAncestor, recoveryCommit), /\|\|\s*true/)
+
+  const gate = step('Leaga imaginea gate de sursa Constructor')
+  assert.match(gate,
+    /case "\$UPGRADE_RECOVERY" in[\s\S]*0\) \[ "\$commit" = "\$remote_master" \][\s\S]*1\) git merge-base --is-ancestor "\$commit" "\$remote_master"/)
+  assert.match(gate,
+    /actions\/workflows\/build-images\.yml\/runs"[\s\\]*-f event=workflow_run -f status=completed -f head_sha="\$commit" -f per_page=50/)
+  assert.match(gate,
+    /\.workflow_runs\[\] \| select\(\.head_sha == \$sha and \.conclusion == "success"\)/)
+  const upgradeStep = step('Actualizeaza atomic Constructorul in-place')
+  assert.match(upgradeStep,
+    /\[ "\$source_commit" = "\$UPGRADE_SOURCE_COMMIT" \][\s\S]*\[ "\$\(git rev-parse origin\/master\)" = "\$UPGRADE_MASTER_COMMIT" \]/)
+  assert.match(upgradeStep,
+    /case "\$UPGRADE_RECOVERY" in 0\|1\) ;; \*\) exit 1 ;; esac/)
+  assert.match(upgradeStep,
+    /if \[ "\$UPGRADE_RECOVERY" = 0 \]; then[\s\S]*\[ "\$bundle_commit" = "\$latest_master" \][\s\S]*else[\s\S]*git merge-base --is-ancestor "\$bundle_commit" "\$latest_master"/)
+  assert.match(upgradeStep,
+    /KELION_CONSTRUCTOR_RECOVERY="\$recovery"[\s\\]*KELION_CONSTRUCTOR_SOURCE_COMMIT="\$source_commit"/)
+})
+
+test('scriptul upgrade leagă modul fresh/recovery de prezența jurnalului și de commitul selectat', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  assert.match(upgrade,
+    /constructor_upgrade_recovery=\$\{KELION_CONSTRUCTOR_RECOVERY:-invalid\}[\s\S]*\[\[ "\$constructor_upgrade_recovery" =~ \^\[01\]\$ \]\]/)
+  const modeBranch = upgrade.indexOf('if [ "$constructor_upgrade_recovery" = 0 ]; then')
+  const publicationLock = upgrade.lastIndexOf('flock -n 9', modeBranch)
+  const freshAbsence = upgrade.indexOf('[ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]', modeBranch)
+  const snapshot = upgrade.indexOf('create_upgrade_snapshot', freshAbsence)
+  const recoveryPresence = upgrade.indexOf('[ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]', snapshot)
+  const load = upgrade.indexOf('load_upgrade_journal', recoveryPresence)
+  assert.ok(publicationLock >= 0 && modeBranch > publicationLock && freshAbsence > modeBranch && snapshot > freshAbsence
+    && recoveryPresence > snapshot && load > recoveryPresence,
+  'fresh trebuie să ceară jurnal absent și să-l creeze; recovery trebuie să ceară jurnal prezent înainte de load')
+  const loader = shellFunction(upgrade, 'load_upgrade_journal')
+  assert.match(loader, /--arg commit "\$constructor_upgrade_source_commit"[\s\S]*\.sourceCommit == \$commit/)
+  assert.match(loader,
+    /\[ "\$\(sha256sum "\$state_file" \| awk '\{print \$1\}'\)" = "\$snapshot_state_sha256" \]/)
+})
+
+test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne quiesced până la generația completă', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const arrayValues = (name) => {
+    const match = upgrade.match(new RegExp(`${name}=\\(\\n([\\s\\S]*?)\\n\\)`))
+    assert.ok(match, `vectorul ${name} lipsește`)
+    return match[1].trim().split(/\r?\n/).map((line) => line.trim())
+  }
+  assert.deepEqual(arrayValues('constructor_markers'), [
+    '/etc/kelion/codex-worker.enabled',
+    '/etc/kelion/constructor-publisher.enabled',
+    '/etc/kelion/constructor-release.enabled',
+  ])
+  assert.deepEqual(arrayValues('constructor_timers'), [
+    'kelion-codex-worker.timer',
+    'kelion-constructor-publisher.timer',
+    'kelion-constructor-release.timer',
+  ])
+  assert.deepEqual(arrayValues('constructor_services'), [
+    'kelion-codex-worker.service',
+    'kelion-constructor-publisher.service',
+    'kelion-constructor-release.service',
+  ])
+  assert.match(upgrade, /UPGRADE_JOURNAL=\$RUNTIME_ROOT\/constructor-upgrade\.journal/)
+
+  const liveVector = shellFunction(upgrade, 'validate_live_activation_vector')
+  assert.match(liveVector,
+    /if \[ "\$present" = 1 \]; then[\s\S]*"\$unit_file_state" = enabled[\s\S]*"\$active_state" = active[\s\S]*else[\s\S]*"\$unit_file_state" = disabled[\s\S]*"\$active_state" = inactive/)
+  assert.match(liveVector,
+    /constructor_markers\[2\][\s\S]*constructor_markers\[0\][\s\S]*constructor_markers\[1\][\s\S]*constructor_markers\[1\][\s\S]*constructor_markers\[0\]/,
+    'vectorii activi acceptați trebuie să fie prefixele canonice worker, publisher, release')
+
+  const snapshot = shellFunction(upgrade, 'create_upgrade_snapshot')
+  const snapshotFileFsync = snapshot.indexOf('fsync_path "$snapshot_root/marker.$index"')
+  const snapshotStateFsync = snapshot.indexOf('fsync_path "$state_file"', snapshotFileFsync)
+  const snapshotRootFsync = snapshot.indexOf('fsync_path "$snapshot_root"', snapshotStateFsync)
+  const snapshotHash = snapshot.indexOf('snapshot_state_sha256=$(sha256sum "$state_file"', snapshotRootFsync)
+  const armedJournal = snapshot.indexOf('write_upgrade_journal armed', snapshotHash)
+  assert.ok(snapshotFileFsync >= 0 && snapshotStateFsync > snapshotFileFsync
+    && snapshotRootFsync > snapshotStateFsync && snapshotHash > snapshotRootFsync
+    && armedJournal > snapshotHash,
+  'copiile, starea și directorul snapshotului trebuie fsync înaintea jurnalului armed')
+
+  const journalWriter = shellFunction(upgrade, 'write_upgrade_journal')
+  assert.match(journalWriter, /case "\$phase" in armed\|installed\) ;; \*\) return 1 ;; esac/)
+  assert.match(journalWriter,
+    /schema:1,kind:"constructor-upgrade",phase:\$phase,sourceCommit:\$sourceCommit,[\s\S]*snapshotRoot:\$snapshotRoot,stateSha256:\$stateSha256/)
+  const journalFsync = journalWriter.indexOf('fsync_path "$temporary"')
+  const journalMove = journalWriter.indexOf('mv -f -- "$temporary" "$UPGRADE_JOURNAL"', journalFsync)
+  const journalRootFsync = journalWriter.indexOf('fsync_path "$RUNTIME_ROOT"', journalMove)
+  assert.ok(journalFsync >= 0 && journalMove > journalFsync && journalRootFsync > journalMove)
+
+  const journalLoader = shellFunction(upgrade, 'load_upgrade_journal')
+  assert.match(journalLoader,
+    /\.schema == 1 and \.kind == "constructor-upgrade"[\s\S]*\(\.phase == "armed" or \.phase == "installed"\)[\s\S]*\.sourceCommit == \$commit/)
+  assert.match(journalLoader,
+    /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
+  assert.match(journalLoader, /sha256sum "\$state_file"[\s\S]*snapshot_state_sha256/)
+  assert.match(journalLoader, /\[ "\$\{#snapshot_lines\[@\]\}" -eq 6 \]/)
+  assert.match(journalLoader,
+    /"\$first" = "\$\{snapshot_marker_present\[\$index\]\}"[\s\S]*"\$second" = "\$\{snapshot_marker_present\[\$index\]\}"/,
+    'snapshotul autentificat trebuie să lege marker == timer enabled == timer active')
+
+  const installedProof = shellFunction(upgrade, 'validate_installed_generation_quiesced')
+  assert.match(installedProof, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
+  assert.match(installedProof, /\[ ! -e "\$READY_STAMP" \] && \[ ! -L "\$READY_STAMP" \]/)
+  assert.match(installedProof, /for marker in "\$\{constructor_markers\[@\]\}"[\s\S]*\[ ! -e "\$marker" \]/)
+  assert.match(installedProof, /UnitFileState --value\)" = disabled[\s\S]*inactive\|failed/)
+  assert.match(installedProof, /validate_service_quiescence/)
+
+  const main = upgrade.slice(upgrade.lastIndexOf('[ -d "$ROOT" ]'))
+  const publicationLock = main.indexOf('flock -n 9')
+  const createSnapshot = main.indexOf('create_upgrade_snapshot', publicationLock)
+  const loadArmed = main.indexOf('load_upgrade_journal', createSnapshot)
+  const installer = main.indexOf('bash "$repo_root/deploy/instaleaza-constructor.sh"', loadArmed)
+  const proveInstalled = main.indexOf('validate_installed_generation_quiesced', installer)
+  const commitInstalled = main.indexOf('write_upgrade_journal installed', proveInstalled)
+  const strictCutover = main.indexOf('strict_constructor_config_recommit', commitInstalled)
+  const proveRestored = main.indexOf('validate_restored_activation_vector', strictCutover)
+  const workerHash = main.indexOf('worker_sha256=$(sha256sum', proveRestored)
+  const clearOuter = main.indexOf('clear_upgrade_transaction', workerHash)
+  assert.ok(publicationLock >= 0 && createSnapshot > publicationLock && loadArmed > createSnapshot
+    && installer > loadArmed && proveInstalled > installer && commitInstalled > proveInstalled
+    && strictCutover > commitInstalled && proveRestored > strictCutover
+    && workerHash > proveRestored && clearOuter > workerHash,
+  'jurnalul exterior trebuie să încadreze installerul roll-forward, cutover-ul strict și dovada exactă finală')
+  assert.match(main.slice(loadArmed, installer), /\[ "\$upgrade_phase" = armed \]/)
+  assert.match(main.slice(loadArmed, installer), /KELION_CONSTRUCTOR_SOURCE_COMMIT="\$constructor_upgrade_source_commit"/)
+  assert.doesNotMatch(shellFunction(upgrade, 'report_constructor_upgrade_failure'),
+    /clear_upgrade_transaction|rm -f -- "\$UPGRADE_JOURNAL"|rm -rf[^\n]*constructor-upgrade/,
+    'un eșec trebuie să păstreze jurnalul exterior și snapshotul pentru retry autentificat')
+})
+
+test('cutover-ul final al upgrade-ului restage-uiește numai configul worker byte-identic, fără restart backend', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
+  assert.match(recommit, /config_file=\$CONFIG_ROOT\/codex-worker\.env/)
+  assert.match(recommit,
+    /--recover-only "\$compose" --leave-constructor-quiesced[\s\S]*restore_snapshot_markers/)
+  assert.match(recommit,
+    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+  assert.match(recommit,
+    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+  assert.match(recommit,
+    /printf [^\n]*constructor-config\.codex-worker\.env[^\n]*> "\$cutover_stage\/manifest"/)
+  assert.match(recommit,
+    /fsync_path "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
+  assert.match(recommit,
+    /KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1[\s\\]*KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"[\s\\]*"\$helper" "\$cutover_stage" "\$compose"/)
+  assert.doesNotMatch(recommit,
+    /runtime\.env|app-secret|gate-secret|worker-secret|publisher-secret|release-secret|recreate_active_release|systemctl\s+(?:restart|try-restart)/)
+
+  const mapper = shellFunction(cutover, 'map_logical')
+  const workerMappingStart = mapper.indexOf('constructor-config.codex-worker.env)')
+  const workerMappingEnd = mapper.indexOf('\n    constructor-config.constructor-publisher.env)', workerMappingStart)
+  assert.ok(workerMappingStart >= 0 && workerMappingEnd > workerMappingStart)
+  const workerMapping = mapper.slice(workerMappingStart, workerMappingEnd)
+  assert.match(workerMapping, /mapped_target=\$CONFIG_ROOT\/codex-worker\.env; mapped_mode=640/)
+  assert.doesNotMatch(workerMapping, /restart_required=1/)
+
+  const restored = shellFunction(upgrade, 'validate_restored_activation_vector')
+  assert.match(restored, /validate_ready_stamp/)
+  assert.match(restored, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
+  assert.match(restored,
+    /cmp -s -- "\$snapshot_root\/marker\.\$index" "\$marker"/)
+  assert.match(restored, /unit_file_state=\$\(systemctl show "\$timer" --property=UnitFileState --value\)/)
+  assert.match(restored, /active_state=\$\(systemctl show "\$timer" --property=ActiveState --value\)/)
+  assert.match(restored,
+    /"\$\{snapshot_timer_enabled\[\$index\]\}" = 1[\s\S]*"\$unit_file_state" = enabled[\s\S]*else[\s\S]*"\$unit_file_state" = disabled/)
+  assert.match(restored,
+    /"\$\{snapshot_timer_active\[\$index\]\}" = 1[\s\S]*"\$active_state" = active[\s\S]*else[\s\S]*"\$active_state" = inactive/)
+  assert.match(restored, /validate_service_quiescence/)
+})
+
+test('jurnalul exterior al upgrade-ului blochează fiecare mutator după eliberarea lock-ului la crash', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const deploy = read('deploy/deploy.sh')
+  const provision = read('.github/workflows/vps-set-env.yml')
+  const control = read('.github/workflows/vps-run.yml')
+
+  const pendingPublisher = shellFunction(upgrade, 'publish_unit_pending')
+  const pendingValidation = pendingPublisher.indexOf('validate_unit_pending')
+  const pendingMove = pendingPublisher.indexOf('mv -f -- "$temporary" "$UNIT_MIGRATION_PENDING"')
+  const pendingFsync = pendingPublisher.indexOf('fsync_path "$RUNTIME_ROOT"', pendingMove)
+  const readyRemoval = pendingPublisher.indexOf('rm -f -- "$READY_STAMP"', pendingFsync)
+  const readyFsync = pendingPublisher.indexOf('fsync_path "$READY_ROOT"', readyRemoval)
+  assert.ok(pendingValidation >= 0 && pendingMove > pendingValidation && pendingFsync > pendingMove
+    && readyRemoval > pendingFsync && readyFsync > readyRemoval,
+  'pending trebuie autentificat și fsync înainte de unlink+fsync ready; crash-ul nu poate lăsa outer-only fără barieră')
+
+  const deployLock = deploy.indexOf('\nflock 8\n')
+  const deployOuterGuard = deploy.indexOf('CONSTRUCTOR_UPGRADE_JOURNAL=', deployLock)
+  const deployFirstRecovery = deploy.indexOf('\nrecover_lost_post_ponr_quiesce', deployLock)
+  assert.ok(deployLock >= 0 && deployOuterGuard > deployLock && deployFirstRecovery > deployOuterGuard,
+    'deploy-ul trebuie să refuze outer journal înaintea primului recovery sau mutator')
+  assert.match(deploy.slice(deployOuterGuard, deployFirstRecovery),
+    /CONSTRUCTOR_UPGRADE_JOURNAL=\$RUNTIME_ROOT\/constructor-upgrade\.journal[\s\S]*\[ ! -e "\$CONSTRUCTOR_UPGRADE_JOURNAL" \] && \[ ! -L "\$CONSTRUCTOR_UPGRADE_JOURNAL" \]/)
+
+  const provisionRemoteStart = provision.indexOf('          exec 9>/root/kelion/publicare.lock')
+  const provisionLock = provision.indexOf('          flock -n 9', provisionRemoteStart)
+  const provisionOuterGuard = provision.indexOf('constructor_upgrade_journal=', provisionLock)
+  const provisionFirstRecovery = provision.indexOf('KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh', provisionLock)
+  const provisionFirstInstall = provision.indexOf('          install_atomic ', provisionLock)
+  assert.ok(provisionLock >= 0 && provisionOuterGuard > provisionLock
+    && provisionFirstRecovery > provisionOuterGuard && provisionFirstInstall > provisionOuterGuard,
+  'provisionarea trebuie să refuze outer journal înainte de recovery și de primul install atomic')
+  assert.match(provision.slice(provisionOuterGuard, Math.min(provisionFirstRecovery, provisionFirstInstall)),
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal[\s\S]*\[ ! -e "\$constructor_upgrade_journal" \] && \[ ! -L "\$constructor_upgrade_journal" \]/)
+
+  const configureStart = control.indexOf('- name: Configureaza Constructorul fara activare prematura')
+  const configureEnd = control.indexOf('\n      - name:', configureStart + 1)
+  assert.ok(configureStart >= 0 && configureEnd > configureStart)
+  const configure = control.slice(configureStart, configureEnd)
+  const configureLock = configure.indexOf('flock -n 9')
+  const configureOuterGuard = configure.indexOf('constructor_upgrade_journal=', configureLock)
+  const configureFirstRecovery = configure.indexOf('deploy_quiesce_journal=', configureLock)
+  assert.ok(configureLock >= 0 && configureOuterGuard > configureLock
+    && configureFirstRecovery > configureOuterGuard,
+  'configure trebuie să refuze outer journal înainte să recupereze ori să reia installerul')
+  assert.match(configure.slice(configureOuterGuard, configureFirstRecovery),
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal[\s\S]*(?:\[ ! -e "\$constructor_upgrade_journal" \] && \[ ! -L "\$constructor_upgrade_journal" \]|if \[ -e "\$constructor_upgrade_journal" \] \|\| \[ -L "\$constructor_upgrade_journal" \]; then[\s\S]*exit 1)/)
+
+  const activationStart = control.indexOf('- name: Activeaza etapizat sau raporteaza starea')
+  const activationEnd = control.indexOf('\n      - name:', activationStart + 1)
+  assert.ok(activationStart >= 0 && activationEnd > activationStart)
+  const activation = control.slice(activationStart, activationEnd)
+  const workerStart = activation.indexOf('            activate-worker-publisher)')
+  const releaseStart = activation.indexOf('            activate-release)', workerStart)
+  const statusStart = activation.indexOf('            constructor-status)', releaseStart)
+  assert.ok(workerStart >= 0 && releaseStart > workerStart && statusStart > releaseStart)
+  assert.match(activation,
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal/)
+  for (const [name, branch] of [
+    ['activate-worker-publisher', activation.slice(workerStart, releaseStart)],
+    ['activate-release', activation.slice(releaseStart, statusStart)],
+  ]) {
+    const lock = branch.indexOf('flock -n 9')
+    const guard = branch.indexOf('if [ -e "$constructor_upgrade_journal"', lock)
+    const recovery = branch.indexOf('recover_activation_preflight', lock)
+    assert.ok(lock >= 0 && guard > lock && recovery > guard,
+      `${name} trebuie să refuze outer journal după lock și înainte de recovery`)
+    assert.match(branch.slice(guard, recovery),
+      /if \[ -e "\$constructor_upgrade_journal" \] \|\| \[ -L "\$constructor_upgrade_journal" \]; then[\s\S]*exit 1/)
+  }
+
+  assert.match(cutover, /^leave_constructor_quiesced=0$/m)
+  const ownerContractStart = cutover.indexOf('constructor_upgrade_owner=${KELION_CONSTRUCTOR_UPGRADE_OWNER:-0}')
+  const ownerContractEnd = cutover.indexOf('deploy_owner_request_id=', ownerContractStart)
+  assert.ok(ownerContractStart >= 0 && ownerContractEnd > ownerContractStart)
+  assert.match(cutover.slice(ownerContractStart, ownerContractEnd),
+    /constructor_upgrade_source_commit=\$\{KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT:-\}[\s\S]*if \[ "\$constructor_upgrade_owner" = 1 \]; then[\s\S]*\^\[0-9a-f\]\{40\}\$[\s\S]*else[\s\S]*\[ -z "\$constructor_upgrade_source_commit" \][\s\S]*unset KELION_CONSTRUCTOR_UPGRADE_OWNER[\s\S]*unset KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT/,
+    'ownerul trebuie să prezinte un source commit canonic, iar apelantul generic nu poate furniza această capabilitate')
+  const runtimeLockContract = cutover.indexOf('if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then')
+  const inheritedFdGuard = cutover.indexOf('[ -f /proc/$$/fd/9 ]', runtimeLockContract)
+  const inheritedFdPath = cutover.indexOf('readlink /proc/$$/fd/9', inheritedFdGuard)
+  const inheritedFdAcl = cutover.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9", inheritedFdPath)
+  const inheritedFdIdentity = cutover.indexOf("publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)", inheritedFdAcl)
+  const inheritedRuntimeLock = cutover.indexOf('flock -n 9', runtimeLockContract)
+  const directPathGuard = cutover.indexOf('[ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ]', inheritedRuntimeLock)
+  const directFdOpen = cutover.indexOf('exec 9<>"$PUBLICATION_LOCK"', directPathGuard)
+  const directFdGuard = cutover.indexOf('[ -f /proc/$$/fd/9 ]', directFdOpen)
+  const directFdIdentity = cutover.indexOf("publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)", directFdGuard)
+  const directPathIdentity = cutover.indexOf('[ "$publication_fd_identity" = "$(stat -Lc \'%d:%i\' "$PUBLICATION_LOCK")" ]', directFdIdentity)
+  const directRuntimeLock = cutover.indexOf('flock -n 9', inheritedRuntimeLock + 1)
+  const postFlockGuard = cutover.indexOf('[ ! -L "$PUBLICATION_LOCK" ]', directRuntimeLock)
+  const postFlockPath = cutover.indexOf('readlink /proc/$$/fd/9', postFlockGuard)
+  const postFlockIdentity = cutover.indexOf('[ "$publication_fd_identity" = "$(stat -Lc \'%d:%i\' "$PUBLICATION_LOCK")" ]', postFlockPath)
+  const earlyBarrierCall = cutover.indexOf('\n  early_recover_only_barrier \\')
+  assert.ok(runtimeLockContract >= 0 && inheritedFdGuard > runtimeLockContract
+    && inheritedFdPath > inheritedFdGuard && inheritedFdAcl > inheritedFdPath
+    && inheritedFdIdentity > inheritedFdAcl && inheritedRuntimeLock > inheritedFdIdentity
+    && directPathGuard > inheritedRuntimeLock && directFdOpen > directPathGuard
+    && directFdGuard > directFdOpen && directFdIdentity > directFdGuard
+    && directPathIdentity > directFdIdentity && directRuntimeLock > directPathIdentity
+    && postFlockGuard > directRuntimeLock && postFlockPath > postFlockGuard
+    && postFlockIdentity > postFlockPath && earlyBarrierCall > postFlockIdentity,
+  'recover-only nu poate retrage ready sau opri unități înainte să dețină publication lock-ul canonic')
+  const runtimeUpgradeGuard = cutover.indexOf('if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then', directRuntimeLock)
+  const runtimePendingGuard = cutover.indexOf('if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then', runtimeUpgradeGuard)
+  const runtimeFsyncDefinition = cutover.indexOf('\nfsync_path() {', runtimeUpgradeGuard)
+  assert.ok(runtimeUpgradeGuard > earlyBarrierCall && runtimePendingGuard > runtimeUpgradeGuard
+    && runtimeFsyncDefinition > runtimePendingGuard,
+    'apelantul generic poate doar quiesce fail-closed sub lock înainte ca outer journal să fie autentificat; guardul precede restul cutover-ului')
+  assert.match(cutover.slice(runtimeUpgradeGuard, runtimePendingGuard),
+    /constructor_upgrade_owner" = 1[\s\S]*KELION_CUTOVER_LOCK_HELD[\s\S]*--arg sourceCommit "\$constructor_upgrade_source_commit"[\s\S]*\.kind == "constructor-upgrade"[\s\S]*\.sourceCommit == \$sourceCommit[\s\S]*\.snapshotRoot[\s\S]*\.stateSha256/)
+  assert.match(cutover.slice(runtimePendingGuard, runtimeFsyncDefinition),
+    /\[ -f "\$UNIT_MIGRATION_PENDING" \] && \[ ! -L "\$UNIT_MIGRATION_PENDING" \][\s\S]*0:0:600:1[\s\S]*wc -l[\s\S]*grep -qx 'schema=1'[\s\S]*constructor_upgrade_owner" != 1[\s\S]*recover_only" = 1[\s\S]*die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'/,
+    'pending-ul trebuie autentificat înainte ca recovery-ul generic să fie refuzat fail-closed')
+  assert.doesNotMatch(cutover.slice(earlyBarrierCall, runtimeUpgradeGuard),
+    /publish_runtime_ready_stamp|restore_constructor_timers|clear_unit_migration_pending|recover_interrupted|mv -f/,
+    'între quiesce-ul serializat și guard nu poate exista recovery, restaurare sau publicare')
+  const genericRecoveryStart = cutover.indexOf('if [ "$recover_only" = 1 ]; then',
+    cutover.indexOf('trap cleanup_cutover EXIT'))
+  const retractReady = cutover.indexOf('retract_runtime_ready_stamp_for_recovery', genericRecoveryStart)
+  const quiesceFirst = cutover.indexOf('quiesce_units_for_recovery 1', retractReady)
+  const pendingRecoveryStart = cutover.indexOf('if [ "$recover_only" = 1 ]; then', quiesceFirst + 1)
+  const validatePending = cutover.indexOf('validate_unit_migration_pending', pendingRecoveryStart)
+  const genericPendingBranch = cutover.indexOf('\n    else\n      [ "$leave_constructor_quiesced" = 1 ]',
+    cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]', validatePending))
+  const requireExplicitLeave = cutover.indexOf('[ "$leave_constructor_quiesced" = 1 ]', genericPendingBranch)
+  const pendingExit = cutover.indexOf('exit 0', requireExplicitLeave)
+  const genericReady = cutover.indexOf('publish_runtime_ready_stamp', pendingExit)
+  assert.ok(genericRecoveryStart >= 0 && retractReady > genericRecoveryStart
+    && quiesceFirst > retractReady && pendingRecoveryStart > quiesceFirst
+    && validatePending > pendingRecoveryStart && genericPendingBranch > validatePending
+    && requireExplicitLeave > genericPendingBranch && pendingExit > requireExplicitLeave
+    && genericReady > pendingExit,
+  'recover-only trebuie să retragă ready, să oprească unitățile și să refuze pending fără --leave înainte de orice ready/start')
+  assert.match(cutover.slice(requireExplicitLeave, pendingExit),
+    /bariera unit-only blochează boot-ul generic până la cutover-ul strict/)
+  assert.doesNotMatch(cutover.slice(genericPendingBranch, pendingExit),
+    /clear_unit_migration_pending|publish_runtime_ready_stamp|restore_constructor_timers/)
+
+  const inheritedOwnerCalls = [...upgrade.matchAll(/KELION_CUTOVER_LOCK_HELD=1/g)]
+  assert.ok(inheritedOwnerCalls.length >= 5)
+  for (const call of inheritedOwnerCalls) {
+    const ownerCall = upgrade.slice(call.index, call.index + 340)
+    assert.match(ownerCall, /KELION_CONSTRUCTOR_UPGRADE_OWNER=1/,
+      'fiecare helper/installer al upgrade-ului trebuie să poarte ownerul explicit sub lockul moștenit')
+    assert.match(ownerCall,
+      /KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"/,
+      'fiecare owner moștenit trebuie legat de sourceCommit-ul exact al jurnalului exterior')
+  }
+})
+
+test('telemetria upgrade-ului Constructor este structurată și nu divulgă mediul', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const reporter = shellFunction(upgrade, 'report_constructor_upgrade_failure')
+  const capture = shellFunction(upgrade, 'capture_constructor_upgrade_failure')
+  assert.doesNotMatch(upgrade,
+    /CODEX_WORKER_SECRET|CONSTRUCTOR_(?:PUBLISHER|RELEASE)_SECRET|SYNC_GITHUB_TOKEN|PUBLISHER_GITHUB_TOKEN|RELEASE_GITHUB_TOKEN|GHCR_READ_TOKEN|OPENAI_(?:API|ADMIN)_KEY|\bpayload\b|\bapt(?:-get)?\b|\bnpm\b/i)
+  assert.doesNotMatch(reporter,
+    /BASH_COMMAND|set\s+-x|printenv|declare\s+-p|export\s+-p|printf[^\n]*(?:token|secret|value|env)/i)
+
+  const canary = `CANARY-UPGRADE-${process.pid}-${Date.now()}`
+  const sourceCommit = '89abcdef0123456789abcdef0123456789abcdef'
+  const probe = spawnSync(bashExecutable, ['-c', `
+set -Eeuo pipefail
+constructor_upgrade_phase=artifact-publication
+constructor_upgrade_failure_line=0
+constructor_upgrade_source_commit=${sourceCommit}
+activation_restore_started=0
+cleanup_unpublished_stage() { :; }
+${reporter}
+${capture}
+trap 'capture_constructor_upgrade_failure "$LINENO"' ERR
+trap report_constructor_upgrade_failure EXIT
+false
+`], {
+    encoding: 'utf8',
+    env: { ...process.env, CANARY_SECRET: canary },
+  })
+  assert.equal(probe.status, 1, probe.stderr || probe.stdout)
+  assert.equal(probe.stdout, '')
+  const events = probe.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('{'))
+  assert.equal(events.length, 1, probe.stderr)
+  const event = JSON.parse(events[0])
+  assert.deepEqual({ ...event, line: 0 }, {
+    ok: false,
+    event: 'constructor_upgrade_failure',
+    phase: 'artifact-publication',
+    line: 0,
+    exit_code: 1,
+    source_commit: sourceCommit,
+  })
+  assert.ok(Number.isInteger(event.line) && event.line > 0)
+  assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
+  assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
+})

@@ -10,6 +10,7 @@ on:
         options:
           - discover-host-key
           - configure-constructor
+          - upgrade-constructor
           - activate-worker-publisher
           - activate-release
           - constructor-status
@@ -77,13 +78,6 @@ jobs:
       CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
       CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation,current-tree,merge-policy' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
-      CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
-      CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
-      SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
-      PUBLISHER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
-      RELEASE_GITHUB_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
-      GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Valideaza tinta fixa
@@ -129,23 +123,131 @@ jobs:
           printf '%s\n' "$host_key" | ssh-keygen -lf - -E sha256
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        if: inputs.operation == 'configure-constructor'
+        if: inputs.operation == 'configure-constructor' || inputs.operation == 'upgrade-constructor'
         with:
+          ref: master
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Leaga imaginea gate de varful master
-        if: inputs.operation == 'configure-constructor'
+      - name: Selecteaza determinist sursa upgrade-ului Constructor
+        if: inputs.operation == 'upgrade-constructor'
+        id: upgrade-source
+        run: |
+          set -Eeuo pipefail
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          master_commit=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+          [[ "$master_commit" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$master_commit" ]
+          [ "$(git rev-parse origin/master)" = "$master_commit" ]
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ -n "$current_host_key" ]
+          [ "$(printf '%s\n' "$current_host_key" | wc -l)" -eq 1 ]
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup_source_probe() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup_source_probe EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          journal_source=$(ssh \
+            -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+            -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+            "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          journal=/root/kelion/runtime/constructor-upgrade.journal
+          if [ ! -e "$journal" ] && [ ! -L "$journal" ]; then
+            printf 'none\n'
+            exit 0
+          fi
+          [ -f "$journal" ] && [ ! -L "$journal" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$journal")" = '0:0:600:1' ]
+          journal_identity=$(stat -Lc '%d:%i' "$journal")
+          exec 8<"$journal"
+          [ "$(readlink /proc/$$/fd/8)" = "$journal" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8)" = '0:0:600:1' ]
+          [ "$(stat -Lc '%d:%i' /proc/$$/fd/8)" = "$journal_identity" ]
+          [ "$(wc -l < /proc/$$/fd/8)" -eq 1 ]
+          source_commit=$(jq -er '
+            select(
+              .schema == 1 and .kind == "constructor-upgrade" and
+              (.phase == "armed" or .phase == "installed") and
+              (.sourceCommit | strings | test("^[0-9a-f]{40}$")) and
+              (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
+              (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
+              (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
+            ) | .sourceCommit
+          ' /proc/$$/fd/8)
+          snapshot_root=$(jq -er '.snapshotRoot' /proc/$$/fd/8)
+          state_sha256=$(jq -er '.stateSha256' /proc/$$/fd/8)
+          [ ! -L "$journal" ]
+          [ "$(stat -Lc '%d:%i' "$journal")" = "$journal_identity" ]
+          [ -d "$snapshot_root" ] && [ ! -L "$snapshot_root" ]
+          [ "$(realpath -e -- "$snapshot_root")" = "$snapshot_root" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$snapshot_root")" = '0:0:700:2' ]
+          snapshot_identity=$(stat -Lc '%d:%i' "$snapshot_root")
+          [ -f "$snapshot_root/state" ] && [ ! -L "$snapshot_root/state" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$snapshot_root/state")" = '0:0:600:1' ]
+          state_identity=$(stat -Lc '%d:%i' "$snapshot_root/state")
+          exec 7<"$snapshot_root/state"
+          [ "$(readlink /proc/$$/fd/7)" = "$snapshot_root/state" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/7)" = '0:0:600:1' ]
+          [ "$(stat -Lc '%d:%i' /proc/$$/fd/7)" = "$state_identity" ]
+          [ "$(sha256sum /proc/$$/fd/7 | awk '{print $1}')" = "$state_sha256" ]
+          [ ! -L "$snapshot_root/state" ]
+          [ "$(stat -Lc '%d:%i' "$snapshot_root/state")" = "$state_identity" ]
+          [ ! -L "$snapshot_root" ]
+          [ "$(stat -Lc '%d:%i' "$snapshot_root")" = "$snapshot_identity" ]
+          printf '%s\n' "$source_commit"
+          REMOTE
+          [ "$(printf '%s\n' "$journal_source" | wc -l)" -eq 1 ]
+
+          recovery=0
+          source_commit=$master_commit
+          if [ "$journal_source" != none ]; then
+            [[ "$journal_source" =~ ^[0-9a-f]{40}$ ]]
+            git cat-file -e "$journal_source^{commit}"
+            git merge-base --is-ancestor "$journal_source" "$master_commit"
+            source_commit=$journal_source
+            recovery=1
+          fi
+          git checkout --detach "$source_commit"
+          [ "$(git rev-parse HEAD)" = "$source_commit" ]
+          printf 'commit=%s\nmaster=%s\nrecovery=%s\n' \
+            "$source_commit" "$master_commit" "$recovery" >> "$GITHUB_OUTPUT"
+
+      - name: Leaga imaginea gate de sursa Constructor
+        if: inputs.operation == 'configure-constructor' || inputs.operation == 'upgrade-constructor'
         id: gate
+        env:
+          OPERATION: ${{ inputs.operation }}
+          UPGRADE_SOURCE_COMMIT: ${{ steps.upgrade-source.outputs.commit }}
+          UPGRADE_MASTER_COMMIT: ${{ steps.upgrade-source.outputs.master }}
+          UPGRADE_RECOVERY: ${{ steps.upgrade-source.outputs.recovery }}
         run: |
           set -euo pipefail
           commit=$(git rev-parse HEAD)
           [ "$GITHUB_REF" = refs/heads/master ]
-          [ "$commit" = "$GITHUB_SHA" ]
-          [ "$commit" = "$(git rev-parse origin/master)" ]
           remote_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
-          [ "$commit" = "$remote_master" ]
-          runs=$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" -f event=workflow_run -f status=completed -f per_page=50)
+          if [ "$OPERATION" = configure-constructor ]; then
+            [ "$commit" = "$GITHUB_SHA" ]
+            [ "$commit" = "$(git rev-parse origin/master)" ]
+            [ "$commit" = "$remote_master" ]
+          else
+            [ "$commit" = "$UPGRADE_SOURCE_COMMIT" ]
+            [ "$(git rev-parse origin/master)" = "$UPGRADE_MASTER_COMMIT" ]
+            [ "$remote_master" = "$UPGRADE_MASTER_COMMIT" ]
+            case "$UPGRADE_RECOVERY" in
+              0) [ "$commit" = "$remote_master" ] ;;
+              1) git merge-base --is-ancestor "$commit" "$remote_master" ;;
+              *) exit 1 ;;
+            esac
+          fi
+          runs=$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
+            -f event=workflow_run -f status=completed -f head_sha="$commit" -f per_page=50)
           run_id=$(jq -er '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")][0].id' --arg sha "$commit" <<<"$runs")
           gh run download "$run_id" --name "release-images-$commit" --dir "$RUNNER_TEMP/release-manifest"
           gate_image=$(jq -er --arg commit "$commit" 'select(.schema == 1 and .commit == $commit and (.image | type == "string")) | .image' "$RUNNER_TEMP/release-manifest/codex-gates.json")
@@ -166,10 +268,142 @@ jobs:
           grep -qx 'AGENTS.md' "$RUNNER_TEMP/constructor-bundle.entries"
           grep -q '^deploy/' "$RUNNER_TEMP/constructor-bundle.entries"
 
+      - name: Actualizeaza atomic Constructorul in-place
+        if: inputs.operation == 'upgrade-constructor'
+        env:
+          UPGRADE_SOURCE_COMMIT: ${{ steps.upgrade-source.outputs.commit }}
+          UPGRADE_MASTER_COMMIT: ${{ steps.upgrade-source.outputs.master }}
+          UPGRADE_RECOVERY: ${{ steps.upgrade-source.outputs.recovery }}
+        run: |
+          set -Eeuo pipefail
+          [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          source_commit=$(git rev-parse HEAD)
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$source_commit" = "$UPGRADE_SOURCE_COMMIT" ]
+          [ "$(git rev-parse origin/master)" = "$UPGRADE_MASTER_COMMIT" ]
+          case "$UPGRADE_RECOVERY" in 0|1) ;; *) exit 1 ;; esac
+          [ -f "$RUNNER_TEMP/constructor-bundle.tar.gz" ]
+          [ ! -L "$RUNNER_TEMP/constructor-bundle.tar.gz" ]
+          chmod 0600 "$RUNNER_TEMP/constructor-bundle.tar.gz"
+          [ "$(stat -Lc '%a:%h' "$RUNNER_TEMP/constructor-bundle.tar.gz")" = '600:1' ]
+
+          release_proof=$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+            --max-time 12 --max-redirs 0 "$PUBLIC_APP_ORIGIN/api/release-proof")
+          jq -e --arg expected "$source_commit" '
+            .ready == true and .release.sideEffectsActive == true and
+            .release.candidate == false and
+            .activeCommit == $expected
+          ' <<<"$release_proof" >/dev/null
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ -n "$current_host_key" ]
+          [ "$(printf '%s\n' "$current_host_key" | wc -l)" -eq 1 ]
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+
+          umask 077
+          key_file=''
+          known_hosts=''
+          remote_bundle="/root/kelion/runtime/constructor-upgrade-bundle.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
+          cleanup_unit="kelion-constructor-upgrade-bundle-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_opts=()
+          cleanup() {
+            if [ "${#ssh_opts[@]}" -gt 0 ]; then
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+                "rm -f -- '$remote_bundle'; systemctl stop '$cleanup_unit.timer' '$cleanup_unit.service' >/dev/null 2>&1 || true; systemctl reset-failed '$cleanup_unit.service' >/dev/null 2>&1 || true" \
+                >/dev/null 2>&1 || true
+            fi
+            [ -z "$key_file" ] || rm -f -- "$key_file"
+            [ -z "$known_hosts" ] || rm -f -- "$known_hosts"
+          }
+          trap cleanup EXIT
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+
+          bundle_commit=$source_commit
+          assert_resolved_master_unchanged() {
+            local latest_master
+            latest_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+            [ "$latest_master" = "$UPGRADE_MASTER_COMMIT" ] \
+              || { echo '::error::master a avansat după selectarea sursei; reia operația.'; return 1; }
+            if [ "$UPGRADE_RECOVERY" = 0 ]; then
+              [ "$bundle_commit" = "$latest_master" ]
+            else
+              git merge-base --is-ancestor "$bundle_commit" "$latest_master"
+            fi
+          }
+          assert_resolved_master_unchanged
+          scp "${ssh_opts[@]}" "$RUNNER_TEMP/constructor-bundle.tar.gz" "$VPS_USER@$VPS_HOST:$remote_bundle"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "chmod 0600 '$remote_bundle'; [ \"\$(stat -Lc '%u:%g:%a:%h' '$remote_bundle')\" = '0:0:600:1' ]; systemd-run --quiet --unit='$cleanup_unit' --on-active=30m /usr/bin/rm -f -- '$remote_bundle'; systemctl is-active --quiet '$cleanup_unit.timer'"
+          assert_resolved_master_unchanged
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_bundle" "$cleanup_unit" "$source_commit" "$UPGRADE_RECOVERY" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          bundle=$1
+          cleanup_unit=$2
+          source_commit=$3
+          recovery=$4
+          [[ "$bundle" =~ ^/root/kelion/runtime/constructor-upgrade-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
+          [[ "$cleanup_unit" =~ ^kelion-constructor-upgrade-bundle-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$recovery" =~ ^[01]$ ]]
+          [ -f "$bundle" ] && [ ! -L "$bundle" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$bundle")" = '0:0:600:1' ]
+          active_marker=/root/kelion/runtime/release-state/active
+          [ -f "$active_marker" ] && [ ! -L "$active_marker" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$active_marker")" = '0:10050:640:1' ] \
+            && [ "$(wc -l < "$active_marker")" -eq 1 ] \
+            && grep -qx "$source_commit" "$active_marker"
+          work=''
+          cleanup_remote() {
+            local rc=$? cleanup_failed=0
+            trap - ERR EXIT
+            set +e
+            rm -f -- "$bundle" || cleanup_failed=1
+            systemctl stop "$cleanup_unit.timer" >/dev/null 2>&1 || cleanup_failed=1
+            systemctl stop "$cleanup_unit.service" >/dev/null 2>&1 || cleanup_failed=1
+            systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || cleanup_failed=1
+            if [[ "$work" =~ ^/root/kelion/runtime/constructor-upgrade-source\.[A-Za-z0-9]+$ ]] \
+              && [ -d "$work" ] && [ ! -L "$work" ]; then
+              rm -rf --one-file-system -- "$work" || cleanup_failed=1
+            fi
+            if [ "$rc" = 0 ] && [ "$cleanup_failed" != 0 ]; then rc=1; fi
+            exit "$rc"
+          }
+          trap cleanup_remote EXIT
+          work=$(mktemp -d /root/kelion/runtime/constructor-upgrade-source.XXXXXX)
+          [ "$(stat -Lc '%u:%g:%a' "$work")" = '0:0:700' ]
+          tar -tzf "$bundle" > "$work/bundle.entries"
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' "$work/bundle.entries"; then exit 1; fi
+          grep -qx 'AGENTS.md' "$work/bundle.entries"
+          grep -qx 'deploy/upgrade-constructor.sh' "$work/bundle.entries"
+          tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
+          [ -f "$work/AGENTS.md" ] && [ ! -L "$work/AGENTS.md" ]
+          [ -f "$work/deploy/upgrade-constructor.sh" ] && [ ! -L "$work/deploy/upgrade-constructor.sh" ]
+          KELION_CONSTRUCTOR_UPGRADE=1 \
+          KELION_CONSTRUCTOR_RECOVERY="$recovery" \
+          KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
+            bash "$work/deploy/upgrade-constructor.sh"
+          REMOTE
+
       - name: Configureaza Constructorul fara activare prematura
         if: inputs.operation == 'configure-constructor'
         env:
           GATE_IMAGE: ${{ steps.gate.outputs.image }}
+          CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
+          CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
+          CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
+          SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
+          PUBLISHER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
+          RELEASE_GITHUB_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+          GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
         run: |
           set -euo pipefail
           [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
@@ -258,8 +492,30 @@ jobs:
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$public_origin"
           public_host=$(node -e 'process.stdout.write(new URL(process.argv[1]).hostname)' "$public_origin")
-          exec 9>/root/kelion/publicare.lock
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<>"$publication_lock"
+          publication_fd_path=$(readlink /proc/$$/fd/9)
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_path" = "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
           flock -n 9
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+            && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          if [ -e "$constructor_upgrade_journal" ] || [ -L "$constructor_upgrade_journal" ]; then
+            echo 'un upgrade Constructor exterior este pending; configure-constructor este refuzat' >&2
+            exit 1
+          fi
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          if [ -e "$constructor_unit_pending" ] || [ -L "$constructor_unit_pending" ]; then
+            echo 'o barieră unit-only Constructor este pending; configure-constructor este refuzat' >&2
+            exit 1
+          fi
           export KELION_CUTOVER_LOCK_HELD=1
           work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)
           bootstrap=/run/kelion-constructor-bootstrap
@@ -946,6 +1202,8 @@ jobs:
           fi
           activation_journal=/root/kelion/runtime/constructor-activation.journal
           activation_pending=/run/kelion/constructor-activation.pending
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
           activation_dir=''
           activation_in_progress=0
           activation_committed=0
@@ -956,6 +1214,26 @@ jobs:
           all_timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
           all_services=(kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service)
           declare -a snapshot_marker_present=() snapshot_timer_enabled=() snapshot_timer_active=() snapshot_service_active=()
+
+          publication_lock=/root/kelion/publicare.lock
+          publication_fd_identity=''
+          open_control_publication_lock() {
+            local publication_fd_path
+            [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ] || return 1
+            exec 9<>"$publication_lock"
+            publication_fd_path=$(readlink /proc/$$/fd/9) || return 1
+            publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9) || return 1
+            [ "$publication_fd_path" = "$publication_lock" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+              && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          }
+          verify_control_publication_lock() {
+            [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+              && [ ! -L "$publication_lock" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+              && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          }
 
           validate_runtime() {
             [ -f /root/kelion/config/runtime.env ] && [ ! -L /root/kelion/config/runtime.env ]
@@ -970,7 +1248,7 @@ jobs:
           assert_backend_side_effects_active() {
             local payload
             payload=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:18079/readyz)
-            jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$payload" >/dev/null
+            jq -e '.ready == true and .release.sideEffectsActive == true and .release.candidate == false' <<<"$payload" >/dev/null
             jq -c '{ready,release}' <<<"$payload"
           }
           stop_and_disable_constructor_timer() {
@@ -1243,8 +1521,17 @@ jobs:
           }
           case "$operation" in
             activate-worker-publisher)
-              exec 9>/root/kelion/publicare.lock
+              open_control_publication_lock
               flock -n 9
+              verify_control_publication_lock
+              if [ -e "$constructor_upgrade_journal" ] || [ -L "$constructor_upgrade_journal" ]; then
+                echo 'un upgrade Constructor exterior este pending; activarea este refuzată' >&2
+                exit 1
+              fi
+              if [ -e "$constructor_unit_pending" ] || [ -L "$constructor_unit_pending" ]; then
+                echo 'o barieră unit-only Constructor este pending; activarea este refuzată' >&2
+                exit 1
+              fi
               recover_activation_preflight
               load_activation_barrier
               validate_runtime
@@ -1263,8 +1550,17 @@ jobs:
                 /root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml
               ;;
             activate-release)
-              exec 9>/root/kelion/publicare.lock
+              open_control_publication_lock
               flock -n 9
+              verify_control_publication_lock
+              if [ -e "$constructor_upgrade_journal" ] || [ -L "$constructor_upgrade_journal" ]; then
+                echo 'un upgrade Constructor exterior este pending; activarea este refuzată' >&2
+                exit 1
+              fi
+              if [ -e "$constructor_unit_pending" ] || [ -L "$constructor_unit_pending" ]; then
+                echo 'o barieră unit-only Constructor este pending; activarea este refuzată' >&2
+                exit 1
+              fi
               recover_activation_preflight
               load_activation_barrier
               validate_runtime
@@ -1286,7 +1582,15 @@ jobs:
               KELION_CUTOVER_LOCK_HELD=1 KELION_ACTIVATION_RESUME_OPERATION="$operation" \
                 /root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml
               ;;
-            constructor-status) ;;
+            constructor-status)
+              open_control_publication_lock
+              flock -s -n 9
+              verify_control_publication_lock
+              if [ -e "$constructor_upgrade_journal" ] || [ -L "$constructor_upgrade_journal" ]; then
+                echo 'un upgrade Constructor exterior este pending; statusul canonic este refuzat' >&2
+                exit 1
+              fi
+              ;;
             *) exit 1 ;;
           esac
           status
@@ -1337,6 +1641,30 @@ jobs:
 
           current_check='identity-and-services-inactive'
           [ "$(id -u)" = 0 ]
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<>"$publication_lock"
+          publication_fd_path=$(readlink /proc/$$/fd/9)
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_path" = "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          flock -n 9
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+            && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          if [ -e "$constructor_upgrade_journal" ] || [ -L "$constructor_upgrade_journal" ]; then
+            echo 'un upgrade Constructor exterior este pending; repair-spool-layout este refuzat' >&2
+            exit 1
+          fi
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          if [ -e "$constructor_unit_pending" ] || [ -L "$constructor_unit_pending" ]; then
+            echo 'o barieră unit-only Constructor este pending; repair-spool-layout este refuzat' >&2
+            exit 1
+          fi
           [ "$(stat -c '%U:%G:%a' /var/lib)" = 'root:root:755' ]
           for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service; do
             if systemctl is-active --quiet "$unit"; then
@@ -1528,6 +1856,10 @@ jobs:
         if: inputs.operation == 'audit-token-identity'
         env:
           SOURCE_COMMIT: ${{ github.sha }}
+          SYNC_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
+          PUBLISHER_GITHUB_TOKEN: ${{ secrets.CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN }}
+          RELEASE_GITHUB_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+          GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
         run: |
           set -Eeuo pipefail
           phase='audit-token-identity'
