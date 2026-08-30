@@ -3671,7 +3671,8 @@ test('selectorul upgrade folosește master pentru fresh și numai jurnalul stric
   assert.ok(filterMatch, 'schema jq a jurnalului selector trebuie să poată fi extrasă')
   const journalFilter = filterMatch[1]
   assert.match(journalFilter, /\.schema == 1 and \.kind == "constructor-upgrade"/)
-  assert.match(journalFilter, /\.phase == "armed" or \.phase == "installed"/)
+  assert.match(journalFilter,
+    /\.phase == "armed" or \.phase == "installed" or \.phase == "committed"/)
   assert.match(journalFilter, /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
   const ancestor = '1234567890abcdef1234567890abcdef12345678'
   const validJournal = {
@@ -3686,11 +3687,16 @@ test('selectorul upgrade folosește master pentru fresh și numai jurnalul stric
     input: `${JSON.stringify(journal)}\n`,
     encoding: 'utf8',
   })
-  const accepted = evaluateJournal(validJournal)
-  assert.equal(accepted.status, 0, accepted.stderr)
-  assert.equal(accepted.stdout.trim(), ancestor)
+  for (const phase of ['armed', 'installed', 'committed']) {
+    const accepted = evaluateJournal({ ...validJournal, phase })
+    assert.equal(accepted.status, 0, `${phase}: ${accepted.stderr}`)
+    assert.equal(accepted.stdout.trim(), ancestor)
+  }
   for (const malformed of [
+    Object.fromEntries(Object.entries(validJournal).filter(([key]) => key !== 'phase')),
     { ...validJournal, phase: 'complete' },
+    { ...validJournal, phase: '' },
+    { ...validJournal, phase: null },
     { ...validJournal, sourceCommit: ancestor.slice(0, 7) },
     { ...validJournal, snapshotRoot: '/tmp/constructor-upgrade.Abc123' },
     { ...validJournal, stateSha256: 'a'.repeat(63) },
@@ -3798,7 +3804,7 @@ test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne
   'copiile, starea și directorul snapshotului trebuie fsync înaintea jurnalului armed')
 
   const journalWriter = shellFunction(upgrade, 'write_upgrade_journal')
-  assert.match(journalWriter, /case "\$phase" in armed\|installed\) ;; \*\) return 1 ;; esac/)
+  assert.match(journalWriter, /case "\$phase" in armed\|installed\|committed\) ;; \*\) return 1 ;; esac/)
   assert.match(journalWriter,
     /schema:1,kind:"constructor-upgrade",phase:\$phase,sourceCommit:\$sourceCommit,[\s\S]*snapshotRoot:\$snapshotRoot,stateSha256:\$stateSha256/)
   const journalFsync = journalWriter.indexOf('fsync_path "$temporary"')
@@ -3808,7 +3814,7 @@ test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne
 
   const journalLoader = shellFunction(upgrade, 'load_upgrade_journal')
   assert.match(journalLoader,
-    /\.schema == 1 and \.kind == "constructor-upgrade"[\s\S]*\(\.phase == "armed" or \.phase == "installed"\)[\s\S]*\.sourceCommit == \$commit/)
+    /\.schema == 1 and \.kind == "constructor-upgrade"[\s\S]*\(\.phase == "armed" or \.phase == "installed" or \.phase == "committed"\)[\s\S]*\.sourceCommit == \$commit/)
   assert.match(journalLoader,
     /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
   assert.match(journalLoader, /sha256sum "\$state_file"[\s\S]*snapshot_state_sha256/)
@@ -3832,12 +3838,21 @@ test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne
   const proveInstalled = main.indexOf('validate_installed_generation_quiesced', installer)
   const commitInstalled = main.indexOf('write_upgrade_journal installed', proveInstalled)
   const strictCutover = main.indexOf('strict_constructor_config_recommit', commitInstalled)
-  const proveRestored = main.indexOf('validate_restored_activation_vector', strictCutover)
+  const proveCommittedQuiesced = main.indexOf('validate_committed_activation_vector_quiesced', strictCutover)
+  const commitCommitted = main.indexOf('write_upgrade_journal committed', proveCommittedQuiesced)
+  const loadCommitted = main.indexOf('load_upgrade_journal', commitCommitted)
+  const quiesceCommitted = main.indexOf('quiesce_committed_activation', loadCommitted)
+  const reproveCommittedQuiesced = main.indexOf('validate_committed_activation_vector_quiesced', quiesceCommitted)
+  const finalizeCommitted = main.indexOf('finalize_committed_activation', reproveCommittedQuiesced)
+  const proveRestored = main.indexOf('validate_restored_activation_vector', finalizeCommitted)
   const workerHash = main.indexOf('worker_sha256=$(sha256sum', proveRestored)
   const clearOuter = main.indexOf('clear_upgrade_transaction', workerHash)
   assert.ok(publicationLock >= 0 && createSnapshot > publicationLock && loadArmed > createSnapshot
     && installer > loadArmed && proveInstalled > installer && commitInstalled > proveInstalled
-    && strictCutover > commitInstalled && proveRestored > strictCutover
+    && strictCutover > commitInstalled && proveCommittedQuiesced > strictCutover
+    && commitCommitted > proveCommittedQuiesced && loadCommitted > commitCommitted
+    && quiesceCommitted > loadCommitted && reproveCommittedQuiesced > quiesceCommitted
+    && finalizeCommitted > reproveCommittedQuiesced && proveRestored > finalizeCommitted
     && workerHash > proveRestored && clearOuter > workerHash,
   'jurnalul exterior trebuie să încadreze installerul roll-forward, cutover-ul strict și dovada exactă finală')
   assert.match(main.slice(loadArmed, installer), /\[ "\$upgrade_phase" = armed \]/)
@@ -3845,6 +3860,501 @@ test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne
   assert.doesNotMatch(shellFunction(upgrade, 'report_constructor_upgrade_failure'),
     /clear_upgrade_transaction|rm -f -- "\$UPGRADE_JOURNAL"|rm -rf[^\n]*constructor-upgrade/,
     'un eșec trebuie să păstreze jurnalul exterior și snapshotul pentru retry autentificat')
+})
+
+test('faza committed precede orice activare și recuperează idempotent un SIGKILL după primul timer', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const bootUnit = read('deploy/systemd/kelion-runtime-config-recovery.service')
+  const main = upgrade.slice(upgrade.lastIndexOf('[ -d "$ROOT" ]'))
+  const installedBranch = main.indexOf('if [ "$upgrade_phase" = installed ]; then')
+  const strictRecommit = main.indexOf('strict_constructor_config_recommit', installedBranch)
+  const quiescedProof = main.indexOf('validate_committed_activation_vector_quiesced', strictRecommit)
+  const committedWrite = main.indexOf('write_upgrade_journal committed', quiescedProof)
+  const committedLoad = main.indexOf('load_upgrade_journal', committedWrite)
+  const committedEntry = main.indexOf('[ "$upgrade_phase" = committed ]', committedLoad)
+  const retryQuiesce = main.indexOf('quiesce_committed_activation', committedEntry)
+  const retryQuiescedProof = main.indexOf('validate_committed_activation_vector_quiesced', retryQuiesce)
+  const retryCommittedWrite = main.indexOf('write_upgrade_journal committed', retryQuiescedProof)
+  const retryCommittedLoad = main.indexOf('load_upgrade_journal', retryCommittedWrite)
+  const firstActivation = main.indexOf('finalize_committed_activation', retryCommittedLoad)
+  const exactProof = main.indexOf('validate_restored_activation_vector', firstActivation)
+  const workerHashProof = main.indexOf('worker_sha256=$(sha256sum', exactProof)
+  const clearDisarm = main.indexOf('activation_restore_started=0', workerHashProof)
+  const clear = main.indexOf('clear_upgrade_transaction', exactProof)
+  assert.ok(installedBranch >= 0 && strictRecommit > installedBranch && quiescedProof > strictRecommit
+    && committedWrite > quiescedProof && committedLoad > committedWrite
+    && committedEntry > committedLoad && retryQuiesce > committedEntry
+    && retryQuiescedProof > retryQuiesce && retryCommittedWrite > retryQuiescedProof
+    && retryCommittedLoad > retryCommittedWrite && firstActivation > retryCommittedLoad
+    && exactProof > firstActivation && workerHashProof > exactProof
+    && clearDisarm > workerHashProof && clear > clearDisarm,
+  'fiecare retry trebuie să re-publice committed durabil sub quiesce înainte de activare; flag0 și clear urmează dovezilor exacte')
+  assert.doesNotMatch(main.slice(strictRecommit, committedWrite),
+    /finalize_committed_activation|validate_restored_activation_vector|systemctl\s+(?:enable|start)|publish_runtime_ready_stamp/)
+
+  const journalWriter = shellFunction(upgrade, 'write_upgrade_journal')
+  const fileFsync = journalWriter.indexOf('fsync_path "$temporary"')
+  const journalMove = journalWriter.indexOf('mv -f -- "$temporary" "$UPGRADE_JOURNAL"', fileFsync)
+  const directoryFsync = journalWriter.indexOf('fsync_path "$RUNTIME_ROOT"', journalMove)
+  assert.ok(fileFsync >= 0 && journalMove > fileFsync && directoryFsync > journalMove,
+    'write committed revine numai după fsync(file), rename și fsync(runtime root)')
+
+  const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
+  const recommitHelperCalls = recommit.match(/^\s*"\$helper" .*$/gm) ?? []
+  assert.equal(recommitHelperCalls.length, 2)
+  for (const helperCall of recommitHelperCalls) {
+    assert.match(helperCall, /--leave-constructor-quiesced$/,
+      'pregătirea din installed nu poate publica ready ori porni timere')
+  }
+  assert.doesNotMatch(recommit,
+    /systemctl\s+(?:enable|start)|publish_runtime_ready_stamp|restore_constructor_timers/)
+  const committedVectorProof = shellFunction(upgrade, 'validate_committed_activation_vector_quiesced')
+  assert.match(committedVectorProof,
+    /\[ ! -e "\$READY_STAMP" \] && \[ ! -L "\$READY_STAMP" \][\s\S]*UnitFileState --value[\s\S]*"\$unit_file_state" = disabled[\s\S]*inactive\|failed/)
+
+  const actualClear = shellFunction(upgrade, 'clear_upgrade_transaction')
+  const clearLoad = actualClear.indexOf('load_upgrade_journal')
+  const clearCommitted = actualClear.indexOf('[ "$upgrade_phase" = committed ]', clearLoad)
+  const clearUnlink = actualClear.indexOf('rm -f -- "$UPGRADE_JOURNAL"', clearCommitted)
+  const clearFsync = actualClear.indexOf('fsync_path "$RUNTIME_ROOT"', clearUnlink)
+  assert.ok(clearLoad >= 0 && clearCommitted > clearLoad && clearUnlink > clearCommitted && clearFsync > clearUnlink,
+    'clear-ul real reautentifică committed și persistă unlink-ul outer înainte de snapshot GC')
+  assert.doesNotMatch(actualClear, /activation_restore_started=/,
+    'flagul se dezarmează numai în main după dovada exactă, nu în clear')
+
+  const flowEnd = main.indexOf('\nprintf \'{"ok":true,"event":"constructor_upgrade_complete"', clear)
+  assert.ok(flowEnd > clear)
+  const executableFlow = main.slice(installedBranch, flowEnd)
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-constructor-committed-'))
+  const runtimeRoot = join(sandbox, 'runtime')
+  const snapshotRoot = join(runtimeRoot, 'snapshot')
+  const journal = join(runtimeRoot, 'constructor-upgrade.journal')
+  const state = join(sandbox, 'units.state')
+  const expected = join(sandbox, 'expected.state')
+  const quiesced = join(sandbox, 'quiesced.state')
+  const ready = join(sandbox, 'runtime.ready')
+  const crashEvents = join(sandbox, 'crash.events')
+  const bootEvents = join(sandbox, 'boot.events')
+  const retryEvents = join(sandbox, 'retry.events')
+  const renameCrashEvents = join(sandbox, 'rename-crash.events')
+  const renameRetryEvents = join(sandbox, 'rename-retry.events')
+  const rmFailureEvents = join(sandbox, 'rm-failure.events')
+  const fsyncFailureEvents = join(sandbox, 'fsync-failure.events')
+  const freshEvents = join(sandbox, 'fresh.events')
+  const resurrectedEvents = join(sandbox, 'resurrected.events')
+  mkdirSync(snapshotRoot, { recursive: true })
+  for (let index = 0; index < 3; index += 1) writeFileSync(join(snapshotRoot, `marker.${index}`), '')
+  writeFileSync(join(snapshotRoot, 'state'), 'snapshot\n')
+  const quiescedState = [
+    'kelion-codex-worker.timer disabled inactive',
+    'kelion-constructor-publisher.timer disabled inactive',
+    'kelion-constructor-release.timer disabled inactive',
+    'kelion-codex-worker.service static inactive',
+    'kelion-constructor-publisher.service static inactive',
+    'kelion-constructor-release.service static inactive',
+  ].join('\n') + '\n'
+  const expectedState = [
+    'kelion-codex-worker.timer enabled active',
+    'kelion-constructor-publisher.timer enabled active',
+    'kelion-constructor-release.timer disabled inactive',
+    'kelion-codex-worker.service static inactive',
+    'kelion-constructor-publisher.service static inactive',
+    'kelion-constructor-release.service static inactive',
+  ].join('\n') + '\n'
+  const committedDocument = {
+    schema: 1,
+    kind: 'constructor-upgrade',
+    phase: 'committed',
+    sourceCommit: 'b'.repeat(40),
+    snapshotRoot: '/root/kelion/runtime/constructor-upgrade.Harness',
+    stateSha256: 'a'.repeat(64),
+  }
+  writeFileSync(state, quiescedState)
+  writeFileSync(quiesced, quiescedState)
+  writeFileSync(expected, expectedState)
+  writeFileSync(crashEvents, '')
+  writeFileSync(bootEvents, '')
+  writeFileSync(retryEvents, '')
+  writeFileSync(renameCrashEvents, '')
+  writeFileSync(renameRetryEvents, '')
+  writeFileSync(rmFailureEvents, '')
+  writeFileSync(fsyncFailureEvents, '')
+  writeFileSync(freshEvents, '')
+  writeFileSync(resurrectedEvents, '')
+
+  const harness = `
+set -Eeuo pipefail
+RUNTIME_ROOT=$HARNESS_RUNTIME_ROOT
+UPGRADE_JOURNAL=$HARNESS_JOURNAL
+snapshot_root=$HARNESS_SNAPSHOT_ROOT
+snapshot_state_sha256=${'a'.repeat(64)}
+constructor_upgrade_source_commit=${'b'.repeat(40)}
+constructor_markers=(worker publisher release)
+activation_restore_started=0
+restored_proof=0
+
+event() { printf '%s\\n' "$1" >> "$HARNESS_EVENTS"; }
+exit_cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" != 0 ] && [ "$activation_restore_started" = 1 ]; then
+    event exit-quiesce
+    quiesce_committed_activation
+  fi
+  exit "$status"
+}
+trap exit_cleanup EXIT
+write_quiesced_state() { command cp "$HARNESS_QUIESCED" "$HARNESS_STATE"; }
+write_restored_state() {
+  local worker publisher release
+  IFS=, read -r worker publisher release <<<"$HARNESS_VECTOR"
+  {
+    if [ "$worker" = 1 ]; then printf 'kelion-codex-worker.timer enabled active\\n'; else printf 'kelion-codex-worker.timer disabled inactive\\n'; fi
+    if [ "$publisher" = 1 ]; then printf 'kelion-constructor-publisher.timer enabled active\\n'; else printf 'kelion-constructor-publisher.timer disabled inactive\\n'; fi
+    if [ "$release" = 1 ]; then printf 'kelion-constructor-release.timer enabled active\\n'; else printf 'kelion-constructor-release.timer disabled inactive\\n'; fi
+    printf '%s\\n' \\
+      'kelion-codex-worker.service static inactive' \\
+      'kelion-constructor-publisher.service static inactive' \\
+      'kelion-constructor-release.service static inactive'
+  } > "$HARNESS_STATE"
+}
+set_constructor_upgrade_phase() { event "phase:$1"; }
+strict_constructor_config_recommit() {
+  event strict-quiesce
+  command rm -f -- "$HARNESS_READY"
+  write_quiesced_state
+}
+validate_committed_activation_vector_quiesced() {
+  [ ! -e "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_QUIESCED"
+  event proof-quiesced
+}
+write_upgrade_journal() {
+  local phase=$1 temporary
+  [ "$phase" = committed ]
+  temporary=$(mktemp "$RUNTIME_ROOT/.outer.XXXXXX")
+  jq -cn \\
+    --arg sourceCommit "$constructor_upgrade_source_commit" \\
+    --arg snapshotRoot /root/kelion/runtime/constructor-upgrade.Harness \\
+    --arg stateSha256 "$snapshot_state_sha256" \\
+    '{schema:1,kind:"constructor-upgrade",phase:"committed",sourceCommit:$sourceCommit,
+      snapshotRoot:$snapshotRoot,stateSha256:$stateSha256}' > "$temporary"
+  command sync -f "$temporary"
+  event journal-file-fsync
+  command mv -f -- "$temporary" "$UPGRADE_JOURNAL"
+  event journal-rename
+  if [ "$HARNESS_MODE" = kill-after-rename ]; then kill -KILL "$$"; fi
+  command sync -f "$RUNTIME_ROOT"
+  event committed-durable
+}
+load_upgrade_journal() {
+  [ -f "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]
+  jq -e --arg commit "$constructor_upgrade_source_commit" '
+    .schema == 1 and .kind == "constructor-upgrade" and .phase == "committed" and
+    .sourceCommit == $commit and
+    (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\\\.[A-Za-z0-9]+$")) and
+    (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
+    (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
+  ' "$UPGRADE_JOURNAL" >/dev/null
+  upgrade_phase=$(jq -er '.phase' "$UPGRADE_JOURNAL")
+  snapshot_root=$HARNESS_SNAPSHOT_ROOT
+  event "load:$upgrade_phase"
+}
+quiesce_committed_activation() {
+  command rm -f -- "$HARNESS_READY"
+  event ready-retracted
+  event quiesce:kelion-codex-worker.timer
+  event quiesce:kelion-constructor-publisher.timer
+  event quiesce:kelion-constructor-release.timer
+  event quiesce:kelion-codex-worker.service
+  event quiesce:kelion-constructor-publisher.service
+  event quiesce:kelion-constructor-release.service
+  write_quiesced_state
+  event quiesce-complete
+}
+finalize_committed_activation() {
+  [ ! -e "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_QUIESCED"
+  event restore-begin
+  : > "$HARNESS_READY"
+  event ready-published
+  printf '%s\\n' \\
+    'kelion-codex-worker.timer enabled active' \\
+    'kelion-constructor-publisher.timer disabled inactive' \\
+    'kelion-constructor-release.timer disabled inactive' \\
+    'kelion-codex-worker.service static inactive' \\
+    'kelion-constructor-publisher.service static inactive' \\
+    'kelion-constructor-release.service static inactive' > "$HARNESS_STATE"
+  event timer-start:kelion-codex-worker.timer
+  if [ "$HARNESS_MODE" = kill ]; then kill -KILL "$$"; fi
+  event timer-start:kelion-constructor-publisher.timer
+  write_restored_state
+  event restore-complete
+}
+validate_restored_activation_vector() {
+  [ -f "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_EXPECTED"
+  restored_proof=1
+  event proof-restored-exact
+}
+sha256sum() { printf '${'c'.repeat(64)}  %s\\n' "$1"; }
+clear_upgrade_transaction() {
+  load_upgrade_journal
+  [ "$upgrade_phase" = committed ]
+  [ "$restored_proof" = 1 ]
+  event outer-unlink-attempt
+  if [ "$HARNESS_MODE" = rm-fail ]; then
+    event outer-unlink-failed
+    return 90
+  fi
+  command rm -f -- "$UPGRADE_JOURNAL"
+  event outer-unlink
+  if [ "$HARNESS_MODE" = fsync-fail ]; then
+    event outer-dir-fsync-failed
+    return 91
+  fi
+  command sync -f "$RUNTIME_ROOT"
+  event outer-dir-fsync
+}
+
+boot_ownerless_model() {
+  [ "$(jq -er '.phase' "$UPGRADE_JOURNAL")" = committed ]
+  event boot-owner:0
+  command rm -f -- "$HARNESS_READY"
+  event boot-ready-retracted
+  event boot-stop-disable:kelion-codex-worker.timer
+  event boot-stop-disable:kelion-constructor-publisher.timer
+  event boot-stop-disable:kelion-constructor-release.timer
+  event boot-stop-disable:kelion-codex-worker.service
+  event boot-stop-disable:kelion-constructor-publisher.service
+  event boot-stop-disable:kelion-constructor-release.service
+  write_quiesced_state
+  event boot-quiesce-complete
+  event boot-outer-committed-refused
+  return 73
+}
+
+fresh_snapshot_model() {
+  [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]
+  [ -f "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_EXPECTED"
+  event fresh-live-vector-valid
+  command cp "$HARNESS_STATE" "$RUNTIME_ROOT/fresh-snapshot.state"
+  command sync -f "$RUNTIME_ROOT/fresh-snapshot.state"
+  event fresh-snapshot-durable
+}
+
+if [ "$HARNESS_MODE" = boot-ownerless ]; then
+  set +e
+  boot_ownerless_model
+  boot_status=$?
+  exit "$boot_status"
+fi
+if [ "$HARNESS_MODE" = fresh-check ]; then
+  fresh_snapshot_model
+  exit 0
+fi
+if [ -f "$UPGRADE_JOURNAL" ]; then load_upgrade_journal; else upgrade_phase=installed; fi
+${executableFlow}
+`
+  const runHarness = (mode, events) => spawnSync(bashExecutable, ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HARNESS_RUNTIME_ROOT: runtimeRoot,
+      HARNESS_JOURNAL: journal,
+      HARNESS_SNAPSHOT_ROOT: snapshotRoot,
+      HARNESS_STATE: state,
+      HARNESS_EXPECTED: expected,
+      HARNESS_QUIESCED: quiesced,
+      HARNESS_READY: ready,
+      HARNESS_VECTOR: '1,1,0',
+      HARNESS_EVENTS: events,
+      HARNESS_MODE: mode,
+    },
+  })
+
+  const constructorUnits = [
+    'kelion-codex-worker.timer',
+    'kelion-constructor-publisher.timer',
+    'kelion-constructor-release.timer',
+    'kelion-codex-worker.service',
+    'kelion-constructor-publisher.service',
+    'kelion-constructor-release.service',
+  ]
+
+  try {
+    const crash = runHarness('kill', crashEvents)
+    assert.equal(crash.signal, 'SIGKILL', crash.stderr || crash.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'SIGKILL după primul start trebuie să păstreze schema outer committed exactă')
+    const crashLog = readFileSync(crashEvents, 'utf8').trim().split(/\r?\n/)
+    const currentQuiescedProof = crashLog.lastIndexOf('proof-quiesced')
+    const currentDurable = crashLog.lastIndexOf('committed-durable')
+    const restore = crashLog.indexOf('restore-begin')
+    const readyPublished = crashLog.indexOf('ready-published')
+    const firstTimer = crashLog.indexOf('timer-start:kelion-codex-worker.timer')
+    assert.ok(crashLog.filter((entry) => entry === 'committed-durable').length >= 2,
+      'fresh-ul trebuie să persiste committed și să îl re-publice la intrarea în ramura committed')
+    assert.ok(currentQuiescedProof >= 0 && currentDurable > currentQuiescedProof
+      && restore > currentDurable && readyPublished > restore && firstTimer > readyPublished,
+    'nici ready, restore sau timer start nu poate preceda re-fsync-ul committed al execuției curente')
+    assert.equal(crashLog.includes('outer-unlink'), false)
+
+    const boot = runHarness('boot-ownerless', bootEvents)
+    assert.equal(boot.status, 73, boot.stderr || boot.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'boot-ul ownerless trebuie să păstreze outer journal committed pentru retry-ul pin-uit')
+    const bootLog = readFileSync(bootEvents, 'utf8').trim().split(/\r?\n/)
+    const bootReady = bootLog.indexOf('boot-ready-retracted')
+    const bootComplete = bootLog.indexOf('boot-quiesce-complete')
+    const bootRefusal = bootLog.indexOf('boot-outer-committed-refused')
+    assert.ok(bootReady >= 0 && bootComplete > bootReady && bootRefusal > bootComplete)
+    for (const unit of constructorUnits) {
+      const stopped = bootLog.indexOf(`boot-stop-disable:${unit}`)
+      assert.ok(stopped > bootReady && stopped < bootRefusal,
+        `boot ownerless trebuie să oprească/dezactiveze ${unit} înainte de refuz`)
+    }
+    assert.doesNotMatch(bootLog.join('\n'), /restore-begin|ready-published|timer-start|outer-unlink/)
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+
+    const retry = runHarness('retry', retryEvents)
+    assert.equal(retry.status, 0, retry.stderr || retry.stdout)
+    const retryLog = readFileSync(retryEvents, 'utf8').trim().split(/\r?\n/)
+    const retryQuiescedProof = retryLog.indexOf('proof-quiesced')
+    const retryDurable = retryLog.indexOf('committed-durable')
+    const retryRestore = retryLog.indexOf('restore-begin')
+    const retryProof = retryLog.indexOf('proof-restored-exact')
+    const retryUnlink = retryLog.indexOf('outer-unlink')
+    const retryFsync = retryLog.indexOf('outer-dir-fsync')
+    assert.ok(retryLog.indexOf('ready-retracted') >= 0)
+    for (const unit of constructorUnits) {
+      const stopped = retryLog.indexOf(`quiesce:${unit}`)
+      assert.ok(stopped >= 0 && stopped < retryRestore, `${unit} trebuie quiesced înainte de retry restore`)
+    }
+    assert.ok(retryQuiescedProof >= 0 && retryDurable > retryQuiescedProof
+      && retryRestore > retryDurable && retryProof > retryRestore
+      && retryUnlink > retryProof && retryFsync > retryUnlink,
+    'retry-ul re-fsyncuiește committed înainte de restore și îl șterge numai după dovada exactă')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(journal), false)
+
+    writeFileSync(journal, `${JSON.stringify(committedDocument)}\n`)
+    const renameCrash = runHarness('kill-after-rename', renameCrashEvents)
+    assert.equal(renameCrash.signal, 'SIGKILL', renameCrash.stderr || renameCrash.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'rename-ul pre-dir-fsync poate lăsa vizibil numai un document committed strict')
+    const renameCrashLog = readFileSync(renameCrashEvents, 'utf8').trim().split(/\r?\n/)
+    const renameQuiescedProof = renameCrashLog.indexOf('proof-quiesced')
+    const renameFileFsync = renameCrashLog.indexOf('journal-file-fsync')
+    const renameVisible = renameCrashLog.indexOf('journal-rename')
+    assert.ok(renameQuiescedProof >= 0 && renameFileFsync > renameQuiescedProof
+      && renameVisible > renameFileFsync)
+    assert.doesNotMatch(renameCrashLog.join('\n'),
+      /committed-durable|restore-begin|ready-published|timer-start|outer-unlink/,
+      'crash-ul dintre rename și dir-fsync nu poate activa sau declara committed durabil')
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+    assert.equal(existsSync(ready), false)
+
+    const renameRetry = runHarness('retry', renameRetryEvents)
+    assert.equal(renameRetry.status, 0, renameRetry.stderr || renameRetry.stdout)
+    const renameRetryLog = readFileSync(renameRetryEvents, 'utf8').trim().split(/\r?\n/)
+    const renameRetryProofQuiesced = renameRetryLog.indexOf('proof-quiesced')
+    const renameRetryFileFsync = renameRetryLog.indexOf('journal-file-fsync')
+    const renameRetryVisible = renameRetryLog.indexOf('journal-rename')
+    const renameRetryDurable = renameRetryLog.indexOf('committed-durable')
+    const renameRetryRestore = renameRetryLog.indexOf('restore-begin')
+    const renameRetryExact = renameRetryLog.indexOf('proof-restored-exact')
+    const renameRetryUnlink = renameRetryLog.indexOf('outer-unlink')
+    assert.ok(renameRetryProofQuiesced >= 0
+      && renameRetryFileFsync > renameRetryProofQuiesced
+      && renameRetryVisible > renameRetryFileFsync
+      && renameRetryDurable > renameRetryVisible
+      && renameRetryRestore > renameRetryDurable
+      && renameRetryExact > renameRetryRestore
+      && renameRetryUnlink > renameRetryExact,
+    'retry-ul după crash pre-dir-fsync trebuie să re-publice și să re-fsyncuiească committed înainte de activare')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+    assert.equal(existsSync(journal), false)
+
+    const rmFailure = runHarness('rm-fail', rmFailureEvents)
+    assert.equal(rmFailure.status, 90, rmFailure.stderr || rmFailure.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'eșecul unlink trebuie să păstreze outer committed pentru retry pin-uit')
+    const rmFailureLog = readFileSync(rmFailureEvents, 'utf8').trim().split(/\r?\n/)
+    const rmFailureProof = rmFailureLog.indexOf('proof-restored-exact')
+    const rmFailureAttempt = rmFailureLog.indexOf('outer-unlink-attempt')
+    const rmFailed = rmFailureLog.indexOf('outer-unlink-failed')
+    assert.ok(rmFailureProof >= 0 && rmFailureAttempt > rmFailureProof && rmFailed > rmFailureAttempt)
+    assert.equal(rmFailureLog.includes('outer-unlink'), false)
+    assert.equal(rmFailureLog.includes('exit-quiesce'), false,
+      'flag0 înainte de clear păstrează vectorul final activ chiar dacă unlink eșuează')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+
+    rmSync(journal)
+    const fsyncFailure = runHarness('fsync-fail', fsyncFailureEvents)
+    assert.equal(fsyncFailure.status, 91, fsyncFailure.stderr || fsyncFailure.stdout)
+    const fsyncFailureLog = readFileSync(fsyncFailureEvents, 'utf8').trim().split(/\r?\n/)
+    const fsyncFailureProof = fsyncFailureLog.indexOf('proof-restored-exact')
+    const fsyncFailureUnlink = fsyncFailureLog.indexOf('outer-unlink')
+    const fsyncFailed = fsyncFailureLog.indexOf('outer-dir-fsync-failed')
+    assert.ok(fsyncFailureProof >= 0 && fsyncFailureUnlink > fsyncFailureProof
+      && fsyncFailed > fsyncFailureUnlink)
+    assert.equal(fsyncFailureLog.includes('exit-quiesce'), false,
+      'eșecul fsync după unlink nu poate retracta vectorul final dovedit')
+    assert.equal(existsSync(journal), false)
+    assert.equal(existsSync(ready), true)
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+
+    const fresh = runHarness('fresh-check', freshEvents)
+    assert.equal(fresh.status, 0, fresh.stderr || fresh.stdout)
+    assert.deepEqual(readFileSync(freshEvents, 'utf8').trim().split(/\r?\n/),
+      ['fresh-live-vector-valid', 'fresh-snapshot-durable'],
+      'outer absent după fsync eșuat trebuie să permită validarea și snapshotul fresh')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+
+    writeFileSync(journal, `${JSON.stringify(committedDocument)}\n`)
+    const resurrected = runHarness('retry', resurrectedEvents)
+    assert.equal(resurrected.status, 0, resurrected.stderr || resurrected.stdout)
+    const resurrectedLog = readFileSync(resurrectedEvents, 'utf8').trim().split(/\r?\n/)
+    const resurrectedQuiescedProof = resurrectedLog.indexOf('proof-quiesced')
+    const resurrectedDurable = resurrectedLog.indexOf('committed-durable')
+    const resurrectedRestore = resurrectedLog.indexOf('restore-begin')
+    const resurrectedExact = resurrectedLog.indexOf('proof-restored-exact')
+    const resurrectedUnlink = resurrectedLog.indexOf('outer-unlink')
+    for (const unit of constructorUnits) {
+      const stopped = resurrectedLog.indexOf(`quiesce:${unit}`)
+      assert.ok(stopped >= 0 && stopped < resurrectedRestore,
+        `outer committed reapărut trebuie să re-quiesce ${unit} înainte de restore`)
+    }
+    assert.ok(resurrectedQuiescedProof >= 0 && resurrectedDurable > resurrectedQuiescedProof
+      && resurrectedRestore > resurrectedDurable && resurrectedExact > resurrectedRestore
+      && resurrectedUnlink > resurrectedExact)
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+    assert.equal(existsSync(journal), false)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+
+  assert.match(bootUnit,
+    /Environment=KELION_RECOVERY_BOOT=1[\s\S]*ExecStart=\/root\/kelion\/bin\/runtime-config-cutover\.sh --recover-only/)
+  const earlyBarrier = shellFunction(cutover, 'early_recover_only_barrier')
+  assert.match(earlyBarrier,
+    /rm -f -- "\$ready_stamp"[\s\S]*sync -f "\$ready_root"[\s\S]*kelion-codex-worker\.timer[\s\S]*kelion-constructor-release\.service/)
+  assert.doesNotMatch(earlyBarrier,
+    /systemctl\s+(?:start|enable --now)|publish_runtime_ready_stamp|restore_constructor_timers/)
+  const earlyCall = cutover.indexOf('\n  early_recover_only_barrier \\')
+  const outerGuard = cutover.indexOf('if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then', earlyCall)
+  assert.ok(earlyCall >= 0 && outerGuard > earlyCall,
+    'boot generic trebuie să execute quiesce-ul fail-closed înainte să întâlnească outer journal')
+  assert.match(cutover.slice(outerGuard, cutover.indexOf('\nfsync_path() {', outerGuard)),
+    /constructor_upgrade_owner" = 1[\s\S]*\.phase == "armed" or \.phase == "installed" or \.phase == "committed"/,
+    'apelantul generic fără owner trebuie refuzat și pentru committed după quiesce')
 })
 
 test('cutover-ul final al upgrade-ului restage-uiește numai configul worker byte-identic, fără restart backend', () => {

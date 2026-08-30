@@ -257,8 +257,12 @@ byte-identică; nu include `runtime.env`, nu recreează și nu restartează back
 Înainte de prima oprire, helperul capturează durabil markerii și starea
 enabled/active a celor trei timere. Installerul publică generația nouă cu toate
 unitățile quiesced, iar cutover-ul strict restaurează exact vectorul capturat
-numai după validarea generației. La crash, reia operația fără să modifici starea
-VPS. Selectorul read-only acceptă SHA-ul vechi numai din jurnalul root-only
+în markeri, dar păstrează ready absent și toate unitățile oprite. Numai după
+dovada completă scrie și sincronizează faza exterioară `committed`; finalizerul
+poate publica ready și porni timerele abia după acel prag durabil. Un crash după
+primul start păstrează `committed`, iar retry-ul quiesce-uiește înainte să
+restaureze idempotent vectorul și să șteargă jurnalul. La crash, reia operația
+fără să modifici starea VPS. Selectorul read-only acceptă SHA-ul vechi numai din jurnalul root-only
 strict, dacă acel commit există, este strămoș al noului `master`, iar release-ul
 live a rămas exact pe acel SHA; fără jurnal, orice SHA diferit de vârful
 `master` este refuzat. Nu porni manual timere și nu
