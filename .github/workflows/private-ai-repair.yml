@@ -17,7 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  guard-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validează sursa canonică fără secrete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
   resume-install:
+    needs: guard-source
     runs-on: ubuntu-latest
     timeout-minutes: 210
     environment: production
@@ -35,6 +52,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           installer=.github/private-ai/install-private-ai.sh
