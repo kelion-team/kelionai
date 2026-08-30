@@ -12,20 +12,47 @@ permissions:
   contents: read
 
 jobs:
-  measured-status:
+  guard-source:
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    env:
-      VPS_HOST: ${{ vars.VPS_HOST }}
-      VPS_USER: ${{ vars.VPS_USER }}
-      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
-      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    timeout-minutes: 5
     steps:
-      - name: Citește starea măsurată a instalării
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă diferită de ramura operațională canonică
         shell: bash
         run: |
           set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
+  measured-status:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Citește starea măsurată a instalării
+        shell: bash
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)

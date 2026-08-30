@@ -16,8 +16,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard-source:
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă diferită de masterul canonic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
   prove-local-constructor:
-    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    needs: guard-source
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -46,45 +64,43 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
           [[ "$PROOF_JOB_ID" =~ ^[1-9][0-9]{0,18}$ ]]
-          [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 
-          installer=.github/private-ai/install-private-ai.sh
+          permanent_installer=deploy/instaleaza-constructor.sh
+          opencode_contract=deploy/opencode-constructor.json
           worker=deploy/codex-worker.mjs
-          [ -f "$installer" ] && [ -f "$worker" ]
-          bash -n "$installer"
+          [ -f "$permanent_installer" ] && [ -f "$opencode_contract" ] && [ -f "$worker" ]
+          bash -n "$permanent_installer"
           expected_worker_sha=$(sha256sum "$worker" | awk '{print $1}')
           [[ "$expected_worker_sha" =~ ^[0-9a-f]{64}$ ]]
 
-          mapfile -t base_contract < <(node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs'
-          const source = readFileSync('.github/private-ai/install-private-ai.sh', 'utf8')
-          for (const name of [
-            'INSTALLER_ID', 'LLAMA_CPP_REF', 'OPENCODE_VERSION',
-            'MODEL_REPO', 'MODEL_QUANT', 'MODEL_ALIAS',
-          ]) {
-            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const matches = [...source.matchAll(new RegExp(`^readonly ${escaped}="([^"]+)"$`, 'gm'))]
-            if (matches.length !== 1) process.exit(1)
-            process.stdout.write(`${matches[0][1]}\n`)
-          }
-          NODE
-          )
-          [ "${#base_contract[@]}" -eq 6 ]
-          expected_installer=${base_contract[0]}
-          expected_llama_ref=${base_contract[1]}
-          expected_opencode_version=${base_contract[2]}
-          expected_model_repo=${base_contract[3]}
-          expected_model_quant=${base_contract[4]}
-          expected_model_alias=${base_contract[5]}
+          readonly expected_installer=private-ai-contabo-v1
+          readonly expected_llama_ref=c1d0e7a004015f23bc0233470b747b596f29b264
+          readonly expected_opencode_version=1.18.25
+          readonly expected_model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF
+          readonly expected_model_quant=Q4_K_M
+          readonly expected_model_alias=qwen3.6-35b-a3b-local
           [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
           [[ "$expected_llama_ref" =~ ^[0-9a-f]{40}$ ]]
           [[ "$expected_opencode_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$expected_model_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$expected_model_quant" =~ ^[A-Za-z0-9_.-]+$ ]]
           [[ "$expected_model_alias" =~ ^[A-Za-z0-9_.-]+$ ]]
+          grep -Fq "'installer_id=${expected_installer}'" "$permanent_installer"
+          grep -Fq "'llama_cpp_ref=${expected_llama_ref}'" "$permanent_installer"
+          grep -Fq "'opencode_version=${expected_opencode_version}'" "$permanent_installer"
+          grep -Fq "'model_repo=${expected_model_repo}'" "$permanent_installer"
+          grep -Fq "'model_quant=${expected_model_quant}'" "$permanent_installer"
+          jq -e --arg model "llama.cpp/$expected_model_alias" '
+            .model == $model and (.small_model // .model) == $model and
+            (.provider["llama.cpp"].models | has($model | sub("^llama\\.cpp/"; "")))
+          ' "$opencode_contract" >/dev/null
 
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ "$current_host_key" = "$VPS_HOST_KEY" ]
@@ -387,8 +403,9 @@ jobs:
             let heartbeat
             try { heartbeat = JSON.parse(heartbeatRow.value) } catch { process.exit(10) }
             if (!heartbeat || typeof heartbeat !== 'object' || Array.isArray(heartbeat)) process.exit(11)
-            const allowedHeartbeatKeys = new Set(['status', 'at', 'taskUrl', 'detail', 'internalCostUsdMicros'])
+            const allowedHeartbeatKeys = new Set(['status', 'at', 'detail'])
             if (Object.keys(heartbeat).some((key) => !allowedHeartbeatKeys.has(key)) || heartbeat.status !== 'busy') process.exit(12)
+            if ('taskUrl' in heartbeat || 'internalCostUsdMicros' in heartbeat) process.exit(12)
             const heartbeatAt = Date.parse(heartbeat.at)
             const dbNow = new Date(heartbeatRow.dbNow).getTime()
             const jobUpdatedAt = new Date(row.updatedAt).getTime()
