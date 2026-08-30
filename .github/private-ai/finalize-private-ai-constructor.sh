@@ -28,6 +28,8 @@ readonly MODEL_QUANT=Q4_K_M
 readonly MODEL_FILE=Qwen3.6-35B-A3B-Q4_K_M.gguf
 readonly MODEL_FILE_BYTES=20419565568
 readonly MODEL_FILE_SHA256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
+readonly LLAMA_SERVER_SHA256=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
+readonly OPENCODE_BIN_SHA256=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
 readonly LEGACY_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
 readonly LEGACY_CODEX_REAL=/opt/kelion-codex/bin/codex-real
@@ -76,6 +78,30 @@ restore_unit_state() {
 
 [ "$(id -u)" -eq 0 ] || fail 'root is required'
 [ -d "$BUNDLE_ROOT" ] && [ ! -L "$BUNDLE_ROOT" ] || fail 'invalid bundle root'
+bundle_id=${BUNDLE_ROOT##*/}
+[[ "$bundle_id" =~ ^[0-9a-f]{64}$ ]] || fail 'bundle id is invalid'
+attempt_root=/var/lib/private-ai/finalizer-attempts
+attempt_file=$attempt_root/$bundle_id
+install -d -o root -g root -m 0700 "$attempt_root"
+[ -d "$attempt_root" ] && [ ! -L "$attempt_root" ]
+attempt_count=0
+if [ -e "$attempt_file" ] || [ -L "$attempt_file" ]; then
+  require_regular "$attempt_file" root:root:600
+  attempt_count=$(<"$attempt_file")
+  [[ "$attempt_count" =~ ^[0-9]+$ ]] || fail 'persistent attempt counter is invalid'
+fi
+if [ "$attempt_count" -ge 3 ]; then
+  systemctl disable private-ai-constructor-finalize.service >/dev/null 2>&1 || true
+  printf 'private-ai-finalize: ERROR: hard retry limit reached for bundle %s\n' "$bundle_id" >&2
+  exit 75
+fi
+attempt_candidate=$(mktemp "$attempt_root/.attempt.XXXXXX")
+printf '%s\n' "$((attempt_count + 1))" > "$attempt_candidate"
+chown root:root "$attempt_candidate"
+chmod 0600 "$attempt_candidate"
+sync -f "$attempt_candidate"
+mv -f -- "$attempt_candidate" "$attempt_file"
+sync -f "$attempt_root"
 [ -f "$WORKER_SOURCE" ] && [ ! -L "$WORKER_SOURCE" ] || fail 'worker source missing'
 [ -f "$WORKER_UNIT_SOURCE" ] && [ ! -L "$WORKER_UNIT_SOURCE" ] || fail 'worker unit source missing'
 [ -f "$SUDOERS_SOURCE" ] && [ ! -L "$SUDOERS_SOURCE" ] || fail 'worker sudoers source missing'
@@ -135,7 +161,8 @@ require_regular "$PRIVATE_AI_CONFIG/opencode.env" root:privateai:640
   || fail 'llama.cpp state does not match the pinned revision'
 [ -d "$LLAMA_SOURCE/.git" ] && [ ! -L "$LLAMA_SOURCE" ] \
   || fail 'pinned llama.cpp source checkout is missing'
-[ "$(git -C "$LLAMA_SOURCE" rev-parse HEAD)" = "$LLAMA_CPP_REF" ] \
+[ "$(runuser -u privateai -- env -i HOME="$PRIVATE_AI_HOME" PATH=/usr/bin:/bin \
+  git -C "$LLAMA_SOURCE" rev-parse HEAD)" = "$LLAMA_CPP_REF" ] \
   || fail 'llama.cpp checkout does not match the pinned revision'
 mapfile -d '' -t model_candidates < <(
   find "$MODEL_CACHE" -xdev -type f -size "${MODEL_FILE_BYTES}c" -print0
@@ -153,8 +180,10 @@ model_file_sha=$(sha256sum "$model_file_path" | awk '{print $1}')
   || fail 'the cached Qwen GGUF hash does not match the pinned artifact'
 llama_server_sha=$(sha256sum "$LLAMA_SERVER" | awk '{print $1}')
 opencode_bin_sha=$(sha256sum "$OPENCODE_BIN" | awk '{print $1}')
-[[ "$llama_server_sha" =~ ^[0-9a-f]{64}$ ]]
-[[ "$opencode_bin_sha" =~ ^[0-9a-f]{64}$ ]]
+[ "$llama_server_sha" = "$LLAMA_SERVER_SHA256" ] \
+  || fail 'llama-server binary does not match the pinned installed build'
+[ "$opencode_bin_sha" = "$OPENCODE_BIN_SHA256" ] \
+  || fail 'OpenCode binary does not match the pinned official release payload'
 systemctl is-active --quiet private-ai-llm.service
 # Un retry după HUP/reboot poate găsi web-ul oprit exact între quiesce și
 # restart. Fișierele sunt publicate numai prin rename; pornirea aici oferă o
@@ -519,6 +548,9 @@ expected_llm_argv=(
 for argv_index in "${!expected_llm_argv[@]}"; do
   [ "${llm_argv[$argv_index]}" = "${expected_llm_argv[$argv_index]}" ]
 done
+awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
+  "/proc/$llm_pid/maps" \
+  || fail 'running llama-server is not mapped to the pinned Qwen GGUF object'
 printf 'OPENCODE_WEB_FULL_HOST_PROBE=uid0\n'
 for attempt in $(seq 1 60); do
   if ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'; then

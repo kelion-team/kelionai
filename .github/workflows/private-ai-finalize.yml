@@ -253,6 +253,7 @@ jobs:
           ExecStart=/usr/bin/bash $durable_root/.github/private-ai/finalize-private-ai-constructor.sh $durable_root
           ExecStartPost=/usr/bin/systemctl disable private-ai-constructor-finalize.service
           Restart=on-failure
+          RestartPreventExitStatus=75
           RestartSec=15s
           TimeoutStartSec=6900s
           TimeoutStopSec=600s
