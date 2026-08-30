@@ -379,7 +379,7 @@ export function handoffReceipt(input) {
 
 function publishHandoff(jobDir, input) {
   const currentHead = exactOutput('/usr/bin/git', ['rev-parse', 'HEAD'], jobDir, gitSupervisorEnv())
-  if (currentHead !== input.baseCommit) fail('Codex a mutat HEAD-ul; workerul acceptă numai patch peste baza revendicată')
+  if (currentHead !== input.baseCommit) fail('Executorul OpenCode a mutat HEAD-ul; workerul acceptă numai patch peste baza revendicată')
   const add = gitResult(['add', '--all', '--', '.'], jobDir)
   if (add.status !== 0) fail('Nu am putut indexa patch-ul după porți')
   const submodules = exactOutput('/usr/bin/git', ['ls-files', '--stage'], jobDir, gitSupervisorEnv())
