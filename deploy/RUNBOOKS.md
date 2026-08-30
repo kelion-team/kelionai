@@ -237,6 +237,43 @@ credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
   numai fingerprintul în configul non-secret. Cheia nu este cheie SSH de acces
   la repository și nu este primită de worker ori dispatcher.
 
+### Upgrade in-place al Constructorului instalat
+
+După bootstrap, codul și unitățile Constructorului se actualizează numai din
+workflow-ul `vps-constructor-control`, cu operația separată
+`upgrade-constructor`. Înainte de dispatch, rulează `constructor-status`, reține
+vectorul complet și cere una dintre stările canonice `000`, `100`, `110` sau
+`111`: pentru fiecare componentă, markerul și timerul enabled/active trebuie să
+fie aliniate, serviciile oneshot inactive și lista joburilor systemd goală.
+
+Prima execuție acceptă exclusiv bundle-ul urmărit din vârful curent `master`,
+dovada build-ului gate, release proof-ul și markerul activ pentru exact același
+SHA, plus pinul ed25519 al gazdei.
+Către VPS nu trimite config, HMAC-uri, tokenuri GitHub ori
+chei OpenAI. Nu reinstalează `apt`, `npm` sau CLI-ul și nu regenerează configul
+ori secretele. Reface tranzacțional numai configul workerului din copia live
+byte-identică; nu include `runtime.env`, nu recreează și nu restartează backendul.
+
+Înainte de prima oprire, helperul capturează durabil markerii și starea
+enabled/active a celor trei timere. Installerul publică generația nouă cu toate
+unitățile quiesced, iar cutover-ul strict restaurează exact vectorul capturat
+numai după validarea generației. La crash, reia operația fără să modifici starea
+VPS. Selectorul read-only acceptă SHA-ul vechi numai din jurnalul root-only
+strict, dacă acel commit există, este strămoș al noului `master`, iar release-ul
+live a rămas exact pe acel SHA; fără jurnal, orice SHA diferit de vârful
+`master` este refuzat. Nu porni manual timere și nu
+șterge `constructor-upgrade.journal`, directoarele `constructor-upgrade.*` sau
+`constructor-unit-migration.pending`. Avansarea `master` nu rescrie și nu
+suprascrie jurnalul: rerun-ul sau un nou dispatch selectează determinist commitul
+pin-uit, iar un jurnal invalid, symlink ori cu SHA neînrudit este refuzat.
+
+Acceptă upgrade-ul numai dacă evenimentul final este
+`constructor_upgrade_complete`, apoi rulează `constructor-status` și cere
+vectorul pre-upgrade exact, plus `codex-auth=ready`. Dacă preflight-ul raportează
+o stare necanonică ori alt recovery activ, diagnostichează read-only; nu folosi
+`configure-constructor`, deoarece reprovisionează configul și credentialele și
+refuză un Constructor deja activ.
+
 Credentiala publisherului are numai metadata read, Contents write, Pull
 requests write, Actions/Checks read și Administration **read-only** pe
 repository-ul unic; ultimul scope este necesar exclusiv pentru verificarea

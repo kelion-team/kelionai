@@ -21,6 +21,18 @@ deploy_quiesce_proof=${KELION_DEPLOY_QUIESCE_PROOF:-0}
 case "$deploy_quiesce_proof" in 0|1) ;; *) die 'KELION_DEPLOY_QUIESCE_PROOF trebuie 0 sau 1' ;; esac
 defer_secret_gates=${KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER:-0}
 case "$defer_secret_gates" in 0|1) ;; *) die 'KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER trebuie 0 sau 1' ;; esac
+constructor_upgrade_owner=${KELION_CONSTRUCTOR_UPGRADE_OWNER:-0}
+case "$constructor_upgrade_owner" in 0|1) ;; *) die 'KELION_CONSTRUCTOR_UPGRADE_OWNER trebuie 0 sau 1' ;; esac
+constructor_upgrade_source_commit=${KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT:-}
+if [ "$constructor_upgrade_owner" = 1 ]; then
+  [[ "$constructor_upgrade_source_commit" =~ ^[0-9a-f]{40}$ ]] \
+    || die 'KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT este invalid'
+else
+  [ -z "$constructor_upgrade_source_commit" ] \
+    || die 'sursa upgrade-ului este permisă numai ownerului explicit'
+fi
+unset KELION_CONSTRUCTOR_UPGRADE_OWNER
+unset KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT
 deploy_owner_request_id=${KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID:-}
 deploy_owner_commit=${KELION_DEPLOY_QUIESCE_OWNER_COMMIT:-}
 if [ -n "$deploy_owner_request_id" ] || [ -n "$deploy_owner_commit" ]; then
@@ -180,6 +192,55 @@ early_recover_only_barrier() {
   done
   [ "$failed" = 0 ]
 }
+
+ROOT=/root/kelion
+CONFIG_ROOT=$ROOT/config
+SECRET_ROOT=$ROOT/secrets
+RUNTIME_ROOT=$ROOT/runtime
+COMPOSE_BIN=$ROOT/bin/docker-compose
+PUBLICATION_LOCK=$ROOT/publicare.lock
+JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
+ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
+GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
+DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
+UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
+UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+READY_ROOT=/run/kelion
+READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
+ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
+
+for early_tool in flock readlink stat; do
+  command -v "$early_tool" >/dev/null 2>&1 || die "lipsește utilitarul $early_tool"
+done
+if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then
+  [ -f /proc/$$/fd/9 ] \
+    && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+    || die 'FD9 moștenit nu este lock-ul canonic de publicare'
+  publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+  flock -n 9 || die 'lock-ul de publicare moștenit nu este deținut'
+else
+  [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$PUBLICATION_LOCK")" = '0:0:600:1' ] \
+    || die 'pathul lock-ului de publicare este nesigur'
+  exec 9<>"$PUBLICATION_LOCK"
+  [ -f /proc/$$/fd/9 ] \
+    && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+    || die 'FD9 nu este lock-ul canonic de publicare'
+  publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+  [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+    || die 'pathul și FD9 nu indică același lock de publicare'
+  flock -n 9 || die 'altă operație de publicare este activă'
+fi
+[ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+  && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'lock-ul de publicare s-a schimbat după flock'
+
+# Bariera rămâne înaintea validării compose/tooling, dar numai după
+# serializarea cu toți ceilalți mutatori ai publicației.
 if [ "$recover_only" = 1 ]; then
   early_recover_only_barrier \
     || die 'bariera recovery nu a putut retrage stamp-ul și opri toate unitățile înainte de preflight'
@@ -205,26 +266,36 @@ for tool in awk cmp curl dirname docker find flock getent grep jq mktemp od pyth
   command -v "$tool" >/dev/null 2>&1 || die "lipsește utilitarul $tool"
 done
 
-ROOT=/root/kelion
-CONFIG_ROOT=$ROOT/config
-SECRET_ROOT=$ROOT/secrets
-RUNTIME_ROOT=$ROOT/runtime
-COMPOSE_BIN=$ROOT/bin/docker-compose
-PUBLICATION_LOCK=$ROOT/publicare.lock
-JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
-ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
-GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
-DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
-UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
-READY_ROOT=/run/kelion
-READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
-ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
-
-if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then
-  flock -n 9 || die 'lock-ul de publicare moștenit nu este deținut'
+if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then
+  [ "$constructor_upgrade_owner" = 1 ] \
+    || die 'un upgrade Constructor exterior este pending; cutover-ul generic este refuzat'
+  [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] \
+    || die 'ownerul upgrade-ului Constructor trebuie să moștenească publication lock'
+  [ -f "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UPGRADE_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg sourceCommit "$constructor_upgrade_source_commit" '
+      .schema == 1 and .kind == "constructor-upgrade" and
+      (.phase == "armed" or .phase == "installed") and
+      .sourceCommit == $sourceCommit and
+      (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
+      (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
+      (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
+    ' "$UPGRADE_JOURNAL" >/dev/null \
+    || die 'jurnalul exterior al upgrade-ului Constructor este nesigur'
 else
-  exec 9>"$PUBLICATION_LOCK"
-  flock -n 9 || die 'altă operație de publicare este activă'
+  [ "$constructor_upgrade_owner" = 0 ] \
+    || die 'ownerul upgrade-ului Constructor nu are jurnalul exterior durabil'
+fi
+
+if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only existentă este nesigură'
+  if [ "$constructor_upgrade_owner" != 1 ] && [ "$recover_only" = 1 ]; then
+    die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'
+  fi
 fi
 
 fsync_path() {
