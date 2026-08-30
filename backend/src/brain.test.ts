@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 
 import { config } from './config.js'
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
-import { isOpenAIProviderThrottleError, OpenAIProviderRequestError } from './services/openaiResponses.js'
+import {
+  isOpenAIProviderThrottleError,
+  openaiResponses,
+  OpenAIProviderRequestError,
+} from './services/openaiResponses.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
   it('nu propagă un 429 pe scară după retry-ul unic al adaptorului', () => {
@@ -24,22 +28,47 @@ describe('Expertul fiabil — clasificarea erorilor', () => {
 
 describe('Politica terminală partajată de chat și brain', () => {
   it('oprește scara pe marcajul separat fără să transforme eroarea locală în 429', async () => {
-    const localError = Object.assign(new Error('provider_usage_write_failed'), {
-      rateLimitRetryConsumed: true as const,
-    })
-    const tried: string[] = []
+    const initialKey = config.openai.key
+    config.openai.key = 'cheie-brain-test'
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: 'rate_limit_exceeded', message: 'private' },
+      }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '0' },
+      }))
+      .mockResolvedValueOnce(new Response('{not-json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const pending = openaiResponses('model-luna', [{ role: 'user', content: 'salut' }])
+      const errorPromise = pending.catch((caught: unknown) => caught)
+      await vi.advanceTimersByTimeAsync(250)
+      const localError = await errorPromise
+      const tried: string[] = []
 
-    expect(isOpenAIProviderThrottleError(localError)).toBe(true)
-    await expect(runBrainLadder(
-      ['m1', 'm2'],
-      async (model) => {
-        tried.push(model)
-        throw localError
-      },
-      { sleep: () => Promise.resolve() },
-    )).rejects.toBe(localError)
-    expect(localError).not.toHaveProperty('status')
-    expect(tried).toEqual(['m1'])
+      expect(localError).toBeInstanceOf(SyntaxError)
+      expect(localError).toMatchObject({ rateLimitRetryConsumed: true })
+      expect(isOpenAIProviderThrottleError(localError)).toBe(true)
+      await expect(runBrainLadder(
+        ['m1', 'm2'],
+        async (model) => {
+          tried.push(model)
+          throw localError
+        },
+        { sleep: () => Promise.resolve() },
+      )).rejects.toBe(localError)
+      expect(localError).not.toHaveProperty('status')
+      expect(tried).toEqual(['m1'])
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      config.openai.key = initialKey
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
   })
 })
 

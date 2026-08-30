@@ -316,11 +316,16 @@ async function openaiFetchWithBoundedRateLimitRetry(
 
 function markRateLimitRetryConsumed(error: unknown): unknown {
   if (error && typeof error === 'object') {
-    Object.defineProperty(error, 'rateLimitRetryConsumed', {
-      value: true,
-      configurable: true,
-    })
-    return error
+    try {
+      Object.defineProperty(error, 'rateLimitRetryConsumed', {
+        value: true,
+        configurable: true,
+      })
+      return error
+    } catch {
+      // Frozen/non-extensible errors cannot carry transport provenance. The
+      // wrapper remains status-neutral and retains the original as its cause.
+    }
   }
   const wrapped = new Error('openai_retry_failed_after_rate_limit', { cause: error })
   Object.defineProperty(wrapped, 'rateLimitRetryConsumed', {

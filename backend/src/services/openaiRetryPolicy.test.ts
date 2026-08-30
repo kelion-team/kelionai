@@ -236,6 +236,31 @@ describe('OpenAI 429 anti-amplification policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('wraps a frozen retry failure with terminal provenance and the original cause', async () => {
+    vi.useFakeTimers()
+    const frozenFailure = Object.freeze(new TypeError('fetch failed'))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(limitResponse('rate_limit_exceeded', '0'))
+      .mockRejectedValueOnce(frozenFailure)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = openaiResponses('configured-luna', [{ role: 'user', content: 'salut' }])
+    const errorPromise = pending.catch((caught: unknown) => caught)
+    await vi.advanceTimersByTimeAsync(250)
+    const error = await errorPromise
+
+    expect(error).not.toBe(frozenFailure)
+    expect(error).toMatchObject({
+      message: 'openai_retry_failed_after_rate_limit',
+      cause: frozenFailure,
+      rateLimitRetryConsumed: true,
+    })
+    expect(error).not.toHaveProperty('status')
+    expect(error).not.toHaveProperty('providerCode')
+    expect(isOpenAIProviderThrottleError(error)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves invalid JSON after the rate-limit retry and only marks it terminal', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn()
