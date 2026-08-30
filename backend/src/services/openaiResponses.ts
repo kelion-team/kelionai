@@ -77,12 +77,10 @@ export class OpenAIProviderRequestError extends Error {
 export function isOpenAIProviderThrottleError(error: unknown): boolean {
   if (error && typeof error === 'object') {
     const candidate = error as { name?: unknown; status?: unknown; rateLimitRetryConsumed?: unknown }
+    if (candidate.rateLimitRetryConsumed === true) return true
     const status = typeof candidate.status === 'number' ? candidate.status : 0
     const permanent4xx = status >= 400 && status < 500 && status !== 408 && status !== 409
-    if (
-      candidate.name === 'OpenAIProviderRequestError'
-      && (permanent4xx || candidate.rateLimitRetryConsumed === true)
-    ) return true
+    if (candidate.name === 'OpenAIProviderRequestError' && permanent4xx) return true
   }
   return /\bopenai\s+429\b|rate[_ -]?limit(?:ed|[_ -]?exceeded)?|insufficient[_ -]?quota|credit[_ -]?balance[_ -]?exhausted|(?:project|organization)[_ -]?(?:spend|usage)[_ -]?limit/i.test(
     String((error as { message?: unknown })?.message ?? error),
@@ -309,19 +307,31 @@ async function openaiFetchWithBoundedRateLimitRetry(
   })
   try {
     return { response: await openaiFetch(body, timeoutMs), rateLimitRetryConsumed: true }
-  } catch {
+  } catch (error) {
     // The one retry was already spent. Preserve that provenance so outer chat
     // and memory layers cannot turn a transport failure into a third request.
-    throw new OpenAIProviderRequestError(429, 'rate_limit_exceeded', true)
+    throw errorAfterRateLimitRetry(error, true)
   }
 }
 
-function errorAfterRateLimitRetry(error: unknown, consumed: boolean): unknown {
-  if (!consumed || isOpenAIProviderThrottleError(error)) return error
-  if (error instanceof OpenAIProviderRequestError) {
-    return new OpenAIProviderRequestError(error.status, error.providerCode, true)
+function markRateLimitRetryConsumed(error: unknown): unknown {
+  if (error && typeof error === 'object') {
+    Object.defineProperty(error, 'rateLimitRetryConsumed', {
+      value: true,
+      configurable: true,
+    })
+    return error
   }
-  return new OpenAIProviderRequestError(429, 'rate_limit_exceeded', true)
+  const wrapped = new Error('openai_retry_failed_after_rate_limit', { cause: error })
+  Object.defineProperty(wrapped, 'rateLimitRetryConsumed', {
+    value: true,
+    configurable: true,
+  })
+  return wrapped
+}
+
+function errorAfterRateLimitRetry(error: unknown, consumed: boolean): unknown {
+  return consumed ? markRateLimitRetryConsumed(error) : error
 }
 
 function outputText(response: OpenAIResponse): string {
@@ -538,7 +548,7 @@ export async function openaiResponsesStream(
         return
       }
       if (type === 'error') {
-        const providerLimit = exactProviderLimitError(event.error)
+        const providerLimit = exactProviderLimitError(event)
         if (providerLimit) throw providerLimit
         throw new Error('openai_stream_error')
       }

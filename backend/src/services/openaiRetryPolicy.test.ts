@@ -218,22 +218,69 @@ describe('OpenAI 429 anti-amplification policy', () => {
 
   it('does not permit an outer retry when the one rate-limit retry loses transport', async () => {
     vi.useFakeTimers()
+    const transportFailure = new TypeError('fetch failed')
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(limitResponse('rate_limit_exceeded', '0'))
-      .mockRejectedValueOnce(new Error(PRIVATE_PROVIDER_TEXT))
+      .mockRejectedValueOnce(transportFailure)
     vi.stubGlobal('fetch', fetchMock)
 
     const pending = openaiResponses('configured-luna', [{ role: 'user', content: 'salut' }])
     const errorPromise = pending.catch((caught: unknown) => caught)
     await vi.advanceTimersByTimeAsync(250)
     const error = await errorPromise
-    expect(error).toMatchObject({
-      status: 429,
-      providerCode: 'rate_limit_exceeded',
-      rateLimitRetryConsumed: true,
-    })
-    expect(String(error)).not.toContain(PRIVATE_PROVIDER_TEXT)
+    expect(error).toBe(transportFailure)
+    expect(error).toMatchObject({ rateLimitRetryConsumed: true })
+    expect(error).not.toHaveProperty('status')
+    expect(error).not.toHaveProperty('providerCode')
+    expect(isOpenAIProviderThrottleError(error)).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves invalid JSON after the rate-limit retry and only marks it terminal', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(limitResponse('rate_limit_exceeded', '0'))
+      .mockResolvedValueOnce(new Response('{not-json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = openaiResponses('configured-luna', [{ role: 'user', content: 'salut' }])
+    const errorPromise = pending.catch((caught: unknown) => caught)
+    await vi.advanceTimersByTimeAsync(250)
+    const error = await errorPromise
+
+    expect(error).toBeInstanceOf(SyntaxError)
+    expect(error).toMatchObject({ rateLimitRetryConsumed: true })
+    expect(error).not.toHaveProperty('status')
+    expect(error).not.toHaveProperty('providerCode')
+    expect(isOpenAIProviderThrottleError(error)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(metering.record).not.toHaveBeenCalled()
+  })
+
+  it('preserves the metering failure after a successful rate-limit retry', async () => {
+    vi.useFakeTimers()
+    const meteringFailure = new Error('provider_usage_write_failed')
+    metering.record.mockRejectedValueOnce(meteringFailure)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(limitResponse('rate_limit_exceeded', '0'))
+      .mockResolvedValueOnce(successResponse('resp_metering_failed'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = openaiResponses('configured-luna', [{ role: 'user', content: 'salut' }])
+    const errorPromise = pending.catch((caught: unknown) => caught)
+    await vi.advanceTimersByTimeAsync(250)
+    const error = await errorPromise
+
+    expect(error).toBe(meteringFailure)
+    expect(error).toMatchObject({ rateLimitRetryConsumed: true })
+    expect(error).not.toHaveProperty('status')
+    expect(error).not.toHaveProperty('providerCode')
+    expect(isOpenAIProviderThrottleError(error)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(metering.record).toHaveBeenCalledTimes(1)
   })
 
   it('applies the 10 second cap to the actual retry timer', async () => {
@@ -310,29 +357,32 @@ describe('OpenAI streaming 429 policy', () => {
     expect(JSON.parse(String(firstBody))).toMatchObject({ model: 'configured-luna', stream: true })
   })
 
-  it('treats an exact quota error inside an SSE event as terminal', async () => {
-    const body = [
-      'event: error',
-      `data: ${JSON.stringify({ type: 'error', error: { code: 'insufficient_quota', message: PRIVATE_PROVIDER_TEXT } })}`,
-      '',
-      '',
-    ].join('\n')
-    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream' },
-    }))
-    vi.stubGlobal('fetch', fetchMock)
+  it.each(['insufficient_quota', 'rate_limit_exceeded'] as const)(
+    'treats direct SSE error code %s as terminal without exposing provider text',
+    async (code) => {
+      const body = [
+        'event: error',
+        `data: ${JSON.stringify({ type: 'error', code, message: PRIVATE_PROVIDER_TEXT, param: null })}`,
+        '',
+        '',
+      ].join('\n')
+      const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }))
+      vi.stubGlobal('fetch', fetchMock)
 
-    const error = await openaiResponsesStream(
-      'configured-luna',
-      [{ role: 'user', content: 'salut' }],
-      [],
-      vi.fn(),
-    ).catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ status: 429, providerCode: 'insufficient_quota' })
-    expect(String(error)).not.toContain(PRIVATE_PROVIDER_TEXT)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
+      const error = await openaiResponsesStream(
+        'configured-luna',
+        [{ role: 'user', content: 'salut' }],
+        [],
+        vi.fn(),
+      ).catch((caught: unknown) => caught)
+      expect(error).toMatchObject({ status: 429, providerCode: code })
+      expect(String(error)).not.toContain(PRIVATE_PROVIDER_TEXT)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    },
+  )
 })
 
 describe('Memory 429 policy', () => {
