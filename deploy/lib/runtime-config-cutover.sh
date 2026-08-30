@@ -266,6 +266,7 @@ for tool in awk cmp curl dirname docker find flock getent grep jq mktemp od pyth
   command -v "$tool" >/dev/null 2>&1 || die "lipsește utilitarul $tool"
 done
 
+upgrade_journal_phase=''
 if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then
   [ "$constructor_upgrade_owner" = 1 ] \
     || die 'un upgrade Constructor exterior este pending; cutover-ul generic este refuzat'
@@ -275,13 +276,18 @@ if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then
     && [ "$(stat -Lc '%u:%g:%a:%h' "$UPGRADE_JOURNAL")" = '0:0:600:1' ] \
     && jq -e --arg sourceCommit "$constructor_upgrade_source_commit" '
       .schema == 1 and .kind == "constructor-upgrade" and
-      (.phase == "armed" or .phase == "installed") and
+      (.phase == "armed" or .phase == "installed" or .phase == "committed") and
       .sourceCommit == $sourceCommit and
       (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
       (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
       (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
     ' "$UPGRADE_JOURNAL" >/dev/null \
     || die 'jurnalul exterior al upgrade-ului Constructor este nesigur'
+  upgrade_journal_phase=$(jq -er '.phase' "$UPGRADE_JOURNAL")
+  if [ "$validate_only" = 0 ] && [ "$upgrade_journal_phase" != committed ]; then
+    [ "$leave_constructor_quiesced" = 1 ] \
+      || die 'jurnalul upgrade-ului blochează ready și timerele până la faza committed durabilă'
+  fi
 else
   [ "$constructor_upgrade_owner" = 0 ] \
     || die 'ownerul upgrade-ului Constructor nu are jurnalul exterior durabil'

@@ -258,7 +258,7 @@ validate_live_activation_vector() {
 
 write_upgrade_journal() {
   local phase=$1 temporary
-  case "$phase" in armed|installed) ;; *) return 1 ;; esac
+  case "$phase" in armed|installed|committed) ;; *) return 1 ;; esac
   [[ "$snapshot_root" =~ ^/root/kelion/runtime/constructor-upgrade\.[A-Za-z0-9]+$ ]] || return 1
   [[ "$snapshot_state_sha256" =~ ^[0-9a-f]{64}$ ]] || return 1
   temporary=$(mktemp "$RUNTIME_ROOT/.constructor-upgrade.journal.XXXXXX") || return 1
@@ -285,7 +285,7 @@ load_upgrade_journal() {
     && [ "$(stat -Lc '%u:%g:%a:%h' "$UPGRADE_JOURNAL")" = '0:0:600:1' ] || return 1
   jq -e --arg commit "$constructor_upgrade_source_commit" '
     .schema == 1 and .kind == "constructor-upgrade" and
-    (.phase == "armed" or .phase == "installed") and
+    (.phase == "armed" or .phase == "installed" or .phase == "committed") and
     .sourceCommit == $commit and
     (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
     (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
@@ -446,8 +446,55 @@ strict_constructor_config_recommit() {
   fsync_path "$cutover_stage"
   KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
     KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
-    "$helper" "$cutover_stage" "$compose"
+    "$helper" "$cutover_stage" "$compose" --leave-constructor-quiesced
   cutover_stage=''
+}
+
+validate_committed_activation_vector_quiesced() {
+  local index marker timer unit_file_state active_state
+  [ ! -e "$INSTALL_JOURNAL" ] && [ ! -L "$INSTALL_JOURNAL" ] || return 1
+  [ ! -e "$RUNTIME_JOURNAL" ] && [ ! -L "$RUNTIME_JOURNAL" ] || return 1
+  [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ] || return 1
+  [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] || return 1
+  [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] || return 1
+  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
+  for index in "${!constructor_markers[@]}"; do
+    marker=${constructor_markers[$index]}
+    timer=${constructor_timers[$index]}
+    if [ "${snapshot_marker_present[$index]}" = 1 ]; then
+      [ -f "$marker" ] && [ ! -L "$marker" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ] \
+        && cmp -s -- "$snapshot_root/marker.$index" "$marker" || return 1
+    else
+      [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
+    fi
+    unit_file_state=$(systemctl show "$timer" --property=UnitFileState --value) || return 1
+    active_state=$(systemctl show "$timer" --property=ActiveState --value) || return 1
+    [ "$unit_file_state" = disabled ] || return 1
+    case "$active_state" in inactive|failed) ;; *) return 1 ;; esac
+    if systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then return 1; fi
+    [ -z "$(systemctl list-jobs --no-legend --plain "$timer" 2>/dev/null)" ] || return 1
+  done
+  validate_service_quiescence
+}
+
+finalize_committed_activation() {
+  local helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  [ -f "$helper" ] && [ ! -L "$helper" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ] || return 1
+  [ -f "$compose" ] && [ ! -L "$compose" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ] || return 1
+  KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    "$helper" --recover-only "$compose"
+}
+
+quiesce_committed_activation() {
+  local helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  [ -f "$helper" ] && [ ! -L "$helper" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ] || return 1
+  [ -f "$compose" ] && [ ! -L "$compose" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ] || return 1
+  KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    "$helper" --recover-only "$compose" --leave-constructor-quiesced
 }
 
 validate_restored_activation_vector() {
@@ -491,7 +538,7 @@ validate_restored_activation_vector() {
 clear_upgrade_transaction() {
   local index root=$snapshot_root cleanup_failed=0
   load_upgrade_journal || return 1
-  [ "$upgrade_phase" = installed ] || return 1
+  [ "$upgrade_phase" = committed ] || return 1
   rm -f -- "$UPGRADE_JOURNAL" || return 1
   fsync_path "$RUNTIME_ROOT" || return 1
   for index in "${!constructor_markers[@]}"; do rm -f -- "$root/marker.$index" || cleanup_failed=1; done
@@ -564,16 +611,38 @@ if [ "$upgrade_phase" = armed ]; then
   load_upgrade_journal
 fi
 
-[ "$upgrade_phase" = installed ]
+if [ "$upgrade_phase" = installed ]; then
+  set_constructor_upgrade_phase activation-prepare
+  activation_restore_started=1
+  strict_constructor_config_recommit
+  validate_committed_activation_vector_quiesced \
+    || { echo 'generația comisă nu a rămas exactă și quiesced' >&2; exit 1; }
+  set_constructor_upgrade_phase activation-commit
+  write_upgrade_journal committed
+  load_upgrade_journal
+fi
+
+[ "$upgrade_phase" = committed ]
 set_constructor_upgrade_phase activation-restore
 activation_restore_started=1
-strict_constructor_config_recommit
+quiesce_committed_activation
+validate_committed_activation_vector_quiesced \
+  || { echo 'faza committed nu poate fi revalidată exact și quiesced' >&2; exit 1; }
+# Un rename committed observabil după SIGKILL nu dovedește fsync-ul directorului.
+# Republicăm idempotent pragul sub quiesce la fiecare retry, astfel încât ready și
+# primul start să urmeze întotdeauna unui committed durabil în execuția curentă.
+write_upgrade_journal committed
+load_upgrade_journal
+finalize_committed_activation
 validate_restored_activation_vector \
   || { echo 'starea markerelor și timerelor nu a fost restaurată exact' >&2; exit 1; }
 
 set_constructor_upgrade_phase commit
 worker_sha256=$(sha256sum /opt/kelion-codex/codex-worker.mjs | awk '{print $1}')
-clear_upgrade_transaction
+# Committed este republicat durabil, iar vectorul activ și workerul sunt dovedite
+# exact. Orice eșec al clear-ului trebuie să păstreze această stare: outer prezent
+# reia committed, iar outer absent permite unui fresh upgrade s-o captureze.
 activation_restore_started=0
+clear_upgrade_transaction
 printf '{"ok":true,"event":"constructor_upgrade_complete","source_commit":"%s","worker_sha256":"%s"}\n' \
   "$constructor_upgrade_source_commit" "$worker_sha256"

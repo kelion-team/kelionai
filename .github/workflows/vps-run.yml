@@ -174,7 +174,7 @@ jobs:
           source_commit=$(jq -er '
             select(
               .schema == 1 and .kind == "constructor-upgrade" and
-              (.phase == "armed" or .phase == "installed") and
+              (.phase == "armed" or .phase == "installed" or .phase == "committed") and
               (.sourceCommit | strings | test("^[0-9a-f]{40}$")) and
               (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
               (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
