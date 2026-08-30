@@ -17,6 +17,7 @@ on:
           - diagnose-spool
           - audit-token-identity
           - repair-spool-layout
+          - install-private-ai
       auto_routed_to_master:
         description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
         required: false
@@ -42,7 +43,7 @@ concurrency:
 
 jobs:
   route-to-master:
-    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.operation != 'install-private-ai' && inputs.auto_routed_to_master != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -63,6 +64,84 @@ jobs:
             -f auto_routed_to_master=true \
             -f pilot_pr_number="$PILOT_PR_NUMBER" \
             -f pilot_merge_commit="$PILOT_MERGE_COMMIT"
+  install-private-ai:
+    if: github.ref == 'refs/heads/ops/private-ai-install-20260830' && inputs.operation == 'install-private-ai' && inputs.auto_routed_to_master == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      REPO_TOKEN: ${{ secrets.CONSTRUCTOR_SYNC_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Instalează și verifică agentul AI privat
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "${#REPO_TOKEN}" -ge 32 ]
+          installer=.github/private-ai/install-private-ai.sh
+          [ -f "$installer" ] && bash -n "$installer"
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          remote_installer="/root/private-ai-installer.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.sh"
+          cleanup() {
+            rm -f -- "$key_file" "$known_hosts"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=20
+          )
+
+          scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_installer"
+          if ! ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            "chmod 0700 '$remote_installer'; '$remote_installer' > /root/private-ai-install.log 2>&1"; then
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+              "tail -n 200 /root/private-ai-install.log 2>/dev/null || true; rm -f -- '$remote_installer'"
+            exit 1
+          fi
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f -- '$remote_installer'"
+
+          printf '%s\n' "$REPO_TOKEN" \
+            | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" /opt/private-ai/bin/configure-kelion-access
+
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          systemctl is-active --quiet private-ai-llm.service
+          systemctl is-active --quiet private-ai-web.service
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:18080'
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:14096'
+          curl --fail --silent --max-time 10 http://127.0.0.1:18080/health >/dev/null
+          curl --fail --silent --max-time 10 http://127.0.0.1:14096/global/health \
+            | jq -e '.healthy == true' >/dev/null
+          runuser -u privateai -- env -i \
+            HOME=/srv/private-ai/home \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            git -C /srv/private-ai/workspace/kelionai ls-remote --exit-code origin HEAD >/dev/null
+          printf '%s\n' PRIVATE_AI_INSTALLATION_VERIFIED
+          REMOTE
+
+
   control:
     if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
