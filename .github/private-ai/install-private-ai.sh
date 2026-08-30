@@ -22,6 +22,8 @@ readonly MODEL_QUANT="Q4_K_M"
 readonly MODEL_ALIAS="qwen3.6-35b-a3b-local"
 readonly LLAMA_CPP_REF="c1d0e7a004015f23bc0233470b747b596f29b264"
 readonly OPENCODE_VERSION="1.18.25"
+readonly OPENCODE_X64_SHA256="58a3729a6f3432dd6d2917fcc4a949788891a035818646ad480e12c947f56e78"
+readonly OPENCODE_BASELINE_SHA256="ccd10586611b598b1eaed7c05cfbcbc68e3ec09e736b360da09b1d615d922968"
 
 log() {
   printf '[private-ai] %s\n' "$*"
@@ -203,11 +205,13 @@ build_llama_cpp() {
 }
 
 install_opencode() {
-  local opencode_asset opencode_tmp
+  local opencode_asset opencode_sha256 opencode_tmp
   if grep -qwi avx2 /proc/cpuinfo; then
     opencode_asset="opencode-linux-x64.tar.gz"
+    opencode_sha256="$OPENCODE_X64_SHA256"
   else
     opencode_asset="opencode-linux-x64-baseline.tar.gz"
+    opencode_sha256="$OPENCODE_BASELINE_SHA256"
   fi
   opencode_tmp=$(mktemp -d -p "$PRIVATE_AI_CACHE" opencode-install.XXXXXX)
   chown "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" "$opencode_tmp"
@@ -217,6 +221,8 @@ install_opencode() {
     curl --fail --location --silent --show-error --proto "=https" --tlsv1.2 \
       "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/${opencode_asset}" \
       --output "${opencode_tmp}/${opencode_asset}"
+  printf '%s  %s\n' "$opencode_sha256" "${opencode_tmp}/${opencode_asset}" \
+    | sha256sum --check --strict -
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
@@ -224,7 +230,14 @@ install_opencode() {
   [ -x "${opencode_tmp}/opencode" ] || fail "OpenCode executable was not found in the pinned release."
   install -o root -g root -m 0755 "${opencode_tmp}/opencode" "${PRIVATE_AI_BIN}/opencode"
   rm -rf -- "$opencode_tmp"
-  "${PRIVATE_AI_BIN}/opencode" --version > "${PRIVATE_AI_STATE}/opencode.version"
+  (
+    cd "$PRIVATE_AI_WORKSPACE"
+    runuser -u "$PRIVATE_AI_USER" -- env -i \
+      HOME="$PRIVATE_AI_HOME" \
+      PATH=/usr/local/bin:/usr/bin:/bin \
+      "${PRIVATE_AI_BIN}/opencode" --version \
+      > "${PRIVATE_AI_STATE}/opencode.version"
+  )
   chmod 0600 "${PRIVATE_AI_STATE}/opencode.version"
   chown "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" "${PRIVATE_AI_STATE}/opencode.version"
 }
@@ -307,9 +320,19 @@ JSON
     "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" \
     "${PRIVATE_AI_HOME}/.config/opencode/instructions.md"
 
-  cat > "${PRIVATE_AI_CONFIG}/opencode.env" <<'EOF'
-# Access control is provided by the authenticated SSH tunnel.
+  if [ ! -s "${PRIVATE_AI_CONFIG}/opencode.env" ]; then
+    local opencode_password
+    opencode_password=$(openssl rand -hex 24)
+    cat > "${PRIVATE_AI_CONFIG}/opencode.env" <<EOF
+OPENCODE_SERVER_USERNAME=adrian
+OPENCODE_SERVER_PASSWORD=${opencode_password}
 EOF
+    unset opencode_password
+  fi
+  grep -Eq '^OPENCODE_SERVER_USERNAME=[A-Za-z0-9._-]+$' "${PRIVATE_AI_CONFIG}/opencode.env" \
+    || fail "The OpenCode username configuration is invalid."
+  grep -Eq '^OPENCODE_SERVER_PASSWORD=[A-Fa-f0-9]{48}$' "${PRIVATE_AI_CONFIG}/opencode.env" \
+    || fail "The OpenCode password configuration is invalid."
   chown root:"$PRIVATE_AI_GROUP" "${PRIVATE_AI_CONFIG}/opencode.env"
   chmod 0640 "${PRIVATE_AI_CONFIG}/opencode.env"
 }
@@ -583,8 +606,14 @@ start_and_verify() {
   systemctl enable private-ai-web.service
   systemctl restart private-ai-web.service
 
+  # shellcheck disable=SC1091
+  . "${PRIVATE_AI_CONFIG}/opencode.env"
+  [ -n "${OPENCODE_SERVER_USERNAME:-}" ] && [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] \
+    || fail "OpenCode authentication is not configured."
+
   for attempt in $(seq 1 60); do
-    if curl --fail --silent --show-error --max-time 3 \
+    if printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" \
+      | curl --config - --fail --silent --show-error --max-time 3 \
       "http://127.0.0.1:${OPENCODE_PORT}/global/health" \
       | jq -e '.healthy == true' >/dev/null 2>&1; then
       break
@@ -608,14 +637,20 @@ Private AI is installed and healthy.
 Browser URL after opening the SSH tunnel:
 http://127.0.0.1:${OPENCODE_PORT}
 
+Web username:
+${OPENCODE_SERVER_USERNAME}
+
+Web password:
+${OPENCODE_SERVER_PASSWORD}
+
 SSH tunnel from Windows PowerShell:
 ssh -N -L 127.0.0.1:${OPENCODE_PORT}:127.0.0.1:${OPENCODE_PORT} root@164.68.120.87
 EOF
   chmod 0600 /root/private-ai-access.txt
 
-  printf '\n'
-  cat /root/private-ai-access.txt
-  printf '\n[private-ai] The two AI ports are bound only to 127.0.0.1.\n'
+  unset OPENCODE_SERVER_PASSWORD
+  printf '\n[private-ai] Access details were stored in /root/private-ai-access.txt (mode 0600).\n'
+  printf '[private-ai] The two AI ports are bound only to 127.0.0.1.\n'
   printf '[private-ai] No paid AI API key is configured.\n'
 }
 
