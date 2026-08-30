@@ -65,7 +65,9 @@ unit_state() {
 }
 
 restore_unit_state() {
-  local unit=$1 state=$2 enabled=${state%%:*} active=${state#*:}
+  local unit=$1 state=$2 enabled active
+  enabled=${state%%:*}
+  active=${state#*:}
   case "$enabled" in
     enabled|enabled-runtime) systemctl enable "$unit" >/dev/null 2>&1 || true ;;
     *) systemctl disable "$unit" >/dev/null 2>&1 || true ;;
@@ -381,7 +383,7 @@ fi
 
 worker_candidate=$(mktemp "$WORKER_TARGET.candidate.XXXXXX")
 install -o root -g root -m 0555 "$WORKER_SOURCE" "$worker_candidate"
-node --check "$worker_candidate"
+node --input-type=module --check < "$worker_candidate"
 mv -f -- "$worker_candidate" "$WORKER_TARGET"
 sync -f "$WORKER_TARGET"
 sync -f "$(dirname "$WORKER_TARGET")"
