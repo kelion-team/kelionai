@@ -106,6 +106,7 @@ install_packages() {
     iproute2 \
     jq \
     libcurl4-openssl-dev \
+    libssl-dev \
     openssl \
     pkg-config \
     procps \
@@ -184,7 +185,8 @@ build_llama_cpp() {
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     -DGGML_NATIVE=ON \
-    -DLLAMA_CURL=ON
+    -DLLAMA_CURL=ON \
+    -DLLAMA_OPENSSL=ON
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
