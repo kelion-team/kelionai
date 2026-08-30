@@ -435,10 +435,26 @@ for retired_artifact in \
     || fail "retired Codex adapter remains: $retired_artifact"
 done
 if [ -e "$CANONICAL_CODEX" ] || [ -L "$CANONICAL_CODEX" ]; then
-  [ -f "$CANONICAL_CODEX" ] && [ ! -L "$CANONICAL_CODEX" ] \
-    || fail 'canonical Codex path is unsafe'
+  canonical_codex_verified=$CANONICAL_CODEX
+  if [ -L "$CANONICAL_CODEX" ]; then
+    canonical_codex_verified=$(readlink -f -- "$CANONICAL_CODEX" || true)
+    [ -n "$canonical_codex_verified" ] && [ -f "$canonical_codex_verified" ] \
+      || fail 'canonical Codex symlink target is unsafe'
+    case "$canonical_codex_verified" in
+      "$LEGACY_CODEX_REAL"|"$LEGACY_OPENCODE_WRAPPER"|"$OPENCODE_BIN"|/opt/private-ai/*)
+        fail 'canonical Codex symlink still targets the retired local adapter'
+        ;;
+    esac
+  else
+    [ -f "$CANONICAL_CODEX" ] || fail 'canonical Codex path is unsafe'
+  fi
+  [ "$(stat -Lc '%u:%g' "$canonical_codex_verified")" = '0:0' ] \
+    || fail 'canonical Codex target is not root owned'
+  [ $((8#$(stat -Lc '%a' "$canonical_codex_verified") & 8#022)) -eq 0 ] \
+    || fail 'canonical Codex target is writable outside root'
+  [ -x "$canonical_codex_verified" ] || fail 'canonical Codex target is not executable'
   ! grep -aEq 'KELION_LOCAL_QWEN_WRAPPER|local-qwen-compat|opencode-constructor-root' \
-    "$CANONICAL_CODEX" || fail 'fake canonical Codex wrapper remains'
+    "$canonical_codex_verified" || fail 'fake canonical Codex wrapper remains'
 fi
 
 chown privateai:privateai "$PRIVATE_AI_HOME"
