@@ -18,6 +18,7 @@ export const MONITORED_FILES = Object.freeze([
   '.github/workflows/vps-set-env.yml',
   'deploy/RUNBOOKS.md',
   'deploy/deploy.sh',
+  'deploy/instaleaza-constructor.sh',
   'deploy/lib/constructor-publication.test.mjs',
   'deploy/lib/runtime-config-cutover.sh',
   'deploy/upgrade-constructor.sh',
