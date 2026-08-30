@@ -1,20 +1,20 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T12:08:57Z`
+Actualizat: `2026-08-30T13:13:43Z`
 
 ## Stare verificată
 
 - `origin/master` și producția activă sunt la
-  `c516465b6a26023fe6686ce2a7644bd4e783c0e7`, după merge-ul prin rebase al
-  PR-ului funcțional `#1538`.
-- Release-ul canonic `33309719900` a confirmat
-  `release_ok commit=c516465b6a26023fe6686ce2a7644bd4e783c0e7 slot=blue`.
-  `/api/release-proof` raportează `ready=true`, `candidate=false`,
-  `sideEffectsActive=true` și SHA-ul activ exact; `/health` raportează
-  `status=ok`.
-- Provisionarea `33309260780`, verificarea PR `33309198973`, build-ul
-  `33309411200` și dispatch-ul `33309714412` au încheiat cu succes pentru
-  același SHA.
+  `5792fbfde2b603be8efcaa6fe67cabdd823d3171`, după merge-ul PR-ului `#1541`.
+- CI `33312315059`, build-ul `33312531594`, dispatch-ul `33312852263` și
+  release-ul canonic `33312856341` au încheiat cu succes pentru același SHA.
+  Receiptul este
+  `release_ok commit=5792fbfde2b603be8efcaa6fe67cabdd823d3171 slot=green`.
+- Verifierul `33312315032` a confirmat trei din trei eșantioane live, toate
+  endpointurile cu HTTP 200 și fără lipsuri: versiunea `5792fbf`, readiness,
+  liveness, health și release-proof cu `candidate=false`,
+  `sideEffectsActive=true` și commitul activ exact. Verdictul său final a eșuat
+  exclusiv pe `branch-protection`; incidentul canonic este `#1544`.
 - Proba reală Responses din Kelion nu este funcțională: OpenAI răspunde
   `429 insufficient_quota`, iar UI afișează fallback-ul neutru. Capabilitatea
   Realtime este indisponibilă cu `code=quota`.
@@ -24,27 +24,22 @@ Actualizat: `2026-08-30T12:08:57Z`
 - Contractul implementat rămâne: aceeași cheie project-scoped
   `OPENAI_API_KEY` pentru backend și Constructor; cheia admin separată doar
   pentru Costs/Usage. Nicio cheie nu este expusă în browser, argv sau loguri.
-- Timerele și markerele worker/publisher Constructor sunt active. Workflow-ul
-  de login `33310222314` a ieșit verde, dar controlul ulterior `33310350441`
-  raportează încă `codex-auth=required`; cauza este capturarea canalului greșit
-  pentru receiptul `codex login status`, iar remedierea este în curs de
-  integrare. Constructorul nu este declarat funcțional.
-- Verifierul VPS a identificat două probleme independente de deploy:
-  evaluatorul post-cutover cerea greșit `candidate=true`, iar protecția ramurii
-  nu satisface încă toate regulile de livrare. Corecția evaluatorului cere
-  starea activă `candidate=false` și `sideEffectsActive=true` atât în
-  `/readyz`, cât și în `/api/release-proof`.
-- Excepția temporară de auto-merge pentru PR-ul `#1538` a fost consumată și
-  este eliminată; PR-urile VPS revin la allowlist-ul canonic fail-closed.
+- Corecția statusului Codex este în Git, dar release-ul aplicației nu publică
+  automat copia host `/opt/kelion-codex/codex-worker.mjs`. Constructorul rămâne
+  nedeclarat funcțional până la un upgrade in-place canonic, apoi login,
+  status și heartbeat real verificate.
+- Schimbarea curentă elimină excepția one-shot consumată de PR-ul `#1541` și
+  extinde permanent allowlist-ul fail-closed numai pentru upgrade-ul canonic al
+  Constructorului, runbook, testul său și acest checkpoint operațional.
 
 ## Următorul pas sigur
 
-1. Publică remedierea statusului Codex, corecția verifierului și eliminarea
-   excepției one-shot într-un PR nou, după toate testele locale.
-2. Îmbină numai după checkuri obligatorii verzi și conversații rezolvate, apoi
-   rulează release-ul pentru SHA-ul rezultat și verifică independent live-ul.
-3. Reexecută login/status Constructor și cere heartbeat real înainte de orice
-   ordin pilot.
+1. Integrează această curățare de politică numai după testele remediatorului,
+   siguranța workflow-urilor și verificarea sintaxei.
+2. Publică apoi upgrade-ul in-place al Constructorului într-un PR separat,
+   păstrând atomic markerii și timerele și fără a retransmite secretele.
+3. După upgrade, verifică hashul workerului host, loginul project-scoped,
+   `constructor-status` și heartbeatul real înainte de orice ordin pilot.
 4. Chatul și vocea pot deveni funcționale numai după ce proiectul OpenAI
    provisionat are credit/spend limit disponibil sau primește o altă cheie
    project-scoped cu quota. Costs/Usage necesită o cheie admin validă.
