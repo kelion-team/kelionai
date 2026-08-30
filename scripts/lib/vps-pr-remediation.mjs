@@ -5,6 +5,54 @@ export const INCIDENT_MARKER = '<!-- kelion-vps-remediation-incident:v1 -->'
 export const MAX_L1_ATTEMPTS = 2
 export const MAX_L2_ATTEMPTS = 1
 export const DEFAULT_FEEDBACK_TIMEOUT_MINUTES = 20
+export const OPENAI_UNIFIED_ONCE_PR_NUMBER = 1538 // hardcod-permis: excepția tehnică one-shot este legată de acest PR auditat
+export const OPENAI_UNIFIED_ONCE_REPOSITORY = 'kelion-team/kelionai' // hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
+export const OPENAI_UNIFIED_ONCE_BRANCH = 'chore/openai-unified-credentials-20260830'
+export const OPENAI_UNIFIED_ONCE_FILES = Object.freeze([
+  '.github/workflows/pr-verify.yml',
+  '.github/workflows/vps-codex-login.yml',
+  '.github/workflows/vps-run.yml',
+  '.github/workflows/vps-set-env.yml',
+  'AGENTS.md',
+  'backend/.env.example',
+  'backend/src/config.ts',
+  'backend/src/envCheck.test.ts',
+  'backend/src/openaiAdmin.test.ts',
+  'backend/src/openaiAdminConfig.test.ts',
+  'backend/src/openaiAdminStatus.test.ts',
+  'backend/src/routes/admin.ts',
+  'backend/src/services/codexWorker.ts',
+  'backend/src/services/diagnosticConstructor.ts',
+  'backend/src/services/envCheck.ts',
+  'backend/src/services/imageCost.test.ts',
+  'backend/src/services/manual.ts',
+  'backend/src/services/openaiAdmin.ts',
+  'backend/src/shared/api-types.ts',
+  'config/runtime-contract.json',
+  'deploy/DEPLOY.md',
+  'deploy/RUNBOOKS.md',
+  'deploy/codex-worker.mjs',
+  'deploy/codex-worker.profile.toml',
+  'deploy/compose.production.yml',
+  'deploy/deploy.sh',
+  'deploy/instaleaza-constructor.sh',
+  'deploy/kelionai.env.example',
+  'deploy/lib/codex-boundary.test.mjs',
+  'deploy/lib/constructor-publication.test.mjs',
+  'deploy/lib/runtime-config-cutover.sh',
+  'deploy/systemd/kelion-codex-worker.service',
+  'docs/FRONTEND-LIVE-TEST-MATRIX.md',
+  'docs/operations/CURRENT.md',
+  'docs/operations/DELIVERY-RULES-AND-ROADMAP.md',
+  'frontend/src/adminProductContract.test.ts',
+  'frontend/src/components/admin/AdminBani.tsx',
+  'frontend/src/components/admin/AdminProductie.tsx',
+  'frontend/src/components/admin/shared.tsx',
+  'frontend/src/lib/admin.ts',
+  'frontend/src/pages/Stage.tsx',
+  'scripts/verifica-contract-deploy.mjs',
+  'scripts/verifica-contract-deploy.test.mjs',
+])
 
 export const MONITORED_FILES = Object.freeze([
   '.github/workflows/deploy.yml',
@@ -181,14 +229,29 @@ export function parseStateComment(body, identity) {
   }
 }
 
-export function isMonitoredScope(files) {
+export function isOpenaiUnifiedOneShotScope(files, identity = {}) {
+  if (
+    identity.prNumber !== OPENAI_UNIFIED_ONCE_PR_NUMBER
+    || identity.repository !== OPENAI_UNIFIED_ONCE_REPOSITORY
+    || identity.headRepo !== OPENAI_UNIFIED_ONCE_REPOSITORY
+    || identity.headRef !== OPENAI_UNIFIED_ONCE_BRANCH
+    || !Array.isArray(files)
+    || files.length !== OPENAI_UNIFIED_ONCE_FILES.length
+  ) return false
+  const names = files.map((entry) => typeof entry === 'string' ? entry : entry?.filename)
+  if (names.some((file) => typeof file !== 'string') || new Set(names).size !== names.length) return false
+  return names.toSorted().every((file, index) => file === OPENAI_UNIFIED_ONCE_FILES[index])
+}
+
+export function isMonitoredScope(files, identity = {}) {
   if (!Array.isArray(files) || files.length === 0) return false
-  return files.every((entry) => {
+  const normalScope = files.every((entry) => {
     const file = typeof entry === 'string' ? entry : entry?.filename
     const status = typeof entry === 'string' ? null : entry?.status
     if (MONITORED_FILES.includes(String(file))) return true
     return file === '.github/workflows/vps-seed-slots.yml' && status === 'removed'
   })
+  return normalScope || isOpenaiUnifiedOneShotScope(files, identity)
 }
 
 export function assertL2DiffSafe(files, patchBytes) {

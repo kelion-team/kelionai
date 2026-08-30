@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   MAX_L1_ATTEMPTS,
+  OPENAI_UNIFIED_ONCE_BRANCH,
+  OPENAI_UNIFIED_ONCE_FILES,
+  OPENAI_UNIFIED_ONCE_PR_NUMBER,
+  OPENAI_UNIFIED_ONCE_REPOSITORY,
   appendAudit,
   assertL2DiffSafe,
   classifySnapshot,
@@ -10,6 +15,7 @@ import {
   formatStateComment,
   initialRemediationState,
   isMonitoredScope,
+  isOpenaiUnifiedOneShotScope,
   mayResolveThread,
   officialSource,
   parseStateComment,
@@ -56,6 +62,43 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['backend/src/index.ts']), false)
   assert.deepEqual(assertL2DiffSafe(['.github/workflows/vps-run.yml'], 100), ['.github/workflows/vps-run.yml'])
   assert.throws(() => assertL2DiffSafe(['deploy/deploy.sh'], 100), /neautorizată/)
+})
+
+test('scope-ul OpenAI one-shot cere identitatea și exact cele 43 de căi', () => {
+  const identity = {
+    prNumber: OPENAI_UNIFIED_ONCE_PR_NUMBER,
+    repository: OPENAI_UNIFIED_ONCE_REPOSITORY,
+    headRepo: OPENAI_UNIFIED_ONCE_REPOSITORY,
+    headRef: OPENAI_UNIFIED_ONCE_BRANCH,
+  }
+  const exact = [...OPENAI_UNIFIED_ONCE_FILES]
+  assert.equal(exact.length, 43)
+  assert.equal(new Set(exact).size, exact.length)
+  assert.deepEqual(exact, exact.toSorted())
+  assert.equal(isOpenaiUnifiedOneShotScope(exact, identity), true)
+  assert.equal(isMonitoredScope(exact.map((filename) => ({ filename, status: 'modified' })), identity), true)
+
+  assert.equal(isOpenaiUnifiedOneShotScope(exact, { ...identity, prNumber: 1537 }), false)
+  assert.equal(isOpenaiUnifiedOneShotScope(exact, { ...identity, headRef: 'chore/openai-unified-credentials-alt' }), false)
+  assert.equal(isOpenaiUnifiedOneShotScope(exact, { ...identity, repository: 'kelion-team/other' }), false)
+  assert.equal(isOpenaiUnifiedOneShotScope(exact, { ...identity, headRepo: 'fork/kelionai' }), false)
+  assert.equal(isOpenaiUnifiedOneShotScope(exact.slice(0, -1), identity), false)
+  assert.equal(isOpenaiUnifiedOneShotScope([...exact, 'unexpected/path'], identity), false)
+  assert.equal(isOpenaiUnifiedOneShotScope([...exact.slice(0, -1), exact[0]], identity), false)
+})
+
+test('workflow-ul merge-policy folosește aceeași identitate și aceeași listă one-shot', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/vps-auto-merge-chore-prs.yml', import.meta.url), 'utf8')
+  const encoded = /openai_unified_once='(\[[\s\S]*?\n          \])'\n          files=/.exec(workflow)?.[1]
+  assert.ok(encoded)
+  assert.deepEqual(JSON.parse(encoded), OPENAI_UNIFIED_ONCE_FILES)
+  assert.match(workflow, new RegExp(`readonly openai_unified_pr_number=${OPENAI_UNIFIED_ONCE_PR_NUMBER}\\b`))
+  assert.match(workflow, new RegExp(`readonly openai_unified_repository=${OPENAI_UNIFIED_ONCE_REPOSITORY.replace('/', '\\/')}\\b`))
+  assert.match(workflow, new RegExp(`readonly openai_unified_branch=${OPENAI_UNIFIED_ONCE_BRANCH}\\b`))
+  assert.match(workflow, /\[ "\$pr_number" = "\$openai_unified_pr_number" \]/)
+  assert.match(workflow, /\[ "\$GITHUB_REPOSITORY" = "\$openai_unified_repository" \]/)
+  assert.match(workflow, /\[ "\$head_repo" = "\$openai_unified_repository" \]/)
+  assert.match(workflow, /\[ "\$head_ref" = "\$openai_unified_branch" \]/)
 })
 
 test('clasificarea prioritizează conflictul, sincronizarea și review threads', () => {
