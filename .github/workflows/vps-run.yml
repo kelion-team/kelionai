@@ -1,6 +1,11 @@
 name: vps-constructor-control
 
 on:
+  push:
+    branches:
+      - ops/private-ai-install-20260830
+    paths:
+      - .github/workflows/vps-run.yml
   workflow_dispatch:
     inputs:
       operation:
@@ -65,7 +70,7 @@ jobs:
             -f pilot_pr_number="$PILOT_PR_NUMBER" \
             -f pilot_merge_commit="$PILOT_MERGE_COMMIT"
   install-private-ai:
-    if: github.ref == 'refs/heads/ops/private-ai-install-20260830' && inputs.operation == 'install-private-ai' && inputs.auto_routed_to_master == true
+    if: github.ref == 'refs/heads/ops/private-ai-install-20260830' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'install-private-ai' && inputs.auto_routed_to_master == true))
     runs-on: ubuntu-latest
     timeout-minutes: 180
     environment: production
