@@ -388,7 +388,7 @@ WorkingDirectory=${PRIVATE_AI_WORKSPACE}
 Environment=HOME=${PRIVATE_AI_HOME}
 Environment=XDG_CACHE_HOME=${PRIVATE_AI_CACHE}
 Environment=HF_HOME=${PRIVATE_AI_MODEL_CACHE}
-ExecStart=${PRIVATE_AI_BIN}/llama-server -hf ${MODEL_REPO}:${MODEL_QUANT} --offline --alias ${MODEL_ALIAS} --host 127.0.0.1 --port ${LLAMA_PORT} --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja
+ExecStart=${PRIVATE_AI_BIN}/llama-server -hf ${MODEL_REPO}:${MODEL_QUANT} --offline --alias ${MODEL_ALIAS} --host 127.0.0.1 --port ${LLAMA_PORT} --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=1800
