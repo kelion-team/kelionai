@@ -13,6 +13,7 @@ on:
       - deploy/systemd/private-ai-web-full-access.conf
       - constructor-desktop/**
       - .github/private-ai/finalize-private-ai-constructor.sh
+      - .github/workflows/vps-codex-login.yml
       - .github/workflows/private-ai-finalize.yml
   workflow_dispatch:
 
