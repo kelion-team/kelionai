@@ -8,11 +8,14 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fstatSync,
+  ftruncateSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readSync,
   renameSync,
   readFileSync,
   realpathSync,
@@ -21,6 +24,7 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -58,6 +62,7 @@ const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const OPENCODE_VERSION = '1.18.25'
 const OPENCODE_MODEL_ID = 'qwen3.6-35b-a3b-local'
 const OPENCODE_PROMPT = 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
+const WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
 const REQUIRED_LAYOUT = Object.freeze({
   openCodeBin: '/opt/private-ai/bin/opencode',
@@ -101,17 +106,37 @@ class WorkerApiError extends Error {
   }
 }
 
-function privateLogTail(logPath, maxBytes = 128 * 1024) {
-  if (!logPath || !existsSync(logPath)) return ''
-  const raw = readFileSync(logPath, 'utf8')
-  return raw.slice(-maxBytes)
+export function tailText(logPath, maxBytes = 128 * 1024) {
+  if (!logPath) return ''
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) fail('Limita tail-ului privat este invalidă')
+  let descriptor = null
+  try {
+    descriptor = openSync(logPath, 'r')
+    const info = fstatSync(descriptor)
+    if (!info.isFile() || maxBytes === 0 || info.size === 0) return ''
+    const byteCount = Math.min(info.size, maxBytes)
+    const buffer = Buffer.alloc(byteCount)
+    const start = info.size - byteCount
+    let offset = 0
+    while (offset < byteCount) {
+      const count = readSync(descriptor, buffer, offset, byteCount - offset, start + offset)
+      if (count === 0) break
+      offset += count
+    }
+    return buffer.subarray(0, offset).toString('utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return ''
+    throw error
+  } finally {
+    if (descriptor !== null) closeSync(descriptor)
+  }
 }
 
 /** Clasifică local jurnalul privat și transmite serverului numai un cod dintr-un
  * catalog fix. Niciun fragment de output (care poate conține secrete) nu iese
  * din contul workerului. */
 function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
-  const source = `${privateLogTail(logPath)}\n${error instanceof Error ? error.message : ''}`
+  const source = `${tailText(logPath)}\n${error instanceof Error ? error.message : ''}`
   if (/credit balance is too low|requires more credits|insufficient.{0,30}credit|insufficient_quota|credit_balance_exhausted|project_spend_limit_exceeded|organization_spend_limit_exceeded|payment required|\b402\b/i.test(source)) return 'provider_credit'
   if (/invalid x-api-key|authentication_error|api key not valid|not logged in|unauthorized|\b(?:401|403)\b.{0,80}(?:key|token|auth)/i.test(source)) return 'provider_auth'
   if (result.timedOut || /timed out|timeout|timp.{0,20}depăș/i.test(source)) return 'execution_timeout'
@@ -685,24 +710,63 @@ async function preflight() {
   return null
 }
 
-function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 30 * 60_000, signal = undefined, privilegedKill = false) {
+export function runSucceeded(result) {
+  return result?.code === 0
+    && result.signal === null
+    && result.timedOut === false
+    && result.aborted === false
+    && result.outputExceeded === false
+}
+
+function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 30 * 60_000, signal = undefined, privilegedKill = false, maxLogBytes = WORKER_LOG_MAX_BYTES) {
   return new Promise((done, reject) => {
+    if (!Number.isSafeInteger(maxLogBytes) || maxLogBytes <= 0 || maxLogBytes > WORKER_LOG_MAX_BYTES) {
+      reject(new Error('Limita jurnalului worker este invalidă'))
+      return
+    }
     if (signal?.aborted) {
       reject(signal.reason instanceof Error ? signal.reason : new Error('Lease-ul jobului a fost pierdut'))
       return
     }
-    const fd = openSync(logPath, 'a', 0o600)
+    let fd = null
+    let logBytes = 0
+    try {
+      fd = openSync(logPath, 'a', 0o600)
+      const info = fstatSync(fd)
+      if (!info.isFile()) throw new Error('Jurnalul worker nu este fișier regulat')
+      if (info.size > maxLogBytes) ftruncateSync(fd, maxLogBytes)
+      logBytes = Math.min(info.size, maxLogBytes)
+      if (logBytes === maxLogBytes) {
+        closeSync(fd)
+        fd = null
+        done({ code: 1, signal: null, timedOut: false, aborted: false, outputExceeded: true })
+        return
+      }
+    } catch (error) {
+      if (fd !== null) closeSync(fd)
+      reject(error)
+      return
+    }
     let settled = false
     let killTimer = null
     let timedOut = false
     let aborted = false
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      stdio: [stdin === null ? 'ignore' : 'pipe', fd, fd],
-      detached: true,
-      windowsHide: true,
-    })
+    let outputExceeded = false
+    let outputError = null
+    let child
+    try {
+      child = spawn(command, args, {
+        cwd,
+        env,
+        stdio: [stdin === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        detached: true,
+        windowsHide: true,
+      })
+    } catch (error) {
+      closeSync(fd)
+      reject(error)
+      return
+    }
     const signalGroup = (name) => {
       if (privilegedKill) {
         const killed = spawnSync(
@@ -726,6 +790,28 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 3
       }, 2_000)
       killTimer.unref()
     }
+    const appendOutput = (value) => {
+      if (settled || outputExceeded || outputError) return
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+      const accepted = Math.min(chunk.length, maxLogBytes - logBytes)
+      try {
+        let offset = 0
+        while (offset < accepted) {
+          const written = writeSync(fd, chunk, offset, accepted - offset)
+          if (written === 0) throw new Error('Scriere nulă în jurnalul worker')
+          offset += written
+        }
+        logBytes += accepted
+      } catch (error) {
+        outputError = error
+        terminate()
+        return
+      }
+      if (accepted < chunk.length) {
+        outputExceeded = true
+        terminate()
+      }
+    }
     const onTimeout = () => {
       timedOut = true
       terminate()
@@ -739,8 +825,13 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 3
       clearTimeout(timer)
       if (killTimer) clearTimeout(killTimer)
       signal?.removeEventListener('abort', onAbort)
-      closeSync(fd)
+      if (fd !== null) {
+        closeSync(fd)
+        fd = null
+      }
     }
+    child.stdout.on('data', appendOutput)
+    child.stderr.on('data', appendOutput)
     signal?.addEventListener('abort', onAbort, { once: true })
     if (signal?.aborted) onAbort()
     child.once('error', (error) => {
@@ -749,14 +840,22 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 3
       cleanup()
       reject(error)
     })
-    child.once('exit', (code, exitSignal) => {
-      if (settled) return
+    child.once('exit', () => {
       // `sudo` poate ieși la SIGTERM înaintea executorului său. Grupul încă
       // păstrează PGID-ul inițial, deci îl închidem definitiv înainte de cleanup.
       if (killTimer) signalGroup('SIGKILL')
+    })
+    child.once('close', (code, exitSignal) => {
+      if (settled) return
       settled = true
       cleanup()
-      done({ code: code ?? 1, signal: exitSignal, timedOut, aborted })
+      if (outputError) {
+        reject(outputError)
+        return
+      }
+      done(outputExceeded
+        ? { code: 1, signal: null, timedOut, aborted, outputExceeded: true }
+        : { code: code ?? 1, signal: exitSignal, timedOut, aborted, outputExceeded: false })
     })
     if (stdin !== null) {
       child.stdin.on('error', () => undefined)
@@ -1061,7 +1160,7 @@ async function runOnce() {
         if (executorAttempted && existsSync(jobStateDir)) restoreJobOwnership(jobStateDir, ownershipScope)
       }
     }
-    if (result.code !== 0) {
+    if (!runSucceeded(result)) {
       const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'opencode', result))
       await reportEvent(secret, jobId, { taskId, event: 'failed', code })
       failureReported = true
@@ -1085,7 +1184,7 @@ async function runOnce() {
     } finally {
       await stopGateLease()
     }
-    if (gate.code !== 0) {
+    if (!runSucceeded(gate)) {
       const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'gate', gate))
       await reportEvent(secret, jobId, { taskId, event: 'failed', code })
       failureReported = true
@@ -1190,7 +1289,7 @@ async function executorSmoke() {
     } finally {
       if (executorAttempted && existsSync(smokeStateDir)) restoreJobOwnership(smokeStateDir, ownershipScope)
     }
-    if (result.code !== 0) fail(`Smoke-ul OpenCode a eșuat cu codul ${result.code}`)
+    if (!runSucceeded(result)) fail(`Smoke-ul OpenCode a eșuat cu codul ${result.code}`)
     if (!existsSync(proofPath) || readFileSync(proofPath, 'utf8') !== `${nonce}\n`) {
       fail('Smoke-ul OpenCode nu a produs editarea deterministă cerută')
     }
@@ -1317,6 +1416,16 @@ async function selfTest() {
   if (receipt.kind !== 'kelion-constructor-handoff' || receipt.schema !== 1) fail('Receipt-ul handoff nu este canonic')
   for (const code of WORKER_FAILURE_CODES) {
     if (assertWorkerFailureCode(code) !== code) fail('Catalog worker failure inconsistent')
+  }
+  const successfulRun = { code: 0, signal: null, timedOut: false, aborted: false, outputExceeded: false }
+  if (!runSucceeded(successfulRun)) fail('Rezultatul canonic reușit este refuzat')
+  for (const rejectedRun of [
+    { ...successfulRun, signal: 'SIGTERM' },
+    { ...successfulRun, timedOut: true },
+    { ...successfulRun, aborted: true },
+    { ...successfulRun, outputExceeded: true },
+  ]) {
+    if (runSucceeded(rejectedRun)) fail('Rezultatul ambiguu al unei execuții este acceptat ca succes')
   }
   if (classifyWorkerFailure(null, 'gate', { timedOut: true }) !== 'execution_timeout') fail('Timeout worker neclasificat')
   for (const providerCode of [
@@ -1461,14 +1570,58 @@ async function selfTest() {
     fail('Contractul claim ambiguu legacy nu este refuzat fail-closed')
   }
 
-  const abortDir = mkdtempSync('/tmp/kelion-worker-abort-self-test-')
-  const abortLog = join(abortDir, 'child.log')
+  const runLoggedDir = mkdtempSync('/tmp/kelion-worker-run-logged-self-test-')
+  const abortLog = join(runLoggedDir, 'abort.log')
   try {
+    const tailLog = join(runLoggedDir, 'tail.log')
+    writeFileSync(tailLog, 'prefix-necitit\nTAIL-EXACT', { mode: 0o600 })
+    if (tailText(tailLog, 10) !== 'TAIL-EXACT') fail('tailText nu citește exact coada bounded a jurnalului')
+
+    const timeoutLog = join(runLoggedDir, 'timeout.log')
+    const timedOut = await runLogged(
+      process.execPath,
+      ['-e', "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000)"],
+      runLoggedDir,
+      timeoutLog,
+      { PATH: '/usr/bin:/bin' },
+      null,
+      1_000,
+    )
+    if (
+      timedOut.code !== 0
+      || timedOut.signal !== null
+      || !timedOut.timedOut
+      || runSucceeded(timedOut)
+      || classifyWorkerFailure(timeoutLog, 'opencode', timedOut) !== 'execution_timeout'
+    ) fail('Timeout-ul cu exit 0 poate avansa fals după executor')
+
+    const overflowLog = join(runLoggedDir, 'overflow.log')
+    const overflowLimit = 1_024
+    const overflowed = await runLogged(
+      process.execPath,
+      ['-e', "process.stdout.write('o'.repeat(700));process.stderr.write('e'.repeat(700));setInterval(()=>{},1000)"],
+      runLoggedDir,
+      overflowLog,
+      { PATH: '/usr/bin:/bin' },
+      null,
+      10_000,
+      undefined,
+      false,
+      overflowLimit,
+    )
+    if (
+      !overflowed.outputExceeded
+      || overflowed.code !== 1
+      || overflowed.signal !== null
+      || runSucceeded(overflowed)
+      || statSync(overflowLog).size !== overflowLimit
+    ) fail('Depășirea stdout+stderr nu este oprită la plafonul exact al jurnalului')
+
     const controller = new AbortController()
     const running = runLogged(
       process.execPath,
       ['-e', `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:'ignore'});process.on('SIGTERM',()=>process.exit(0));process.stdout.write(String(child.pid)+'\\n');setInterval(()=>{},1000)`],
-      abortDir,
+      runLoggedDir,
       abortLog,
       { PATH: '/usr/bin:/bin' },
       null,
@@ -1477,14 +1630,16 @@ async function selfTest() {
     )
     let descendantPid = null
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const value = existsSync(abortLog) ? readFileSync(abortLog, 'utf8').trim() : ''
+      const value = tailText(abortLog, 64).trim()
       if (/^[1-9]\d*$/.test(value)) { descendantPid = Number(value); break }
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
     }
     if (!Number.isSafeInteger(descendantPid)) fail('Self-testul abort nu a pornit descendentul')
     controller.abort(new Error('self-test-lease-lost'))
     const aborted = await running
-    if (!aborted.aborted) fail('runLogged nu a marcat întreruperea lease-ului')
+    if (aborted.code !== 0 || aborted.signal !== null || !aborted.aborted || runSucceeded(aborted)) {
+      fail('Abort-ul lease-ului cu exit 0 poate avansa fals spre gate sau handoff')
+    }
     let descendantAlive = true
     for (let attempt = 0; attempt < 100; attempt += 1) {
       try { process.kill(descendantPid, 0) } catch { descendantAlive = false; break }
@@ -1492,7 +1647,7 @@ async function selfTest() {
     }
     if (descendantAlive) fail('Descendentul executorului a rămas activ după abort')
   } finally {
-    rmSync(abortDir, { recursive: true, force: true })
+    rmSync(runLoggedDir, { recursive: true, force: true })
   }
   process.stdout.write('codex-worker self-test: TRECE\n')
 }

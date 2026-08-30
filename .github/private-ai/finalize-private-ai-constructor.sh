@@ -8,15 +8,28 @@ readonly WORKER_TARGET=/opt/kelion-codex/codex-worker.mjs
 readonly WORKER_UNIT_SOURCE="$BUNDLE_ROOT/deploy/systemd/kelion-codex-worker.service"
 readonly WORKER_UNIT_TARGET=/etc/systemd/system/kelion-codex-worker.service
 readonly SUDOERS_SOURCE="$BUNDLE_ROOT/deploy/sudoers/kelion-codex-full-access"
+readonly OPENCODE_CONFIG_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor.json"
+readonly OPENCODE_INSTRUCTIONS_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor-instructions.md"
+readonly WEB_DROPIN_SOURCE="$BUNDLE_ROOT/deploy/systemd/private-ai-web-full-access.conf"
 readonly PRIVATE_AI_ROOT=/srv/private-ai
 readonly PRIVATE_AI_HOME=$PRIVATE_AI_ROOT/home
 readonly PRIVATE_AI_CONFIG=/etc/private-ai
 readonly OPENCODE_CONFIG=$PRIVATE_AI_HOME/.config/opencode/opencode.json
 readonly OPENCODE_INSTRUCTIONS=$PRIVATE_AI_HOME/.config/opencode/instructions.md
 readonly OPENCODE_BIN=/opt/private-ai/bin/opencode
-readonly WORKER_DROPIN_DIR=/etc/systemd/system/kelion-codex-worker.service.d
-readonly WORKER_DROPIN=$WORKER_DROPIN_DIR/90-local-opencode-full-access.conf
-readonly LEGACY_WORKER_DROPIN=$WORKER_DROPIN_DIR/90-local-qwen-full-access.conf
+readonly LLAMA_SERVER=/opt/private-ai/bin/llama-server
+readonly LLAMA_SOURCE=/opt/private-ai/src/llama.cpp
+readonly LLAMA_COMMIT_STATE=/var/lib/private-ai/llama-cpp.commit
+readonly MODEL_CACHE=$PRIVATE_AI_ROOT/models
+readonly LLAMA_CPP_REF=c1d0e7a004015f23bc0233470b747b596f29b264
+readonly MODEL_REPO=ggml-org/Qwen3.6-35B-A3B-GGUF
+readonly MODEL_REVISION=baec3ebee244827cda0f4557eafa8b28f7545fa6
+readonly MODEL_QUANT=Q4_K_M
+readonly MODEL_FILE=Qwen3.6-35B-A3B-Q4_K_M.gguf
+readonly MODEL_FILE_BYTES=20419565568
+readonly MODEL_FILE_SHA256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
+readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
+readonly LEGACY_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
 readonly LEGACY_CODEX_REAL=/opt/kelion-codex/bin/codex-real
 readonly LEGACY_OPENCODE_WRAPPER=/opt/private-ai/bin/opencode-constructor-root
 readonly LEGACY_COMPAT_KEY=/etc/private-ai/local-codex-compat-key
@@ -66,6 +79,12 @@ restore_unit_state() {
 [ -f "$WORKER_SOURCE" ] && [ ! -L "$WORKER_SOURCE" ] || fail 'worker source missing'
 [ -f "$WORKER_UNIT_SOURCE" ] && [ ! -L "$WORKER_UNIT_SOURCE" ] || fail 'worker unit source missing'
 [ -f "$SUDOERS_SOURCE" ] && [ ! -L "$SUDOERS_SOURCE" ] || fail 'worker sudoers source missing'
+[ -f "$OPENCODE_CONFIG_SOURCE" ] && [ ! -L "$OPENCODE_CONFIG_SOURCE" ] \
+  || fail 'canonical OpenCode config source missing'
+[ -f "$OPENCODE_INSTRUCTIONS_SOURCE" ] && [ ! -L "$OPENCODE_INSTRUCTIONS_SOURCE" ] \
+  || fail 'canonical OpenCode instructions source missing'
+[ -f "$WEB_DROPIN_SOURCE" ] && [ ! -L "$WEB_DROPIN_SOURCE" ] \
+  || fail 'canonical OpenCode web full-access drop-in source missing'
 node --check "$WORKER_SOURCE"
 grep -q 'OPENCODE_BIN' "$WORKER_SOURCE" || fail 'worker has no direct OpenCode executor'
 ! grep -q 'KELION_LOCAL_QWEN_WRAPPER' "$WORKER_SOURCE" || fail 'fake Codex wrapper found in worker source'
@@ -75,6 +94,24 @@ grep -Fqx 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$
 grep -Fqx 'LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret' "$WORKER_UNIT_SOURCE"
 ! grep -Eq 'CODEX_BIN=|CODEX_HOME=|openai-project-key|codex-real|opencode-constructor-root' \
   "$WORKER_UNIT_SOURCE" || fail 'worker unit source still references the retired Codex adapter'
+jq -e '
+  . as $config |
+  $config.autoupdate == false and $config.share == "disabled" and
+  $config.enabled_providers == ["llama.cpp"] and
+  ($config.provider | keys) == ["llama.cpp"] and
+  $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+  ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+  $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+  $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+  ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+  (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+    "webfetch", "websearch", "external_directory"]
+   | all(.[]; $config.permission[.] == "allow"))
+' "$OPENCODE_CONFIG_SOURCE" >/dev/null
+[ -s "$OPENCODE_INSTRUCTIONS_SOURCE" ]
+! grep -Eiq 'OPENAI_API_KEY|ANTHROPIC_API_KEY|login --with-api-key|paid provider' \
+  "$OPENCODE_CONFIG_SOURCE" "$OPENCODE_INSTRUCTIONS_SOURCE" \
+  || fail 'canonical OpenCode sources reference an external paid executor'
 
 require_regular "$PRIVATE_AI_CONFIG/.install-complete" root:root:600
 mapfile -t base_receipt < "$PRIVATE_AI_CONFIG/.install-complete"
@@ -90,9 +127,41 @@ completed_at=${BASH_REMATCH[1]}
 [ "${base_receipt[5]}" = 'model_quant=Q4_K_M' ]
 require_regular /var/lib/private-ai/model.ready privateai:privateai:600
 require_regular "$OPENCODE_BIN" root:root:755
+require_regular "$LLAMA_SERVER" root:root:755
+require_regular "$LLAMA_COMMIT_STATE" privateai:privateai:600
 require_regular "$OPENCODE_CONFIG" root:privateai:640
 require_regular "$PRIVATE_AI_CONFIG/opencode.env" root:privateai:640
+[ "$(tr -d '\n' < "$LLAMA_COMMIT_STATE")" = "$LLAMA_CPP_REF" ] \
+  || fail 'llama.cpp state does not match the pinned revision'
+[ -d "$LLAMA_SOURCE/.git" ] && [ ! -L "$LLAMA_SOURCE" ] \
+  || fail 'pinned llama.cpp source checkout is missing'
+[ "$(git -C "$LLAMA_SOURCE" rev-parse HEAD)" = "$LLAMA_CPP_REF" ] \
+  || fail 'llama.cpp checkout does not match the pinned revision'
+mapfile -d '' -t model_candidates < <(
+  find "$MODEL_CACHE" -xdev -type f -size "${MODEL_FILE_BYTES}c" -print0
+)
+[ "${#model_candidates[@]}" -eq 1 ] \
+  || fail 'the pinned Qwen GGUF was not found exactly once in the offline cache'
+model_file_path=${model_candidates[0]}
+[ -f "$model_file_path" ] && [ ! -L "$model_file_path" ] \
+  || fail 'the pinned Qwen GGUF cache object is unsafe'
+[ "$(stat -Lc '%U:%G:%s:%h' "$model_file_path")" = \
+  "privateai:privateai:${MODEL_FILE_BYTES}:1" ] \
+  || fail 'the pinned Qwen GGUF metadata is invalid'
+model_file_sha=$(sha256sum "$model_file_path" | awk '{print $1}')
+[ "$model_file_sha" = "$MODEL_FILE_SHA256" ] \
+  || fail 'the cached Qwen GGUF hash does not match the pinned artifact'
+llama_server_sha=$(sha256sum "$LLAMA_SERVER" | awk '{print $1}')
+opencode_bin_sha=$(sha256sum "$OPENCODE_BIN" | awk '{print $1}')
+[[ "$llama_server_sha" =~ ^[0-9a-f]{64}$ ]]
+[[ "$opencode_bin_sha" =~ ^[0-9a-f]{64}$ ]]
 systemctl is-active --quiet private-ai-llm.service
+# Un retry după HUP/reboot poate găsi web-ul oprit exact între quiesce și
+# restart. Fișierele sunt publicate numai prin rename; pornirea aici oferă o
+# bază coerentă pentru roll-forward fără a declara încă succesul.
+if ! systemctl is-active --quiet private-ai-web.service; then
+  systemctl start private-ai-web.service
+fi
 systemctl is-active --quiet private-ai-web.service
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null
 [ "$($OPENCODE_BIN --version)" = 1.18.25 ] || fail 'unexpected OpenCode version'
@@ -120,6 +189,8 @@ readonly RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
 rollback_root=$(mktemp -d "$RUNTIME_ROOT/private-ai-finalize.XXXXXX")
 chmod 0700 "$rollback_root"
 rollback_armed=0
+readonly FINALIZER_MAIN_BASHPID=$BASHPID
+rollback_running=0
 worker_cutover_started=0
 web_cutover_started=0
 canonical_codex_fake=0
@@ -128,7 +199,6 @@ unit_candidate=''
 sudoers_candidate=''
 canonical_codex_candidate=''
 config_candidate=''
-worker_dropin_candidate=''
 web_dropin_candidate=''
 instructions_candidate=''
 auth_config=''
@@ -177,11 +247,16 @@ restore_legacy_path() {
 
 rollback() {
   local status=$?
-  trap - ERR INT TERM EXIT
+  if [ "$#" -gt 0 ]; then status=$1; fi
+  if [ "$BASHPID" != "$FINALIZER_MAIN_BASHPID" ]; then return "$status"; fi
+  if [ "$status" -eq 0 ]; then return 0; fi
+  if [ "$rollback_running" -eq 1 ]; then builtin exit "$status"; fi
+  rollback_running=1
+  trap - ERR HUP INT TERM EXIT
   for temporary in \
     "$worker_candidate" "$unit_candidate" "$sudoers_candidate" \
     "$canonical_codex_candidate" "$config_candidate" "$auth_config" \
-    "$worker_dropin_candidate" "$web_dropin_candidate" "$instructions_candidate" \
+    "$web_dropin_candidate" "$instructions_candidate" \
     "$receipt_candidate"; do
     [ -z "$temporary" ] || rm -f -- "$temporary" >/dev/null 2>&1 || true
   done
@@ -196,7 +271,7 @@ rollback() {
     restore_file worker_unit "$WORKER_UNIT_TARGET" || true
     restore_file config "$OPENCODE_CONFIG" || true
     restore_file instructions "$OPENCODE_INSTRUCTIONS" || true
-    restore_file worker_dropin "$WORKER_DROPIN" || true
+    restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || true
     restore_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN" || true
     restore_file web_dropin "$WEB_DROPIN" || true
     restore_file sudoers "$SUDOERS" || true
@@ -215,13 +290,16 @@ rollback() {
   printf 'PRIVATE_AI_FINALIZE_ROLLED_BACK=yes EXIT=%s\n' "$status" >&2
   exit "$status"
 }
-trap rollback ERR INT TERM
+trap rollback ERR EXIT
+trap 'rollback 129' HUP
+trap 'rollback 130' INT
+trap 'rollback 143' TERM
 
 snapshot_file worker "$WORKER_TARGET"
 snapshot_file worker_unit "$WORKER_UNIT_TARGET"
 snapshot_file config "$OPENCODE_CONFIG"
 snapshot_file instructions "$OPENCODE_INSTRUCTIONS"
-snapshot_file worker_dropin "$WORKER_DROPIN"
+snapshot_file retired_worker_dropin "$RETIRED_WORKER_DROPIN"
 snapshot_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN"
 snapshot_file web_dropin "$WEB_DROPIN"
 snapshot_file sudoers "$SUDOERS"
@@ -284,92 +362,16 @@ install -o root -g root -m 0444 "$WORKER_UNIT_SOURCE" "$unit_candidate"
 mv -f -- "$unit_candidate" "$WORKER_UNIT_TARGET"
 sync -f "$WORKER_UNIT_TARGET"
 
-install -d -o root -g root -m 0755 "$WORKER_DROPIN_DIR" "$WEB_DROPIN_DIR"
-worker_dropin_candidate=$(mktemp "$WORKER_DROPIN.candidate.XXXXXX")
-cat > "$worker_dropin_candidate" <<'UNIT'
-[Service]
-Environment=CODEX_WORKER_EXECUTOR=opencode
-Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode
-Environment=OPENCODE_CONFIG_HOME=/srv/private-ai/home/.config
-Environment=OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json
-Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local
-Environment=OPENCODE_BASE_URL=http://127.0.0.1:24080/v1
-LoadCredential=
-LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
-SupplementaryGroups=
-SupplementaryGroups=kelion-handoff privateai
-NoNewPrivileges=false
-PrivateIPC=false
-PrivateDevices=false
-PrivateTmp=false
-ProtectClock=false
-ProtectControlGroups=false
-ProtectHome=false
-ProtectHostname=false
-ProtectKernelLogs=false
-ProtectKernelModules=false
-ProtectKernelTunables=false
-ProtectProc=default
-ProcSubset=all
-ProtectSystem=false
-RestrictAddressFamilies=
-RestrictNamespaces=false
-RestrictRealtime=false
-RestrictSUIDSGID=false
-LockPersonality=false
-CapabilityBoundingSet=~
-ReadWritePaths=
-MemoryMax=infinity
-TasksMax=infinity
-UNIT
-chown root:root "$worker_dropin_candidate"
-chmod 0644 "$worker_dropin_candidate"
-mv -f -- "$worker_dropin_candidate" "$WORKER_DROPIN"
-worker_dropin_candidate=''
-sync -f "$WORKER_DROPIN"
-rm -f -- "$LEGACY_WORKER_DROPIN"
+install -d -o root -g root -m 0755 "$WEB_DROPIN_DIR"
+rm -f -- "$LEGACY_WORKER_DROPIN" "$RETIRED_WORKER_DROPIN"
 
 web_dropin_candidate=$(mktemp "$WEB_DROPIN.candidate.XXXXXX")
-cat > "$web_dropin_candidate" <<'UNIT'
-[Service]
-User=root
-Group=root
-WorkingDirectory=/srv/private-ai/workspace
-NoNewPrivileges=false
-PrivateIPC=false
-PrivateDevices=false
-PrivateTmp=false
-ProtectClock=false
-ProtectControlGroups=false
-ProtectHome=false
-ProtectHostname=false
-ProtectKernelLogs=false
-ProtectKernelModules=false
-ProtectKernelTunables=false
-ProtectProc=default
-ProcSubset=all
-ProtectSystem=false
-RestrictAddressFamilies=
-RestrictNamespaces=false
-RestrictRealtime=false
-RestrictSUIDSGID=false
-LockPersonality=false
-CapabilityBoundingSet=~
-ReadWritePaths=
-InaccessiblePaths=
-IPAddressDeny=
-IPAddressAllow=
-CPUQuota=infinity
-CPUWeight=100
-MemoryHigh=infinity
-MemoryMax=infinity
-TasksMax=infinity
-UNIT
-chown root:root "$web_dropin_candidate"
-chmod 0644 "$web_dropin_candidate"
+install -o root -g root -m 0444 "$WEB_DROPIN_SOURCE" "$web_dropin_candidate"
 mv -f -- "$web_dropin_candidate" "$WEB_DROPIN"
 web_dropin_candidate=''
 sync -f "$WEB_DROPIN"
+[ "$(sha256sum "$WEB_DROPIN" | awk '{print $1}')" = \
+  "$(sha256sum "$WEB_DROPIN_SOURCE" | awk '{print $1}')" ]
 
 sudoers_candidate=$(mktemp /etc/sudoers.d/.kelion-constructor.XXXXXX)
 install -o root -g root -m 0440 "$SUDOERS_SOURCE" "$sudoers_candidate"
@@ -396,7 +398,8 @@ for retired_artifact in \
   "$LEGACY_OPENCODE_WRAPPER" \
   "$LEGACY_COMPAT_KEY" \
   "$LEGACY_SUDOERS" \
-  "$LEGACY_WORKER_DROPIN"; do
+  "$LEGACY_WORKER_DROPIN" \
+  "$RETIRED_WORKER_DROPIN"; do
   [ ! -e "$retired_artifact" ] && [ ! -L "$retired_artifact" ] \
     || fail "retired Codex adapter remains: $retired_artifact"
 done
@@ -415,57 +418,44 @@ install -d -o kelion-codex -g kelion-codex -m 0700 \
   /var/lib/kelion-codex/.cache /var/lib/kelion-codex/.local /var/lib/kelion-codex/.local/share
 
 instructions_candidate=$(mktemp "$OPENCODE_INSTRUCTIONS.candidate.XXXXXX")
-cat > "$instructions_candidate" <<'INSTRUCTIONS'
-You are Adrian's Kelion Constructor, powered only by the local Qwen model through llama.cpp.
-You are the same Constructor used by the Kelion admin chat queue and by the separate laptop application.
-You have Adrian's requested full host access. Use passwordless sudo when an explicit task needs root access to the Kelion repository, VPS runtime, services, containers, production files, or configured credentials.
-For queue work, edit the current worktree and leave publication to the existing immutable handoff, offline gates, publisher, protected PR, and release pipeline.
-Never use a paid or external AI provider. Never expose secret values in chat, files, commits, or logs.
-Never claim completion without measured evidence from the real target.
-Reply in Romanian unless Adrian asks otherwise.
-INSTRUCTIONS
-chown root:privateai "$instructions_candidate"
-chmod 0640 "$instructions_candidate"
+install -o root -g privateai -m 0640 "$OPENCODE_INSTRUCTIONS_SOURCE" "$instructions_candidate"
 mv -f -- "$instructions_candidate" "$OPENCODE_INSTRUCTIONS"
 instructions_candidate=''
 sync -f "$OPENCODE_INSTRUCTIONS"
 
 config_candidate=$(mktemp "$OPENCODE_CONFIG.candidate.XXXXXX")
-jq '
-  .autoupdate = false
-  | .model = "llama.cpp/qwen3.6-35b-a3b-local"
-  | .small_model = "llama.cpp/qwen3.6-35b-a3b-local"
-  | .enabled_providers = ["llama.cpp"]
-  | .provider = {"llama.cpp": .provider["llama.cpp"]}
-  | del(.provider["llama.cpp"].options.apiKey)
-  | .share = "disabled"
-  | .permission = {
-      "*":"allow", "read":"allow", "glob":"allow", "grep":"allow",
-      "edit":"allow", "bash":"allow", "task":"allow", "skill":"allow",
-      "webfetch":"allow", "websearch":"allow", "external_directory":"allow"
-    }
-  | .instructions = ["instructions.md"]
-  | .server = {"hostname":"127.0.0.1","port":24096,"mdns":false}
-' "$OPENCODE_CONFIG" > "$config_candidate"
+install -o root -g privateai -m 0640 "$OPENCODE_CONFIG_SOURCE" "$config_candidate"
 mv -f -- "$config_candidate" "$OPENCODE_CONFIG"
 config_candidate=''
-chown root:privateai "$OPENCODE_CONFIG" "$OPENCODE_INSTRUCTIONS"
-chmod 0640 "$OPENCODE_CONFIG" "$OPENCODE_INSTRUCTIONS"
+sync -f "$OPENCODE_CONFIG"
+
+[ "$(sha256sum "$OPENCODE_CONFIG" | awk '{print $1}')" = \
+  "$(sha256sum "$OPENCODE_CONFIG_SOURCE" | awk '{print $1}')" ]
+[ "$(sha256sum "$OPENCODE_INSTRUCTIONS" | awk '{print $1}')" = \
+  "$(sha256sum "$OPENCODE_INSTRUCTIONS_SOURCE" | awk '{print $1}')" ]
 
 jq -e '
-  .autoupdate == false and .share == "disabled" and
-  .enabled_providers == ["llama.cpp"] and
-  (.provider | keys) == ["llama.cpp"] and
-  .model == "llama.cpp/qwen3.6-35b-a3b-local" and
-  .provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
-  .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-  (.provider["llama.cpp"].options | has("apiKey") | not) and
-  .permission["*"] == "allow" and .permission.external_directory == "allow" and
-  .server.hostname == "127.0.0.1" and .server.port == 24096 and .server.mdns == false
+  . as $config |
+  $config.autoupdate == false and $config.share == "disabled" and
+  $config.enabled_providers == ["llama.cpp"] and
+  ($config.provider | keys) == ["llama.cpp"] and
+  $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+  ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+  $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+  $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+  ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+  (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+    "webfetch", "websearch", "external_directory"]
+   | all(.[]; $config.permission[.] == "allow")) and
+  $config.server.hostname == "127.0.0.1" and
+  $config.server.port == 24096 and $config.server.mdns == false
 ' "$OPENCODE_CONFIG" >/dev/null
 
 systemctl daemon-reload
 systemd-analyze verify private-ai-web.service kelion-codex-worker.service >/dev/null
+[ "$(systemctl show kelion-codex-worker.service -p FragmentPath --value)" = \
+  "$WORKER_UNIT_TARGET" ]
+[ -z "$(systemctl show kelion-codex-worker.service -p DropInPaths --value)" ]
 systemctl cat kelion-codex-worker.service > "$rollback_root/effective-worker.unit"
 grep -Fq 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
   "$rollback_root/effective-worker.unit"
@@ -486,6 +476,12 @@ effective_groups=" $(systemctl show kelion-codex-worker.service -p Supplementary
 systemctl restart private-ai-web.service
 systemctl is-active --quiet private-ai-web.service
 systemctl is-active --quiet private-ai-llm.service
+[ "$(systemctl show private-ai-web.service -p FragmentPath --value)" = \
+  /etc/systemd/system/private-ai-web.service ]
+[ "$(systemctl show private-ai-web.service -p DropInPaths --value)" = "$WEB_DROPIN" ]
+[ "$(systemctl show private-ai-llm.service -p FragmentPath --value)" = \
+  /etc/systemd/system/private-ai-llm.service ]
+[ -z "$(systemctl show private-ai-llm.service -p DropInPaths --value)" ]
 [ "$(systemctl show private-ai-web.service -p User --value)" = root ]
 [ "$(systemctl show private-ai-web.service -p Group --value)" = root ]
 [ "$(systemctl show private-ai-web.service -p NoNewPrivileges --value)" = no ]
@@ -501,6 +497,28 @@ systemctl is-active --quiet private-ai-llm.service
 web_pid=$(systemctl show private-ai-web.service -p MainPID --value)
 [[ "$web_pid" =~ ^[1-9][0-9]*$ ]]
 [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ]
+[ "$(readlink -f -- "/proc/$web_pid/exe")" = "$OPENCODE_BIN" ]
+mapfile -d '' -t web_argv < "/proc/$web_pid/cmdline"
+expected_web_argv=("$OPENCODE_BIN" web --hostname 127.0.0.1 --port 24096)
+[ "${#web_argv[@]}" -eq "${#expected_web_argv[@]}" ]
+for argv_index in "${!expected_web_argv[@]}"; do
+  [ "${web_argv[$argv_index]}" = "${expected_web_argv[$argv_index]}" ]
+done
+llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
+[[ "$llm_pid" =~ ^[1-9][0-9]*$ ]]
+[ "$(awk '/^Uid:/ { print $2 }' "/proc/$llm_pid/status")" = "$(id -u privateai)" ]
+[ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$LLAMA_SERVER" ]
+mapfile -d '' -t llm_argv < "/proc/$llm_pid/cmdline"
+expected_llm_argv=(
+  "$LLAMA_SERVER" -hf "${MODEL_REPO}:${MODEL_QUANT}" --offline
+  --alias qwen3.6-35b-a3b-local --host 127.0.0.1 --port 24080
+  --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja
+  --chat-template-kwargs '{"enable_thinking":false}'
+)
+[ "${#llm_argv[@]}" -eq "${#expected_llm_argv[@]}" ]
+for argv_index in "${!expected_llm_argv[@]}"; do
+  [ "${llm_argv[$argv_index]}" = "${expected_llm_argv[$argv_index]}" ]
+done
 printf 'OPENCODE_WEB_FULL_HOST_PROBE=uid0\n'
 for attempt in $(seq 1 60); do
   if ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'; then
@@ -512,6 +530,10 @@ done
 ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
 ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
 ! ss -ltnH | awk '{print $4}' | grep -Eq '(0\.0\.0\.0|\[::\]):(24080|24096)$'
+mapfile -t llm_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24080"')
+mapfile -t web_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24096"')
+[ "${#llm_listeners[@]}" -eq 1 ] && [[ "${llm_listeners[0]}" == *"pid=$llm_pid,"* ]]
+[ "${#web_listeners[@]}" -eq 1 ] && [[ "${web_listeners[0]}" == *"pid=$web_pid,"* ]]
 
 mapfile -t opencode_env_lines < "$PRIVATE_AI_CONFIG/opencode.env"
 [ "${#opencode_env_lines[@]}" -eq 2 ] || fail 'OpenCode web auth schema is not exact'
@@ -618,6 +640,10 @@ printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
   || fail 'publisher timer state changed'
 [ "$(unit_state kelion-constructor-release.timer)" = "$RELEASE_TIMER_STATE" ] \
   || fail 'release timer state changed'
+[ "$PUBLISHER_TIMER_STATE" = enabled:active ] \
+  || fail 'publisher timer was not enabled and active before finalization'
+[ "$RELEASE_TIMER_STATE" = enabled:active ] \
+  || fail 'release timer was not enabled and active before finalization'
 
 claim_cursor=$(journalctl --no-pager --lines=0 --show-cursor \
   | sed -n 's/^-- cursor: //p')
@@ -662,14 +688,33 @@ worker_sha=$(sha256sum "$WORKER_TARGET" | awk '{print $1}')
 worker_unit_sha=$(sha256sum "$WORKER_UNIT_TARGET" | awk '{print $1}')
 sudoers_sha=$(sha256sum "$SUDOERS" | awk '{print $1}')
 config_sha=$(sha256sum "$OPENCODE_CONFIG" | awk '{print $1}')
+instructions_sha=$(sha256sum "$OPENCODE_INSTRUCTIONS" | awk '{print $1}')
+web_dropin_sha=$(sha256sum "$WEB_DROPIN" | awk '{print $1}')
+[ "$(sha256sum "$LLAMA_SERVER" | awk '{print $1}')" = "$llama_server_sha" ]
+[ "$(sha256sum "$OPENCODE_BIN" | awk '{print $1}')" = "$opencode_bin_sha" ]
+[ "$(stat -Lc '%s' "$model_file_path")" = "$MODEL_FILE_BYTES" ]
+[ "$(sha256sum "$model_file_path" | awk '{print $1}')" = "$MODEL_FILE_SHA256" ]
 receipt_candidate=$(mktemp "$PRIVATE_AI_CONFIG/.constructor-finalized.XXXXXX")
 printf '%s\n' \
-  'schema=1' \
+  'schema=3' \
   'executor=opencode' \
   'opencode_version=1.18.25' \
   'model=llama.cpp/qwen3.6-35b-a3b-local' \
+  "llama_cpp_ref=$LLAMA_CPP_REF" \
+  "llama_server_sha256=$llama_server_sha" \
+  "opencode_bin_sha256=$opencode_bin_sha" \
+  "model_repo=$MODEL_REPO" \
+  "model_revision=$MODEL_REVISION" \
+  "model_quant=$MODEL_QUANT" \
+  "model_file=$MODEL_FILE" \
+  "model_file_bytes=$MODEL_FILE_BYTES" \
+  "model_file_sha256=$MODEL_FILE_SHA256" \
   "worker_sha256=$worker_sha" \
+  "worker_unit_sha256=$worker_unit_sha" \
+  "sudoers_sha256=$sudoers_sha" \
   "config_sha256=$config_sha" \
+  "instructions_sha256=$instructions_sha" \
+  "web_dropin_sha256=$web_dropin_sha" \
   "verified_at=$(date -u +%FT%TZ)" \
   'base_verified=yes' \
   'executor_e2e=passed' \
@@ -689,12 +734,21 @@ sync -f "$PRIVATE_AI_CONFIG"
 final_receipt_sha=$(sha256sum "$FINAL_RECEIPT" | awk '{print $1}')
 
 rollback_armed=0
-trap - ERR INT TERM
+trap - ERR HUP INT TERM EXIT
 rm -rf --one-file-system -- "$rollback_root"
 printf 'WORKER_INSTALLED_SHA256=%s\n' "$worker_sha"
 printf 'WORKER_UNIT_INSTALLED_SHA256=%s\n' "$worker_unit_sha"
 printf 'WORKER_SUDOERS_INSTALLED_SHA256=%s\n' "$sudoers_sha"
 printf 'OPENCODE_CONFIG_SHA256=%s\n' "$config_sha"
+printf 'OPENCODE_INSTRUCTIONS_SHA256=%s\n' "$instructions_sha"
+printf 'OPENCODE_WEB_DROPIN_SHA256=%s\n' "$web_dropin_sha"
+printf 'LLAMA_CPP_REF=%s\n' "$LLAMA_CPP_REF"
+printf 'LLAMA_SERVER_SHA256=%s\n' "$llama_server_sha"
+printf 'OPENCODE_BIN_SHA256=%s\n' "$opencode_bin_sha"
+printf 'MODEL_REVISION=%s\n' "$MODEL_REVISION"
+printf 'MODEL_FILE=%s\n' "$MODEL_FILE"
+printf 'MODEL_FILE_BYTES=%s\n' "$MODEL_FILE_BYTES"
+printf 'MODEL_FILE_SHA256=%s\n' "$MODEL_FILE_SHA256"
 printf 'FINAL_RECEIPT_SHA256=%s\n' "$final_receipt_sha"
 printf 'WORKER_QUEUE_STATE=%s RESULT=%s EXIT=%s\n' "$worker_active" "$worker_result" "$worker_exit"
 printf 'PUBLISHER_TIMER_PRESERVED=%s\n' "$PUBLISHER_TIMER_STATE"

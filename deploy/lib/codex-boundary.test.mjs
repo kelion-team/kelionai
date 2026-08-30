@@ -47,6 +47,31 @@ test('workerul folosește direct OpenCode 1.18.25 cu Qwen local și acces comple
   assert.equal(result.stdout.trim(), 'codex-worker self-test: TRECE')
 })
 
+test('jurnalul workerului este bounded, iar timeoutul, abortul și overflow-ul nu pot publica handoff', () => {
+  const worker = read('deploy/codex-worker.mjs')
+  const tail = worker.slice(worker.indexOf('export function tailText'), worker.indexOf('/** Clasifică local jurnalul privat'))
+  const success = worker.slice(worker.indexOf('export function runSucceeded'), worker.indexOf('function runLogged'))
+  const runLogged = worker.slice(worker.indexOf('function runLogged'), worker.indexOf('function canonicalDirectory'))
+  const runOnce = worker.slice(worker.indexOf('async function runOnce'), worker.indexOf('async function executorSmoke'))
+
+  assert.match(tail, /openSync\(logPath, 'r'\)[\s\S]*fstatSync\(descriptor\)[\s\S]*const start = info\.size - byteCount[\s\S]*readSync\(descriptor, buffer, offset, byteCount - offset, start \+ offset\)/)
+  assert.doesNotMatch(tail, /readFileSync/)
+  assert.match(success, /result\?\.code === 0[\s\S]*result\.signal === null[\s\S]*result\.timedOut === false[\s\S]*result\.aborted === false[\s\S]*result\.outputExceeded === false/)
+  assert.match(runLogged, /WORKER_LOG_MAX_BYTES[\s\S]*fstatSync\(fd\)[\s\S]*ftruncateSync\(fd, maxLogBytes\)/)
+  assert.match(runLogged, /stdio: \[stdin === null \? 'ignore' : 'pipe', 'pipe', 'pipe'\]/)
+  assert.match(runLogged, /child\.stdout\.on\('data', appendOutput\)[\s\S]*child\.stderr\.on\('data', appendOutput\)/)
+  assert.match(runLogged, /accepted = Math\.min\(chunk\.length, maxLogBytes - logBytes\)[\s\S]*outputExceeded = true[\s\S]*terminate\(\)/)
+  assert.match(runLogged, /done\(outputExceeded[\s\S]*\{ code: 1, signal: null, timedOut, aborted, outputExceeded: true \}[\s\S]*\{ code: code \?\? 1, signal: exitSignal, timedOut, aborted, outputExceeded: false \}/)
+
+  const executorReject = runOnce.indexOf('if (!runSucceeded(result))')
+  const gateStart = runOnce.indexOf('const stopGateLease')
+  const gateReject = runOnce.indexOf('if (!runSucceeded(gate))')
+  const handoff = runOnce.indexOf('const handoff = publishHandoff')
+  assert.ok(executorReject >= 0 && gateStart > executorReject)
+  assert.ok(gateReject > gateStart && handoff > gateReject)
+  assert.doesNotMatch(runOnce, /if \((?:result|gate)\.code (?:===|!==) 0\)/)
+})
+
 test('activarea Constructorului este dublu fail-closed', () => {
   const runtimeExample = read('deploy/kelionai.env.example')
   const workerExample = read('deploy/codex-worker.env.example')
@@ -70,6 +95,8 @@ test('backendul primește admin key numai ca fișier, niciodată mediul OpenCode
   const parentEnv = worker.slice(worker.indexOf('export function openCodeParentEnv()'), worker.indexOf('function podmanSupervisorEnv()'))
   const workerService = read('deploy/systemd/kelion-codex-worker.service')
   const loginWorkflow = read('.github/workflows/vps-codex-login.yml')
+  const loginGuard = loginWorkflow.slice(loginWorkflow.indexOf('  guard-source:'), loginWorkflow.indexOf('  preflight:'))
+  const loginPreflight = loginWorkflow.slice(loginWorkflow.indexOf('  preflight:'))
 
   for (const forbidden of [
     '/var/lib/kelion-codex-auth',
@@ -87,6 +114,24 @@ test('backendul primește admin key numai ca fișier, niciodată mediul OpenCode
   assert.doesNotMatch(parentEnv, /OPENAI_ADMIN|OPENAI_API_KEY|CREDENTIALS_DIRECTORY/)
   assert.doesNotMatch(workerService, /OPENAI_ADMIN|openai-admin-key/)
   assert.doesNotMatch(loginWorkflow, /OPENAI_ADMIN|openai-admin-key/)
+  assert.match(loginWorkflow, /^name: VPS Constructor Local Preflight$/m)
+  assert.match(loginGuard, /if: always\(\)[\s\S]*actions\/checkout@11d5960a326750d5838078e36cf38b85af677262[\s\S]*persist-credentials: false/)
+  assert.match(loginGuard, /\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*\[ "\$GITHUB_REF" = refs\/heads\/master \][\s\S]*\[ "\$GITHUB_REF_NAME" = master \][\s\S]*\[ "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA" \]/)
+  assert.match(loginWorkflow, /preflight:\s*\n\s+needs: guard-source/)
+  assert.doesNotMatch(loginPreflight, /^\s+if:\s*github\./m)
+  assert.match(loginPreflight, /\[ "\$GITHUB_REPOSITORY" = 'kelion-team\/kelionai' \][\s\S]*\[ "\$GITHUB_REF" = 'refs\/heads\/master' \][\s\S]*\[ "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA" \]/)
+  assert.match(loginWorkflow, /expected_worker_sha=\$\(sha256sum deploy\/codex-worker\.mjs/)
+  assert.match(loginWorkflow, /\/opt\/private-ai\/bin\/opencode/)
+  assert.match(loginWorkflow, /llama\.cpp\/qwen3\.6-35b-a3b-local/)
+  assert.match(loginWorkflow, /enabled_providers == \["llama\.cpp"\]/)
+  assert.match(loginWorkflow, /has\("apiKey"\) \| not/)
+  assert.match(loginWorkflow, /all\(\.\[\]; \$config\.permission\[\.\] == "allow"\)/)
+  assert.doesNotMatch(loginWorkflow, /all\(\. as \$permission;/)
+  assert.match(loginWorkflow, /kelion-codex ALL=\(ALL:ALL\) NOPASSWD: ALL/)
+  assert.match(loginWorkflow, /sudo -n -u root -- \/usr\/bin\/id -u/)
+  assert.match(loginWorkflow, /LOCAL_CONSTRUCTOR_PREFLIGHT=passed/)
+  assert.doesNotMatch(loginWorkflow, /codex\s+login|login\s+--with-api-key|@openai\/codex|npm\s+(?:install|update)|apt(?:-get)?\s+install|OPENAI_(?:API_KEY|ADMIN_KEY)|sk-proj-/i)
+  assert.doesNotMatch(loginWorkflow, /systemctl\s+(?:start|restart|stop|enable|disable)\b/)
   assert.match(compose, /^\s+CODEX_WORKER_SECRET_FILE: \/run\/secrets\/codex-worker-secret$/m)
 })
 
@@ -142,4 +187,40 @@ test('metadatele TypeScript rămân în worktree-ul temporar, nu în dependențe
   assert.match(viteConfig, /cacheDir:\s*['"]\.tmp\/vite-cache['"]/)
   assert.doesNotMatch(frontendPackage.scripts.build, /--configLoader bundle/)
   assert.doesNotMatch(frontendPackage.scripts.test, /--configLoader bundle/)
+})
+
+test('finalizarea one-shot are roll-forward persistent și receipt complet legat de sursă', () => {
+  const script = read('.github/private-ai/finalize-private-ai-constructor.sh')
+  const workflow = read('.github/workflows/private-ai-finalize.yml')
+  const proof = read('.github/workflows/private-ai-constructor-proof.yml')
+
+  assert.match(script, /FINALIZER_MAIN_BASHPID=\$BASHPID/)
+  assert.match(script, /trap rollback ERR EXIT[\s\S]*trap 'rollback 129' HUP[\s\S]*trap 'rollback 143' TERM/)
+  assert.match(script, /if ! systemctl is-active --quiet private-ai-web\.service; then[\s\S]*systemctl start private-ai-web\.service/)
+  assert.match(workflow, /durable_parent=\/root\/private-ai-finalize[\s\S]*private-ai-constructor-finalize\.service/)
+  assert.match(workflow, /Restart=on-failure[\s\S]*WantedBy=multi-user\.target/)
+  assert.match(workflow, /ExecStartPost=\/usr\/bin\/systemctl disable private-ai-constructor-finalize\.service/)
+  assert.match(script, /'schema=3'[\s\S]*llama_cpp_ref=[\s\S]*model_file_sha256=[\s\S]*worker_unit_sha256=[\s\S]*sudoers_sha256=[\s\S]*instructions_sha256=[\s\S]*web_dropin_sha256=/)
+  assert.match(proof, /\[ "\$\{#final_lines\[@\]\}" -eq 28 \][\s\S]*schema=3/)
+  assert.match(script, /FragmentPath --value[\s\S]*DropInPaths --value/)
+  assert.match(script, /MODEL_FILE_SHA256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7/)
+  assert.match(proof, /origin\/master\^\{commit\}[\s\S]*expected_source_sha[\s\S]*org\.opencontainers\.image\.revision/)
+  assert.match(proof, /\.baseCommit == \$base/)
+})
+
+test('release-ul desktop cere CI-ul latest și Authenticode public-trust cu timestamp', () => {
+  const workflow = read('.github/workflows/constructor-desktop-release.yml')
+  assert.match(workflow, /RELEASE_SHA -ne \$env:GITHUB_SHA/)
+  assert.match(workflow, /Sort-Object \{\[DateTimeOffset\]\$_\.created_at\} -Descending/)
+  assert.match(workflow, /\$latest\.status -ne 'completed'[\s\S]*\$latest\.conclusion -ne 'success'/)
+  for (const job of ['release-train-preflight', 'verify', 'container-isolation']) {
+    assert.match(workflow, new RegExp(job))
+  }
+  assert.match(workflow, /WINDOWS_AUTHENTICODE_PFX_BASE64/)
+  assert.match(workflow, /signtool[\s\S]*\/tr 'http:\/\/timestamp\.digicert\.com'[\s\S]*Get-AuthenticodeSignature/)
+  assert.match(workflow, /Status -ne 'Valid'[\s\S]*TimeStamperCertificate/)
+  assert.match(workflow, /AUTHENTICODE_EXPECTED_THUMBPRINT[\s\S]*SignerCertificate\.Thumbprint/)
+  assert.doesNotMatch(workflow, /id-token:\s*write/)
+  const jobEnv = workflow.match(/    env:\n([\s\S]*?)    steps:/)?.[1] ?? ''
+  assert.doesNotMatch(jobEnv, /AUTHENTICODE_PFX/)
 })
