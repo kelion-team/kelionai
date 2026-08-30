@@ -66,7 +66,7 @@ test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.throws(() => assertL2DiffSafe(['deploy/deploy.sh'], 100), /neautorizată/)
 })
 
-test('scope-ul OpenAI one-shot cere identitatea și exact cele 11 căi', () => {
+test('scope-ul OpenAI one-shot cere identitatea și exact cele 7 căi', () => {
   const identity = {
     prNumber: OPENAI_UNIFIED_ONCE_PR_NUMBER,
     repository: OPENAI_UNIFIED_ONCE_REPOSITORY,
@@ -74,7 +74,7 @@ test('scope-ul OpenAI one-shot cere identitatea și exact cele 11 căi', () => {
     headRef: OPENAI_UNIFIED_ONCE_BRANCH,
   }
   const exact = [...OPENAI_UNIFIED_ONCE_FILES]
-  assert.equal(exact.length, 11)
+  assert.equal(exact.length, 7)
   assert.equal(new Set(exact).size, exact.length)
   assert.deepEqual(exact, exact.toSorted())
   const exactEntries = exact.map((filename) => ({ filename, status: 'modified', previous_filename: null }))

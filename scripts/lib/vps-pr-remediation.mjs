@@ -9,16 +9,12 @@ export const OPENAI_UNIFIED_ONCE_PR_NUMBER = 1541 // hardcod-permis: excepția t
 export const OPENAI_UNIFIED_ONCE_REPOSITORY = 'kelion-team/kelionai' // hardcod-permis: identitatea tehnică exactă împiedică folosirea excepției din fork
 export const OPENAI_UNIFIED_ONCE_BRANCH = 'chore/postdeploy-openai-verifier-cleanup-20260830'
 export const OPENAI_UNIFIED_ONCE_FILES = Object.freeze([
-  '.github/workflows/vps-auto-merge-chore-prs.yml',
   '.github/workflows/vps-codex-login.yml',
   '.github/workflows/vps-run.yml',
   'deploy/codex-worker.mjs',
   'deploy/lib/codex-boundary.test.mjs',
   'docs/operations/CURRENT.md',
-  'scripts/lib/vps-pr-remediation.mjs',
   'scripts/lib/vps-release-verification.mjs',
-  'scripts/vps-pr-remediator.mjs',
-  'scripts/vps-pr-remediator.test.mjs',
   'scripts/vps-release-verifier.test.mjs',
 ])
 

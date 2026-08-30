@@ -93,16 +93,12 @@ jobs:
             "scripts/verifica-workflow-uri-sigure.mjs"
           ]'
           openai_unified_once='[
-            ".github/workflows/vps-auto-merge-chore-prs.yml",
             ".github/workflows/vps-codex-login.yml",
             ".github/workflows/vps-run.yml",
             "deploy/codex-worker.mjs",
             "deploy/lib/codex-boundary.test.mjs",
             "docs/operations/CURRENT.md",
-            "scripts/lib/vps-pr-remediation.mjs",
             "scripts/lib/vps-release-verification.mjs",
-            "scripts/vps-pr-remediator.mjs",
-            "scripts/vps-pr-remediator.test.mjs",
             "scripts/vps-release-verifier.test.mjs"
           ]'
           file_entries=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate \
