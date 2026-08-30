@@ -4,11 +4,13 @@ import { recordProviderUsage } from '../db.js'
 import { readSSE } from './sse.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall, ResponseCarryItem } from './brainContract.js'
 import {
+  allowlistedOpenAIProviderCode,
   cacheOpenAIHealthProbe,
   classifyOpenAIError,
   probeOpenAIHealth,
   type OpenAIAuthMode,
   type OpenAIHealthResult,
+  type OpenAIProviderErrorCode,
 } from './openaiHealth.js'
 
 export { probeOpenAIHealth } from './openaiHealth.js'
@@ -16,6 +18,9 @@ export type { OpenAIHealthResult } from './openaiHealth.js'
 
 const OPENAI_BASE = 'https://api.openai.com/v1'
 const PROVIDER_USAGE_WRITE_TIMEOUT_MS = 5_000
+const OPENAI_RATE_LIMIT_RETRY_DEFAULT_MS = 1_000
+const OPENAI_RATE_LIMIT_RETRY_MIN_MS = 250
+const OPENAI_RATE_LIMIT_RETRY_MAX_MS = 10_000
 
 type ResponseInput = Record<string, unknown>
 
@@ -46,7 +51,59 @@ interface OpenAIResponse {
     input_tokens_details?: { cached_tokens?: number }
     output_tokens_details?: { reasoning_tokens?: number }
   }
-  error?: { message?: string }
+  error?: { code?: string; type?: string; message?: string }
+}
+
+/** Safe transport error: status + a closed provider code, never provider text. */
+export class OpenAIProviderRequestError extends Error {
+  readonly status: number
+  readonly providerCode?: OpenAIProviderErrorCode
+  readonly rateLimitRetryConsumed: boolean
+
+  constructor(
+    status: number,
+    providerCode?: OpenAIProviderErrorCode,
+    rateLimitRetryConsumed = false,
+  ) {
+    super(`openai ${status}${providerCode ? ` ${providerCode}` : ''}`)
+    this.name = 'OpenAIProviderRequestError'
+    this.status = status
+    this.providerCode = providerCode
+    this.rateLimitRetryConsumed = rateLimitRetryConsumed
+  }
+}
+
+/** Includes structural matching so the guard remains stable across module reloads in tests. */
+export function isOpenAIProviderThrottleError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const candidate = error as { name?: unknown; status?: unknown; rateLimitRetryConsumed?: unknown }
+    const status = typeof candidate.status === 'number' ? candidate.status : 0
+    const permanent4xx = status >= 400 && status < 500 && status !== 408 && status !== 409
+    if (
+      candidate.name === 'OpenAIProviderRequestError'
+      && (permanent4xx || candidate.rateLimitRetryConsumed === true)
+    ) return true
+  }
+  return /\bopenai\s+429\b|rate[_ -]?limit(?:ed|[_ -]?exceeded)?|insufficient[_ -]?quota|credit[_ -]?balance[_ -]?exhausted|(?:project|organization)[_ -]?(?:spend|usage)[_ -]?limit/i.test(
+    String((error as { message?: unknown })?.message ?? error),
+  )
+}
+
+/** Parses only Retry-After seconds/date and clamps it to a user-safe bounded delay. */
+export function safeOpenAIRetryAfterMs(raw: string | null, nowMs = Date.now()): number {
+  const value = raw?.trim() ?? ''
+  let delayMs = Number.NaN
+  if (/^\d+(?:\.\d+)?$/.test(value)) {
+    delayMs = Number(value) * 1_000
+  } else if (value) {
+    const at = Date.parse(value)
+    if (Number.isFinite(at)) delayMs = at - nowMs
+  }
+  if (!Number.isFinite(delayMs)) delayMs = OPENAI_RATE_LIMIT_RETRY_DEFAULT_MS
+  return Math.max(
+    OPENAI_RATE_LIMIT_RETRY_MIN_MS,
+    Math.min(OPENAI_RATE_LIMIT_RETRY_MAX_MS, Math.ceil(delayMs)),
+  )
 }
 
 export function openaiAvailable(): boolean {
@@ -197,6 +254,76 @@ async function openaiFetch(
   })
 }
 
+async function providerCodeFromResponse(response: Response): Promise<OpenAIProviderErrorCode | undefined> {
+  let providerError: unknown
+  try {
+    const payload = await response.json() as Record<string, unknown>
+    providerError = payload.error
+  } catch {
+    providerError = undefined
+  }
+  return allowlistedOpenAIProviderCode(response.status, providerError)
+}
+
+async function openaiResponseError(
+  response: Response,
+  rateLimitRetryConsumed = false,
+): Promise<OpenAIProviderRequestError> {
+  return new OpenAIProviderRequestError(
+    response.status,
+    await providerCodeFromResponse(response),
+    rateLimitRetryConsumed,
+  )
+}
+
+function providerCodeFromPayload(providerError: unknown): OpenAIProviderErrorCode | undefined {
+  return allowlistedOpenAIProviderCode(429, providerError)
+}
+
+function exactProviderLimitError(providerError: unknown): OpenAIProviderRequestError | null {
+  const code = providerCodeFromPayload(providerError)
+  return code ? new OpenAIProviderRequestError(429, code) : null
+}
+
+interface OpenAIFetchResult {
+  response: Response
+  rateLimitRetryConsumed: boolean
+}
+
+/**
+ * A provider 429 is never fanned out across models here. Only the documented
+ * request-rate code gets one retry; quota/spend/usage and unknown 429s return
+ * immediately to the caller.
+ */
+async function openaiFetchWithBoundedRateLimitRetry(
+  body: unknown,
+  timeoutMs: number,
+): Promise<OpenAIFetchResult> {
+  const first = await openaiFetch(body, timeoutMs)
+  if (first.status !== 429) return { response: first, rateLimitRetryConsumed: false }
+  const code = await providerCodeFromResponse(first.clone())
+  if (code !== 'rate_limit_exceeded') return { response: first, rateLimitRetryConsumed: false }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, safeOpenAIRetryAfterMs(first.headers.get('retry-after')))
+    timer.unref?.()
+  })
+  try {
+    return { response: await openaiFetch(body, timeoutMs), rateLimitRetryConsumed: true }
+  } catch {
+    // The one retry was already spent. Preserve that provenance so outer chat
+    // and memory layers cannot turn a transport failure into a third request.
+    throw new OpenAIProviderRequestError(429, 'rate_limit_exceeded', true)
+  }
+}
+
+function errorAfterRateLimitRetry(error: unknown, consumed: boolean): unknown {
+  if (!consumed || isOpenAIProviderThrottleError(error)) return error
+  if (error instanceof OpenAIProviderRequestError) {
+    return new OpenAIProviderRequestError(error.status, error.providerCode, true)
+  }
+  return new OpenAIProviderRequestError(429, 'rate_limit_exceeded', true)
+}
+
 function outputText(response: OpenAIResponse): string {
   if (typeof response.output_text === 'string') return response.output_text
   let text = ''
@@ -324,22 +451,34 @@ export async function openaiResponses(
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
   if (!openaiAvailable()) return noKeyResult(model)
-  const response = await openaiFetch(toResponsesBody(model, messages, tools, opts, false), opts.timeoutMs ?? 120_000)
-  if (!response.ok) throw new Error(`openai ${response.status}: ${(await response.text().catch(() => '')).slice(0, 300)}`)
-  const json = await response.json() as OpenAIResponse
-  if (json.error?.message) throw new Error(`openai: ${json.error.message.slice(0, 300)}`)
-  const usage = await meterResponse(json, opts, model)
-  if (json.status === 'failed' || json.status === 'incomplete' || json.status === 'cancelled') {
-    throw new Error(`openai_response_${json.status}`)
-  }
-  return {
-    text: outputText(json),
-    toolCalls: outputToolCalls(json),
-    // Responses exposes token usage, not an invoice amount. Provider expense
-    // is reconciled separately in USD micros; never fabricate money here.
-    stop: json.status ?? 'completed',
-    responseItems: responseItems(json),
-    ...usage,
+  const fetched = await openaiFetchWithBoundedRateLimitRetry(
+    toResponsesBody(model, messages, tools, opts, false),
+    opts.timeoutMs ?? 120_000,
+  )
+  const { response, rateLimitRetryConsumed } = fetched
+  try {
+    if (!response.ok) throw await openaiResponseError(response, rateLimitRetryConsumed)
+    const json = await response.json() as OpenAIResponse
+    if (json.error) {
+      const providerLimit = exactProviderLimitError(json.error)
+      if (providerLimit) throw providerLimit
+      throw new Error('openai_response_error')
+    }
+    const usage = await meterResponse(json, opts, model)
+    if (json.status === 'failed' || json.status === 'incomplete' || json.status === 'cancelled') {
+      throw new Error(`openai_response_${json.status}`)
+    }
+    return {
+      text: outputText(json),
+      toolCalls: outputToolCalls(json),
+      // Responses exposes token usage, not an invoice amount. Provider expense
+      // is reconciled separately in USD micros; never fabricate money here.
+      stop: json.status ?? 'completed',
+      responseItems: responseItems(json),
+      ...usage,
+    }
+  } catch (error) {
+    throw errorAfterRateLimitRetry(error, rateLimitRetryConsumed)
   }
 }
 
@@ -352,72 +491,87 @@ export async function openaiResponsesStream(
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
   if (!openaiAvailable()) return noKeyResult(model)
-  const response = await openaiFetch(toResponsesBody(model, messages, tools, opts, true), opts.timeoutMs ?? 120_000)
-  if (!response.ok || !response.body) {
-    throw new Error(`openai ${response.status}: ${(await response.text().catch(() => '')).slice(0, 300)}`)
-  }
-  let text = ''
-  let finalResponse: OpenAIResponse | null = null
-  const partialCalls = new Map<string, { id: string; name: string; arguments: string }>()
-  await readSSE(response.body, (raw) => {
-    const event = raw as Record<string, unknown>
-    const type = String(event.type ?? '')
-    if (type === 'response.output_text.delta' && typeof event.delta === 'string') {
-      text += event.delta
-      onText(event.delta)
-      return
+  const fetched = await openaiFetchWithBoundedRateLimitRetry(
+    toResponsesBody(model, messages, tools, opts, true),
+    opts.timeoutMs ?? 120_000,
+  )
+  const { response, rateLimitRetryConsumed } = fetched
+  try {
+    if (!response.ok || !response.body) {
+      throw await openaiResponseError(response, rateLimitRetryConsumed)
     }
-    if (type === 'response.output_item.added' || type === 'response.output_item.done') {
-      const item = event.item as ResponseFunctionCall | undefined
-      if (item?.type === 'function_call') {
-        const key = item.call_id || item.id || `call_${partialCalls.size}`
-        const old = partialCalls.get(key) ?? { id: key, name: '', arguments: '' }
-        if (item.name) old.name = item.name
-        if (item.arguments) old.arguments = item.arguments
-        partialCalls.set(key, old)
+    let text = ''
+    let finalResponse: OpenAIResponse | null = null
+    const partialCalls = new Map<string, { id: string; name: string; arguments: string }>()
+    await readSSE(response.body, (raw) => {
+      const event = raw as Record<string, unknown>
+      const type = String(event.type ?? '')
+      if (type === 'response.output_text.delta' && typeof event.delta === 'string') {
+        text += event.delta
+        onText(event.delta)
+        return
       }
-      return
+      if (type === 'response.output_item.added' || type === 'response.output_item.done') {
+        const item = event.item as ResponseFunctionCall | undefined
+        if (item?.type === 'function_call') {
+          const key = item.call_id || item.id || `call_${partialCalls.size}`
+          const old = partialCalls.get(key) ?? { id: key, name: '', arguments: '' }
+          if (item.name) old.name = item.name
+          if (item.arguments) old.arguments = item.arguments
+          partialCalls.set(key, old)
+        }
+        return
+      }
+      if (type === 'response.function_call_arguments.delta') {
+        const key = String(event.call_id ?? event.item_id ?? `call_${partialCalls.size}`)
+        const old = partialCalls.get(key) ?? { id: key, name: '', arguments: '' }
+        if (typeof event.name === 'string') old.name = event.name
+        if (typeof event.delta === 'string') old.arguments += event.delta
+        partialCalls.set(key, old)
+        return
+      }
+      if (
+        (type === 'response.completed' || type === 'response.failed' || type === 'response.incomplete')
+        && event.response && typeof event.response === 'object'
+      ) {
+        finalResponse = event.response as OpenAIResponse
+        return
+      }
+      if (type === 'error') {
+        const providerLimit = exactProviderLimitError(event.error)
+        if (providerLimit) throw providerLimit
+        throw new Error('openai_stream_error')
+      }
+    })
+    const completed = finalResponse as OpenAIResponse | null
+    if (!completed) throw new Error('openai_stream_missing_completed_response')
+    if (completed.error) {
+      const providerLimit = exactProviderLimitError(completed.error)
+      if (providerLimit) throw providerLimit
+      throw new Error('openai_stream_response_error')
     }
-    if (type === 'response.function_call_arguments.delta') {
-      const key = String(event.call_id ?? event.item_id ?? `call_${partialCalls.size}`)
-      const old = partialCalls.get(key) ?? { id: key, name: String(event.name ?? ''), arguments: '' }
-      if (typeof event.delta === 'string') old.arguments += event.delta
-      partialCalls.set(key, old)
-      return
+    const usage = await meterResponse(completed, opts, model)
+    if (completed.status === 'failed' || completed.status === 'incomplete' || completed.status === 'cancelled') {
+      throw new Error(`openai_response_${completed.status}`)
     }
-    if (
-      (type === 'response.completed' || type === 'response.failed' || type === 'response.incomplete')
-      && event.response && typeof event.response === 'object'
-    ) {
-      finalResponse = event.response as OpenAIResponse
-      return
+    const completeCalls = completed ? outputToolCalls(completed) : []
+    const toolCalls = completeCalls.length
+      ? completeCalls
+      : [...partialCalls.values()].filter((call) => call.name).map((call) => ({
+        id: call.id,
+        type: 'function' as const,
+        function: { name: call.name, arguments: call.arguments || '{}' },
+      }))
+    if (!text && completed) text = outputText(completed)
+    return {
+      text,
+      toolCalls,
+      stop: completed?.status ?? 'completed',
+      responseItems: responseItems(completed),
+      ...usage,
     }
-    if (type === 'error') {
-      const err = event.error as { message?: unknown } | undefined
-      throw new Error(`openai stream: ${String(err?.message ?? 'eroare necunoscută').slice(0, 300)}`)
-    }
-  })
-  const completed = finalResponse as OpenAIResponse | null
-  if (!completed) throw new Error('openai_stream_missing_completed_response')
-  const usage = await meterResponse(completed, opts, model)
-  if (completed.status === 'failed' || completed.status === 'incomplete' || completed.status === 'cancelled') {
-    throw new Error(`openai_response_${completed.status}`)
-  }
-  const completeCalls = completed ? outputToolCalls(completed) : []
-  const toolCalls = completeCalls.length
-    ? completeCalls
-    : [...partialCalls.values()].filter((call) => call.name).map((call) => ({
-      id: call.id,
-      type: 'function' as const,
-      function: { name: call.name, arguments: call.arguments || '{}' },
-    }))
-  if (!text && completed) text = outputText(completed)
-  return {
-    text,
-    toolCalls,
-    stop: completed?.status ?? 'completed',
-    responseItems: responseItems(completed),
-    ...usage,
+  } catch (error) {
+    throw errorAfterRateLimitRetry(error, rateLimitRetryConsumed)
   }
 }
 
@@ -436,7 +590,10 @@ async function probeOpenAIHealthOnce(): Promise<OpenAIHealthResult> {
     ],
     [],
     {
-      maxTokens: 8,
+      // Reasoning models can consume part of this budget before emitting the
+      // visible token. Eight tokens could therefore yield a billable
+      // `incomplete` response and falsely report a healthy project as 400.
+      maxTokens: 64,
       reasoning: 'none',
       usageContext: { userEmail: 'system', surface: 'openai_health' },
     },

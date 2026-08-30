@@ -3,17 +3,32 @@ import { readFileSync } from 'node:fs'
 
 import { config } from './config.js'
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
+import { OpenAIProviderRequestError } from './services/openaiResponses.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
+  it('nu propagă un 429 pe scară după retry-ul unic al adaptorului', () => {
+    expect(isTransientBrainError(new OpenAIProviderRequestError(429, 'rate_limit_exceeded'))).toBe(false)
+    expect(isTransientBrainError(new OpenAIProviderRequestError(429, 'credit_balance_exhausted'))).toBe(false)
+    expect(isTransientBrainError(new Error('openai 429: rate limited'))).toBe(false)
+    expect(isTransientBrainError('Rate limit exceeded')).toBe(false)
+  })
   it('recunoaște numai erorile tranzitorii de capacitate sau transport', () => {
-    expect(isTransientBrainError(new Error('openai 429: rate limited'))).toBe(true)
-    expect(isTransientBrainError('Rate limit exceeded')).toBe(true)
     expect(isTransientBrainError(new Error('openai 503: upstream'))).toBe(true)
     expect(isTransientBrainError(new Error('fetch failed'))).toBe(true)
   })
   it('nu clasifică drept tranzitorii erorile de cerere sau autentificare', () => {
     expect(isTransientBrainError(new Error('openai 400: bad request'))).toBe(false)
     expect(isTransientBrainError(new Error('openai 401: invalid key'))).toBe(false)
+  })
+})
+
+describe('Chatul nu amplifică un 429 OpenAI', () => {
+  it('oprește reluarea și ambele plase de model după clasificarea providerului', () => {
+    const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
+    expect(chat).toContain('const provider429 = isOpenAIProviderThrottleError(ge)')
+    expect(chat).toContain('const potiRelua = !provider429')
+    expect(chat).toContain('if (opresteFallbackProvider429) break')
+    expect(chat.match(/!opresteFallbackProvider429/g)).toHaveLength(2)
   })
 })
 
@@ -59,33 +74,31 @@ describe('Expertul fiabil — scara de modele', () => {
 describe('Expertul fiabil — runBrainLadder', () => {
   const noSleep = (): Promise<void> => Promise.resolve()
 
-  it('sare peste un model saturat (429) și răspunde de pe următorul', async () => {
+  it('oprește scara pe primul 429, fără un apel suplimentar de memorie pe alt model', async () => {
     const tried: string[] = []
-    const out = await runBrainLadder(
+    await expect(runBrainLadder(
       ['m1', 'm2', 'm3'],
       async (m) => {
         tried.push(m)
-        if (m === 'm1') throw new Error('openai 429: rate limit')
-        return `raspuns de la ${m}`
+        throw new OpenAIProviderRequestError(429, 'rate_limit_exceeded')
       },
       { sleep: noSleep },
-    )
-    expect(out).toBe('raspuns de la m2')
-    expect(tried).toEqual(['m1', 'm2']) // stopped at the first good one
+    )).rejects.toMatchObject({ status: 429, providerCode: 'rate_limit_exceeded' })
+    expect(tried).toEqual(['m1'])
   })
 
-  it('încearcă TOATE treptele înainte să arunce, dacă toate pică', async () => {
+  it('păstrează scara pentru erori temporare 5xx', async () => {
     const tried: string[] = []
     await expect(
       runBrainLadder(
         ['a', 'b', 'c'],
         async (m) => {
           tried.push(m)
-          throw new Error('openai 429: saturat')
+          throw new Error('openai 503: indisponibil')
         },
         { sleep: noSleep },
       ),
-    ).rejects.toThrow(/429/)
+    ).rejects.toThrow(/503/)
     expect(tried).toEqual(['a', 'b', 'c'])
   })
 

@@ -104,13 +104,22 @@ describe('Responses durable usage metering', () => {
     expect(metering.record).not.toHaveBeenCalled()
   })
 
-  it('meters one successful health response and deduplicates concurrent pollers', async () => {
+  it('uses a reasoning-safe health budget, meters once and deduplicates concurrent pollers', async () => {
     const fetchMock = vi.mocked(fetch)
     const [first, second] = await Promise.all([openaiHealth(), openaiHealth()])
 
     expect(first).toMatchObject({ serving: true, class: 'ok' })
     expect(second).toEqual(first)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    const request = fetchMock.mock.calls[0]?.[1]
+    const body = JSON.parse(String(request?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      model: 'configured-luna',
+      max_output_tokens: 64,
+      stream: false,
+      store: false,
+    })
+    expect(body.max_output_tokens).not.toBe(8)
     expect(metering.record).toHaveBeenCalledTimes(1)
     expect(metering.record).toHaveBeenCalledWith(expect.objectContaining({
       userEmail: 'system',

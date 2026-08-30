@@ -13,6 +13,15 @@ export type OpenAIHealthClass =
 
 export type OpenAIAuthMode = 'api_key' | 'unknown'
 
+/** Documented provider codes safe to expose to an authenticated administrator. */
+export type OpenAIProviderErrorCode =
+  | 'rate_limit_exceeded'
+  | 'credit_balance_exhausted'
+  | 'project_spend_limit_exceeded'
+  | 'organization_spend_limit_exceeded'
+  | 'organization_usage_limit_exceeded'
+  | 'insufficient_quota'
+
 export interface OpenAIHealthResult {
   /** `ok` means the probe obtained an HTTP response, not that OpenAI serves. */
   ok: boolean
@@ -21,6 +30,8 @@ export interface OpenAIHealthResult {
   status: number | null
   /** Closed, safe classification. Provider bodies/messages never cross this boundary. */
   class: OpenAIHealthClass
+  /** Allowlisted `error.code` for a 429 response; never provider text. */
+  providerCode?: OpenAIProviderErrorCode
 }
 
 const OPENAI_HEALTH_ACTIONS: Record<Exclude<OpenAIHealthClass, 'ok'>, string> = {
@@ -61,6 +72,27 @@ function openaiErrorSignal(error: unknown): OpenAIErrorSignal {
   }
 }
 
+const OPENAI_PROVIDER_ERROR_CODES = new Set<OpenAIProviderErrorCode>([
+  'rate_limit_exceeded',
+  'credit_balance_exhausted',
+  'project_spend_limit_exceeded',
+  'organization_spend_limit_exceeded',
+  'organization_usage_limit_exceeded',
+  'insufficient_quota',
+])
+
+/** Returns only a closed, documented code; unknown provider strings stay private. */
+export function allowlistedOpenAIProviderCode(
+  status: number,
+  providerError?: unknown,
+): OpenAIProviderErrorCode | undefined {
+  if (status !== 429) return undefined
+  const code = openaiErrorSignal(providerError).code
+  return OPENAI_PROVIDER_ERROR_CODES.has(code as OpenAIProviderErrorCode)
+    ? code as OpenAIProviderErrorCode
+    : undefined
+}
+
 /** Pure provider-error classifier. Its output is always a closed safe code. */
 export function classifyOpenAIError(
   status: number,
@@ -98,7 +130,14 @@ export async function classifyOpenAIHealthResponse(
   } catch {
     providerError = undefined
   }
-  return { ok: true, serving: false, status, class: classifyOpenAIError(status, providerError, authMode) }
+  const providerCode = allowlistedOpenAIProviderCode(status, providerError)
+  return {
+    ok: true,
+    serving: false,
+    status,
+    class: classifyOpenAIError(status, providerError, authMode),
+    ...(providerCode ? { providerCode } : {}),
+  }
 }
 
 interface OpenAIHealthProbeOptions {
