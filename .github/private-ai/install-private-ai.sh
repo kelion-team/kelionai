@@ -258,9 +258,9 @@ You are Adrian's private local coding agent.
 Start work only after Adrian sends a new explicit command in this private web interface.
 Never schedule work, poll for work, create timers, create webhooks, or continue an unfinished task after a restart.
 Work only inside /srv/private-ai/workspace.
-The Kelion working copy is /srv/private-ai/workspace/kelionai after Adrian configures its access data.
-Access Kelion only for an explicit command from Adrian. Do not deploy, publish, change credentials, or touch live production paths without a separate explicit confirmation.
-Do not access unrelated application directories, credentials, databases, container sockets, or deployment systems.
+Remain independent from every other application, repository, account, credential, database, container socket, deployment system, and production path on this server.
+Do not use external or paid AI providers.
+Do not deploy, publish, change credentials, or touch live production paths without a separate explicit confirmation.
 Do not reveal secrets in chat, command output, source files, or logs.
 Ask for confirmation before destructive actions, publication, deployment, credential changes, or external communication.
 Reply in Romanian unless Adrian asks for another language.
@@ -492,80 +492,6 @@ warm_opencode_provider() {
   chmod 0600 "${PRIVATE_AI_STATE}/opencode-models.txt"
 }
 
-write_kelion_access_helper() {
-  cat > "${PRIVATE_AI_BIN}/configure-kelion-access" <<'HELPER'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-
-readonly marker="/etc/private-ai/.installer-id"
-readonly expected_marker="private-ai-contabo-v1"
-readonly private_user="privateai"
-readonly private_group="privateai"
-readonly private_home="/srv/private-ai/home"
-readonly workspace="/srv/private-ai/workspace/kelionai"
-readonly credential_file="${private_home}/.git-credentials"
-readonly repo_url="https://github.com/kelion-team/kelionai.git"
-
-[ "$(id -u)" -eq 0 ] || { printf 'Run as root.\n' >&2; exit 1; }
-[ -r "$marker" ] && [ "$(cat "$marker")" = "$expected_marker" ] \
-  || { printf 'Private AI installation marker is missing.\n' >&2; exit 1; }
-
-IFS= read -r github_token
-github_token=${github_token%$'\r'}
-[ "${#github_token}" -ge 20 ] \
-  || { printf 'GitHub access token is missing or too short.\n' >&2; exit 1; }
-
-printf 'https://x-access-token:%s@github.com\n' "$github_token" > "$credential_file"
-unset github_token
-chown "$private_user:$private_group" "$credential_file"
-chmod 0600 "$credential_file"
-
-if [ ! -e "${private_home}/.gitconfig" ]; then
-  install -o "$private_user" -g "$private_group" -m 0600 /dev/null "${private_home}/.gitconfig"
-fi
-
-runuser -u "$private_user" -- env -i \
-  HOME="$private_home" \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  git config --global credential.helper "store --file=$credential_file"
-runuser -u "$private_user" -- env -i \
-  HOME="$private_home" \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  git config --global user.name "Adrian Enciulescu"
-runuser -u "$private_user" -- env -i \
-  HOME="$private_home" \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  git config --global user.email "private-ai@kelionai.app"
-
-if [ -e "$workspace" ] && [ ! -d "${workspace}/.git" ]; then
-  printf 'Refusing to overwrite the existing non-Git path %s.\n' "$workspace" >&2
-  exit 1
-fi
-
-if [ ! -d "${workspace}/.git" ]; then
-  runuser -u "$private_user" -- env -i \
-    HOME="$private_home" \
-    PATH=/usr/local/bin:/usr/bin:/bin \
-    git clone "$repo_url" "$workspace"
-else
-  runuser -u "$private_user" -- env -i \
-    HOME="$private_home" \
-    PATH=/usr/local/bin:/usr/bin:/bin \
-    git -C "$workspace" remote set-url origin "$repo_url"
-fi
-
-runuser -u "$private_user" -- env -i \
-  HOME="$private_home" \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  git -C "$workspace" ls-remote --exit-code origin HEAD >/dev/null
-
-printf 'Kelion repository access is configured in the separate Private AI workspace.\n'
-HELPER
-  chown root:root "${PRIVATE_AI_BIN}/configure-kelion-access"
-  chmod 0750 "${PRIVATE_AI_BIN}/configure-kelion-access"
-}
-
 start_and_verify() {
   systemctl enable private-ai-llm.service
   systemctl restart private-ai-llm.service
@@ -674,8 +600,6 @@ main() {
   download_and_test_model
   log "Caching the OpenCode local provider."
   warm_opencode_provider
-  log "Installing the separate Kelion access configurator."
-  write_kelion_access_helper
   log "Creating dedicated systemd services."
   write_systemd_units
   log "Starting and verifying the private agent."
