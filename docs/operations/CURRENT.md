@@ -1,55 +1,54 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-29T19:52:00Z`
+Actualizat: `2026-08-30T05:39:53Z`
 
 ## Stare verificată
 
-- Repo: `kelion-team/kelionai`; singura țintă de producție este `master`.
-  Vârful remote și release-ul activ sunt
-  `ff6d2e30991b4f35adaf68f4b3a88ada8504d350`.
-- Diagnoza VPS a confirmat containerele slotului verde sănătoase și
-  răspuns `200` pentru `/livez`, `/readyz` și `/api/version`. Interfața
-  publică rămâne disponibilă.
-- Remedierea ACL pentru Codex CLI este inclusă în release-ul curent, dar
-  activarea Constructorului nu ajunge încă la proba CLI.
-- `vps-constructor-control` run `33254987691`, inclusiv relansarea
-  controlată, și recovery-ul generic run `33255194656` se opresc
-  fail-closed cu mesajul că snapshoturile de activare orfane nu pot fi
-  curățate sigur.
-- Cauza este deterministă în `runtime-config-cutover.sh`:
-  `garbage_collect_activations` iterează globul `constructor-activation.*`,
-  care include și fișierul legitim `constructor-activation.journal`.
-  Recovery-ul quiesced păstrează intenționat jurnalul, apoi garbage
-  collectorul îl respinge fiindcă nu este director.
-- Toate cele trei timere Constructor sunt inactive, iar stamp-ul de
-  execuție este retras. Constructorul rămâne fail-closed fără să oprească
-  release-ul web activ.
-- Cheia OpenAI API de producție rămâne revocată; chatul și vocea online
-  nu sunt declarate funcționale până la configurarea explicită a unei
-  chei valide sau a modului suportat „API dezactivat”.
-- Remedierea este pregătită pe ramura
-  `chore/constructor-activation-journal-gc-20260829`: exclude numai calea
-  exactă a jurnalului înainte de validarea directoarelor, păstrează
-  refuzul pentru orice alt nod neașteptat, actualizează pinul SHA-256 al
-  helperului compatibil și adaugă regresia în suita Constructor deja
-  obligatorie în CI.
+- `master` este `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
+  CI-ul post-merge și buildul celor cinci imagini OCI au trecut, iar
+  digesturile au fost semnate.
+- Release run `33272696377` a validat candidatul și semnăturile, dar s-a
+  oprit înainte de point-of-no-return. Release-ul public anterior a rămas
+  activ.
+- Cauza nouă este un bootstrap deadlock în `deploy.sh`: înainte să
+  instaleze helperul reparat, deploy-ul cere helperului live vechi să
+  recupereze `constructor-activation.journal`. Generația veche include
+  jurnalul în globul `constructor-activation.*` și refuză recovery-ul.
+- Migrarea pregătită pe ramura
+  `chore/deploy-activation-gc-bootstrap-20260829` este one-shot și dublu
+  pin-uită. Acceptă numai helperul live `ce136f…`, candidatul `cd93ea…`,
+  un jurnal schema 2 pentru `activate-worker-publisher` și absența
+  oricărui jurnal runtime, gate sau deploy concurent.
+- Migrarea rulează helperul candidat numai dintr-o copie temporară
+  root-only, reia explicit operația jurnalizată, dovedește ștergerea
+  jurnalului/pendingului/snapshotului, apoi quiesce din nou Constructorul.
+  Helperul live nu este înlocuit înaintea dovezii.
+- Constructorul rămâne fail-closed; timerele sunt inactive până la
+  recovery/deploy reușit și la probele Codex CLI.
+- Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
+  separată de release și Constructor.
+- Failul jobului `provision` (`actions/runs/33295132843/jobs/99213371892`)
+  a fost corelat cu validarea prea strictă a snapshoturilor
+  `constructor-activation.*`: helperul refuza sufixe legacy validate
+  root-only, ceea ce bloca `garbage_collect_activations`.
+- Corecția locală lărgește allowlist-ul de sufixe pentru snapshoturile
+  `constructor-activation.*` în helperul runtime și actualizează hash-urile
+  pin-uite pentru helperul compatibil (`deploy.sh` și
+  `instaleaza-constructor.sh`), împreună cu testul contractual aferent.
 
 ## Următorul pas sigur
 
-1. Deschide PR-ul unic pentru remedierea garbage collectorului și lasă
-   `verify` plus `container-isolation` să treacă integral.
-2. Îmbină prin rebase numai pe verde și confirmă deploy-ul noului `master`.
-3. Rulează recovery-ul Constructor, apoi `activate-worker-publisher`;
-   acceptă rezultatul numai după proba `codex --version` ca
-   `kelion-codex` și starea activă a celor două timere.
-4. Rulează ceremonia oficială `VPS Codex Login Bridge`, verifică
-   `codex login status`, apoi activează și probează release-ul Constructor.
-5. Separat, repară modul explicit „OpenAI API dezactivat” sau rotește o
-   cheie validă înainte de a relua testarea chatului și vocii online.
+1. Rulează din nou workflow-ul `provision-production-secrets` pe SHA-ul cu
+   fixul GC + hash pinning și confirmă că jobul `provision` trece.
+2. Rulează porțile PR pentru modificările curente și păstrează doar failurile
+   reproduse local (în prezent, un test existent cere dependența
+   `@electric-sql/pglite` absentă în sandboxul curent).
+3. Îmbină prin rebase numai pe verde și publică noul `master`.
+4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
+   Constructor pentru starea timerelor și proba `codex --version`.
 
 ## Legături canonice
 
 - Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Activare/retry eșuat: <https://github.com/kelion-team/kelionai/actions/runs/33254987691>
-- Recovery eșuat: <https://github.com/kelion-team/kelionai/actions/runs/33255194656>
+- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33272696377>
 - Versiune live: <https://kelionai.app/api/release-proof>
