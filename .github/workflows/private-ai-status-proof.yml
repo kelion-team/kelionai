@@ -1,0 +1,77 @@
+name: private-ai-status-proof
+
+on:
+  push:
+    branches:
+      - ops/private-ai-install-20260830
+    paths:
+      - .github/workflows/private-ai-status-proof.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measured-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Citește starea măsurată a instalării
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
+          if pgrep -af '/root/private-ai-installer\.' >/dev/null; then
+            printf 'INSTALLER_PROCESS=running\n'
+          else
+            printf 'INSTALLER_PROCESS=not_running\n'
+          fi
+          for unit in private-ai-llm.service private-ai-web.service; do
+            printf '%s=' "$unit"
+            systemctl is-active "$unit" 2>/dev/null || true
+          done
+          if [ -d /srv/private-ai/models ]; then
+            printf 'MODEL_STORAGE='; du -sh /srv/private-ai/models | awk '{print $1}'
+          else
+            printf 'MODEL_STORAGE=missing\n'
+          fi
+          if [ -f /var/lib/private-ai/model.ready ]; then
+            printf 'MODEL_READY=yes\n'
+          else
+            printf 'MODEL_READY=no\n'
+          fi
+          if [ -f /root/private-ai-install.log ]; then
+            printf '%s\n' '--- INSTALL LOG TAIL ---'
+            tail -n 80 /root/private-ai-install.log \
+              | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig'
+          else
+            printf 'INSTALL_LOG=missing\n'
+          fi
+          REMOTE
