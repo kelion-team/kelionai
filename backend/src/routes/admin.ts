@@ -375,6 +375,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         serving: openai.serving,
         status: openai.status,
         class: openai.class,
+        providerCode: openai.providerCode,
         action: openaiHealthAction(openai.class),
         // Costul real vine dintr-un import separat al OpenAI Costs API; runtime
         // nu transformă tokeni în dolari cu tarife scrise în cod.

@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   cacheOpenAIHealthProbe,
+  allowlistedOpenAIProviderCode,
   classifyOpenAIHealthResponse,
   openaiHealthAction,
   probeOpenAIHealth,
   type OpenAIHealthClass,
   type OpenAIHealthResult,
   type OpenAIAuthMode,
+  type OpenAIProviderErrorCode,
 } from './openaiHealth.js'
 
 const PRIVATE_PROVIDER_TEXT = 'PRIVATE_PROVIDER_TEXT_MUST_NOT_ESCAPE'
@@ -36,21 +38,54 @@ describe('OpenAI health classification boundary', () => {
     })
   })
 
-  it.each<[string, number, Record<string, unknown>, OpenAIHealthClass]>([
+  it.each<[string, number, Record<string, unknown>, OpenAIHealthClass, OpenAIProviderErrorCode?]>([
     ['400', 400, { code: 'invalid_request_error', message: PRIVATE_PROVIDER_TEXT }, 'bad_request'],
     ['401 generic', 401, { code: 'invalid_api_key', message: PRIVATE_PROVIDER_TEXT }, 'invalid_credentials'],
     ['403', 403, { code: 'permission_denied', message: PRIVATE_PROVIDER_TEXT }, 'model_access'],
     ['404 model', 404, { code: 'model_not_found', message: `Model unavailable ${PRIVATE_PROVIDER_TEXT}` }, 'model_access'],
-    ['429 quota', 429, { code: 'insufficient_quota', message: `Current quota exhausted ${PRIVATE_PROVIDER_TEXT}` }, 'insufficient_quota'],
-    ['429 organization quota', 429, { code: 'organization_usage_limit_exceeded', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota'],
-    ['429 rate', 429, { code: 'rate_limit_exceeded', message: `Requests per minute ${PRIVATE_PROVIDER_TEXT}` }, 'rate_limited'],
+    ['429 legacy quota', 429, { code: 'insufficient_quota', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota', 'insufficient_quota'],
+    ['429 credit exhausted', 429, { code: 'credit_balance_exhausted', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota', 'credit_balance_exhausted'],
+    ['429 project spend', 429, { code: 'project_spend_limit_exceeded', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota', 'project_spend_limit_exceeded'],
+    ['429 organization spend', 429, { code: 'organization_spend_limit_exceeded', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota', 'organization_spend_limit_exceeded'],
+    ['429 organization quota', 429, { code: 'organization_usage_limit_exceeded', message: PRIVATE_PROVIDER_TEXT }, 'insufficient_quota', 'organization_usage_limit_exceeded'],
+    ['429 rate', 429, { code: 'rate_limit_exceeded', message: PRIVATE_PROVIDER_TEXT }, 'rate_limited', 'rate_limit_exceeded'],
     ['5xx', 503, { code: 'internal_error', message: PRIVATE_PROVIDER_TEXT }, 'provider_5xx'],
-  ])('classifies %s without exposing provider content', async (_name, status, error, expectedClass) => {
+  ])('classifies %s without exposing provider content', async (_name, status, error, expectedClass, providerCode) => {
     const result = await classify(status, error)
 
-    expect(result).toEqual({ ok: true, serving: false, status, class: expectedClass })
+    expect(result).toEqual({
+      ok: true,
+      serving: false,
+      status,
+      class: expectedClass,
+      ...(providerCode ? { providerCode } : {}),
+    })
     expect(JSON.stringify(result)).not.toContain(PRIVATE_PROVIDER_TEXT)
-    expect(Object.keys(result).sort()).toEqual(['class', 'ok', 'serving', 'status'])
+    expect(Object.keys(result).sort()).toEqual([
+      'class',
+      'ok',
+      ...(providerCode ? ['providerCode'] : []),
+      'serving',
+      'status',
+    ])
+  })
+
+  it('does not expose an unknown provider code even when private text implies quota', async () => {
+    const providerError = {
+      code: 'private_future_billing_code',
+      message: `credit balance exhausted ${PRIVATE_PROVIDER_TEXT}`,
+    }
+    const result = await classify(429, providerError)
+
+    expect(result).toEqual({
+      ok: true,
+      serving: false,
+      status: 429,
+      class: 'insufficient_quota',
+    })
+    expect(allowlistedOpenAIProviderCode(429, providerError)).toBeUndefined()
+    expect(JSON.stringify(result)).not.toContain('private_future_billing_code')
+    expect(JSON.stringify(result)).not.toContain(PRIVATE_PROVIDER_TEXT)
   })
 
   it('distinge cheia API de o autentificare neclasificată fără recomandare greșită', async () => {
