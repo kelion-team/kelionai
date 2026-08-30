@@ -99,8 +99,63 @@ jobs:
           if [ "${#legacy[@]}" -gt 0 ] || [ "${#orphans[@]}" -gt 0 ]; then
             printf 'UNMANAGED_INSTALL_CONFLICT legacy=%s llama=%s\n' \
               "${legacy[*]:-none}" "${orphans[*]:-none}" >&2
-            rm -f -- "$upload"
-            exit 75
+            [ "${#legacy[@]}" -eq 1 ] && [ "${#orphans[@]}" -eq 1 ]
+            legacy_pid=${legacy[0]}
+            llama_pid=${orphans[0]}
+            [ "$(stat -c %u "/proc/$legacy_pid")" -eq 0 ]
+            [ "$(stat -c %u "/proc/$llama_pid")" -eq "$(id -u privateai)" ]
+            [ "$(readlink -f "/proc/$llama_pid/exe")" = /opt/private-ai/bin/llama-cli ]
+            legacy_sid=$(ps -o sid= -p "$legacy_pid" | tr -d ' ')
+            llama_sid=$(ps -o sid= -p "$llama_pid" | tr -d ' ')
+            [ -n "$legacy_sid" ] && [ "$legacy_sid" = "$llama_sid" ]
+
+            mapfile -t stale_members < <(ps -o pid= --sid "$legacy_sid" | awk '{print $1}')
+            [ "${#stale_members[@]}" -ge 2 ]
+            declare -A stale_start=()
+            private_uid=$(id -u privateai)
+            for pid in "${stale_members[@]}"; do
+              [ -r "/proc/$pid/stat" ]
+              uid=$(stat -c %u "/proc/$pid")
+              [ "$uid" -eq 0 ] || [ "$uid" -eq "$private_uid" ]
+              exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+              case "$exe" in
+                /usr/sbin/sshd|/usr/bin/bash|/bin/bash|/usr/bin/timeout|/usr/sbin/runuser|/usr/bin/runuser|/opt/private-ai/bin/llama-cli) ;;
+                '') [ "$(ps -o stat= -p "$pid" | cut -c1)" = Z ] ;;
+                *) printf 'UNEXPECTED_STALE_EXECUTABLE pid=%s exe=%s\n' "$pid" "$exe" >&2; exit 76 ;;
+              esac
+              stale_start[$pid]=$(awk '{print $22}' "/proc/$pid/stat")
+            done
+            ps -o pid,ppid,sid,pgid,lstart,stat,args --sid "$legacy_sid"
+
+            for pid in "${stale_members[@]}"; do
+              [ "$pid" = "$legacy_sid" ] || kill -TERM "$pid" 2>/dev/null || true
+            done
+            kill -TERM "$legacy_sid" 2>/dev/null || true
+            for _ in $(seq 1 30); do
+              alive=0
+              for pid in "${stale_members[@]}"; do
+                if [ -r "/proc/$pid/stat" ] \
+                  && [ "$(awk '{print $22}' "/proc/$pid/stat")" = "${stale_start[$pid]}" ]; then
+                  alive=1
+                fi
+              done
+              [ "$alive" -eq 0 ] && break
+              sleep 1
+            done
+            for pid in "${stale_members[@]}"; do
+              if [ -r "/proc/$pid/stat" ] \
+                && [ "$(awk '{print $22}' "/proc/$pid/stat")" = "${stale_start[$pid]}" ]; then
+                kill -KILL "$pid"
+              fi
+            done
+            for pid in "${stale_members[@]}"; do
+              if [ -r "/proc/$pid/stat" ] \
+                && [ "$(awk '{print $22}' "/proc/$pid/stat")" = "${stale_start[$pid]}" ]; then
+                printf 'STALE_PROCESS_SURVIVED pid=%s\n' "$pid" >&2
+                exit 77
+              fi
+            done
+            printf 'STALE_INSTALL_SESSION_REMOVED=%s\n' "$legacy_sid"
           fi
 
           install -d -o root -g root -m 0700 /opt/private-ai/installer
