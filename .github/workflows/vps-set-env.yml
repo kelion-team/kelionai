@@ -105,7 +105,6 @@ jobs:
       PUSH_ENDPOINT_HOSTS: ${{ vars.PUSH_ENDPOINT_HOSTS }}
       PUSH_MAX_SUBSCRIPTIONS: ${{ vars.PUSH_MAX_SUBSCRIPTIONS || '5' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -128,6 +127,9 @@ jobs:
           persist-credentials: false
 
       - name: Aplică atomic allowlist-ul și secretele
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ADMIN_KEY: ${{ secrets.OPENAI_ADMIN_KEY }}
         run: |
           set -euo pipefail
           [ "$GITHUB_REF" = refs/heads/master ]
@@ -156,18 +158,15 @@ jobs:
           for name in PUBLIC_APP_ORIGIN ADMIN_EMAIL OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_SHUTDOWN_AT GOOGLE_CLIENT_ID GOOGLE_REDIRECT_URI GOOGLE_TOKEN_ENCRYPTION_KEY_ID CONSTRUCTOR_REQUIRED_CHECKS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS; do
             validate_single_line_env "$name" 2048
           done
-          for name in OPENAI_API_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
+          for name in OPENAI_API_KEY OPENAI_ADMIN_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
             validate_single_line_env "$name" 8192
           done
           [[ "$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" =~ ^[A-Za-z0-9_-]{1,32}$ ]]
           [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
           admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
           [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
-          if [ -n "$OPENAI_API_KEY" ]; then
-            case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
-          else
-            OPENAI_API_KEY="disabled-placeholder-$(openssl rand -hex 32)"
-          fi
+          [[ "$OPENAI_API_KEY" =~ ^sk-proj-[A-Za-z0-9_-]{16,}$ ]] || exit 1
+          [[ "$OPENAI_ADMIN_KEY" =~ ^sk-admin-[A-Za-z0-9_-]{16,}$ ]] || exit 1
           [ "${#SESSION_SECRET}" -ge 32 ]
           [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
           [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]
@@ -312,6 +311,7 @@ jobs:
             "FRONTEND_ORIGIN=$PUBLIC_APP_ORIGIN" \
             "ADMIN_EMAIL=$admin_email" \
             'OPENAI_API_KEY_FILE=/run/secrets/openai-project-key' \
+            'OPENAI_ADMIN_KEY_FILE=/run/secrets/openai-admin-key' \
             "OPENAI_LUNA_MODEL=$OPENAI_LUNA_MODEL" \
             "OPENAI_MEDIUM_MODEL=$OPENAI_MEDIUM_MODEL" \
             "OPENAI_HEAVY_MODEL=$OPENAI_HEAVY_MODEL" \
@@ -420,6 +420,7 @@ jobs:
           encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
           {
             encode openai-project-key "$OPENAI_API_KEY"
+            encode openai-admin-key "$OPENAI_ADMIN_KEY"
             encode database-url "$DATABASE_URL"
             encode session-secret "$SESSION_SECRET"
             encode google-client-secret "$GOOGLE_CLIENT_SECRET"
@@ -635,7 +636,7 @@ jobs:
             chmod 0600 "$cutover_stage/files/$logical"
             printf '%s\n' "$logical" >> "$cutover_stage/manifest"
           }
-          for name in openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
+          for name in openai-project-key openai-admin-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
             stage_value "app-secret.$name" "$(decode "$name")"
           done
           stage_value app-secret.github-release-oauth-token "$oauth_token"

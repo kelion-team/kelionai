@@ -10,13 +10,14 @@ jobs:
   login:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: production
     env:
       VPS_HOST: ${{ vars.VPS_HOST }}
       VPS_USER: ${{ vars.VPS_USER }}
       VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
     steps:
-      - name: Ceremonia de login Codex (device-auth)
+      - name: Reînnoiește cache-ul Codex din cheia project-scoped
         run: |
           set -euo pipefail
           umask 077
@@ -28,6 +29,30 @@ jobs:
           chmod 0600 "$key_file" "$known_hosts"
           ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
             set -euo pipefail
-            runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login --device-auth
-            runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login status
+            credential=/root/kelion/secrets/openai-project-key
+            [ -f "$credential" ] && [ ! -L "$credential" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$credential")" = '0:10050:440:1' ]
+            [ "$(awk 'END { print NR }' "$credential")" -eq 1 ]
+            LC_ALL=C grep -Eq '^sk-proj-[!-~]{16,}$' "$credential"
+            if ! runuser -u kelion-codex -- env -i \
+              HOME=/var/lib/kelion-codex-auth \
+              CODEX_HOME=/var/lib/kelion-codex-auth \
+              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login --with-api-key \
+              < "$credential" >/dev/null 2>&1; then
+              echo 'Autentificarea Codex project-scoped a eșuat' >&2
+              exit 1
+            fi
+            runuser -u kelion-codex -- env -i \
+              HOME=/var/lib/kelion-codex-auth \
+              CODEX_HOME=/var/lib/kelion-codex-auth \
+              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login status >/dev/null 2>&1
+            echo 'codex-api-login=ready'
           EOF

@@ -131,7 +131,7 @@ export async function getCodexWorkerStatus(now = Date.now()): Promise<{
   return {
     worker: { state, lastHeartbeat: stored?.at ?? null },
     setupInstructions: state === 'setup_required'
-      ? 'Autentifică workerul separat cu comanda oficială `codex login`; aplicația web nu primește credentialele.'
+      ? 'Verifică credentiala systemd `openai-project-key` și bridge-ul VPS; workerul rulează `codex login --with-api-key` numai pe stdin, iar aplicația web nu primește cheia.'
       : null,
     taskUrl: codexTaskUrl(stored?.taskUrl ?? '') ?? codexTaskUrl(),
     status: fresh && stored ? (stored.detail ?? stored.status) : null,

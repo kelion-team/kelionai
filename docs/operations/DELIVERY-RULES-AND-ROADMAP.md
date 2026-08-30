@@ -190,10 +190,12 @@ Serviciile server-side relevante o primesc din aceeasi sursa de secret, prin
 mount read-only si cu privilegiu minim; „partajata” nu inseamna copiere in cod,
 env-uri publice sau baze de date.
 
-Credentiala nu ajunge niciodata in browser, client nativ, workerul Constructor,
-publisher, releaser, Git, GitHub Actions logs sau artefacte. Workerul Codex isi
-pastreaza separat autentificarea oficiala `codex login`; ea nu inlocuieste si nu
-citeste credentiala de produs.
+Credentiala nu ajunge niciodata in browser, client nativ, publisher, releaser,
+Git, GitHub Actions logs sau artefacte. Workerul Constructor primeste aceeasi
+sursa numai ca fisier `LoadCredential`, o transmite clientului oficial exclusiv
+pe stdin prin `codex login --with-api-key`, apoi `codex exec` ruleaza fara cheie
+in environment sau argv. Cache-ul si fingerprintul privat raman numai in
+`CODEX_HOME` al workerului.
 
 Daca secretul lipseste sau nu poate fi citit, capabilitatile dependente se
 opresc fail-closed si afiseaza un diagnostic stabil, redactat si actionabil in

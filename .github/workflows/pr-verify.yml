@@ -203,6 +203,7 @@ jobs:
             printf 'disabled-placeholder-%s\n' "$(openssl rand -hex 32)" > "/tmp/kelion-ci-secrets/$name"
           done
           printf 'sk-%s-%s\n' proj "$(openssl rand -hex 24)" > /tmp/kelion-ci-secrets/openai-project-key
+          printf 'sk-%s-%s\n' admin "$(openssl rand -hex 24)" > /tmp/kelion-ci-secrets/openai-admin-key
           printf '%s\n' 'postgresql://postgres@localhost/kelion_ci?host=/var/run/postgresql' > /tmp/kelion-ci-secrets/database-url
           ci_model_prefix=$(printf '%s%s' g pt-ci)
           cat > /tmp/kelion-ci-config/runtime.env <<ENV
@@ -212,6 +213,7 @@ jobs:
           FRONTEND_ORIGIN=https://ci.invalid
           ADMIN_EMAIL=owner@example.com
           OPENAI_API_KEY_FILE=/run/secrets/openai-project-key
+          OPENAI_ADMIN_KEY_FILE=/run/secrets/openai-admin-key
           OPENAI_LUNA_MODEL=${ci_model_prefix}-luna
           OPENAI_MEDIUM_MODEL=${ci_model_prefix}-medium
           OPENAI_HEAVY_MODEL=${ci_model_prefix}-heavy

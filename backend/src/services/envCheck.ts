@@ -48,6 +48,7 @@ const cuFisier = (names: string[]): string[] => names.flatMap((name) => [name, `
 
 const ASTEPTATE_BAZA: VariabilaAsteptata[] = [
   { alias: cuFisier(ENV_ALIASES.openaiKey), name: 'OPENAI_API_KEY', what: 'creierul unic, vedere, imagini, transcriere și voce Realtime', breaks: 'funcțiile cloud OpenAI nu răspund; continuitatea locală rămâne disponibilă' },
+  { alias: cuFisier(ENV_ALIASES.openaiAdminKey), name: 'OPENAI_ADMIN_KEY', what: 'costurile și usage-ul OpenAI din Kelion Admin', breaks: 'doar costurile/usage-ul furnizorului rămân necitibile; inferența nu este afectată' },
   { alias: cuFisier(ENV_ALIASES.databaseUrl), name: 'DATABASE_URL', what: 'baza de date', breaks: 'conturi, credite, istoric — toate' },
   { alias: cuFisier(ENV_ALIASES.sessionSecret), name: 'SESSION_SECRET', what: 'sesiunile de login', breaks: 'nimeni nu poate rămâne logat' },
   { alias: cuFisier(ENV_ALIASES.googleTokenEncryptionKey), name: 'GOOGLE_TOKEN_ENCRYPTION_KEY', what: 'criptarea credentialelor Google în baza de date', breaks: 'conectarea funcțiilor Google este refuzată sigur' },

@@ -24,7 +24,10 @@ describe('Admin uses the measured safe OpenAI status consistently', () => {
     expect(route).toContain('status: openai.status')
     expect(route).toContain('class: openai.class')
     expect(route).toContain('action: openaiHealthAction(openai.class)')
+    expect(route).toContain('admin: openaiAdmin')
+    expect(route).toContain('openaiAdmin.costs.available ? openaiAdmin.costs.monthUsd : undefined')
     expect(route).not.toContain('serving: openaiAvailable()')
+    expect(route).not.toMatch(/serving:\s*openaiAdmin/)
   })
 
   it('a non-serving provider never renders a success check and shows the safe class', () => {

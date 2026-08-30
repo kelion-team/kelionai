@@ -67,6 +67,43 @@ export interface ExpenseLine {
   platiAutomate?: boolean
 }
 
+/** Safe status exposed only on authenticated Admin routes for OpenAI's
+ * organization Costs/Usage API. Provider response bodies and credentials
+ * never cross this contract. */
+export type OpenAIAdminStatusClass =
+  | 'ok'
+  | 'not_configured'
+  | 'invalid_key'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'provider_5xx'
+  | 'transport'
+  | 'invalid_response'
+
+export interface OpenAIAdminMeasurement {
+  checked: boolean
+  available: boolean
+  status: number | null
+  class: OpenAIAdminStatusClass
+}
+
+/** The Admin key is a control-plane credential. This snapshot deliberately
+ * contains no key/project identifiers and cannot be used as inference state. */
+export interface OpenAIAdminSnapshot {
+  configured: boolean
+  scope: 'project' | 'organization'
+  period: { start: string; end: string }
+  costs: OpenAIAdminMeasurement & {
+    monthUsd?: number
+    currency?: 'usd'
+  }
+  usage: OpenAIAdminMeasurement & {
+    requests?: number
+    inputTokens?: number
+    outputTokens?: number
+  }
+}
+
 export interface MoneyCircuit {
   /** All the application's expenses, with the place they are paid from. */
   expenses?: ExpenseLine[]

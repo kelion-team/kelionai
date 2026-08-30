@@ -892,7 +892,7 @@ jobs:
           cutover_stage=''
           constructor_config_phase='complete'
           constructor_config_check='success-message'
-          printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si autentificarea ChatGPT'
+          printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si credentiala OpenAI project-scoped valida'
           REMOTE
 
       - name: Valideaza dovada PR-ului pilot
@@ -1210,7 +1210,7 @@ jobs:
           trap cleanup_activation EXIT
 
           status() {
-            local unit marker state
+            local unit marker state codex_auth_status
             for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer; do
               state=$(systemctl show "$unit" --property=ActiveState --value)
               printf '%s=%s\n' "$unit" "$state"
@@ -1223,7 +1223,18 @@ jobs:
                 printf '%s=disabled\n' "$marker"
               fi
             done
-            if runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login status >/dev/null 2>&1; then echo 'codex-auth=ready'; else echo 'codex-auth=required'; fi
+            codex_auth_status=$(runuser -u kelion-codex -- env -i \
+              HOME=/var/lib/kelion-codex-auth \
+              CODEX_HOME=/var/lib/kelion-codex-auth \
+              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login status 2>/dev/null || :)
+            case "$codex_auth_status" in
+              'Logged in using an API key - sk-proj-'*) echo 'codex-auth=ready' ;;
+              *) echo 'codex-auth=required' ;;
+            esac
             assert_backend_side_effects_active
           }
           case "$operation" in
@@ -1236,7 +1247,8 @@ jobs:
               [ ! -e /etc/kelion/constructor-release.enabled ] && [ ! -L /etc/kelion/constructor-release.enabled ]
               require_enabled_flag CODEX_WORKER_ENABLED
               require_enabled_flag CONSTRUCTOR_PUBLISHER_ENABLED
-              runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login status >/dev/null
+              # Primul start al serviciului validează credentiala systemd și
+              # creează fail-closed cache-ul API-key înainte de orice claim.
               assert_backend_side_effects_active >/dev/null
               if [ "$activation_resume_pending" = 0 ]; then
                 activation_dir=$(mktemp -d /root/kelion/runtime/constructor-activation.XXXXXX)

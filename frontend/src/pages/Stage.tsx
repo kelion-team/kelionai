@@ -24,6 +24,7 @@ import {
   isAdminTab,
   type AdminTab,
   type CreditAIFurnizor,
+  type OpenAIAdminSnapshot,
   type OpenAIHealthClass,
 } from '../lib/admin'
 import {
@@ -1062,6 +1063,7 @@ export interface BrainCredit {
     sold?: number
     soldMoneda?: string
     soldMotiv?: string
+    admin?: OpenAIAdminSnapshot
   }
 
   vps?: {

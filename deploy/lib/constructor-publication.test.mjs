@@ -55,6 +55,7 @@ const runtimeFixture = (cutover) => {
     ['FRONTEND_ORIGIN', 'https://kelionai.app'],
     ['GOOGLE_REDIRECT_URI', 'https://kelionai.app/auth/google/callback'],
     ['OPENAI_API_KEY_FILE', '/run/secrets/openai-project-key'],
+    ['OPENAI_ADMIN_KEY_FILE', '/run/secrets/openai-admin-key'],
     ['DATABASE_URL_FILE', '/run/secrets/database-url'],
     ['SESSION_SECRET_FILE', '/run/secrets/session-secret'],
     ['GOOGLE_CLIENT_SECRET_FILE', '/run/secrets/google-client-secret'],
