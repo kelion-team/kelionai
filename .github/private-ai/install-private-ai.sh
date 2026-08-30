@@ -15,8 +15,8 @@ readonly PRIVATE_AI_BIN="/opt/private-ai/bin"
 readonly PRIVATE_AI_SOURCE="/opt/private-ai/src/llama.cpp"
 readonly PRIVATE_AI_MARKER="${PRIVATE_AI_CONFIG}/.installer-id"
 readonly INSTALLER_ID="private-ai-contabo-v1"
-readonly LLAMA_PORT="18080"
-readonly OPENCODE_PORT="14096"
+readonly LLAMA_PORT="24080"
+readonly OPENCODE_PORT="24096"
 readonly MODEL_REPO="ggml-org/Qwen3.6-35B-A3B-GGUF"
 readonly MODEL_QUANT="Q4_K_M"
 readonly MODEL_ALIAS="qwen3.6-35b-a3b-local"
@@ -277,7 +277,7 @@ INSTRUCTIONS
       "npm": "@ai-sdk/openai-compatible",
       "name": "Qwen local",
       "options": {
-        "baseURL": "http://127.0.0.1:18080/v1",
+        "baseURL": "http://127.0.0.1:24080/v1",
         "timeout": 1800000,
         "chunkTimeout": 600000
       },
@@ -308,7 +308,7 @@ INSTRUCTIONS
   "instructions": ["instructions.md"],
   "server": {
     "hostname": "127.0.0.1",
-    "port": 14096,
+    "port": 24096,
     "mdns": false
   }
 }
