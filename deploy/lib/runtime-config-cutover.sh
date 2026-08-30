@@ -66,8 +66,12 @@ case "${1:-}" in
     ;;
 esac
 if [ -n "$activation_resume_operation" ]; then
-  [ "$recover_only" = 1 ] && [ "$leave_constructor_quiesced" = 0 ] \
-    || die 'resume-ul activării este permis numai în recover-only non-leave'
+  [ "$recover_only" = 1 ] && [ "$discard_unmutated_prepared" = 0 ] \
+    || die 'resume-ul activării este permis numai în recover-only generic'
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    [ "$activation_resume_operation" = activate-worker-publisher ] \
+      || die 'resume+leave este rezervat migrării worker/publisher pin-uite'
+  fi
 fi
 
 # Bariera minimă rulează înainte de validarea compose-ului, inventarul de
@@ -1905,7 +1909,7 @@ recover_interrupted_activation() {
   done
   fsync_path /etc/kelion || failed=1
   systemctl daemon-reload || failed=1
-  if [ "$leave_constructor_quiesced" = 1 ] || [ "$activation_resume_operation" != "$operation" ]; then
+  if [ "$activation_resume_operation" != "$operation" ]; then
     write_activation_journal_phase quiesced || failed=1
     validate_activation_pending || failed=1
     [ -f "$ACTIVATION_PENDING" ] || failed=1
@@ -1926,10 +1930,38 @@ recover_interrupted_activation() {
     force_quiesce_constructor_units || true
     die 'faza applied a activării nu a putut fi publicată durabil înainte de start'
   }
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    # Jurnalul activării urmează să fie consumat de deploy. Publicăm mai întâi
+    # blockerul persistent folosit deja de migrarea strictă a unităților;
+    # astfel niciun crash după retragerea pendingului activării nu poate lăsa
+    # boot recovery să pornească marker-ele abia comise.
+    publish_unit_migration_pending || {
+      force_quiesce_constructor_units || true
+      die 'blockerul durabil al activării applied nu a putut fi publicat'
+    }
+  fi
   clear_activation_pending || {
     force_quiesce_constructor_units || true
     die 'gate-ul pending nu a putut fi retras după commitul applied'
   }
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    # Deploy-ul one-shot poate consuma o activare deja comisă fără să execute
+    # workerul ori publisherul în preflight. `applied` este pragul durabil;
+    # pending dispare numai după el, iar ready rămâne retras. Apelantul pin-uit
+    # verifică apoi exact jurnalul și curăță jurnalul înaintea snapshotului.
+    if [ "$failed" != 0 ] \
+      || ! validate_unit_migration_pending \
+      || [ ! -f "$UNIT_MIGRATION_PENDING" ] \
+      || [ -e "$ACTIVATION_PENDING" ] || [ -L "$ACTIVATION_PENDING" ] \
+      || [ -e "$READY_STAMP" ] || [ -L "$READY_STAMP" ] \
+      || ! validate_constructor_quiesce_barrier; then
+      force_quiesce_constructor_units || true
+      die 'commitul applied nu a putut rămâne quiesced; unitățile rămân oprite'
+    fi
+    units_quiesced=0
+    recovery_in_progress=0
+    return 0
+  fi
   publish_runtime_ready_stamp || failed=1
   for index in "${!constructor_timers[@]}"; do
     timer=${constructor_timers[$index]}
@@ -2501,6 +2533,10 @@ garbage_collect_activations() {
     canonical=$(realpath -e -- "$candidate") || return 1
     [ "$canonical" = "$candidate" ] || return 1
     if [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]; then
+      # Persistăm mai întâi absența jurnalului. Altfel un power-loss după
+      # ștergerea snapshotului ar putea readuce unlink-ul nedurabil și ar lăsa
+      # un jurnal fără rollback root, stare pe care recovery-ul trebuie s-o refuze.
+      fsync_path "$RUNTIME_ROOT" || return 1
       remove_activation_dir "$canonical" || return 1
       fsync_path "$RUNTIME_ROOT" || return 1
     fi

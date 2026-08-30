@@ -1,54 +1,51 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T05:39:53Z`
+Actualizat: `2026-08-30T06:33:28Z`
 
 ## Stare verificată
 
-- `master` este `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
-  CI-ul post-merge și buildul celor cinci imagini OCI au trecut, iar
-  digesturile au fost semnate.
-- Release run `33272696377` a validat candidatul și semnăturile, dar s-a
-  oprit înainte de point-of-no-return. Release-ul public anterior a rămas
-  activ.
-- Cauza nouă este un bootstrap deadlock în `deploy.sh`: înainte să
-  instaleze helperul reparat, deploy-ul cere helperului live vechi să
-  recupereze `constructor-activation.journal`. Generația veche include
-  jurnalul în globul `constructor-activation.*` și refuză recovery-ul.
-- Migrarea pregătită pe ramura
-  `chore/deploy-activation-gc-bootstrap-20260829` este one-shot și dublu
-  pin-uită. Acceptă numai helperul live `ce136f…`, candidatul `cd93ea…`,
-  un jurnal schema 2 pentru `activate-worker-publisher` și absența
-  oricărui jurnal runtime, gate sau deploy concurent.
-- Migrarea rulează helperul candidat numai dintr-o copie temporară
-  root-only, reia explicit operația jurnalizată, dovedește ștergerea
-  jurnalului/pendingului/snapshotului, apoi quiesce din nou Constructorul.
-  Helperul live nu este înlocuit înaintea dovezii.
-- Constructorul rămâne fail-closed; timerele sunt inactive până la
-  recovery/deploy reușit și la probele Codex CLI.
-- Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
-  separată de release și Constructor.
-- Failul jobului `provision` (`actions/runs/33295132843/jobs/99213371892`)
-  a fost corelat cu validarea prea strictă a snapshoturilor
-  `constructor-activation.*`: helperul refuza sufixe legacy validate
-  root-only, ceea ce bloca `garbage_collect_activations`.
-- Corecția locală lărgește allowlist-ul de sufixe pentru snapshoturile
-  `constructor-activation.*` în helperul runtime și actualizează hash-urile
-  pin-uite pentru helperul compatibil (`deploy.sh` și
-  `instaleaza-constructor.sh`), împreună cu testul contractual aferent.
+- `origin/master` este `056c740cc6887158e35e78e860200460a3594ee0`.
+  Release run `33296250851`, job `99216341157`, s-a oprit înainte de
+  point-of-no-return; dovada publică a rămas la
+  `ff6d2e30991b4f35adaf68f4b3a88ada8504d350`.
+- Bootstrap-ul GC a trecut. Eșecul imediat următor a fost
+  `A dependency job for kelion-codex-worker.service failed`, după crearea
+  linkurilor timerelor. `kelion-codex-worker.service` are dependență hard de
+  `kelion-constructor-sync.service`; logul release-ului nu conține însă eroarea
+  leaf a serviciului sync, deci aceasta rămâne necunoscută și nu este declarată
+  reparată.
+- Același eșec de dependență apare și în activarea inițială
+  `33254987691`, job `99107013438`. Mesajul GC care a urmat a fost secundar:
+  activarea a rămas jurnalizată după roll-forward/rollback incomplet.
+- Corecția locală de pe `chore/recover-activation-quiesced-20260830` reia
+  explicit numai activarea worker/publisher acceptată de callerul dublu
+  pin-uit. Helperul publică durabil faza `applied`, apoi
+  `constructor-unit-migration.pending`, și abia după aceea retrage pendingul
+  activării; nu execută `start` sau `enable` în bootstrap.
+- Callerul validează și persistă din nou blockerul root-only exact înainte de
+  unlink, persistă absența jurnalului înainte să șteargă snapshotul și persistă
+  din nou directorul runtime după ștergere. Blockerul rămâne fail-closed și este
+  consumat ulterior numai de cutover-ul strict cu owner și dovadă de generație.
+- Retry-ul pre-upgrade este armat și când a rămas numai blockerul persistent,
+  inclusiv după crash între unlink-ul jurnalului și curățarea snapshotului.
+- Schimbarea nu repară și nu validează credențialele OpenAI/Codex și nu
+  identifică eroarea leaf a sync-ului. Aceste probe rămân separate.
 
 ## Următorul pas sigur
 
-1. Rulează din nou workflow-ul `provision-production-secrets` pe SHA-ul cu
-   fixul GC + hash pinning și confirmă că jobul `provision` trece.
-2. Rulează porțile PR pentru modificările curente și păstrează doar failurile
-   reproduse local (în prezent, un test existent cere dependența
-   `@electric-sql/pglite` absentă în sandboxul curent).
-3. Îmbină prin rebase numai pe verde și publică noul `master`.
-4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
-   Constructor pentru starea timerelor și proba `codex --version`.
+1. Încheie porțile locale pentru helper, caller, fault-cuts și hashurile pin-uite;
+   orice lipsă de dependență locală se raportează separat, nu ca succes.
+2. Inspectează diff-ul și publică un PR din ramura `chore/*`; fără push direct
+   în `master` și fără deploy înainte ca toate checkurile obligatorii să fie verzi.
+3. După merge, rulează release-ul pentru noul SHA și confirmă întâi consumarea
+   fail-closed a jurnalului/blockerului, apoi extrage diagnosticul leaf al
+   `kelion-constructor-sync.service` dacă dependency job mai eșuează.
+4. Declară Constructorul funcțional numai după release proof, starea exactă a
+   timerelor/serviciilor și o probă reală a chatului/workerului.
 
 ## Legături canonice
 
 - Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33272696377>
+- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33296250851>
+- Job release: <https://github.com/kelion-team/kelionai/actions/runs/33296250851/job/99216341157>
 - Versiune live: <https://kelionai.app/api/release-proof>

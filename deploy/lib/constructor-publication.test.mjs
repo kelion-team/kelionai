@@ -1774,6 +1774,7 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   const markerMutation = recovery.indexOf('mv -f -- "$restored" "$marker"', publishPending)
   const genericQuiesce = recovery.indexOf('write_activation_journal_phase quiesced', markerMutation)
   const applied = recovery.indexOf('write_activation_journal_phase applied', genericQuiesce)
+  const durableBlocker = recovery.indexOf('publish_unit_migration_pending', applied)
   const clearPending = recovery.indexOf('clear_activation_pending', applied)
   const ready = recovery.indexOf('publish_runtime_ready_stamp', clearPending)
   const firstEnable = recovery.indexOf('systemctl enable "$timer"', ready)
@@ -1781,10 +1782,30 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   assert.ok(quiesce >= 0 && publishPending > quiesce && markerMutation > publishPending,
     'gate-ul pending trebuie publicat după quiesce și înaintea primei mutații live')
   assert.ok(genericQuiesce > markerMutation && applied > genericQuiesce
-    && clearPending > applied && ready > clearPending && firstEnable > ready && firstStart > ready,
-  'applied trebuie fsync înainte de retragerea pending, ready și orice enable/start')
+    && durableBlocker > applied && clearPending > durableBlocker
+    && ready > clearPending && firstEnable > ready && firstStart > ready,
+  'applied și blockerul persistent trebuie fsync înainte de retragerea pending, ready și orice enable/start')
   assert.match(recovery,
-    /if \[ "[$]leave_constructor_quiesced" = 1 \] \|\| \[ "[$]activation_resume_operation" != "[$]operation" \]; then[\s\S]*write_activation_journal_phase quiesced[\s\S]*return 0[\s\S]*write_activation_journal_phase applied/)
+    /if \[ "[$]activation_resume_operation" != "[$]operation" \]; then[\s\S]*write_activation_journal_phase quiesced[\s\S]*return 0[\s\S]*write_activation_journal_phase applied/)
+  const appliedLeave = recovery.indexOf('if [ "$leave_constructor_quiesced" = 1 ]; then', applied)
+  const appliedLeaveReturn = recovery.indexOf('return 0', clearPending)
+  const appliedLeaveBranch = recovery.slice(appliedLeave, ready)
+  assert.ok(appliedLeave > applied && appliedLeaveReturn > clearPending && ready > appliedLeaveReturn,
+    'resume+leave trebuie să închidă applied sub blocker înaintea căii care deschide ready')
+  assert.doesNotMatch(appliedLeaveBranch, /systemctl enable|start_constructor_unit|publish_runtime_ready_stamp/,
+    'resume+leave nu poate activa timere sau servicii')
+  assert.match(appliedLeaveBranch,
+    /validate_unit_migration_pending[\s\S]*UNIT_MIGRATION_PENDING[\s\S]*ACTIVATION_PENDING[\s\S]*READY_STAMP[\s\S]*validate_constructor_quiesce_barrier/)
+  const activationBarrierExit = cutover.indexOf('if [ "$activation_barrier_pending" = 1 ]; then')
+  const recoverOnlyMain = cutover.indexOf('if [ "$recover_only" = 1 ]; then', activationBarrierExit)
+  const unitBlockerBranch = cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]; then', recoverOnlyMain)
+  const genericReady = cutover.indexOf('publish_runtime_ready_stamp', unitBlockerBranch)
+  assert.ok(activationBarrierExit >= 0 && recoverOnlyMain > activationBarrierExit
+    && unitBlockerBranch > recoverOnlyMain && genericReady > unitBlockerBranch,
+  'recover-only trebuie să trateze blockerul persistent înainte de calea generică ready')
+  assert.match(cutover.slice(unitBlockerBranch, genericReady),
+    /unit-only blochează boot-ul generic[\s\S]*exit 0/,
+    'blockerul persistent trebuie fie să oprească boot-ul, fie să iasă quiesced înainte de ready')
 
   const preflight = workflowFunction('recover_activation_preflight')
   assert.match(preflight,
@@ -1819,17 +1840,30 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   assert.match(shellFunction(cutover, 'validate_constructor_service_unit'),
     /ConditionPathExists=!\/run\/kelion\/constructor-activation\.pending/)
 
-  // Fault injection la fiecare frontieră durabilă. Condițiile systemd cer
-  // simultan ready prezent și pending absent; numai ultima stare poate porni.
+  // Fault injection la fiecare frontieră durabilă. Blockerul persistent este
+  // publicat înainte ca pendingul activării să dispară și împiedică recovery-ul
+  // de boot să publice ready după ce deploy-ul consumă jurnalul activării.
   const canUnitStart = ({ pending, ready: readyPresent }) => !pending && readyPresent
   const crashCuts = [
     { name: 'quiesced-pending', phase: 'quiesced', pending: true, ready: false },
     { name: 'stale-ready-pending', phase: 'quiesced', pending: true, ready: true },
     { name: 'applied-before-gate-clear', phase: 'applied', pending: true, ready: false },
-    { name: 'applied-after-gate-clear', phase: 'applied', pending: false, ready: false },
+    { name: 'applied-blocker-durable', phase: 'applied', pending: true, ready: false, unitBlocker: true },
+    { name: 'applied-after-gate-clear', phase: 'applied', pending: false, ready: false, unitBlocker: true },
+    { name: 'journal-cleared-before-root-gc', phase: null, pending: false, ready: false, unitBlocker: true },
   ]
   for (const cut of crashCuts) assert.equal(canUnitStart(cut), false, cut.name)
   assert.equal(canUnitStart({ phase: 'applied', pending: false, ready: true }), true)
+
+  const recoveryReady = ({ unitBlocker, liveContractValid }) => !unitBlocker && liveContractValid
+  const canStartAfterReboot = ({ unitBlocker, liveContractValid = true }) =>
+    canUnitStart({ pending: false, ready: recoveryReady({ unitBlocker, liveContractValid }) })
+  assert.equal(canStartAfterReboot({ unitBlocker: true }), false,
+    'după journal clear, blockerul persistent interzice ready/start la reboot')
+  assert.equal(canStartAfterReboot({ unitBlocker: false }), true,
+    'controlul dovedește că testul ar detecta lipsa blockerului')
+  assert.equal(canStartAfterReboot({ unitBlocker: false, liveContractValid: false }), false,
+    'contractul live invalid rămâne fail-closed independent de blocker')
 })
 
 test('release-ul drenează handoff-urile Constructor după quiesce și înainte de PONR', async () => {
@@ -2580,6 +2614,12 @@ test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstreaz
 
 test('refuzul discard-ului armează cleanup fail-closed și păstrează jurnalul plus tranzacția', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  assert.match(cutover,
+    /if \[ -n "\$activation_resume_operation" \]; then\s*\[ "\$recover_only" = 1 \] && \[ "\$discard_unmutated_prepared" = 0 \]/,
+  'resume-ul explicit nu poate împrumuta autoritatea căii destructive discard')
+  assert.match(cutover,
+    /if \[ "\$leave_constructor_quiesced" = 1 \]; then\s*\[ "\$activation_resume_operation" = activate-worker-publisher \]/,
+  'resume+leave trebuie limitat la operația one-shot acceptată de callerul pin-uit')
   const cleanup = shellFunction(cutover, 'cleanup_cutover')
   const trap = cutover.indexOf('trap cleanup_cutover EXIT')
   const arm = cutover.indexOf('if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi', trap)
@@ -3252,6 +3292,13 @@ test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
     'GC-ul trebuie să accepte și snapshoturi legacy validate strict din runtime')
   assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
     'snapshoturile reale trebuie curățate în continuare')
+  const journalAbsent = collector.indexOf('if [ ! -e "$ACTIVATION_JOURNAL" ]')
+  const preRemovalFsync = collector.indexOf('fsync_path "$RUNTIME_ROOT" || return 1', journalAbsent)
+  const removeSnapshot = collector.indexOf('remove_activation_dir "$canonical" || return 1', preRemovalFsync)
+  const postRemovalFsync = collector.indexOf('fsync_path "$RUNTIME_ROOT" || return 1', removeSnapshot)
+  assert.ok(journalAbsent >= 0 && preRemovalFsync > journalAbsent
+    && removeSnapshot > preRemovalFsync && postRemovalFsync > removeSnapshot,
+  'GC-ul persistă absența jurnalului înainte de remove și persistă din nou directorul după remove')
 })
 
 test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
@@ -3270,7 +3317,10 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
     '[ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]')
   const mixedRuntimeRefusal = recovery.indexOf(
     'for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"', livePin)
-  const journalAcl = recovery.indexOf("0:0:600:1", mixedRuntimeRefusal)
+  const retryBlocker = recovery.indexOf('if [ -e "$unit_migration_pending" ]', mixedRuntimeRefusal)
+  const retryBlockerProof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', retryBlocker)
+  const journalAcl = recovery.indexOf("0:0:600:1", retryBlockerProof)
   const workerOnly = recovery.indexOf('.operation == "activate-worker-publisher"', journalAcl)
   const rootAllowlist = recovery.indexOf('constructor-activation\\\\.[A-Za-z0-9]+', workerOnly)
   const candidatePin = recovery.indexOf(
@@ -3281,23 +3331,45 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
   const explicitResume = recovery.indexOf(
     'KELION_ACTIVATION_RESUME_OPERATION="$activation_operation"', durableCopy)
   const resumeRun = recovery.indexOf(
-    'bash "$recovery_helper" --recover-only "$live_compose";', explicitResume)
-  const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', resumeRun)
-  const requiesce = recovery.indexOf(
-    'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced', journalGone)
+    'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced;', explicitResume)
+  const appliedProof = recovery.indexOf('.phase == "applied"', resumeRun)
+  const blockerProof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', appliedProof)
+  const blockerReproof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', blockerProof + 1)
+  const blockerFilePersist = recovery.indexOf(
+    'fsync_release_artifact "$unit_migration_pending" file', blockerReproof)
+  const blockerDirectoryPersist = recovery.indexOf(
+    'fsync_release_artifact "$RUNTIME_ROOT" directory', blockerFilePersist)
+  const journalUnlink = recovery.indexOf('rm -f -- "$activation_journal"', blockerDirectoryPersist)
+  const journalPersist = recovery.indexOf('fsync_release_artifact "$RUNTIME_ROOT" directory', journalUnlink)
+  const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', journalPersist)
+  const rootRemoval = recovery.indexOf('rm -rf --one-file-system -- "$activation_root"', journalGone)
+  const rootPersist = recovery.indexOf('fsync_release_artifact "$RUNTIME_ROOT" directory', rootRemoval)
   const orphanProof = recovery.indexOf(
-    'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', requiesce)
+    'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', rootPersist)
   const readyAbsent = recovery.indexOf(
     '[ ! -e /run/kelion/runtime-config-recovery.ready ]', orphanProof)
   const cleanup = recovery.indexOf('rm -f -- "$temporary"', readyAbsent)
 
-  assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && journalAcl > mixedRuntimeRefusal
+  assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && retryBlocker > mixedRuntimeRefusal
+    && retryBlockerProof > retryBlocker && journalAcl > retryBlockerProof
     && workerOnly > journalAcl && rootAllowlist > workerOnly && candidatePin > rootAllowlist
     && temporaryCopy > candidatePin && durableCopy > temporaryCopy
-    && explicitResume > durableCopy && resumeRun > explicitResume && journalGone > resumeRun
-    && requiesce > journalGone && orphanProof > requiesce && readyAbsent > orphanProof
+    && explicitResume > durableCopy && resumeRun > explicitResume && appliedProof > resumeRun
+    && blockerProof > appliedProof && blockerReproof > blockerProof
+    && blockerFilePersist > blockerReproof && blockerDirectoryPersist > blockerFilePersist
+    && journalUnlink > blockerDirectoryPersist
+    && journalPersist > journalUnlink
+    && journalGone > journalPersist && rootRemoval > journalGone && rootPersist > rootRemoval
+    && orphanProof > rootPersist && readyAbsent > orphanProof
     && cleanup > readyAbsent,
-  'fallback-ul trebuie să fie pur, dublu pin-uit, explicit, requiesced și curățat')
+  'fallback-ul trebuie să fie dublu pin-uit, applied+blocked, quiesced și curățat journal-before-root')
+  assert.doesNotMatch(recovery.slice(explicitResume, orphanProof),
+    /start_constructor_unit|systemctl (?:start|enable)/,
+    'bootstrap-ul deploy nu poate porni dependențe ori timere Constructor')
+  assert.doesNotMatch(recovery, /rm -f -- "[$]unit_migration_pending"/,
+    'blockerul persistent este consumat numai de cutover-ul strict ulterior')
   assert.match(recovery,
     /elif \[ "\$status" = 0 \]; then[\s\S]*"\$recovery_helper" --recover-only "\$live_compose" --leave-constructor-quiesced/,
     'orice alt helper trebuie să-și recupereze propriile jurnale')
@@ -3307,8 +3379,60 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
 
   const mainStart = deploy.indexOf('# Jurnalele runtime/activare sunt recuperate în mod normal')
   const call = deploy.indexOf('\n  recover_runtime_activation_before_upgrade \\\n', mainStart)
+  const triggerStart = deploy.lastIndexOf(
+    '\nif [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal"', call)
+  const replayTrigger = deploy.slice(triggerStart, call)
   const persistentUpgrade = deploy.indexOf(
     '# Upgrade atomic și fsync al recovery gate-ului de boot', call)
-  assert.ok(mainStart >= 0 && call > mainStart && persistentUpgrade > call,
+  assert.ok(mainStart >= 0 && call > mainStart && triggerStart > mainStart && persistentUpgrade > call,
     'recovery-ul one-shot trebuie să se încheie înaintea upgrade-ului persistent')
+  assert.match(replayTrigger,
+    /constructor-activation\.journal[\s\S]*constructor-unit-migration\.pending[\s\S]*CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL/,
+  'un reboot după unlink-ul jurnalului trebuie să reintre fail-closed prin blockerul persistent')
+})
+
+test('blockerul applied este replay-idempotent și refuză aliasuri, ACL ori conținut diferit', () => {
+  const deploy = read('deploy/deploy.sh')
+  const validator = shellFunction(deploy, 'validate_compatible_activation_blocker')
+  assert.match(validator, /\[ -f "\$blocker" \] && \[ ! -L "\$blocker" \]/)
+  assert.match(validator, /stat -Lc '%u:%g:%a:%h'[\s\S]*0:0:600:1/)
+  assert.match(validator, /wc -l[\s\S]*-eq 1[\s\S]*grep -qx 'schema=1'/)
+  const harnessValidator = validator.replace(
+    "= '0:0:600:1'",
+    `= '${process.getuid()}:${process.getgid()}:600:1'`)
+  assert.ok(harnessValidator.includes(
+    `= '${process.getuid()}:${process.getgid()}:600:1'`),
+  'harnessul trebuie să adapteze numai ownerul așteptat la runnerul curent')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-activation-blocker-'))
+  const blocker = join(sandbox, 'constructor-unit-migration.pending')
+  const alias = join(sandbox, 'blocker.alias')
+  const hardlink = join(sandbox, 'blocker.hardlink')
+  const harness = `set -euo pipefail
+${harnessValidator}
+blocker=$1
+alias=$2
+hardlink=$3
+printf 'schema=1\\n' > "$blocker"
+chmod 0600 "$blocker"
+validate_compatible_activation_blocker "$blocker"
+validate_compatible_activation_blocker "$blocker"
+ln -s "$blocker" "$alias"
+if validate_compatible_activation_blocker "$alias"; then exit 71; fi
+chmod 0640 "$blocker"
+if validate_compatible_activation_blocker "$blocker"; then exit 72; fi
+chmod 0600 "$blocker"
+printf 'schema=2\\n' > "$blocker"
+if validate_compatible_activation_blocker "$blocker"; then exit 73; fi
+printf 'schema=1\\n' > "$blocker"
+ln "$blocker" "$hardlink"
+if validate_compatible_activation_blocker "$blocker"; then exit 74; fi`
+  const result = spawnSync(bashExecutable, ['-c', harness, 'activation-blocker', blocker, alias, hardlink], {
+    encoding: 'utf8',
+  })
+  try {
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
 })

@@ -1765,16 +1765,25 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=1e187e2d32e67c76ae77903033d77c5974f1b86ef479c7330f0ca5678b17cab8
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=7b22709b8bde7bc7f0f96658dfa4bf7d2acc9437fb5c67f984802fe9bd8b27bb
+
+validate_compatible_activation_blocker() {
+  local blocker=$1
+  [ -f "$blocker" ] && [ ! -L "$blocker" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$blocker")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$blocker")" -eq 1 ] \
+    && grep -qx 'schema=1' "$blocker"
+}
 
 recover_runtime_activation_before_upgrade() {
   local live_helper=$ROOT/bin/runtime-config-cutover.sh
   local live_compose=$ROOT/config/compose.production.yml
   local candidate_helper=$BUNDLE_DIR/lib/runtime-config-cutover.sh
   local activation_journal=$RUNTIME_ROOT/constructor-activation.journal
+  local unit_migration_pending=$RUNTIME_ROOT/constructor-unit-migration.pending
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
   local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal
-  local live_sha candidate_sha recovery_helper activation_operation=''
+  local live_sha candidate_sha recovery_helper activation_operation='' activation_root='' activation_identity=''
   local temporary='' status=0 cleanup_failed=0 use_compatible_activation_resume=0
   local incompatible activation_candidate
 
@@ -1792,6 +1801,9 @@ recover_runtime_activation_before_upgrade() {
     for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; do
       [ ! -e "$incompatible" ] && [ ! -L "$incompatible" ] || return 1
     done
+    if [ -e "$unit_migration_pending" ] || [ -L "$unit_migration_pending" ]; then
+      validate_compatible_activation_blocker "$unit_migration_pending" || return 1
+    fi
     [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
       && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
       || return 1
@@ -1803,6 +1815,12 @@ recover_runtime_activation_before_upgrade() {
           test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))) |
       .operation
     ' "$activation_journal") || return 1
+    activation_root=$(jq -er '.activationRoot' "$activation_journal") || return 1
+    [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+      && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+      || return 1
+    activation_identity=$(stat -Lc '%d:%i' "$activation_root") || return 1
     [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
     candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
     [ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] || return 1
@@ -1824,18 +1842,44 @@ recover_runtime_activation_before_upgrade() {
   if [ "$status" = 0 ] && [ "$use_compatible_activation_resume" = 1 ]; then
     if KELION_CUTOVER_LOCK_HELD=1 \
       KELION_ACTIVATION_RESUME_OPERATION="$activation_operation" \
-      bash "$recovery_helper" --recover-only "$live_compose"; then
-      if [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+      bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+        && jq -e --arg operation "$activation_operation" --arg activationRoot "$activation_root" '
+          .schema == 2 and .phase == "applied" and .operation == $operation and
+          .activationRoot == $activationRoot
+        ' "$activation_journal" >/dev/null \
         && [ ! -e /run/kelion/constructor-activation.pending ] \
-        && [ ! -L /run/kelion/constructor-activation.pending ]; then
-        if KELION_CUTOVER_LOCK_HELD=1 \
-          bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
-          status=0
-        else
-          status=$?
-        fi
-      else
-        status=1
+        && [ ! -L /run/kelion/constructor-activation.pending ] \
+        && [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+        && [ ! -L /run/kelion/runtime-config-recovery.ready ] \
+        && validate_compatible_activation_blocker "$unit_migration_pending" \
+        && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+        && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+        && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+        && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+        || status=1
+      if [ "$status" = 0 ]; then
+        validate_compatible_activation_blocker "$unit_migration_pending" || status=1
+        fsync_release_artifact "$unit_migration_pending" file || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -f -- "$activation_journal" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+          && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+          && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+          && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+          && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+          || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -rf --one-file-system -- "$activation_root" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+        [ ! -e "$activation_root" ] && [ ! -L "$activation_root" ] || status=1
       fi
     else
       status=$?
@@ -1873,6 +1917,7 @@ recover_runtime_activation_before_upgrade() {
 
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
+  || [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
   recover_runtime_activation_before_upgrade \
     || die 'recovery-ul runtime/activare pre-upgrade a eșuat fail-closed'
