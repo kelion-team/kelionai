@@ -14,6 +14,7 @@ readonly PRIVATE_AI_CONFIG="/etc/private-ai"
 readonly PRIVATE_AI_BIN="/opt/private-ai/bin"
 readonly PRIVATE_AI_SOURCE="/opt/private-ai/src/llama.cpp"
 readonly PRIVATE_AI_MARKER="${PRIVATE_AI_CONFIG}/.installer-id"
+readonly PRIVATE_AI_COMPLETE="${PRIVATE_AI_CONFIG}/.install-complete"
 readonly INSTALLER_ID="private-ai-contabo-v1"
 readonly LLAMA_PORT="24080"
 readonly OPENCODE_PORT="24096"
@@ -35,10 +36,11 @@ fail() {
 }
 
 on_error() {
-  local line_no=$1
-  printf '[private-ai] Installation failed near line %s. Existing unrelated services were not changed.\n' "$line_no" >&2
+  local line_no=$1 exit_status=$2
+  printf '[private-ai] Installation failed near line %s with exit status %s. Existing unrelated services were not changed.\n' \
+    "$line_no" "$exit_status" >&2
 }
-trap 'on_error "$LINENO"' ERR
+trap 'on_error "$LINENO" "$?"' ERR
 
 require_root() {
   [ "$(id -u)" -eq 0 ] || fail "Run this installer as root."
@@ -77,12 +79,22 @@ check_preflight() {
       || fail "Refusing to reuse the existing group $PRIVATE_AI_GROUP without an installer marker."
   fi
 
-  local memory_kb available_mb
+  local memory_kb available_mb required_available_mb model_cache_mb
   memory_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
   [ "${memory_kb:-0}" -ge 83886080 ] || fail "At least 80 GB RAM is required."
 
   available_mb=$(df -Pm / | awk 'NR == 2 {print $4}')
-  [ "${available_mb:-0}" -ge 71680 ] || fail "At least 70 GB free disk space is required."
+  required_available_mb=71680
+  if [ -e "$PRIVATE_AI_MARKER" ] && [ -d "$PRIVATE_AI_MODEL_CACHE" ]; then
+    model_cache_mb=$(du -sm "$PRIVATE_AI_MODEL_CACHE" 2>/dev/null | awk '{print $1}')
+    if [ "${model_cache_mb:-0}" -ge 18432 ]; then
+      # A resumable model cache already exists. Requiring the original 70 GB
+      # again would prevent an idempotent recovery after the large download.
+      required_available_mb=20480
+    fi
+  fi
+  [ "${available_mb:-0}" -ge "$required_available_mb" ] \
+    || fail "At least ${required_available_mb} MB free disk space is required."
 
   if command -v ss >/dev/null 2>&1; then
     if ss -ltnH | awk '{print $4}' | grep -Eq "(^|:)${LLAMA_PORT}$" && ! systemctl is-active --quiet private-ai-llm.service 2>/dev/null; then
@@ -342,7 +354,7 @@ EOF
 download_and_test_model() {
   if [ ! -f "${PRIVATE_AI_STATE}/model.ready" ]; then
     log "Downloading the local model. This is about 21 GB and can take a while."
-    timeout 7200 runuser -u "$PRIVATE_AI_USER" -- env -i \
+    timeout --signal=TERM --kill-after=2m 21600 runuser -u "$PRIVATE_AI_USER" -- env -i \
       HOME="$PRIVATE_AI_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin \
       XDG_CACHE_HOME="$PRIVATE_AI_CACHE" \
@@ -582,6 +594,81 @@ EOF
   printf '[private-ai] No paid AI API key is configured.\n'
 }
 
+check_resume_preflight() {
+  require_root
+  [ -f "$PRIVATE_AI_MARKER" ] && [ ! -L "$PRIVATE_AI_MARKER" ] \
+    || fail "The private AI ownership marker is missing or unsafe."
+  [ "$(cat "$PRIVATE_AI_MARKER")" = "$INSTALLER_ID" ] \
+    || fail "The private AI ownership marker is not recognized."
+  [ "$(stat -c '%U:%G:%a' "$PRIVATE_AI_MARKER")" = 'root:root:600' ] \
+    || fail "The private AI ownership marker metadata is invalid."
+  id -u "$PRIVATE_AI_USER" >/dev/null 2>&1 \
+    || fail "The dedicated private AI account is missing."
+  getent group "$PRIVATE_AI_GROUP" >/dev/null \
+    || fail "The dedicated private AI group is missing."
+
+  local required_dir required_file required_bin
+  for required_dir in \
+    "$PRIVATE_AI_ROOT" "$PRIVATE_AI_HOME" "$PRIVATE_AI_WORKSPACE" \
+    "$PRIVATE_AI_CACHE" "$PRIVATE_AI_MODEL_CACHE" "$PRIVATE_AI_STATE" \
+    "$PRIVATE_AI_CONFIG" "$PRIVATE_AI_BIN"; do
+    [ -d "$required_dir" ] && [ ! -L "$required_dir" ] \
+      || fail "Unsafe or missing resume directory: $required_dir"
+  done
+  for required_file in \
+    "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" \
+    "${PRIVATE_AI_HOME}/.config/opencode/instructions.md" \
+    "${PRIVATE_AI_CONFIG}/opencode.env"; do
+    [ -f "$required_file" ] && [ ! -L "$required_file" ] \
+      || fail "Unsafe or missing resume configuration: $required_file"
+  done
+  for required_bin in \
+    "${PRIVATE_AI_BIN}/llama-cli" "${PRIVATE_AI_BIN}/llama-server" \
+    "${PRIVATE_AI_BIN}/opencode"; do
+    [ -x "$required_bin" ] && [ ! -L "$required_bin" ] \
+      || fail "Unsafe or missing resume executable: $required_bin"
+    [ "$(stat -c '%U:%G' "$required_bin")" = 'root:root' ] \
+      || fail "Unexpected executable owner: $required_bin"
+  done
+}
+
+publish_install_receipt() {
+  local receipt_tmp
+  receipt_tmp=$(mktemp "${PRIVATE_AI_CONFIG}/.install-complete.XXXXXX")
+  printf '%s\n' \
+    "installer_id=${INSTALLER_ID}" \
+    "completed_at=$(date -u +%FT%TZ)" \
+    "llama_cpp_ref=${LLAMA_CPP_REF}" \
+    "opencode_version=${OPENCODE_VERSION}" \
+    "model_repo=${MODEL_REPO}" \
+    "model_quant=${MODEL_QUANT}" \
+    > "$receipt_tmp"
+  chown root:root "$receipt_tmp"
+  chmod 0600 "$receipt_tmp"
+  mv -f -- "$receipt_tmp" "$PRIVATE_AI_COMPLETE"
+}
+
+resume_model_install() {
+  check_resume_preflight
+  if [ -e "$PRIVATE_AI_COMPLETE" ]; then
+    [ -f "$PRIVATE_AI_COMPLETE" ] && [ ! -L "$PRIVATE_AI_COMPLETE" ] \
+      || fail "The existing completion receipt is unsafe."
+    [ "$(stat -c '%U:%G:%a' "$PRIVATE_AI_COMPLETE")" = 'root:root:600' ] \
+      || fail "The existing completion receipt metadata is invalid."
+    rm -f -- "$PRIVATE_AI_COMPLETE"
+  fi
+  log "Resuming the model download and smoke test from the existing cache."
+  download_and_test_model
+  log "Caching the OpenCode local provider."
+  warm_opencode_provider
+  log "Creating dedicated systemd services."
+  write_systemd_units
+  log "Starting and verifying the private agent."
+  start_and_verify
+  publish_install_receipt
+  log "Resumed installation completed successfully."
+}
+
 main() {
   require_root
   log "Running read-only preflight checks."
@@ -604,7 +691,12 @@ main() {
   write_systemd_units
   log "Starting and verifying the private agent."
   start_and_verify
+  publish_install_receipt
   log "Installation completed successfully."
 }
 
-main "$@"
+case "${1:-}" in
+  '') main ;;
+  --resume-model) resume_model_install ;;
+  *) fail "Unsupported installer argument: $1" ;;
+esac
