@@ -361,6 +361,7 @@ download_and_test_model() {
       HF_HOME="$PRIVATE_AI_MODEL_CACHE" \
       "${PRIVATE_AI_BIN}/llama-cli" \
       -hf "${MODEL_REPO}:${MODEL_QUANT}" \
+      --single-turn \
       --ctx-size 2048 \
       --threads "$(nproc)" \
       --n-predict 4 \

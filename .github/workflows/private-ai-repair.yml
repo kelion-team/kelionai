@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: private-ai-install-repair
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   resume-install:
@@ -75,9 +75,20 @@ jobs:
 
           state=$(systemctl show private-ai-install-resume.service -p ActiveState --value 2>/dev/null || true)
           if [ "$state" = activating ] || [ "$state" = active ]; then
-            rm -f -- "$upload"
-            printf 'DETACHED_INSTALL_ALREADY_RUNNING=yes STATE=%s\n' "$state"
-            exit 0
+            current_exec=$(systemctl show private-ai-install-resume.service -p ExecStart --value 2>/dev/null || true)
+            if [[ "$current_exec" == *"/opt/private-ai/installer/${expected}.sh --resume-model"* ]]; then
+              rm -f -- "$upload"
+              printf 'DETACHED_INSTALL_ALREADY_RUNNING=yes STATE=%s SHA256=%s\n' "$state" "$expected"
+              exit 0
+            fi
+            printf 'REPLACING_STALE_DETACHED_INSTALL=yes STATE=%s\n' "$state"
+            systemctl stop private-ai-install-resume.service
+            state=$(systemctl show private-ai-install-resume.service -p ActiveState --value 2>/dev/null || true)
+            [ "$state" = inactive ] || [ "$state" = failed ]
+            if pgrep -af '/opt/private-ai/bin/[l]lama-cli .*Qwen3[.]6-35B-A3B-GGUF' >/dev/null; then
+              printf 'STALE_LLAMA_PROCESS_SURVIVED_SERVICE_STOP=yes\n' >&2
+              exit 78
+            fi
           fi
 
           printf 'REPAIR_MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
