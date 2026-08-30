@@ -1,43 +1,51 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T10:00:00Z`
+Actualizat: `2026-08-30T06:33:28Z`
 
 ## Stare verificată
 
-- `origin/master` și producția rulează commitul
-  `2c60f84d63fc6353b4e8b614fbb29b4fe110160f`.
-- `/readyz` este verde pentru configurare, bază de date, migrații,
-  browser-worker și converter-worker. `/api/release-proof` confirmă
-  `candidate:false` și `sideEffectsActive:true`.
-- Workflow-ul `provision-production-secrets` #216 a terminat cu succes și a
-  repornit backendul cu secretul OpenAI din mediul GitHub `production`.
-- O probă autentificată în interfața live a trimis mesajul până la backend,
-  însă răspunsul OpenAI a fost refuzat cu HTTP `429`; interfața a afișat
-  `Încearcă din nou în câteva secunde.`. Ruta admin pentru chei confirmă
-  `fail_429`, nu `not_configured` și nu `401`.
-- Proba de sănătate curentă folosește doar opt tokeni de ieșire. Modelele cu
-  raționament pot întoarce un răspuns 2xx `incomplete`, pe care versiunea live
-  îl reclasifică fals drept `400 bad_request`; astfel nu distinge codul real
-  al refuzului `429`.
-- Cheia expusă anterior trebuie revocată după proba finală. Copia criptată din
-  `Environment secrets` există; copia plaintext din `Environment variables`
-  nu este considerată eliminată până la o confirmare GitHub verificabilă.
+- `origin/master` este `056c740cc6887158e35e78e860200460a3594ee0`.
+  Release run `33296250851`, job `99216341157`, s-a oprit înainte de
+  point-of-no-return; dovada publică a rămas la
+  `ff6d2e30991b4f35adaf68f4b3a88ada8504d350`.
+- Bootstrap-ul GC a trecut. Eșecul imediat următor a fost
+  `A dependency job for kelion-codex-worker.service failed`, după crearea
+  linkurilor timerelor. `kelion-codex-worker.service` are dependență hard de
+  `kelion-constructor-sync.service`; logul release-ului nu conține însă eroarea
+  leaf a serviciului sync, deci aceasta rămâne necunoscută și nu este declarată
+  reparată.
+- Același eșec de dependență apare și în activarea inițială
+  `33254987691`, job `99107013438`. Mesajul GC care a urmat a fost secundar:
+  activarea a rămas jurnalizată după roll-forward/rollback incomplet.
+- Corecția locală de pe `chore/recover-activation-quiesced-20260830` reia
+  explicit numai activarea worker/publisher acceptată de callerul dublu
+  pin-uit. Helperul publică durabil faza `applied`, apoi
+  `constructor-unit-migration.pending`, și abia după aceea retrage pendingul
+  activării; nu execută `start` sau `enable` în bootstrap.
+- Callerul validează și persistă din nou blockerul root-only exact înainte de
+  unlink, persistă absența jurnalului înainte să șteargă snapshotul și persistă
+  din nou directorul runtime după ștergere. Blockerul rămâne fail-closed și este
+  consumat ulterior numai de cutover-ul strict cu owner și dovadă de generație.
+- Retry-ul pre-upgrade este armat și când a rămas numai blockerul persistent,
+  inclusiv după crash între unlink-ul jurnalului și curățarea snapshotului.
+- Schimbarea nu repară și nu validează credențialele OpenAI/Codex și nu
+  identifică eroarea leaf a sync-ului. Aceste probe rămân separate.
 
 ## Următorul pas sigur
 
-1. Publică schimbarea minimă care ridică bugetul probei la 64 de tokeni și
-   expune numai `error.code` dintr-o listă închisă pentru administrator.
-2. După toate porțile și merge prin PR, deployează exact SHA-ul din `master`.
-3. Citește `providerCode`: pentru `rate_limit_exceeded` redu ritmul și repetă o
-   singură probă; pentru un cod de credit/spend/usage, accesul API trebuie
-   restabilit în proiectul OpenAI înainte ca un alt deploy să poată face chatul
-   funcțional.
-4. Confirmă succesul numai printr-un răspuns text real și o sesiune Realtime
-   reală în browser, apoi elimină variabila plaintext și rotește cheia expusă.
+1. Încheie porțile locale pentru helper, caller, fault-cuts și hashurile pin-uite;
+   orice lipsă de dependență locală se raportează separat, nu ca succes.
+2. Inspectează diff-ul și publică un PR din ramura `chore/*`; fără push direct
+   în `master` și fără deploy înainte ca toate checkurile obligatorii să fie verzi.
+3. După merge, rulează release-ul pentru noul SHA și confirmă întâi consumarea
+   fail-closed a jurnalului/blockerului, apoi extrage diagnosticul leaf al
+   `kelion-constructor-sync.service` dacă dependency job mai eșuează.
+4. Declară Constructorul funcțional numai după release proof, starea exactă a
+   timerelor/serviciilor și o probă reală a chatului/workerului.
 
 ## Legături canonice
 
-- Workflow secret production: <https://github.com/kelion-team/kelionai/actions/runs/33299775151>
-- Workflow release: <https://github.com/kelion-team/kelionai/actions/workflows/release.yml>
+- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
+- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33296250851>
+- Job release: <https://github.com/kelion-team/kelionai/actions/runs/33296250851/job/99216341157>
 - Versiune live: <https://kelionai.app/api/release-proof>
-- Diagnostic OpenAI admin: <https://kelionai.app/api/admin/brain-credit>
