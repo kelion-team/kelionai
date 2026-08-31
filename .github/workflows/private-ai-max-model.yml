@@ -1,0 +1,222 @@
+name: private-ai-max-model
+
+on:
+  push:
+    branches:
+      - ops/private-ai-install-20260830
+    paths:
+      - .github/private-ai/upgrade-private-ai-max-model.sh
+      - .github/workflows/private-ai-max-model.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-ai-constructor-finalize
+  cancel-in-progress: false
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validează instalatorul modelului maxim
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          bash -n .github/private-ai/upgrade-private-ai-max-model.sh
+          grep -Fqx "readonly MODEL_REPO='unsloth/Qwen3.5-122B-A10B-GGUF'" \
+            .github/private-ai/upgrade-private-ai-max-model.sh
+          grep -Fqx "readonly MODEL_REVISION='a97b483a9f8cad9788776aa0112a2c63bf349e9e'" \
+            .github/private-ai/upgrade-private-ai-max-model.sh
+          grep -Fqx "readonly MODEL_TOTAL_BYTES='76536964608'" \
+            .github/private-ai/upgrade-private-ai-max-model.sh
+          [ "$(grep -cE "^[[:space:]]+'[0-9a-f]{64}'$" \
+            .github/private-ai/upgrade-private-ai-max-model.sh)" -eq 3 ]
+          ! grep -Ein '(BEGIN (RSA|OPENSSH) PRIVATE KEY|ghp_[A-Za-z0-9]|sk-[A-Za-z0-9])' \
+            .github/private-ai/upgrade-private-ai-max-model.sh
+
+  install-on-contabo:
+    needs: validate-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Instalează, activează și probează Qwen3.5 122B
+        shell: bash
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+
+          installer=.github/private-ai/upgrade-private-ai-max-model.sh
+          bash -n "$installer"
+          installer_sha=$(sha256sum "$installer" | awk '{print $1}')
+          [[ "$installer_sha" =~ ^[0-9a-f]{64}$ ]]
+
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() {
+            rm -f -- "$key_file" "$known_hosts"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=8
+          )
+
+          remote_candidate="/root/private-ai-max-model.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.sh"
+          scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_candidate"
+          proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_candidate" "$installer_sha" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          candidate=$1
+          expected_sha=$2
+          [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+          [ -f "$candidate" ] && [ ! -L "$candidate" ]
+          [ "$(stat -Lc '%u:%g:%h' "$candidate")" = '0:0:1' ]
+          [ "$(sha256sum "$candidate" | awk '{print $1}')" = "$expected_sha" ]
+
+          durable_parent=/root/private-ai-max-model
+          durable_root=$durable_parent/$expected_sha
+          durable_script=$durable_root/upgrade.sh
+          unit=/etc/systemd/system/private-ai-max-model-upgrade.service
+          install -d -o root -g root -m 0700 "$durable_parent"
+          [ -d "$durable_parent" ] && [ ! -L "$durable_parent" ]
+          [ "$(stat -Lc '%u:%g:%a' "$durable_parent")" = '0:0:700' ]
+
+          if systemctl is-active --quiet private-ai-max-model-upgrade.service; then
+            [ -f "$durable_script" ] && [ ! -L "$durable_script" ]
+            [ "$(sha256sum "$durable_script" | awk '{print $1}')" = "$expected_sha" ]
+            rm -f -- "$candidate"
+          else
+            systemctl stop private-ai-max-model-upgrade.service >/dev/null 2>&1 || true
+            if [ -e "$durable_root" ] || [ -L "$durable_root" ]; then
+              [ -d "$durable_root" ] && [ ! -L "$durable_root" ]
+              rm -rf --one-file-system -- "$durable_root"
+            fi
+            install -d -o root -g root -m 0700 "$durable_root"
+            install -o root -g root -m 0700 "$candidate" "$durable_script"
+            rm -f -- "$candidate"
+            sync -f "$durable_script"
+
+            unit_candidate=$(mktemp /etc/systemd/system/.private-ai-max-model-upgrade.XXXXXX)
+            cat > "$unit_candidate" <<UNIT
+          [Unit]
+          Description=Kelion private AI maximum stable model upgrade
+          After=network-online.target private-ai-constructor-finalize.service
+          Wants=network-online.target
+          StartLimitIntervalSec=3600
+          StartLimitBurst=3
+
+          [Service]
+          Type=oneshot
+          WorkingDirectory=$durable_root
+          ExecStart=/usr/bin/bash $durable_script
+          ExecStartPost=/usr/bin/systemctl disable private-ai-max-model-upgrade.service
+          Restart=on-failure
+          RestartSec=20s
+          TimeoutStartSec=21600s
+          TimeoutStopSec=600s
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+            chown root:root "$unit_candidate"
+            chmod 0644 "$unit_candidate"
+            mv -f -- "$unit_candidate" "$unit"
+            sync -f "$unit"
+            systemctl daemon-reload
+            systemd-analyze verify "$unit"
+            systemctl enable private-ai-max-model-upgrade.service >/dev/null
+            systemctl reset-failed private-ai-max-model-upgrade.service >/dev/null 2>&1 || true
+            systemctl start --no-block private-ai-max-model-upgrade.service
+          fi
+
+          deadline=$((SECONDS + 19500))
+          success_invocation=''
+          while :; do
+            active=$(systemctl show private-ai-max-model-upgrade.service -p ActiveState --value)
+            result=$(systemctl show private-ai-max-model-upgrade.service -p Result --value)
+            invocation=$(systemctl show private-ai-max-model-upgrade.service -p InvocationID --value)
+            if [ "$active" = inactive ] && [ "$result" = success ] \
+              && [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+              success_invocation=$invocation
+              break
+            fi
+            if [ "$active" = failed ]; then
+              journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
+                --lines=300 >&2
+              exit 1
+            fi
+            [ "$SECONDS" -lt "$deadline" ] || {
+              journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
+                --lines=300 >&2
+              exit 1
+            }
+            sleep 10
+          done
+
+          [ -f /etc/private-ai/.max-model-complete ]
+          [ ! -L /etc/private-ai/.max-model-complete ]
+          grep -qx 'model=llama.cpp/qwen3.5-122b-a10b-local' \
+            /etc/private-ai/.max-model-complete
+          systemctl is-active --quiet private-ai-llm.service
+          systemctl is-active --quiet private-ai-web.service
+          systemctl is-active --quiet kelion-codex-worker.timer
+          journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$success_invocation"
+          REMOTE
+          )
+
+          printf '%s\n' "$proof"
+          grep -qx 'MODEL_ID=llama.cpp/qwen3.5-122b-a10b-local' <<<"$proof"
+          grep -qx 'MODEL_REPO=unsloth/Qwen3.5-122B-A10B-GGUF' <<<"$proof"
+          grep -qx 'MODEL_REVISION=a97b483a9f8cad9788776aa0112a2c63bf349e9e' <<<"$proof"
+          grep -qx 'MODEL_QUANT=Q4_K_M' <<<"$proof"
+          grep -qx 'MODEL_TOTAL_BYTES=76536964608' <<<"$proof"
+          grep -qx 'MODEL_CONTEXT=16384' <<<"$proof"
+          grep -Eq '^VPS_MEMORY_TOTAL_BYTES=[0-9]+$' <<<"$proof"
+          grep -Eq '^VPS_CPU_THREADS=[0-9]+$' <<<"$proof"
+          grep -qx 'LLAMA_HEALTH=ok' <<<"$proof"
+          grep -qx 'LLAMA_INFERENCE=passed' <<<"$proof"
+          grep -qx 'OPENCODE_PROVIDER=passed' <<<"$proof"
+          grep -qx 'WORKER_SELF_TEST=passed' <<<"$proof"
+          grep -qx 'MAX_MODEL_INSTALLED=yes' <<<"$proof"
+          {
+            printf '%s\n' '### Qwen3.5 122B — dovadă live Contabo'
+            printf '%s\n' '```text'
+            printf '%s\n' "$proof"
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
