@@ -1291,7 +1291,12 @@ async function executorSmoke() {
     } finally {
       if (executorAttempted && existsSync(smokeStateDir)) restoreJobOwnership(smokeStateDir, ownershipScope)
     }
-    if (!runSucceeded(result)) fail(`Smoke-ul OpenCode a eșuat cu codul ${result.code}`)
+    if (!runSucceeded(result)) {
+      const diagnostic = tailText(logPath, 8 * 1024)
+        .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '?')
+      fail(`Smoke-ul OpenCode a eșuat cu codul ${result.code}; jurnal sigur:\n${diagnostic}`)
+    }
     if (!existsSync(proofPath) || readFileSync(proofPath, 'utf8') !== `${nonce}\n`) {
       fail('Smoke-ul OpenCode nu a produs editarea deterministă cerută')
     }
