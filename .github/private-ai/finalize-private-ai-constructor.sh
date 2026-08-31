@@ -340,6 +340,8 @@ rollback() {
     systemctl daemon-reload >/dev/null 2>&1 || true
     restore_unit_state private-ai-web.service "$WEB_STATE"
     restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE"
+    restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE"
+    restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE"
   fi
   printf 'PRIVATE_AI_FINALIZE_ROLLED_BACK=yes EXIT=%s\n' "$status" >&2
   exit "$status"
@@ -430,9 +432,17 @@ publisher_source_commit=$(runuser -u kelion-publisher -- env -i \
 
 validate_rootless_gate_image() {
   local user=$1 home=$2 runtime=$3 digest revision
-  [ -d "$runtime" ] && [ ! -L "$runtime" ] \
-    && [ "$(stat -Lc '%U:%a' "$runtime")" = "$user:700" ] \
-    || fail "unsafe rootless Podman runtime for $user"
+  if [ -e "$runtime" ] || [ -L "$runtime" ]; then
+    [ -d "$runtime" ] && [ ! -L "$runtime" ] \
+      || fail "unsafe rootless Podman runtime type for $user"
+  fi
+  # RuntimeDirectory for a completed oneshot may be removed or later recreated
+  # with deployment-era metadata.  The publication lock held above proves that
+  # no gate consumer is active, so establish the canonical private directory
+  # before asking rootless Podman to use it.
+  install -d -o "$user" -g "$user" -m 0700 -- "$runtime"
+  [ "$(stat -Lc '%U:%G:%a' "$runtime")" = "$user:$user:700" ] \
+    || fail "unsafe rootless Podman runtime metadata for $user"
   digest=$(cd "$runtime" && runuser -u "$user" -- env -i \
     HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
     podman image inspect --format '{{.Digest}}' "$EXPECTED_GATE_IMAGE")
@@ -446,8 +456,15 @@ validate_rootless_gate_image() {
     || fail "gate image revision mismatch for $user"
 }
 
+# A triggered publisher oneshot owns RuntimeDirectory=kelion-publisher and
+# removes it again when the oneshot exits.  Quiesce both publication timers
+# while inspecting their pinned rootless gate images, then restore the exact
+# preflight states.  The publication lock prevents an already-running job.
+systemctl stop kelion-constructor-publisher.timer kelion-constructor-release.timer
 validate_rootless_gate_image kelion-codex /var/lib/kelion-codex /run/kelion-codex
 validate_rootless_gate_image kelion-publisher /var/lib/kelion-publisher /run/kelion-publisher
+restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE"
+restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE"
 
 deploy_quiesce_journal=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
@@ -876,14 +893,10 @@ grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke
 printf '%s\n' "$transport_smoke"
 printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
 
-[ "$(unit_state kelion-constructor-publisher.timer)" = "$PUBLISHER_TIMER_STATE" ] \
-  || fail 'publisher timer state changed'
-[ "$(unit_state kelion-constructor-release.timer)" = "$RELEASE_TIMER_STATE" ] \
-  || fail 'release timer state changed'
-[ "$PUBLISHER_TIMER_STATE" = enabled:active ] \
-  || fail 'publisher timer was not enabled and active before finalization'
-[ "$RELEASE_TIMER_STATE" = enabled:active ] \
-  || fail 'release timer was not enabled and active before finalization'
+[ "$(unit_state kelion-constructor-publisher.timer)" = enabled:active ] \
+  || fail 'publisher timer is not enabled and active after gate recovery'
+[ "$(unit_state kelion-constructor-release.timer)" = enabled:active ] \
+  || fail 'release timer is not enabled and active after gate recovery'
 
 require_regular /etc/kelion/codex-worker.enabled root:root:444
 require_regular /run/kelion/runtime-config-recovery.ready root:root:444
