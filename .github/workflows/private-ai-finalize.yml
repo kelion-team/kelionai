@@ -7,6 +7,7 @@ on:
     paths:
       - deploy/codex-worker.mjs
       - deploy/constructor-sync-worker.sh
+      - deploy/systemd/kelion-constructor-sync.service
       - deploy/systemd/kelion-codex-worker.service
       - deploy/sudoers/kelion-codex-full-access
       - deploy/opencode-constructor.json
@@ -67,6 +68,12 @@ jobs:
           node --test .github/private-ai/finalize-private-ai-constructor.test.mjs
           bash -n deploy/lib/runtime-config-cutover.sh
           bash -n deploy/constructor-sync-worker.sh
+          grep -qx 'User=kelion-codex' deploy/systemd/kelion-constructor-sync.service
+          grep -qx 'Group=kelion-codex' deploy/systemd/kelion-constructor-sync.service
+          grep -qx 'NoNewPrivileges=true' deploy/systemd/kelion-constructor-sync.service
+          grep -qx 'RestrictSUIDSGID=true' deploy/systemd/kelion-constructor-sync.service
+          grep -qx 'CapabilityBoundingSet=' deploy/systemd/kelion-constructor-sync.service
+          grep -qx 'AmbientCapabilities=' deploy/systemd/kelion-constructor-sync.service
           node --check deploy/codex-worker.mjs
           CODEX_WORKER_EXECUTOR=opencode node deploy/codex-worker.mjs --self-test \
             | grep -qx 'codex-worker self-test: TRECE'
@@ -123,6 +130,7 @@ jobs:
           node --check deploy/codex-worker.mjs
           expected_worker_sha=$(sha256sum deploy/codex-worker.mjs | awk '{print $1}')
           expected_sync_worker_sha=$(sha256sum deploy/constructor-sync-worker.sh | awk '{print $1}')
+          expected_sync_unit_sha=$(sha256sum deploy/systemd/kelion-constructor-sync.service | awk '{print $1}')
           expected_worker_unit_sha=$(sha256sum deploy/systemd/kelion-codex-worker.service | awk '{print $1}')
           expected_sudoers_sha=$(sha256sum deploy/sudoers/kelion-codex-full-access | awk '{print $1}')
           expected_config_sha=$(sha256sum deploy/opencode-constructor.json | awk '{print $1}')
@@ -157,6 +165,8 @@ jobs:
             "$bundle_root/deploy/opencode-constructor-instructions.md"
           install -m 0600 deploy/systemd/kelion-codex-worker.service \
             "$bundle_root/deploy/systemd/kelion-codex-worker.service"
+          install -m 0600 deploy/systemd/kelion-constructor-sync.service \
+            "$bundle_root/deploy/systemd/kelion-constructor-sync.service"
           install -m 0600 deploy/systemd/private-ai-web-full-access.conf \
             "$bundle_root/deploy/systemd/private-ai-web-full-access.conf"
           install -m 0600 deploy/sudoers/kelion-codex-full-access \
@@ -177,6 +187,7 @@ jobs:
               deploy/opencode-constructor.json \
               deploy/sudoers/kelion-codex-full-access \
               deploy/systemd/private-ai-web-full-access.conf \
+              deploy/systemd/kelion-constructor-sync.service \
               deploy/systemd/kelion-codex-worker.service \
               > SHA256SUMS
           )
@@ -192,6 +203,7 @@ jobs:
             deploy/opencode-constructor.json \
             deploy/sudoers/kelion-codex-full-access \
             deploy/systemd/private-ai-web-full-access.conf \
+            deploy/systemd/kelion-constructor-sync.service \
             deploy/systemd/kelion-codex-worker.service \
             SHA256SUMS
           bundle_sha=$(sha256sum "$bundle" | awk '{print $1}')
@@ -317,6 +329,7 @@ jobs:
           deploy/opencode-constructor.json
           deploy/sudoers/kelion-codex-full-access
           deploy/systemd/private-ai-web-full-access.conf
+          deploy/systemd/kelion-constructor-sync.service
           deploy/systemd/kelion-codex-worker.service
           SHA256SUMS
           ENTRIES
@@ -427,6 +440,8 @@ jobs:
             "$(sha256sum "$durable_root/deploy/codex-worker.mjs" | awk '{print $1}')" ]
           [ "$(sha256sum /opt/kelion-constructor/constructor-sync-worker.sh | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/constructor-sync-worker.sh" | awk '{print $1}')" ]
+          [ "$(sha256sum /etc/systemd/system/kelion-constructor-sync.service | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/systemd/kelion-constructor-sync.service" | awk '{print $1}')" ]
           [ "$(sha256sum /etc/systemd/system/kelion-codex-worker.service | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/systemd/kelion-codex-worker.service" | awk '{print $1}')" ]
           [ "$(sha256sum /etc/sudoers.d/kelion-constructor-full-access | awk '{print $1}')" = \
@@ -441,11 +456,16 @@ jobs:
           [ "${#receipt_lines[@]}" -eq 28 ]
           [ "${receipt_lines[0]}" = schema=3 ]
           journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$success_invocation"
+          mem_total_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+          [[ "$mem_total_kib" =~ ^[0-9]+$ ]]
+          printf 'VPS_MEMORY_TOTAL_BYTES=%s\n' "$((mem_total_kib * 1024))"
+          printf 'VPS_CPU_THREADS=%s\n' "$(nproc)"
           REMOTE
           )
           printf '%s\n' "$proof"
           grep -qx "WORKER_INSTALLED_SHA256=$expected_worker_sha" <<<"$proof"
           grep -qx "SYNC_WORKER_INSTALLED_SHA256=$expected_sync_worker_sha" <<<"$proof"
+          grep -qx "SYNC_UNIT_INSTALLED_SHA256=$expected_sync_unit_sha" <<<"$proof"
           grep -qx "WORKER_UNIT_INSTALLED_SHA256=$expected_worker_unit_sha" <<<"$proof"
           grep -qx "WORKER_SUDOERS_INSTALLED_SHA256=$expected_sudoers_sha" <<<"$proof"
           grep -qx "OPENCODE_CONFIG_SHA256=$expected_config_sha" <<<"$proof"
@@ -469,9 +489,12 @@ jobs:
           grep -Eq '^WORKER_CLAIM_INVOCATION_ID=[0-9a-f]{32}$' <<<"$proof"
           grep -Eq '^OPENCODE_WORKER_CLAIM_VERIFIED state=(no_claimable_job|pipeline_active|claimed)$' <<<"$proof"
           grep -qx 'WORKER_CLAIM_E2E=passed' <<<"$proof"
+          grep -qx 'SYNC_SERVICE_E2E=passed' <<<"$proof"
           grep -qx 'LEGACY_CODEX_COMPAT_REMOVED=yes' <<<"$proof"
           grep -qx 'PRIVATE_AI_DUAL_ACCESS_VERIFIED=yes' <<<"$proof"
           grep -qx 'PRIVATE_AI_CONSTRUCTOR_FINALIZED=yes' <<<"$proof"
+          grep -Eq '^VPS_MEMORY_TOTAL_BYTES=[0-9]+$' <<<"$proof"
+          grep -Eq '^VPS_CPU_THREADS=[0-9]+$' <<<"$proof"
           {
             printf '%s\n' '### Constructor local — dovadă măsurată pe VPS'
             printf '%s\n' '```text'

@@ -18,6 +18,14 @@ const syncWorker = readFileSync(
   new URL('../../deploy/constructor-sync-worker.sh', import.meta.url),
   'utf8',
 )
+const syncUnit = readFileSync(
+  new URL('../../deploy/systemd/kelion-constructor-sync.service', import.meta.url),
+  'utf8',
+)
+const workflow = readFileSync(
+  new URL('../workflows/private-ai-finalize.yml', import.meta.url),
+  'utf8',
+)
 
 function shellFunction(name) {
   const match = new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(finalizer)
@@ -286,15 +294,28 @@ test('diagnosticul claimului și rollbackul legacy păstrează dovezi fără con
   assert.match(finalizer, /PRIVATE_AI_RESTORE_LEGACY_FAILED/)
 })
 
-test('sync-ul root validează metadata askpass și claimul aparține invocării exacte', () => {
+test('sync-ul neprivilegiat validează metadata askpass și claimul aparține invocării exacte', () => {
   assert.doesNotMatch(syncWorker, /! -w "\$askpass"/)
   assert.match(syncWorker, /stat -Lc '%u:%g:%a:%h'/)
   assert.match(syncWorker, /0:0:555:1/)
-  assert.equal((syncWorker.match(/\/usr\/sbin\/runuser -u kelion-codex/g) ?? []).length, 3)
-  assert.doesNotMatch(syncWorker, /(^|[^/A-Za-z0-9_])runuser -u kelion-codex/m)
+  assert.doesNotMatch(syncWorker, /runuser/)
+  assert.match(syncWorker, /id -un[\s\S]*kelion-codex/)
+  assert.match(syncUnit, /^User=kelion-codex$/m)
+  assert.match(syncUnit, /^Group=kelion-codex$/m)
+  assert.match(syncUnit, /^NoNewPrivileges=true$/m)
+  assert.match(syncUnit, /^RestrictSUIDSGID=true$/m)
+  assert.match(syncUnit, /^CapabilityBoundingSet=$/m)
+  assert.match(syncUnit, /^AmbientCapabilities=$/m)
   assert.match(finalizer, /SYNC_WORKER_SOURCE/)
+  assert.match(finalizer, /SYNC_UNIT_SOURCE/)
   assert.match(finalizer, /restore_file sync_worker/)
   assert.match(finalizer, /snapshot_file sync_worker/)
+  assert.match(finalizer, /restore_file sync_unit/)
+  assert.match(finalizer, /snapshot_file sync_unit/)
+  assert.match(finalizer, /SYNC_UNIT_INSTALLED_SHA256/)
+  assert.match(finalizer, /SYNC_SERVICE_E2E=passed/)
+  assert.match(workflow, /deploy\/systemd\/kelion-constructor-sync[.]service/)
+  assert.match(workflow, /SYNC_UNIT_INSTALLED_SHA256=\$expected_sync_unit_sha/)
   assert.match(finalizer, /_SYSTEMD_INVOCATION_ID=\$claim_invocation/)
   assert.match(finalizer, /PRIVATE_AI_SYNC_DIAGNOSTIC_END=yes/)
   const marker = finalizer.indexOf("printf 'WORKER_CLAIM_E2E=passed\\n'")
