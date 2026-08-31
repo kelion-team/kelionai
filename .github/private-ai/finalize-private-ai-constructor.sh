@@ -462,7 +462,9 @@ chmod 0750 "$PRIVATE_AI_HOME"
 chown root:privateai "$PRIVATE_AI_HOME/.config" "$PRIVATE_AI_HOME/.config/opencode"
 chmod 0750 "$PRIVATE_AI_HOME/.config" "$PRIVATE_AI_HOME/.config/opencode"
 install -d -o kelion-codex -g kelion-codex -m 0700 \
-  /var/lib/kelion-codex/.cache /var/lib/kelion-codex/.local /var/lib/kelion-codex/.local/share
+  /var/lib/kelion-codex/.cache /var/lib/kelion-codex/.local /var/lib/kelion-codex/.local/share \
+  /run/kelion-codex
+[ "$(stat -Lc '%U:%G:%a' /run/kelion-codex)" = 'kelion-codex:kelion-codex:700' ]
 
 instructions_candidate=$(mktemp "$OPENCODE_INSTRUCTIONS.candidate.XXXXXX")
 install -o root -g privateai -m 0640 "$OPENCODE_INSTRUCTIONS_SOURCE" "$instructions_candidate"
@@ -596,8 +598,17 @@ OPENCODE_SERVER_PASSWORD=$(sed -n 's/^OPENCODE_SERVER_PASSWORD=//p' "$PRIVATE_AI
 auth_config=$(mktemp)
 printf 'user = "%s:%s"\n' "$OPENCODE_SERVER_USERNAME" "$OPENCODE_SERVER_PASSWORD" > "$auth_config"
 chmod 0600 "$auth_config"
-curl --config "$auth_config" --fail --silent --show-error --max-time 10 \
-  http://127.0.0.1:24096/global/health | jq -e '.healthy == true' >/dev/null
+web_health_ready=0
+for attempt in $(seq 1 30); do
+  if curl --config "$auth_config" --fail --silent --show-error --max-time 10 \
+      http://127.0.0.1:24096/global/health \
+      | jq -e '.healthy == true' >/dev/null; then
+    web_health_ready=1
+    break
+  fi
+  sleep 2
+done
+[ "$web_health_ready" -eq 1 ] || fail 'OpenCode web health did not become ready'
 rm -f -- "$auth_config"
 auth_config=''
 unset OPENCODE_SERVER_PASSWORD
