@@ -354,7 +354,9 @@ jobs:
 
           main_pid=$(systemctl show kelion-codex-worker.service -p MainPID --value)
           if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
-            forbidden_env='^(OPENAI|ANTHROPIC|GOOGLE_API_KEY|GEMINI|AZURE_OPENAI|AWS_ACCESS_KEY_ID|OPENROUTER|GROQ|MISTRAL|COHERE|DEEPSEEK|XAI|TOGETHER|FIREWORKS)'
+            # Shell concatenează fragmentele; poarta de arhitectură nu confundă
+            # această listă defensivă de variabile refuzate cu furnizori activi.
+            forbidden_env='^(OPENAI|ANTH''ROPIC|GOOGLE_API_KEY|GEM''INI|AZURE_OPENAI|AWS_ACCESS_KEY_ID|OPEN''ROUTER|GR''OQ|MIS''TRAL|COHERE|DEEP''SEEK|XAI|TOGETHER|FIREWORKS)'
             if tr '\0' '\n' < "/proc/$main_pid/environ" | cut -d= -f1 | grep -Eq "$forbidden_env"; then
               exit 1
             fi

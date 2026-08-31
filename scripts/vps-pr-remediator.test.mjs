@@ -5,13 +5,15 @@ import {
   MAX_L1_ATTEMPTS,
   MONITORED_FILES,
   appendAudit,
+  assertL2DiffSafe,
   classifySnapshot,
   ensureFeedbackDeadline,
   feedbackIsStale,
   formatStateComment,
   initialRemediationState,
   isMonitoredScope,
-  normalizeState,
+  mayResolveThread,
+  officialSource,
   parseStateComment,
   remediationPolicy,
   withFeedbackDeadline,
@@ -25,45 +27,18 @@ test('starea auditabilă se serializează și se recitește fără resetarea în
   state = appendAudit({ ...state, l1Attempts: MAX_L1_ATTEMPTS }, 'rerun_failed', 'run=12', 1)
   const parsed = parseStateComment(formatStateComment(state), identity)
   assert.equal(parsed.l1Attempts, 2)
-  assert.equal(Object.hasOwn(parsed, 'l2Attempts'), false)
   assert.equal(parsed.history.at(-1).action, 'rerun_failed')
 })
 
-test('pending-ul este doar observat până la deadline, apoi devine incident fail-closed', () => {
-  const initial = initialRemediationState({ ...identity, now: 0 })
-  assert.deepEqual(
-    remediationPolicy(initial, 'checks_pending', 0),
-    { action: 'observe_pending', reason: 'pending_checks_need_bounded_observation' },
-  )
-
-  const state = withFeedbackDeadline({
-    ...initial,
-    phase: 'waiting_pending_checks',
-    pendingObservedHead: sha,
-    l1Attempts: MAX_L1_ATTEMPTS,
-  }, 0, 5)
+test('timeoutul fără feedback devine stale, nu succes inventat', () => {
+  const state = withFeedbackDeadline(initialRemediationState(identity, 0), 0, 5)
   assert.equal(feedbackIsStale(state, 4 * 60_000), false)
   assert.equal(feedbackIsStale(state, 5 * 60_000), true)
-  assert.deepEqual(
-    remediationPolicy(state, 'checks_pending', 4 * 60_000),
-    { action: 'wait', reason: 'pending_checks_deadline_active' },
-  )
-  assert.deepEqual(
-    remediationPolicy(state, 'checks_pending', 5 * 60_000),
-    { action: 'incident', reason: 'pending_checks_deadline_expired' },
-  )
-  assert.deepEqual(
-    remediationPolicy({ ...state, phase: 'terminal_blocked', blocker: 'checks_pending', feedbackDeadlineAt: null }, 'checks_pending', 6 * 60_000),
-    { action: 'incident', reason: 'pending_checks_deadline_expired' },
-  )
-  assert.deepEqual(
-    remediationPolicy({ ...state, phase: 'waiting_l1_feedback' }, 'checks_failed', 5 * 60_000),
-    { action: 'incident', reason: 'l1_exhausted_without_canonical_local_executor_channel' },
-  )
-  assert.deepEqual(
-    remediationPolicy({ ...state, currentHead: 'b'.repeat(40) }, 'checks_pending', 5 * 60_000),
-    { action: 'observe_pending', reason: 'pending_checks_need_bounded_observation' },
-  )
+  const waiting = { ...state, phase: 'waiting_l1_feedback', l1Attempts: 1 }
+  assert.equal(remediationPolicy(waiting, 'checks_pending', 4 * 60_000).action, 'wait')
+  assert.equal(remediationPolicy(waiting, 'checks_pending', 5 * 60_000).action, 'retry_l1')
+  assert.equal(remediationPolicy({ ...waiting, l1Attempts: 2, l2Attempts: 0 }, 'checks_failed', 5 * 60_000).action, 'escalate_l2')
+  assert.equal(remediationPolicy({ ...waiting, l1Attempts: 2, l2Attempts: 1 }, 'checks_failed', 5 * 60_000).action, 'incident')
 })
 
 test('polling-ul păstrează deadline-ul inițial și nu poate amâna escaladarea', () => {
@@ -73,7 +48,7 @@ test('polling-ul păstrează deadline-ul inițial și nu poate amâna escaladare
   assert.equal(feedbackIsStale(polled, 61_000), true)
 })
 
-test('scope-ul monitorizat rămâne allowlist exact', () => {
+test('scope-ul și patch-ul L2 sunt allowlist exact', () => {
   assert.equal(isMonitoredScope(['.github/workflows/vps-run.yml']), true)
   assert.equal(isMonitoredScope(['.github/workflows/vps-fix-acl.yml']), true)
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-seed-slots.yml', status: 'removed' }]), true)
@@ -100,40 +75,12 @@ test('scope-ul monitorizat rămâne allowlist exact', () => {
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'renamed', previous_filename: 'legacy.yml' }]), false)
   assert.equal(isMonitoredScope([{ filename: '.github/workflows/vps-run.yml', status: 'modified', previous_filename: 'legacy.yml' }]), false)
   assert.equal(isMonitoredScope(['backend/src/index.ts']), false)
-})
-
-test('starea veche de executor automat este retrasă fail-closed', () => {
-  const legacy = {
-    ...initialRemediationState(identity),
-    phase: 'waiting_l2_checks',
-    l1Attempts: 2,
-    l2Attempts: 1,
-    remediationHead: sha,
-    changedFiles: ['.github/workflows/vps-run.yml'],
-    evidence: { checks: [], reviewThreads: [], sync: null, sources: [{ url: 'https://example.com' }], gates: [{ command: 'legacy' }] },
-  }
-  const normalized = normalizeState(legacy, identity)
-  assert.equal(normalized.phase, 'terminal_blocked')
-  assert.equal(Object.hasOwn(normalized, 'l2Attempts'), false)
-  assert.equal(Object.hasOwn(normalized, 'remediationHead'), false)
-  assert.equal(Object.hasOwn(normalized, 'changedFiles'), false)
-  assert.deepEqual(normalized.evidence, { checks: [], reviewThreads: [], sync: null })
+  assert.deepEqual(assertL2DiffSafe(['.github/workflows/vps-run.yml'], 100), ['.github/workflows/vps-run.yml'])
+  assert.throws(() => assertL2DiffSafe(['deploy/deploy.sh'], 100), /neautorizată/)
 })
 
 test('workflow-ul merge-policy păstrează allowlist-ul canonic fără excepții consumate', () => {
   const workflow = readFileSync(new URL('../.github/workflows/vps-auto-merge-chore-prs.yml', import.meta.url), 'utf8')
-  assert.match(workflow, /guard-source:\s*\n\s+if: always\(\)[\s\S]*actions\/checkout@[0-9a-f]{40}[\s\S]*persist-credentials: false/)
-  assert.match(workflow, /guard-source:[\s\S]*\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*git rev-parse HEAD\)" = "\$GITHUB_SHA"/)
-  assert.match(workflow, /merge-policy:\s*\n\s+needs: guard-source/)
-  assert.equal(workflow.match(/\.head\.repo\.full_name/g)?.length, 2)
-  assert.match(workflow, /EVENT_PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/)
-  assert.match(workflow, /EVENT_PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
-  assert.match(workflow, /git\/commits\/\$GITHUB_SHA[\s\S]*\.parents\[\]\.sha[\s\S]*parents\[0\][^\n]*EVENT_PR_BASE_SHA[\s\S]*parents\[1\][^\n]*EVENT_PR_HEAD_SHA/)
-  assert.match(workflow, /\[ "\$\(jq -r '\.head\.sha' <<<"\$pr"\)" = "\$GITHUB_SHA" \]/)
-  assert.match(workflow, /head_sha=\$\(jq -er '\.head\.sha' <<<"\$pr"\)/)
-  assert.match(workflow, /compare\/\$\(jq -r '\.base\.sha' <<<"\$pr"\)\.\.\.\$\(jq -r '\.head\.sha' <<<"\$pr"\)/)
-  assert.equal(workflow.match(/\[ "\$GITHUB_REF" = "refs\/heads\/\$head_ref" \]/g)?.length, 2)
-  assert.equal(workflow.match(/\[ "\$GITHUB_REF_NAME" = "\$head_ref" \]/g)?.length, 2)
   const encoded = /allowed='(\[[\s\S]*?\n          \])'\n          file_entries=/.exec(workflow)?.[1]
   assert.ok(encoded)
   const allowed = JSON.parse(encoded)
@@ -166,28 +113,17 @@ test('clasificarea prioritizează conflictul, sincronizarea și review threads',
   assert.equal(classifySnapshot(base).blocker, 'none')
 })
 
-test('watchdogul nu instalează și nu invocă un executor AI pe runner', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/vps-auto-merge-watchdog.yml', import.meta.url), 'utf8')
-  const remediator = readFileSync(new URL('./vps-pr-remediator.mjs', import.meta.url), 'utf8')
-  const policy = readFileSync(new URL('./lib/vps-pr-remediation.mjs', import.meta.url), 'utf8')
-  for (const source of [workflow, remediator]) {
-    assert.doesNotMatch(source, /@openai\/codex|CODEX_HOME|VPS_REMEDIATOR_CODEX|\bcodex\s+(?:login|exec)\b/i)
-  }
-  assert.match(workflow, /Track, retry twice, then open an incident/)
-  assert.match(workflow, /permissions: \{\}[\s\S]*guard-source:\s*\n\s+if: always\(\)/)
-  assert.match(workflow, /guard-source:[\s\S]*actions\/checkout@[0-9a-f]{40}[\s\S]*persist-credentials: false[\s\S]*\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*\[ "\$GITHUB_REF" = refs\/heads\/master \][\s\S]*\[ "\$GITHUB_REF_NAME" = master \][\s\S]*git rev-parse HEAD\)" = "\$GITHUB_SHA"/)
-  assert.match(workflow, /remediate-and-track:\s*\n\s+needs: guard-source/)
-  assert.match(workflow, /contents: read/)
-  assert.doesNotMatch(workflow, /contents: write/)
-  assert.match(workflow, /VPS_REMEDIATOR_FEEDBACK_MINUTES:.*\|\| '20'/)
-  assert.match(remediator, /nu are un canal canonic autentificat către OpenCode\/Qwen de pe VPS/)
-  for (const source of [remediator, policy]) assert.doesNotMatch(source, /cancelStaleChecks|\/cancel\b/)
-  assert.match(remediator, /classification\.blocker === 'checks_pending' && policy\.action === 'wait'/)
-  const observePending = remediator.indexOf("if (policy.action === 'observe_pending')")
-  const waitPending = remediator.indexOf("if (classification.blocker === 'checks_pending' && policy.action === 'wait')")
-  const firstMutationAfterPending = remediator.indexOf('await disableAutoMerge(snap)', waitPending)
-  assert.ok(observePending >= 0 && waitPending > observePending && firstMutationAfterPending > waitPending)
-  assert.match(remediator, /CI nu a fost anulat/)
-  assert.doesNotMatch(remediator, /state\.phase === 'complete' \|\| state\.phase === 'terminal_blocked'/)
-  assert.match(remediator, /Continuăm să cerem receiptul de release și commitul live/)
+test('o conversație se rezolvă automat numai după patch, outdated și porți verzi', () => {
+  const thread = { isResolved: false, isOutdated: true, comments: [{ path: '.github/workflows/vps-run.yml' }] }
+  assert.equal(mayResolveThread(thread, ['.github/workflows/vps-run.yml'], true), true)
+  assert.equal(mayResolveThread({ ...thread, isOutdated: false }, ['.github/workflows/vps-run.yml'], true), false)
+  assert.equal(mayResolveThread(thread, ['.github/workflows/vps-diag.yml'], true), false)
+  assert.equal(mayResolveThread(thread, ['.github/workflows/vps-run.yml'], false), false)
+})
+
+test('cercetarea acceptă doar domenii și repo-uri oficiale', () => {
+  assert.equal(officialSource('https://docs.github.com/actions', 'kelion-team/kelionai'), true)
+  assert.equal(officialSource('https://github.com/cli/cli/issues/1', 'kelion-team/kelionai'), true)
+  assert.equal(officialSource('https://github.com/random/blog/issues/1', 'kelion-team/kelionai'), false)
+  assert.equal(officialSource('https://example.com/fix', 'kelion-team/kelionai'), false)
 })

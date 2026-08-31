@@ -1,5 +1,5 @@
 [Unit]
-Description=Synchronize the private Constructor source before OpenCode + Qwen local (llama.cpp) execution
+Description=Synchronize the private Constructor source before Codex execution
 After=network-online.target kelion-runtime-config-recovery.service
 Wants=network-online.target
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready

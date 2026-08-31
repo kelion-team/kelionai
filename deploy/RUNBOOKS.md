@@ -126,42 +126,62 @@ Cheia master și backupul nu constituie disaster recovery dacă rămân pe aceea
 gazdă. Configurează și testează o destinație off-host înainte de producție.
 Dovada unei migrări distructive se consumă la release; nu se reutilizează.
 
-## Activarea workerului Constructor local
+## Activarea workerului Codex pentru un singur admin
 
-Workerul folosește direct OpenCode 1.18.25 cu modelul
-`llama.cpp/qwen3.6-35b-a3b-local`. Nu există login Codex, cache OpenAI, cheie AI
-sau adaptor care simulează Codex. Interfața OpenCode nu este publicată drept o
-coadă paralelă: chatul Kelion și clientul desktop trimit joburi prin același
-backend, iar acest worker unic le revendică prin contractul HMAC existent.
+Workerul actual automatizează joburi locale, deci folosește CLI-ul
+non-interactiv; App Server este destinat clienților bogați cu auth, istoric,
+aprobări și evenimente și nu se publică pe web. Dacă va exista un control-plane
+local App Server, transportul acceptat este numai `stdio` sau Unix socket în
+același boundary host-only, nu WebSocket public.
 
-1. Instalează mai întâi runtime-ul AI privat și dovedește receiptul lui:
-   `/opt/private-ai/bin/opencode --version` trebuie să fie `1.18.25`, serviciul
-   `private-ai-llm.service` trebuie să fie sănătos pe loopback, iar `/v1/models`
-   trebuie să publice exact aliasul Qwen configurat.
-2. Configul root-owned
-   `/srv/private-ai/home/.config/opencode/opencode.json` activează exclusiv
-   providerul `llama.cpp`, cu `baseURL=http://127.0.0.1:24080/v1`, fără
-   `apiKey`, pluginuri de provider sau fetch de modele. Grupul `privateai`
-   primește numai dreptul de citire necesar supervisorului.
-3. Rulează installerul permanent din checkoutul aprobat. El instalează atomic
-   workerul, unitatea systemd și regula
-   `/etc/sudoers.d/kelion-constructor-full-access`, validată cu `visudo`.
-   Regula acordă intenționat `kelion-codex` acces complet non-interactiv la
-   host; supervisorul rămâne neprivilegiat și escaladează explicit numai
-   executorul OpenCode. Installerul retrage adaptoarele one-shot, drop-in-urile
-   vechi și cache-ul Codex/OpenAI cunoscut înainte de publicarea noii unități.
-4. Creează configul dedicat din `deploy/codex-worker.env.example`; el conține
+1. Instalează pachetul oficial `@openai/codex` la versiunea exactă cerută de
+   `deploy/codex-worker.mjs`. Nu folosi `curl | bash`. Verifică
+   `codex --version`, `codex exec --help` și `codex app-server --help` înainte de
+   instalarea unității.
+2. Creează utilizatorul și grupul neprivilegiate `kelion-codex`. Directoarele de
+   lucru sunt `/var/lib/kelion-codex`; cache-ul de autentificare separat este
+   `/var/lib/kelion-codex-auth`. Niciunul nu este montat în containerul web.
+3. Instalează `deploy/codex-worker.profile.toml` ca
+   `/opt/kelion-codex/profile-home/kelion-worker.config.toml`, root-owned și
+   read-only. Auth home conține numai starea gestionată de CLI. Profilul impune
+   `forced_login_method="api"`, `approval_policy="never"`, env allowlist și
+   rețea oprită pentru comenzile generate.
+4. Sursa canonică rămâne `/root/kelion/secrets/openai-project-key`, cu metadata
+   `0:10050:0440`. Unitatea workerului o primește numai prin
+   `LoadCredential=openai-project-key:...`; valoarea nu intră în environment,
+   argv sau jurnal. La prima pornire, la rotația cheii ori dacă statusul
+   cache-ului eșuează, workerul execută echivalentul sigur:
+
+   ```bash
+   /opt/kelion-codex/bin/codex \
+     -c 'forced_login_method="api"' \
+     -c 'cli_auth_credentials_store="file"' \
+     login --with-api-key \
+     < "$CREDENTIALS_DIRECTORY/openai-project-key"
+   ```
+
+   Redirecționarea este pe stdin; nu folosi `printenv`, pipe din `cat`,
+   substituție de comandă, `set -x`, `--with-access-token`, device-auth sau
+   login ChatGPT. Workflow-ul `vps-codex-login.yml` poate reînnoi manual același
+   cache fără ca GitHub Actions să primească vreodată cheia OpenAI.
+5. Workerul verifică statusul cu aceleași două override-uri `-c`, plasate
+   înainte de `login status`, și publică atomic, cu mod `0600` și
+   `fsync`, numai fingerprintul SHA-256 privat din auth home. Fișierele
+   `auth.json` și `.openai-project-key.sha256` rămân accesibile exclusiv
+   identității workerului; fingerprintul evită relogarea la fiecare minut.
+6. Creează configul dedicat din `deploy/codex-worker.env.example`; el conține
    numai flagul, API-ul loopback, repository-ul public și digestul imaginii de
-   porți. HMAC-ul cozii intră exclusiv prin `LoadCredential`; niciun secret AI
-   sau Git nu intră în worker.
-5. Pregătește clona fără credentiale, imaginea gate fixată prin digest și
-   spool-ul de handoff. Rulează `node deploy/codex-worker.mjs --self-test`, apoi
-   `--executor-smoke` pentru o modificare nonce reală prin OpenCode/Qwen și
-   `--transport-smoke` pentru transportul HMAC fără revendicare artificială.
-6. Activează în această ordine numai după probe: flagul backend, flagul
+   porți. HMAC-ul cozii intră exclusiv prin `LoadCredential`.
+7. Instalează unitatea și timerul cu markerul de condiție absent. Rulează
+   `node deploy/codex-worker.mjs --self-test`. Pentru preflightul Linux sunt
+   obligatorii CLI-ul și profilul root-owned, bubblewrap, Podman rootless,
+   clona fără credentiale, imaginea gate cu același commit și probele
+   adversariale pentru auth home, credentiale, `/tmp`, localhost și rețea.
+8. Activează în această ordine numai după probe: flagul backend, flagul
    `CODEX_WORKER_EXEC_ENABLED=1`, markerul
    `/etc/kelion/codex-worker.enabled`, apoi timerul. Orice lipsă raportează
-   `setup_required`; nu există fallback la OpenAI, ChatGPT sau alt furnizor.
+   `setup_required`; nu există fallback la ChatGPT/device-auth sau la alt
+   furnizor.
 
 Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
 sau deploy.
@@ -186,10 +206,8 @@ Rulează installerul numai din checkoutul exact care urmează să fie instalat:
 KELION_CONSTRUCTOR_INSTALL=1 bash deploy/instaleaza-constructor.sh
 ```
 
-Installerul creează userii/directoarele, copiază codul root-owned, publică
-configul și instrucțiunile OpenCode locale versionate, regula sudoers completă
-a executorului și verifică unitățile. Retrage compatibilitatea Codex/OpenAI
-cunoscută, șterge markerii de activare și nu creează config runtime, clone sau
+Installerul creează userii/directoarele, copiază codul root-owned și verifică
+unitățile, dar șterge markerii de activare și nu creează config, clone sau
 credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
 
 - clona publică fără credentiale a workerului la
@@ -231,11 +249,10 @@ fie aliniate, serviciile oneshot inactive și lista joburilor systemd goală.
 Prima execuție acceptă exclusiv bundle-ul urmărit din vârful curent `master`,
 dovada build-ului gate, release proof-ul și markerul activ pentru exact același
 SHA, plus pinul ed25519 al gazdei.
-Către VPS nu trimite config runtime, HMAC-uri, tokenuri GitHub ori chei OpenAI.
-Nu reinstalează `apt`, `npm` sau CLI-ul. Installerul republică tranzacțional
-configul și instrucțiunile OpenCode versionate, apoi upgrade-ul reface numai
-configul runtime al workerului din copia live byte-identică; nu include
-`runtime.env`, nu recreează și nu restartează backendul.
+Către VPS nu trimite config, HMAC-uri, tokenuri GitHub ori
+chei OpenAI. Nu reinstalează `apt`, `npm` sau CLI-ul și nu regenerează configul
+ori secretele. Reface tranzacțional numai configul workerului din copia live
+byte-identică; nu include `runtime.env`, nu recreează și nu restartează backendul.
 
 Înainte de prima oprire, helperul capturează durabil markerii și starea
 enabled/active a celor trei timere. Installerul publică generația nouă cu toate
@@ -256,11 +273,10 @@ pin-uit, iar un jurnal invalid, symlink ori cu SHA neînrudit este refuzat.
 
 Acceptă upgrade-ul numai dacă evenimentul final este
 `constructor_upgrade_complete`, apoi rulează `constructor-status` și cere
-vectorul pre-upgrade exact, hashul workerului instalat, endpointul llama.cpp
-sănătos, modelul Qwen fixat și proba `sudo -u root id -u` egală cu `0` pentru
-identitatea `kelion-codex`. Dacă preflight-ul raportează o stare necanonică ori
-alt recovery activ, diagnostichează read-only; nu reprovisiona configul ori
-credentialele unui Constructor deja activ.
+vectorul pre-upgrade exact, plus `codex-auth=ready`. Dacă preflight-ul raportează
+o stare necanonică ori alt recovery activ, diagnostichează read-only; nu folosi
+`configure-constructor`, deoarece reprovisionează configul și credentialele și
+refuză un Constructor deja activ.
 
 Credentiala publisherului are numai metadata read, Contents write, Pull
 requests write, Actions/Checks read și Administration **read-only** pe

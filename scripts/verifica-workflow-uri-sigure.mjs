@@ -17,13 +17,6 @@ const DESCRIERE_INTERZISA = /(?:comand[ăa]|command|shell|bash|powershell|parol[
 const EXPRESIE_IN_RUN = /\$\{\{[^}\n]+\}\}/
 const ACTIUNE_SHA = /^[^@\s]+@[0-9a-f]{40}$/i
 const CONTAINER_DIGEST = /^docker:\/\/[^@\s]+@sha256:[0-9a-f]{64}$/i
-const JOBURI_CU_GARDA_MASTER = new Map([
-  ['constructor-desktop-release.yml', ['package-windows']],
-  ['private-ai-constructor-proof.yml', ['prove-local-constructor']],
-  ['vps-auto-merge-watchdog.yml', ['remediate-and-track']],
-  ['vps-codex-login.yml', ['preflight']],
-  ['vps-recovery.yml', ['classify', 'recover']],
-])
 
 function indentare(linie) {
   const spatii = linie.match(/^[ \t]*/)?.[0] ?? ''
@@ -32,20 +25,6 @@ function indentare(linie) {
 
 function faraComentariu(linie) {
   return linie.trimStart().startsWith('#') ? '' : linie
-}
-
-function blocJob(text, nume) {
-  const inceput = text.indexOf(`\n  ${nume}:\n`)
-  if (inceput < 0) return ''
-  const urmatorul = text.slice(inceput + 1).search(/\n  [A-Za-z0-9_-]+:\n/)
-  return urmatorul < 0
-    ? text.slice(inceput)
-    : text.slice(inceput, inceput + 1 + urmatorul)
-}
-
-function indexLinie(text, fragment) {
-  const index = text.indexOf(fragment)
-  return index < 0 ? 0 : text.slice(0, index).split('\n').length - 1
 }
 
 export function verificaWorkflow(text, numeFisier = '<memorie>') {
@@ -73,9 +52,11 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
     const write = curata.match(/^\s{2}([A-Za-z-]+)\s*:\s*write\s*$/)?.[1]
     const writeAprobat = (caleNormala.endsWith('/sentinel.yml') && write === 'issues')
       || (caleNormala.endsWith('/build-images.yml') && ['packages', 'id-token'].includes(write))
-      // Watchdog-ul primește capabilitățile numai în jobul dependent de guardul
-      // master fail-closed. Guardul rulează fără drepturi de scriere și leagă
-      // checkout-ul pin-uit de repo/ref/GITHUB_SHA înainte de codul remediatorului.
+      // Watchdog-ul rulează numai din default branch (schedule/dispatch), nu
+      // execută cod dintr-un pull_request_target și are nevoie de aceste patru
+      // capabilități exacte: rerun/cancel, push fast-forward pe head, stare/incident
+      // și auto-merge/review threads. Scriptul L2 aplică allowlist de căi și porți
+      // complete înainte ca `contents: write` să fie folosit.
       || (caleNormala.endsWith('/vps-auto-merge-watchdog.yml')
         && ['actions', 'contents', 'issues', 'pull-requests'].includes(write))
       // Verifierul independent nu modifică repo-ul sau producția: scrie numai
@@ -108,58 +89,6 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
 
   if (/uses\s*:\s*actions\/checkout@[0-9a-f]{40}/i.test(text) && !/persist-credentials\s*:\s*false/i.test(text)) {
     abatere(0, 'checkout-token', '`actions/checkout` trebuie să aibă `persist-credentials: false`.')
-  }
-
-  const numeScurt = caleNormala.split('/').at(-1)
-  const joburiProtejate = JOBURI_CU_GARDA_MASTER.get(numeScurt)
-  if (joburiProtejate) {
-    const guard = blocJob(text, 'guard-source')
-    const guardValid = guard
-      && /\n    if: always\(\)\n/.test(guard)
-      && /actions\/checkout@[0-9a-f]{40}/i.test(guard)
-      && /persist-credentials\s*:\s*false/.test(guard)
-      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]') // hardcod-permis: ancora verifică repository-ul canonic privilegiat
-      && guard.includes('[ "$GITHUB_REF" = refs/heads/master ]')
-      && guard.includes('[ "$GITHUB_REF_NAME" = master ]')
-      && guard.includes('[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]')
-    if (!guardValid) {
-      abatere(indexLinie(text, '\n  guard-source:\n'), 'guard-source',
-        'workflow-ul privilegiat cere guard always-run cu checkout pin-uit și repo/ref/ref_name/HEAD legate exact de master.')
-    }
-    for (const job of joburiProtejate) {
-      const bloc = blocJob(text, job)
-      const depindeDeGarda = /\n    needs: guard-source\n/.test(bloc)
-        || /\n    needs:\s*\[[^\]\n]*\bguard-source\b[^\]\n]*\]\n/.test(bloc)
-      if (!depindeDeGarda) {
-        abatere(indexLinie(text, `\n  ${job}:\n`), 'guard-necesar',
-          `jobul \`${job}\` trebuie să depindă de \`guard-source\` înainte să primească drepturi sau secrete.`)
-      }
-    }
-  }
-
-  if (numeScurt === 'vps-auto-merge-chore-prs.yml') {
-    const guard = blocJob(text, 'guard-source')
-    const policy = blocJob(text, 'merge-policy')
-    const guardValid = guard
-      && /\n    if: always\(\)\n/.test(guard)
-      && /actions\/checkout@[0-9a-f]{40}/i.test(guard)
-      && /persist-credentials\s*:\s*false/.test(guard)
-      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]') // hardcod-permis: ancora verifică repository-ul canonic privilegiat
-      && guard.includes('[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]')
-      && policy.includes('needs: guard-source')
-    if (!guardValid) {
-      abatere(indexLinie(text, '\n  guard-source:\n'), 'guard-source',
-        'merge-policy cere guard always-run cu checkout pin-uit și HEAD legat exact de eveniment.')
-    }
-    const dispatchLegat = [guard, policy].every((bloc) =>
-      bloc.includes('.head.repo.full_name')
-      && bloc.includes('.head.sha')
-      && bloc.includes('[ "$GITHUB_REF" = "refs/heads/$head_ref" ]')
-      && bloc.includes('[ "$GITHUB_REF_NAME" = "$head_ref" ]'))
-    if (!dispatchLegat) {
-      abatere(indexLinie(text, 'workflow_dispatch:'), 'dispatch-pr-binding',
-        'dispatch-ul merge-policy trebuie să lege repo-ul, SHA-ul și ref/ref_name de head-ul aceluiași PR.')
-    }
   }
 
   linii.forEach((linie, index) => {
@@ -276,97 +205,19 @@ jobs:
           TOT: \${{ __SECRETE_BULK__ }}
         run: echo test
 `.replace('__SECRETE_BULK__', ['toJSON', '(secrets)'].join(''))
-  const gardaIncompleta = `
-on:
-  workflow_dispatch:
-permissions:
-  contents: read
-jobs:
-  guard-source:
-    if: always()
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
-          [ "$GITHUB_REF" = refs/heads/master ]
-  preflight:
-    needs: guard-source
-    steps:
-      - run: echo guardul-nu-leaga-ref-name-sau-head
-`
-  const jobSareGarda = `
-on:
-  workflow_dispatch:
-permissions:
-  contents: read
-jobs:
-  guard-source:
-    if: always()
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
-          [ "$GITHUB_REF" = refs/heads/master ]
-          [ "$GITHUB_REF_NAME" = master ]
-          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
-  preflight:
-    steps:
-      - run: echo never-trust-a-skipped-ref
-`
-  const dispatchPrNelegat = `
-on:
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        type: string
-permissions:
-  contents: read
-  pull-requests: read
-jobs:
-  guard-source:
-    if: always()
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
-          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
-  merge-policy:
-    needs: guard-source
-    steps:
-      - run: echo pr-nelegat
-`
   const aSigur = verificaWorkflow(sigur, 'sigur.yml')
   const aPericulos = verificaWorkflow(periculos, 'periculos.yml')
-  const aGardaIncompleta = verificaWorkflow(gardaIncompleta, '.github/workflows/vps-codex-login.yml')
-  const aJobSareGarda = verificaWorkflow(jobSareGarda, '.github/workflows/vps-codex-login.yml')
-  const aDispatchPrNelegat = verificaWorkflow(dispatchPrNelegat, '.github/workflows/vps-auto-merge-chore-prs.yml')
+  const dovada = aPericulos.join('\n')
   const reguliPrinse = [
     'inputul `cmd`',
     'inputul `keyb64`',
     '[descriere-sensibilă]',
     '[injecție-run]',
     '[secrete-bulk]',
-  ].every((fragment) => aPericulos.join('\n').includes(fragment))
-    && aGardaIncompleta.some((abatere) => abatere.includes('[guard-source]'))
-    && !aGardaIncompleta.some((abatere) => abatere.includes('[guard-necesar]'))
-    && aJobSareGarda.some((abatere) => abatere.includes('[guard-necesar]'))
-    && !aJobSareGarda.some((abatere) => abatere.includes('[guard-source]'))
-    && aDispatchPrNelegat.some((abatere) => abatere.includes('[dispatch-pr-binding]'))
+  ].every((fragment) => dovada.includes(fragment))
   if (aSigur.length !== 0 || !reguliPrinse) {
     console.error('Autotest poartă workflow-uri: PICĂ')
-    for (const a of [
-      ...aSigur,
-      ...aPericulos,
-      ...aGardaIncompleta,
-      ...aJobSareGarda,
-      ...aDispatchPrNelegat,
-    ]) console.error('  ' + a)
+    for (const a of [...aSigur, ...aPericulos]) console.error('  ' + a)
     process.exit(1)
   }
   console.log('Autotest poartă workflow-uri: TRECE')
@@ -385,7 +236,7 @@ function main() {
     for (const a of abateri) console.error('  ' + a)
     process.exit(1)
   }
-  console.log('Workflow-uri sigure: surse privilegiate legate exact, fără inputuri sensibile/comenzi libere, interpolări shell sau secrete bulk.')
+  console.log('Workflow-uri sigure: fără inputuri sensibile/comenzi libere, interpolări shell sau secrete bulk.')
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

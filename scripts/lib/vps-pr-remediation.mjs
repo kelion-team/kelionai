@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 export const STATE_MARKER = '<!-- kelion-vps-remediation-state:v1 -->'
 export const INCIDENT_MARKER = '<!-- kelion-vps-remediation-incident:v1 -->'
 export const MAX_L1_ATTEMPTS = 2
+export const MAX_L2_ATTEMPTS = 1
 export const DEFAULT_FEEDBACK_TIMEOUT_MINUTES = 20
 
 export const MONITORED_FILES = Object.freeze([
@@ -31,11 +32,39 @@ export const MONITORED_FILES = Object.freeze([
   'scripts/verifica-workflow-uri-sigure.mjs',
 ])
 
+export const L2_WRITABLE_FILES = Object.freeze([
+  '.github/workflows/deploy.yml',
+  '.github/workflows/vps-auto-merge-chore-prs.yml',
+  '.github/workflows/vps-auto-merge-watchdog.yml',
+  '.github/workflows/vps-diag.yml',
+  '.github/workflows/vps-run.yml',
+  '.github/workflows/vps-release-verifier.yml',
+  '.github/workflows/vps-set-env.yml',
+])
+
+export const OFFICIAL_SOURCE_DOMAINS = Object.freeze([
+  'docs.github.com',
+  'github.com',
+  'cli.github.com',
+  'developers.openai.com',
+  'platform.openai.com',
+  'registry.npmjs.org',
+])
+
+export const OFFICIAL_GITHUB_REPOSITORIES = Object.freeze([
+  'actions/checkout',
+  'actions/runner',
+  'cli/cli',
+  'openai/codex',
+])
+
 const SHA = /^[0-9a-f]{40}$/
 const PHASES = new Set([
   'observing',
-  'waiting_pending_checks',
   'waiting_l1_feedback',
+  'l2_running',
+  'waiting_l2_checks',
+  'waiting_review_resolution',
   'waiting_merge',
   'waiting_deploy',
   'complete',
@@ -68,15 +97,17 @@ export function initialRemediationState({ prNumber, headSha, now = Date.now() })
     blocker: 'none',
     cause: 'none',
     l1Attempts: 0,
+    l2Attempts: 0,
     lastAction: 'tracking_started',
     lastActionAt: iso(now),
     lastFeedbackAt: iso(now),
     feedbackDeadlineAt: null,
-    pendingObservedHead: null,
     nextAction: 'inspect',
     nextExpectedResult: 'authoritative_github_snapshot',
     etaSeconds: 60,
-    evidence: { checks: [], reviewThreads: [], sync: null },
+    remediationHead: null,
+    changedFiles: [],
+    evidence: { checks: [], reviewThreads: [], sync: null, sources: [], gates: [] },
     history: [{ at: iso(now), action: 'tracking_started', result: `head=${headSha}` }],
   }
 }
@@ -85,26 +116,16 @@ export function normalizeState(raw, identity) {
   const fallback = initialRemediationState(identity)
   if (!raw || raw.schema !== 1 || raw.prNumber !== identity.prNumber || typeof raw.chainId !== 'string') return fallback
   if (!SHA.test(String(raw.originalHead ?? '')) || !SHA.test(String(raw.currentHead ?? ''))) return fallback
-  const {
-    l2Attempts: _retiredL2Attempts,
-    remediationHead: _retiredRemediationHead,
-    changedFiles: _retiredChangedFiles,
-    ...current
-  } = raw
-  const phase = PHASES.has(current.phase) ? current.phase : 'terminal_blocked'
-  const rawEvidence = current.evidence && typeof current.evidence === 'object' ? current.evidence : {}
+  const phase = PHASES.has(raw.phase) ? raw.phase : 'terminal_blocked'
   return {
     ...fallback,
-    ...current,
+    ...raw,
     phase,
-    l1Attempts: Math.min(MAX_L1_ATTEMPTS, Math.max(0, Number(current.l1Attempts) || 0)),
-    pendingObservedHead: SHA.test(String(current.pendingObservedHead ?? '')) ? current.pendingObservedHead : null,
-    evidence: {
-      checks: Array.isArray(rawEvidence.checks) ? rawEvidence.checks.slice(0, 100) : [],
-      reviewThreads: Array.isArray(rawEvidence.reviewThreads) ? rawEvidence.reviewThreads.slice(0, 100) : [],
-      sync: rawEvidence.sync && typeof rawEvidence.sync === 'object' ? rawEvidence.sync : null,
-    },
-    history: boundedHistory(Array.isArray(current.history) ? current.history : []),
+    l1Attempts: Math.min(MAX_L1_ATTEMPTS, Math.max(0, Number(raw.l1Attempts) || 0)),
+    l2Attempts: Math.min(MAX_L2_ATTEMPTS, Math.max(0, Number(raw.l2Attempts) || 0)),
+    changedFiles: Array.isArray(raw.changedFiles) ? raw.changedFiles.slice(0, 20).map(String) : [],
+    evidence: raw.evidence && typeof raw.evidence === 'object' ? raw.evidence : fallback.evidence,
+    history: boundedHistory(Array.isArray(raw.history) ? raw.history : []),
   }
 }
 
@@ -144,11 +165,12 @@ export function formatStateComment(state) {
     `- Start / timp scurs: \`${state.startedAt}\` / \`${state.elapsedSeconds ?? 'unknown'}s\``,
     `- Deadline feedback: \`${state.feedbackDeadlineAt ?? 'none'}\``,
     `- Ultima acțiune: \`${state.lastAction}\``,
-    `- Încercări automate L1: \`${state.l1Attempts}/${MAX_L1_ATTEMPTS}\``,
+    `- Încercări L1/L2: \`${state.l1Attempts}/${MAX_L1_ATTEMPTS}\` / \`${state.l2Attempts}/${MAX_L2_ATTEMPTS}\``,
     `- Următorul pas automat: \`${state.nextAction}\``,
     `- Rezultat așteptat / ETA: \`${state.nextExpectedResult ?? 'unknown'}\` / \`${state.etaSeconds ?? 'unknown'}s\``,
-    `- Branch / head urmărit: \`${state.branch ?? 'unknown'}\` / \`${state.currentHead}\``,
-    `- Checkuri observate: \`${state.evidence?.checks?.length ?? 0}\``,
+    `- Branch / commit remediere: \`${state.branch ?? 'unknown'}\` / \`${state.remediationHead ?? 'none'}\``,
+    `- Fișiere modificate: \`${(state.changedFiles ?? []).join(', ') || 'none'}\``,
+    `- Teste înregistrate: \`${state.evidence?.gates?.length ?? 0}\``,
     '',
     'Acest comentariu este stare operațională citită și actualizată de watchdog; auto-merge rămâne blocat cât timp starea nu este `waiting_merge` sau `complete`.',
   ].join('\n')
@@ -181,6 +203,38 @@ export function isMonitoredScope(files) {
   })
 }
 
+export function assertL2DiffSafe(files, patchBytes) {
+  if (!Number.isSafeInteger(patchBytes) || patchBytes < 1 || patchBytes > 256 * 1024) throw new Error('Patch L2 gol sau prea mare')
+  const unique = [...new Set(files.map(String))]
+  if (!unique.length || unique.length > L2_WRITABLE_FILES.length) throw new Error('Număr de fișiere L2 invalid')
+  for (const file of unique) {
+    if (!L2_WRITABLE_FILES.includes(file)) throw new Error(`Agentul L2 a modificat o cale neautorizată: ${file}`)
+  }
+  return unique
+}
+
+export function officialSource(url, repository) {
+  let parsed
+  try { parsed = new URL(url) } catch { return false }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false
+  if (!OFFICIAL_SOURCE_DOMAINS.includes(parsed.hostname.toLowerCase())) return false
+  if (parsed.hostname.toLowerCase() !== 'github.com') return true
+  const [owner, repo] = parsed.pathname.split('/').filter(Boolean)
+  const fullName = owner && repo ? `${owner}/${repo}`.toLowerCase() : ''
+  return fullName === String(repository ?? '').toLowerCase() || OFFICIAL_GITHUB_REPOSITORIES.includes(fullName)
+}
+
+export function validateResearchSources(sources, repository) {
+  if (!Array.isArray(sources)) throw new Error('Sursele L2 lipsesc')
+  const normalized = sources.slice(0, 20).map((source) => ({
+    url: String(source.url ?? ''),
+    title: String(source.title ?? '').replace(/\s+/g, ' ').slice(0, 200),
+    usedFor: String(source.usedFor ?? '').replace(/\s+/g, ' ').slice(0, 300),
+  }))
+  if (normalized.some((source) => !officialSource(source.url, repository))) throw new Error('Agentul L2 a returnat o sursă neoficială')
+  return normalized
+}
+
 export function classifySnapshot(snapshot) {
   if (!snapshot.scopeValid) return { blocker: 'invalid_scope', automatic: false }
   if (snapshot.draft) return { blocker: 'draft', automatic: false }
@@ -198,25 +252,17 @@ export function classifySnapshot(snapshot) {
 }
 
 /** Motorul de politici nu execută nimic: primește starea măsurată de watchdog
- * și emite o singură decizie canonică pentru orchestrator. Runnerul poate face
- * numai cele două acțiuni L1 GitHub; după epuizarea lor deschide un incident,
- * deoarece nu are un canal canonic autentificat către OpenCode/Qwen de pe VPS. */
+ * și emite o singură decizie canonică pentru orchestrator. Executorul L2 nu își
+ * poate declara singur succesul; `waiting_l2_checks` cere dovezi GitHub noi. */
 export function remediationPolicy(state, blocker, now = Date.now()) {
   if (blocker === 'none') return { action: 'advance', reason: 'all_observed_gates_green' }
   if (['invalid_scope', 'draft', 'review_threads_incomplete', 'merge_requirements_unknown'].includes(blocker)) {
     return { action: 'incident', reason: blocker }
   }
-  if (blocker === 'checks_pending') {
-    const pendingHeadMatches = state.pendingObservedHead === state.currentHead
-    if (state.phase === 'terminal_blocked' && state.blocker === 'checks_pending' && pendingHeadMatches) {
-      return { action: 'incident', reason: 'pending_checks_deadline_expired' }
-    }
-    const observingCurrentHead = state.phase === 'waiting_pending_checks'
-      && pendingHeadMatches
-    if (!observingCurrentHead) return { action: 'observe_pending', reason: 'pending_checks_need_bounded_observation' }
+  if (state.phase === 'waiting_l2_checks') {
     return feedbackIsStale(state, now)
-      ? { action: 'incident', reason: 'pending_checks_deadline_expired' }
-      : { action: 'wait', reason: 'pending_checks_deadline_active' }
+      ? { action: 'incident', reason: 'l2_feedback_stalled' }
+      : { action: 'wait', reason: 'awaiting_independent_l2_checks' }
   }
   if (state.l1Attempts < MAX_L1_ATTEMPTS) {
     if (state.phase === 'waiting_l1_feedback' && !feedbackIsStale(state, now)) {
@@ -224,7 +270,15 @@ export function remediationPolicy(state, blocker, now = Date.now()) {
     }
     return { action: 'retry_l1', reason: blocker }
   }
-  return { action: 'incident', reason: 'l1_exhausted_without_canonical_local_executor_channel' }
+  if (state.l2Attempts < MAX_L2_ATTEMPTS) return { action: 'escalate_l2', reason: blocker }
+  return { action: 'incident', reason: 'automatic_attempt_budget_exhausted' }
+}
+
+export function mayResolveThread(thread, changedFiles, gatesGreen) {
+  if (!gatesGreen || !thread || thread.isResolved === true || thread.isOutdated !== true) return false
+  const comments = Array.isArray(thread.comments) ? thread.comments : []
+  const path = comments.map((comment) => comment.path).filter(Boolean).at(-1)
+  return Boolean(path && changedFiles.includes(path))
 }
 
 export function redactEvidence(value) {

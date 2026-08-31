@@ -511,8 +511,7 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   const firstOptMutation = installer.indexOf('ensure_root_owned_install_directory /opt/kelion-codex 0755')
   assert.ok(optValidation >= 0 && firstOptMutation > optValidation,
     'layout-ul /opt trebuie validat înaintea primei mutații Constructor')
-  assert.match(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor\/lib 0755/)
-  assert.doesNotMatch(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex\/profile-home|ensure_service_writable_dir \/var\/lib\/kelion-codex-auth/)
+  assert.match(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor\/lib 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-codex\/profile-home 0755/)
   assert.doesNotMatch(installer, /install -d[^\n]*\/opt\/kelion-(?:codex|constructor)/)
   const handoffLockdown = secureHandoff.indexOf('chmod 00750 "$spool"')
   const handoffChildren = secureHandoff.indexOf('for child in ready ack retired')
@@ -524,16 +523,14 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   assert.match(installer, /secure_service_parent \/var\/lib\/kelion-codex[\s\S]*secure_service_parent \/var\/lib\/kelion-publisher[\s\S]*secure_service_parent \/var\/lib\/kelion-release/)
   assert.doesNotMatch(installer, /install -d[^\n]*(?:\/var\/lib\/kelion-(?:codex|publisher|release))(?:\/|\s|$)/)
   assert.doesNotMatch(installer, /\/var\/lib\/kelion-(?:codex|publisher)\/\.local\/share/)
-  assert.match(workerUnit, /^ReadWritePaths=$/m)
-  assert.match(workerUnit, /^ProtectSystem=false$/m)
-  assert.match(workerUnit, /^Environment=CODEX_WORKER_REPO=\/var\/lib\/kelion-codex\/repo$/m)
-  assert.match(workerUnit, /^Environment=CODEX_WORKER_JOBS=\/var\/lib\/kelion-codex\/jobs$/m)
+  assert.doesNotMatch(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex(?:\s|$)/m)
+  assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex\/repo .*\/var\/lib\/kelion-codex\/jobs/m)
   assert.doesNotMatch(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher(?:\s|$)/m)
   assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher\/repo .*\/var\/lib\/kelion-publisher\/state/m)
-  assert.match(workerUnit, /^SupplementaryGroups=kelion-handoff privateai$/m)
-  assert.match(workerUnit, /^Environment=CODEX_HANDOFF_READY=\/var\/lib\/kelion-constructor-handoff\/ready$/m)
-  assert.match(publisherUnit, /^SupplementaryGroups=kelion-handoff$/m)
-  assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
+  for (const unit of [workerUnit, publisherUnit]) {
+    assert.match(unit, /^SupplementaryGroups=kelion-handoff$/m)
+    assert.match(unit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
+  }
   const releaseUnit = read('deploy/systemd/kelion-constructor-release.service')
   assert.doesNotMatch(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release(?:\s|$)/m)
   assert.match(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release\/state/m)
@@ -709,7 +706,6 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'constructor-install',
     'dependency-install',
     'post-installer',
-    'private-ai-preflight',
     'remote-preflight',
     'runtime-config-cutover',
   ]
@@ -719,6 +715,10 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const expectedChecks = [
     'apply',
     'bundle-contract',
+    'codex-cli-install',
+    'codex-cli-layout',
+    'codex-cli-link',
+    'codex-cli-permissions',
     'config-stage',
     'cutover-stage',
     'existing-config-contract',
@@ -726,14 +726,10 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'install-resume-contract',
     'installer',
     'node-runtime',
-    'opencode-full-access-config',
-    'opencode-worker-preflight',
     'package-dependencies',
     'package-index',
     'payload-contract',
     'payload-decode',
-    'private-ai-runtime-contract',
-    'private-ai-runtime-revalidation',
     'publisher-gate-image',
     'publisher-repository',
     'resume-installer',
@@ -749,6 +745,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'success-message',
     'unit-quiescence',
     'worker-gate-image',
+    'worker-profile-publication',
     'worker-repository',
   ]
   const checks = [...remote.matchAll(/constructor_config_check='([^']+)'/g)].map((match) => match[1])
@@ -759,8 +756,9 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   for (const [check, command] of [
     ['package-index', 'apt-get update -qq'],
     ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
-    ['private-ai-runtime-contract', 'validate_private_ai_base'],
-    ['opencode-full-access-config', 'cmp -s -- "$work/deploy/opencode-constructor.json" "$opencode_config"'],
+    ['codex-cli-layout', 'validate_codex_cli_directory()'],
+    ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
+    ['codex-cli-permissions', 'validate_codex_cli_mounts'],
     ['signing-stale-cleanup', 'for stale_signing_root in'],
     ['signing-key-validation', 'validate_signing_key "$signing_key"'],
     ['signing-key-registration', 'existing_keys=$(curl'],
@@ -769,31 +767,54 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     ['worker-gate-image', 'pull_gate kelion-codex'],
     ['publisher-gate-image', 'pull_gate kelion-publisher'],
     ['apply', 'KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh"'],
-    ['opencode-worker-preflight', '/usr/bin/node /opt/kelion-codex/codex-worker.mjs --preflight'],
   ]) {
     const labelIndex = remote.indexOf(`constructor_config_check='${check}'`)
     const commandIndex = remote.indexOf(command, labelIndex)
     assert.ok(labelIndex >= 0 && commandIndex > labelIndex, `${check} trebuie setat înainte de comanda atribuită`)
   }
 
-  const privateAi = remote.slice(
-    remote.indexOf('validate_private_ai_base() {'),
-    remote.indexOf("constructor_config_check='cutover-stage'"),
+  const cliInstall = remote.slice(
+    remote.indexOf("constructor_config_check='codex-cli-layout'"),
+    remote.indexOf("constructor_config_check='worker-profile-publication'"),
   )
-  assert.match(privateAi, /\.install-complete[\s\S]*opencode_version=1\.18\.25[\s\S]*model_repo=ggml-org\/Qwen3\.6-35B-A3B-GGUF/)
-  assert.match(privateAi, /stat -Lc '%u:%g:%a:%h' \/opt\/private-ai\/bin\/opencode[\s\S]*0:0:755:1/)
-  assert.match(privateAi, /private-ai-llm\.service[\s\S]*private-ai-web\.service[\s\S]*\/v1\/models/)
-  assert.match(privateAi, /cmp -s -- "\$work\/deploy\/opencode-constructor\.json" "\$opencode_config"/)
-  assert.match(privateAi, /all\(\.\[\]; \$config\.permission\[\.\] == "allow"\)/)
-  assert.match(privateAi, /cmp -s -- "\$work\/deploy\/systemd\/kelion-codex-worker\.service" \/etc\/systemd\/system\/kelion-codex-worker\.service/)
-  assert.match(privateAi, /visudo -cf \/etc\/sudoers\.d\/kelion-constructor-full-access/)
-  assert.match(privateAi, /sudo -n -u root -- \/usr\/bin\/id -u/)
-  assert.match(privateAi, /codex-worker\.mjs --self-test/)
-  assert.doesNotMatch(remote, /npm install|@openai\/codex|CODEX_HOME|login status|sk-proj-/i)
-  const applyIndex = remote.indexOf("constructor_config_check='apply'")
-  const preflightIndex = remote.indexOf("constructor_config_check='opencode-worker-preflight'")
-  assert.ok(applyIndex >= 0 && preflightIndex > applyIndex,
-    'preflight-ul executorului local trebuie să urmeze clonei, imaginii gate și cutover-ului runtime')
+  const layoutIndex = cliInstall.indexOf("constructor_config_check='codex-cli-layout'")
+  const installIndex = cliInstall.indexOf("constructor_config_check='codex-cli-install'")
+  const permissionsIndex = cliInstall.indexOf("constructor_config_check='codex-cli-permissions'")
+  const linkIndex = cliInstall.indexOf("constructor_config_check='codex-cli-link'")
+  assert.ok(layoutIndex >= 0 && layoutIndex < installIndex && installIndex < permissionsIndex && permissionsIndex < linkIndex)
+  assert.match(cliInstall, /validate_codex_cli_directory\(\)[\s\S]*\[ -d "\$path" \] && \[ ! -L "\$path" \] && \[ "\$\(realpath -e "\$path"\)" = "\$path" \]/)
+  assert.match(cliInstall, /stat -c '%u:%g'/)
+  assert.match(cliInstall, /path_mode=\$\(stat -c '%a' "\$path"\)[\s\S]*\[ \$\(\(8#\$path_mode & 0022\)\) -eq 0 \]/)
+  const rootGuard = cliInstall.indexOf('for path in / /opt /opt/kelion-codex; do')
+  const childGuard = cliInstall.indexOf('for path in /opt/kelion-codex/bin /opt/kelion-codex/npm; do')
+  const directoryCreation = cliInstall.indexOf('install -d -o root -g root -m 0755 "$path"')
+  assert.ok(rootGuard >= 0 && rootGuard < childGuard && childGuard < directoryCreation && directoryCreation < installIndex,
+    'părinții existenți trebuie validați înaintea oricărei traversări sau mutații')
+  assert.match(cliInstall, /stat -c '%d'/)
+  assert.match(cliInstall, /validate_codex_cli_mounts\(\)[\s\S]*\/proc\/self\/mountinfo/)
+  assert.ok([...cliInstall.matchAll(/^\s*validate_codex_cli_mounts$/gm)].length >= 2,
+    'mounturile trebuie refuzate înainte și după instalarea npm')
+  assert.match(cliInstall, /\(umask 022; npm install/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty\(\)[\s\S]*match=\$\(find -P \/opt\/kelion-codex\/npm -xdev "\$@" -print -quit\) \|\| return 1/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -user root/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -group root/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty -type f -links \+1/)
+  assert.match(cliInstall, /validate_codex_cli_find_empty ! -type f ! -type d ! -type l/)
+  assert.match(cliInstall, /validate_codex_cli_symlinks\(\)[\s\S]*validate_codex_cli_find_empty -type l ! -path "\$link"[\s\S]*\.\.\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js/)
+  assert.match(cliInstall, /required\) \[ "\$present" -eq 1 \]/)
+  const preMutationPermissions = cliInstall.indexOf('validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022')
+  assert.ok(preMutationPermissions >= 0 && preMutationPermissions < installIndex,
+    'niciun fișier sau director npm nu poate fi writable de group/other înainte de npm')
+  assert.ok(cliInstall.includes('find -P /opt/kelion-codex/npm -xdev \\( -type f -o -type d \\) -exec chmod u=rwX,go=rX {} +'))
+  const noWritableTree = 'validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022'
+  assert.ok(cliInstall.split(noWritableTree).length - 1 >= 2)
+  assert.match(cliInstall, /codex_target=\$\(realpath -e \/opt\/kelion-codex\/bin\/codex\)/)
+  assert.match(cliInstall, /\[ "\$codex_target" = \/opt\/kelion-codex\/npm\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js \]/)
+  assert.doesNotMatch(cliInstall, /ln -sfn/)
+  assert.match(cliInstall, /codex_link_temporary=\$\(mktemp[\s\S]*ln -s \/opt\/kelion-codex\/npm\/bin\/codex "\$codex_link_temporary"[\s\S]*mv -Tf -- "\$codex_link_temporary" "\$codex_link"/)
+  assert.match(remote, /codex_link_temporary=''[\s\S]*cleanup_remote\(\)[\s\S]*\.codex-link[\s\S]*rm -f -- "\$codex_link_temporary"/)
+  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ test -x \/opt\/kelion-codex\/bin\/codex/)
+  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ \/opt\/kelion-codex\/bin\/codex --version/)
 
   const handlerStart = remote.indexOf('report_constructor_config_failure() {')
   const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
@@ -806,7 +827,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const sourceCommit = 'a'.repeat(40)
   const script = `set -Euo pipefail
 constructor_config_phase='post-installer'
-constructor_config_check='opencode-full-access-config'
+constructor_config_check='codex-cli-install'
 source_commit='${sourceCommit}'
 ${handler}
 cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
@@ -826,7 +847,7 @@ exit 99
     ok: false,
     event: 'constructor_config_failure',
     phase: 'post-installer',
-    check: 'opencode-full-access-config',
+    check: 'codex-cli-install',
     line: 0,
     exit_code: 17,
     source_commit: sourceCommit,
@@ -1057,21 +1078,15 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   assert.match(release, /LoadCredential=constructor-release-secret:\/root\/kelion\/secrets\/constructor-release-secret/)
   assert.match(release, /LoadCredential=github-release-token:/)
   assert.doesNotMatch(release, /codex-worker-secret|constructor-publisher-secret|github-publisher-token|constructor-handoff|VPS/)
-  assert.match(worker, /NoNewPrivileges=false/)
-  assert.match(worker, /ProtectSystem=false/)
-  assert.match(worker, /CapabilityBoundingSet=~/)
-  assert.match(worker, /RestrictNamespaces=false/)
-  for (const unit of [publisher, release]) {
+  for (const unit of [worker, publisher, release]) {
     assert.match(unit, /NoNewPrivileges=true/)
     assert.match(unit, /ProtectSystem=strict/)
     assert.match(unit, /CapabilityBoundingSet=\n/)
-  }
-  for (const unit of [worker, publisher, release]) {
     assert.match(unit, /After=[^\n]*kelion-runtime-config-recovery\.service/)
     assert.match(unit, /ConditionPathExists=\/run\/kelion\/runtime-config-recovery\.ready/)
     assert.doesNotMatch(unit, /\[Install\]|WantedBy=multi-user\.target/)
   }
-  for (const unit of [publisher]) {
+  for (const unit of [worker, publisher]) {
     assert.match(unit, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
     assert.doesNotMatch(unit, /^RestrictNamespaces=.*\bmount\b/m)
   }
@@ -1105,10 +1120,9 @@ test('workerul oprește copilul activ la pierderea lease-ului și păstrează ad
   assert.match(runLogged, /const onAbort = \(\) => \{[\s\S]*aborted = true[\s\S]*terminate\(\)/)
   assert.match(runLogged, /signal\?\.addEventListener\('abort', onAbort, \{ once: true \}\)/)
   assert.match(runLogged, /signal\?\.removeEventListener\('abort', onAbort\)/)
-  assert.match(runLogged, /detached: true[\s\S]*signalGroup\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*signalGroup\('SIGKILL'\)[\s\S]*2_000/)
-  assert.match(runLogged, /privilegedKill[\s\S]*\/usr\/bin\/sudo[\s\S]*\/usr\/bin\/kill/)
+  assert.match(runLogged, /child\.kill\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*child\.kill\('SIGKILL'\)[\s\S]*2_000/)
   assert.match(jobLease, /new AbortController\(\)[\s\S]*controller\.abort\(error\)[\s\S]*stop\.signal = controller\.signal/)
-  assert.match(worker, /30 \* 60_000,\s*stopExecLease\.signal,\s*true/)
+  assert.match(worker, /30 \* 60_000,\s*stopExecLease\.signal/)
   assert.match(worker, /45 \* 60_000,\s*stopGateLease\.signal/)
   assert.equal([...worker.matchAll(/\bci:\s*'local_gates'/g)].length, 2)
   assert.doesNotMatch(worker, /\bci:\s*'green'/)
@@ -1160,7 +1174,7 @@ test('workerul nu publică ready înainte de reconciliere și lipsa unui ordin e
   assert.match(runOnce, /prepareWorkerClaim\(secret\)[\s\S]*acceptWorkerClaim\(secret, claimed\)/)
 })
 
-test('bugetele systemd acoperă execuția OpenCode și porțile complete', () => {
+test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
   const worker = read('deploy/systemd/kelion-codex-worker.service')
   const publisher = read('deploy/systemd/kelion-constructor-publisher.service')
   const value = (unit, key) => {
@@ -1192,9 +1206,7 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
   assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
   assert.match(installer, /systemd-analyze verify/)
-  assert.match(installer, /authorization\.kelion-codex-full-access/)
-  assert.match(installer, /validate_constructor_sudoers \/etc\/sudoers\.d\/kelion-constructor-full-access/)
-  assert.match(installer, /retire_legacy_codex_state/)
+  assert.match(installer, /kelion-worker\.config\.toml/)
   assert.match(installer, /constructor_markers=\(\/etc\/kelion\/codex-worker\.enabled \/etc\/kelion\/constructor-publisher\.enabled \/etc\/kelion\/constructor-release\.enabled\)/)
   assert.match(installer, /rm -f -- "[$][{]constructor_markers\[@\][}]"\s+sync -f \/etc\/kelion/)
   assert.match(installer, /systemctl enable kelion-runtime-config-recovery\.service/)
@@ -1207,112 +1219,9 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.ok(lock >= 0 && identities > lock && transaction > lock,
     'identitățile și tranzacția durabilă se modifică numai sub lock-ul comun dovedit')
   const logicalBlock = installer.slice(installer.indexOf('install_logicals=('), installer.indexOf('\n)', installer.indexOf('install_logicals=(')))
-  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 21)
-  const withoutRequiredSystemdActions = installer
-    .replace(/systemctl enable kelion-runtime-config-recovery\.service[^\n]*/, '')
-    .replace(/systemctl restart private-ai-web\.service[^\n]*/, '')
-  assert.doesNotMatch(withoutRequiredSystemdActions, /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
-})
-
-test('installerul permanent publică OpenCode/Qwen cu sudo complet și retrage compatibilitatea Codex', () => {
-  const installer = read('deploy/instaleaza-constructor.sh')
-  const retire = shellFunction(installer, 'retire_legacy_codex_state')
-  const sudoersGate = shellFunction(installer, 'validate_constructor_sudoers')
-  const workerUnit = read('deploy/systemd/kelion-codex-worker.service')
-  const sudoers = read('deploy/sudoers/kelion-codex-full-access')
-  const logicals = installer.slice(installer.indexOf('install_logicals=('), installer.indexOf('\n)', installer.indexOf('install_logicals=(')))
-  const sources = installer.slice(installer.indexOf('install_sources=('), installer.indexOf('\n)', installer.indexOf('install_sources=(')))
-  const quiesce = installer.indexOf('write_install_journal quiesced')
-  const retirement = installer.lastIndexOf('set_constructor_install_phase legacy-retirement')
-  const publication = installer.lastIndexOf('set_constructor_install_phase artifact-publication')
-
-  assert.match(logicals, /authorization\.kelion-codex-full-access/)
-  assert.match(logicals, /configuration\.opencode[\s\S]*instructions\.opencode/)
-  assert.match(logicals, /systemd-dropin\.private-ai-web-full-access/)
-  assert.doesNotMatch(logicals, /codex-sandbox-probe|codex-worker-profile/)
-  assert.match(sources, /deploy\/sudoers\/kelion-codex-full-access/)
-  assert.match(sources, /deploy\/opencode-constructor\.json[\s\S]*deploy\/opencode-constructor-instructions\.md/)
-  assert.match(sources, /deploy\/systemd\/private-ai-web-full-access\.conf/)
-  assert.doesNotMatch(sources, /codex-sandbox-probe|codex-worker\.profile/)
-  assert.match(installer, /authorization\.kelion-codex-full-access\) install_target=\/etc\/sudoers\.d\/kelion-constructor-full-access; install_mode=440/)
-  assert.match(sudoersGate, /grep -qxF 'kelion-codex ALL=\(ALL:ALL\) NOPASSWD: ALL'/)
-  assert.match(sudoersGate, /visudo -cf "\$file"/)
-  assert.equal(sudoers.trim(), 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL')
-  assert.ok(quiesce >= 0 && retirement > quiesce && publication > retirement,
-    'compatibilitatea veche trebuie retrasă numai sub quiesce și înaintea publicării')
-  for (const retired of [
-    '/var/lib/kelion-codex-auth',
-    '/opt/kelion-codex/codex-sandbox-probe.mjs',
-    '/opt/kelion-codex/profile-home',
-    '/opt/kelion-codex/bin/codex-real',
-    '/opt/private-ai/bin/opencode-constructor-root',
-    '/etc/private-ai/local-codex-compat-key',
-    '/etc/sudoers.d/kelion-local-qwen-constructor',
-    '/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf',
-    '/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf',
-  ]) assert.match(retire, new RegExp(retired.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  assert.match(workerUnit, /^Environment=OPENCODE_BIN=\/opt\/private-ai\/bin\/opencode$/m)
-  assert.match(workerUnit, /^Environment=OPENCODE_MODEL=llama\.cpp\/qwen3\.6-35b-a3b-local$/m)
-  assert.doesNotMatch(workerUnit, /CODEX_HOME|openai-project-key|OPENAI_API_KEY|codex-real/)
-  assert.doesNotMatch(installer, /LoadCredential=.*openai|CODEX_HOME=.*login|codex login --with-api-key/i)
-  const webAccess = shellFunction(installer, 'validate_private_ai_web_full_access')
-  assert.match(webAccess, /User --value\)" = root[\s\S]*Group --value\)" = root/)
-  assert.match(webAccess, /NoNewPrivileges --value\)" = no[\s\S]*ProtectSystem --value\)" = no/)
-  assert.match(webAccess, /\/proc\/\$pid\/status[\s\S]*Uid:/)
-})
-
-test('statusul și activarea cer executorul OpenCode/Qwen local cu sudo complet', () => {
-  const workflow = read('.github/workflows/vps-run.yml')
-  const start = workflow.indexOf('      - name: Activeaza etapizat sau raporteaza starea')
-  const end = workflow.indexOf('\n      - name:', start + 1)
-  assert.ok(start >= 0 && end > start)
-  const activation = workflow.slice(start, end)
-  const remote = activation.split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n')
-  const validator = shellFunction(remote, 'validate_local_constructor_executor')
-  assert.match(validator, /opencode_version=1\.18\.25[\s\S]*\/opt\/private-ai\/bin\/opencode --version/)
-  assert.match(validator, /private-ai-llm\.service[\s\S]*\/health[\s\S]*\/v1\/models/)
-  assert.match(validator, /enabled_providers == \["llama\.cpp"\][\s\S]*has\("apiKey"\) \| not/)
-  assert.match(validator, /all\(\.\[\]; \$config\.permission\[\.\] == "allow"\)/)
-  assert.match(validator, /kelion-constructor-full-access[\s\S]*visudo -cf/)
-  assert.match(validator, /sudo -n -u root -- \/usr\/bin\/id -u/)
-  assert.match(validator, /codex-worker\.mjs --self-test/)
-  assert.match(activation, /constructor-executor=opencode-local-qwen-ready/)
-  assert.match(activation, /constructor-executor=opencode-local-qwen-required/)
-  assert.equal([...activation.matchAll(/^\s+validate_local_constructor_executor$/gm)].length, 2,
-    'ambele activări trebuie să refuze fail-closed executorul local neverificat')
-  assert.doesNotMatch(activation,
-    /CODEX_HOME=|\/opt\/kelion-codex\/bin\/codex(?:\s|$)|login\s+status|sk-proj-|codex-auth=/i)
-})
-
-test('controlul permanent nu mai include instalatorul one-shot al bazei AI', () => {
-  const workflow = read('.github/workflows/vps-run.yml')
-  assert.doesNotMatch(workflow, /install-private-ai|ops\/private-ai-install-20260830|\.github\/private-ai\/install-private-ai\.sh/)
-  assert.doesNotMatch(workflow, /^\s*push:\s*$/m)
-  assert.match(workflow, /guard-source:[\s\S]*\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*\[ "\$GITHUB_REF" = refs\/heads\/master \][\s\S]*git rev-parse HEAD/)
-})
-
-test('toate blocurile run din controlul permanent sunt Bash sintactic valid', () => {
-  const workflow = read('.github/workflows/vps-run.yml')
-  const lines = workflow.split('\n')
-  let count = 0
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = /^(\s*)run:\s*\|[+-]?\s*$/.exec(lines[index])
-    if (!match) continue
-    const parentIndent = match[1].length
-    const block = []
-    let cursor = index + 1
-    for (; cursor < lines.length; cursor += 1) {
-      const line = lines[cursor]
-      if (line.trim() && line.match(/^\s*/)[0].length <= parentIndent) break
-      block.push(line.length >= parentIndent + 2 ? line.slice(parentIndent + 2) : '')
-    }
-    count += 1
-    const result = spawnSync(bashExecutable, ['-n'], { input: `${block.join('\n')}\n`, encoding: 'utf8' })
-    assert.equal(result.status, 0,
-      `bloc run invalid lângă linia ${index + 1}: ${result.stderr || result.stdout}`)
-    index = cursor - 1
-  }
-  assert.ok(count >= 10, `au fost extrase prea puține blocuri run: ${count}`)
+  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 19)
+  const withoutRecoveryEnable = installer.replace(/systemctl enable kelion-runtime-config-recovery\.service[^\n]*/, '')
+  assert.doesNotMatch(withoutRecoveryEnable, /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
 })
 
 test('telemetria instalatorului rămâne fail-closed și nu divulgă mediul', () => {
@@ -2184,7 +2093,6 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
     'kelion-codex-worker.service',
     'kelion-constructor-publisher.service',
     'kelion-constructor-release.service',
-    'private-ai-web-full-access.conf',
   ].map((unit) => join(root, 'deploy', 'systemd', unit))
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const installer = read('deploy/instaleaza-constructor.sh')
@@ -2195,7 +2103,7 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
   const sourceValidator = shellFunction(installer, 'validate_source_systemd_text_files')
   const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
   assert.match(sourceValidator,
-    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 9/)
+    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 8/)
   assert.match(verifyCandidateUnits,
     /local allow_legacy_text=\$\{1:-0\}[\s\S]*case "\$allow_legacy_text" in 0\|1\)[\s\S]*if \[ "\$allow_legacy_text" = 0 \]; then[\s\S]*validate_systemd_text_file_bytes/)
   assert.match(mergePolicy, /"deploy\/systemd\/kelion-constructor-sync\.service"/)
@@ -2635,9 +2543,7 @@ test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperul
   assert.ok(classify >= 0 && recover > classify)
   assert.doesNotMatch(workflow.slice(0, classify), /^concurrency:/m)
   assert.match(workflow.slice(recover), /concurrency:\n\s+group: production-release/)
-  assert.match(workflow, /guard-source:\s*\n\s+if: always\(\)[\s\S]*actions\/checkout@[0-9a-f]{40}[\s\S]*persist-credentials: false/)
-  assert.match(workflow, /guard-source:[\s\S]*\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*\[ "\$GITHUB_REF" = refs\/heads\/master \][\s\S]*\[ "\$GITHUB_REF_NAME" = master \][\s\S]*git rev-parse HEAD\)" = "\$GITHUB_SHA"/)
-  assert.match(workflow, /classify:\s*\n\s+needs: guard-source/)
+  assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
   assert.match(workflow, /BEFORE_SHA[\s\S]*de9fe5f3f081373a23796d83b469651e9c1e33e7\|afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3[\s\S]*execute=false/)
   assert.match(workflow, /RECOVERY_DEFERRED: tranziția incidentului aparține workflow-ului post-PONR dedicat/)
   assert.doesNotMatch(workflow, /\[ -n "\$VPS_HOST" \] &&/)
@@ -3567,13 +3473,13 @@ test('upgrade-ul Constructor este o operație workflow izolată de credentialele
   }
 
   const optionStart = workflow.indexOf('        options:')
-  const optionEnd = workflow.indexOf('\n      pilot_pr_number:', optionStart)
+  const optionEnd = workflow.indexOf('\n      auto_routed_to_master:', optionStart)
   assert.ok(optionStart >= 0 && optionEnd > optionStart)
   const operationOptions = workflow.slice(optionStart, optionEnd)
   assert.equal(operationOptions.match(/^\s+- upgrade-constructor$/gm)?.length, 1,
     'upgrade-constructor trebuie să fie o operație explicită și unică')
 
-  const checkout = stepContaining('ref: master')
+  const checkout = stepContaining('actions/checkout@')
   const gate = stepContaining('Leaga imaginea gate de sursa Constructor')
   for (const prerequisite of [checkout, gate]) {
     assert.match(prerequisite, /inputs\.operation == 'configure-constructor'/)
@@ -3641,7 +3547,7 @@ test('upgrade-ul Constructor este o operație workflow izolată de credentialele
   assert.ok(explicitSecretRefs.every((name) => name === 'VPS_SSH_KEY'),
     `upgrade-ul poate primi numai cheia SSH de control, nu ${explicitSecretRefs.join(', ')}`)
   assert.doesNotMatch(upgradeStep,
-    /\bpayload\b|\bbase64\b|\bapt(?:-get)?\b|\bnpm\s+(?:install|i|ci)\b|@openai\/codex|CODEX_HOME|codex\s+login|login\s+status|sk-proj-|OPENAI_(?:API|ADMIN)_KEY|set\s+-x|printenv|declare\s+-p|export\s+-p/i)
+    /\bpayload\b|\bbase64\b|\bapt(?:-get)?\b|\bnpm\b|set\s+-x|printenv|declare\s+-p|export\s+-p/i)
 })
 
 test('dovada release din workflow cere candidate=false și SHA-ul selectat în fresh și recovery', () => {
@@ -3703,8 +3609,7 @@ test('selectorul upgrade folosește master pentru fresh și numai jurnalul stric
     assert.ok(start >= 0, `pasul ${name} lipsește`)
     return workflow.slice(start, next < 0 ? workflow.length : next)
   }
-  const controlStart = workflow.indexOf('\n  control:')
-  const checkoutStart = workflow.indexOf('- uses: actions/checkout@', controlStart)
+  const checkoutStart = workflow.indexOf('- uses: actions/checkout@')
   const checkoutEnd = workflow.indexOf('\n      - name:', checkoutStart)
   const checkout = workflow.slice(checkoutStart, checkoutEnd)
   assert.match(checkout, /if: inputs\.operation == 'configure-constructor' \|\| inputs\.operation == 'upgrade-constructor'/)
@@ -3942,21 +3847,10 @@ test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne
 
   const installedProof = shellFunction(upgrade, 'validate_installed_generation_quiesced')
   assert.match(installedProof, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
-  assert.match(installedProof, /validate_private_ai_executor/)
   assert.match(installedProof, /\[ ! -e "\$READY_STAMP" \] && \[ ! -L "\$READY_STAMP" \]/)
   assert.match(installedProof, /for marker in "\$\{constructor_markers\[@\]\}"[\s\S]*\[ ! -e "\$marker" \]/)
   assert.match(installedProof, /UnitFileState --value\)" = disabled[\s\S]*inactive\|failed/)
   assert.match(installedProof, /validate_service_quiescence/)
-
-  const executorProof = shellFunction(upgrade, 'validate_private_ai_executor')
-  assert.match(executorProof, /opencode_version=1\.18\.25[\s\S]*\/opt\/private-ai\/bin\/opencode --version/)
-  assert.match(executorProof, /private-ai-llm\.service[\s\S]*\/health[\s\S]*\/v1\/models/)
-  assert.match(executorProof, /cmp -s -- "\$repo_root\/deploy\/opencode-constructor\.json" "\$config"/)
-  assert.match(executorProof, /cmp -s -- "\$repo_root\/deploy\/systemd\/kelion-codex-worker\.service" \/etc\/systemd\/system\/kelion-codex-worker\.service/)
-  assert.match(executorProof, /cmp -s -- "\$repo_root\/deploy\/sudoers\/kelion-codex-full-access" \/etc\/sudoers\.d\/kelion-constructor-full-access/)
-  assert.match(executorProof, /all\(\.\[\]; \$config\.permission\[\.\] == "allow"\)/)
-  assert.match(executorProof, /visudo -cf[\s\S]*sudo -n -u root -- \/usr\/bin\/id -u[\s\S]*codex-worker\.mjs --self-test/)
-  assert.doesNotMatch(executorProof, /@openai\/codex|CODEX_HOME|codex\s+login|login\s+status|sk-proj-/i)
 
   const main = upgrade.slice(upgrade.lastIndexOf('[ -d "$ROOT" ]'))
   const publicationLock = main.indexOf('flock -n 9')
@@ -4516,7 +4410,6 @@ test('cutover-ul final al upgrade-ului restage-uiește numai configul worker byt
   const restored = shellFunction(upgrade, 'validate_restored_activation_vector')
   assert.match(restored, /validate_ready_stamp/)
   assert.match(restored, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
-  assert.match(restored, /validate_private_ai_executor/)
   assert.match(restored,
     /cmp -s -- "\$snapshot_root\/marker\.\$index" "\$marker"/)
   assert.match(restored, /unit_file_state=\$\(systemctl show "\$timer" --property=UnitFileState --value\)/)
@@ -5674,7 +5567,7 @@ test('telemetria upgrade-ului Constructor este structurată și nu divulgă medi
   const reporter = shellFunction(upgrade, 'report_constructor_upgrade_failure')
   const capture = shellFunction(upgrade, 'capture_constructor_upgrade_failure')
   assert.doesNotMatch(upgrade,
-    /CODEX_WORKER_SECRET|CONSTRUCTOR_(?:PUBLISHER|RELEASE)_SECRET|SYNC_GITHUB_TOKEN|PUBLISHER_GITHUB_TOKEN|RELEASE_GITHUB_TOKEN|GHCR_READ_TOKEN|OPENAI_(?:API|ADMIN)_KEY|@openai\/codex|CODEX_HOME|codex\s+login|login\s+status|sk-proj-|\bpayload\b|\bapt(?:-get)?\b|\bnpm\s+(?:install|i|ci)\b/i)
+    /CODEX_WORKER_SECRET|CONSTRUCTOR_(?:PUBLISHER|RELEASE)_SECRET|SYNC_GITHUB_TOKEN|PUBLISHER_GITHUB_TOKEN|RELEASE_GITHUB_TOKEN|GHCR_READ_TOKEN|OPENAI_(?:API|ADMIN)_KEY|\bpayload\b|\bapt(?:-get)?\b|\bnpm\b/i)
   assert.doesNotMatch(reporter,
     /BASH_COMMAND|set\s+-x|printenv|declare\s+-p|export\s+-p|printf[^\n]*(?:token|secret|value|env)/i)
 
