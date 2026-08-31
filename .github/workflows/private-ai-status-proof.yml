@@ -115,6 +115,22 @@ jobs:
               -p ActiveState -p SubState -p Result -p ExecMainStatus -p MainPID \
               -p ControlGroup -p NRestarts --no-pager 2>/dev/null || true
           done
+          printf 'MODEL_FS='
+          df -PB1 /srv/private-ai | awk 'NR == 2 {printf "total=%s used=%s free=%s percent=%s\\n", $2, $3, $4, $5}'
+          max_group=$(systemctl show private-ai-max-model-upgrade.service -p ControlGroup --value 2>/dev/null || true)
+          if [ -n "$max_group" ] && [ -d "/sys/fs/cgroup$max_group" ]; then
+            printf '%s\n' '--- MAX MODEL CGROUP PROCESSES ---'
+            while IFS= read -r pid; do
+              [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+              ps -o pid,ppid,etime,time,%cpu,%mem,rss,vsz,stat,wchan:24,comm,args \
+                -p "$pid" --no-headers || true
+              if [ -r "/proc/$pid/io" ]; then
+                printf 'MAX_PROC_IO_PID=%s ' "$pid"
+                tr '\n' ' ' < "/proc/$pid/io" || true
+                printf '\n'
+              fi
+            done < "/sys/fs/cgroup$max_group/cgroup.procs"
+          fi
           printf 'LLAMA_SERVER_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/llama-server | awk '{print $1}')"
           printf 'OPENCODE_BIN_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')"
           printf 'LLAMA_CPP_CHECKOUT=%s\n' "$(runuser -u privateai -- env -i \
