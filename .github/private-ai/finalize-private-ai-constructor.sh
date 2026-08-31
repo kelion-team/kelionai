@@ -33,6 +33,8 @@ readonly MODEL_FILE_BYTES=20419565568
 readonly MODEL_FILE_SHA256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
 readonly LLAMA_SERVER_SHA256=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
 readonly OPENCODE_BIN_SHA256=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
+readonly PREVIOUS_RUNTIME_CUTOVER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
+readonly EXPECTED_RUNTIME_CUTOVER_SHA256=ccaa17f396cc7d3008422eae5cc836cf3d92df7d4c35509e330bb34e70959286
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
 readonly LEGACY_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
 readonly LEGACY_CODEX_REAL=/opt/kelion-codex/bin/codex-real
@@ -43,10 +45,12 @@ readonly CANONICAL_CODEX=/opt/kelion-codex/bin/codex
 readonly WEB_DROPIN_DIR=/etc/systemd/system/private-ai-web.service.d
 readonly WEB_DROPIN=$WEB_DROPIN_DIR/90-kelion-constructor-full-access.conf
 readonly SUDOERS=/etc/sudoers.d/kelion-constructor-full-access
+readonly RUNTIME_CUTOVER_TARGET=/root/kelion/bin/runtime-config-cutover.sh
 readonly FINAL_RECEIPT=$PRIVATE_AI_CONFIG/.constructor-finalized
 readonly RUNTIME_ROOT=/root/kelion/runtime
 readonly RUNTIME_READY_ROOT=/run/kelion
 readonly RUNTIME_READY_STAMP=$RUNTIME_READY_ROOT/runtime-config-recovery.ready
+readonly RUNTIME_CUTOVER_JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
 readonly PUBLICATION_LOCK=/root/kelion/publicare.lock
 readonly WORKER_ENV=/root/kelion/config/codex-worker.env
 readonly PUBLISHER_ENV=/root/kelion/config/constructor-publisher.env
@@ -279,6 +283,10 @@ instructions_candidate=''
 auth_config=''
 receipt_candidate=''
 gate_cutover_stage=''
+runtime_helper_candidate=''
+committed_gate_repair_root=''
+preserve_committed_gate_env=0
+preserve_runtime_helper=0
 
 snapshot_file() {
   local key=$1 target=$2
@@ -291,14 +299,39 @@ snapshot_file() {
 }
 
 restore_file() {
-  local key=$1 target=$2
+  local key=$1 target=$2 candidate='' parent
+  parent=$(dirname -- "$target")
   if [ -f "$rollback_root/$key.absent" ]; then
-    rm -f -- "$target"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+      rm -f -- "$target" && sync -f "$parent"
+    else
+      # Un părinte absent implică deja starea snapshotului; nu există o
+      # mutație de persistat și sync -f pe calea inexistentă ar fi un fals eșec.
+      [ ! -L "$parent" ] && { [ ! -e "$parent" ] || [ -d "$parent" ]; }
+    fi
   else
-    install -D --preserve-timestamps -- "$rollback_root/$key" "$target"
-    chown --reference="$rollback_root/$key" "$target"
-    chmod --reference="$rollback_root/$key" "$target"
+    [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+    candidate=$(mktemp "$target.rollback.XXXXXX") || return 1
+    if install --preserve-timestamps -- "$rollback_root/$key" "$candidate" \
+      && chown --reference="$rollback_root/$key" "$candidate" \
+      && chmod --reference="$rollback_root/$key" "$candidate" \
+      && sync -f "$candidate" \
+      && mv -f -- "$candidate" "$target" \
+      && sync -f "$target" \
+      && sync -f "$parent"; then
+      return 0
+    fi
+    rm -f -- "$candidate"
+    return 1
   fi
+}
+
+refresh_snapshot_file() {
+  local key=$1 target=$2
+  rm -f -- "$rollback_root/$key" "$rollback_root/$key.absent"
+  snapshot_file "$key" "$target"
+  sync -f "$rollback_root"
 }
 
 snapshot_legacy_path() {
@@ -314,11 +347,30 @@ snapshot_legacy_path() {
 }
 
 restore_legacy_path() {
-  local key=$1 target=$2
-  rm -f -- "$target"
-  if [ ! -f "$rollback_root/$key.absent" ]; then
-    cp -a --no-dereference -- "$rollback_root/$key" "$target"
+  local key=$1 target=$2 parent base candidate=''
+  parent=$(dirname -- "$target")
+  if [ -f "$rollback_root/$key.absent" ]; then
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+      rm -f -- "$target" && sync -f "$parent"
+    else
+      [ ! -L "$parent" ] && { [ ! -e "$parent" ] || [ -d "$parent" ]; }
+    fi
+    return
   fi
+
+  [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+  base=${target##*/}
+  candidate=$(mktemp "$parent/.$base.rollback.XXXXXX") || return 1
+  rm -f -- "$candidate" || return 1
+  if cp -a --no-dereference -- "$rollback_root/$key" "$candidate" \
+    && { [ -L "$candidate" ] || sync -f "$candidate"; } \
+    && mv -f -- "$candidate" "$target" \
+    && sync -f "$parent"; then
+    return 0
+  fi
+  rm -f -- "$candidate"
+  return 1
 }
 
 rollback() {
@@ -333,13 +385,20 @@ rollback() {
     "$worker_candidate" "$unit_candidate" "$sudoers_candidate" \
     "$canonical_codex_candidate" "$config_candidate" "$auth_config" \
     "$web_dropin_candidate" "$instructions_candidate" \
-    "$receipt_candidate"; do
+    "$receipt_candidate" "$runtime_helper_candidate"; do
     [ -z "$temporary" ] || rm -f -- "$temporary" >/dev/null 2>&1 || true
   done
   case "$gate_cutover_stage" in
     /root/kelion/runtime/runtime-cutover.[A-Za-z0-9]*)
       if [ -d "$gate_cutover_stage" ] && [ ! -L "$gate_cutover_stage" ]; then
         rm -rf --one-file-system -- "$gate_cutover_stage" >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
+  case "$committed_gate_repair_root" in
+    /root/kelion/runtime/private-ai-committed-gate-repair.[A-Za-z0-9]*)
+      if [ -d "$committed_gate_repair_root" ] && [ ! -L "$committed_gate_repair_root" ]; then
+        rm -rf --one-file-system -- "$committed_gate_repair_root" >/dev/null 2>&1 || true
       fi
       ;;
   esac
@@ -363,10 +422,22 @@ rollback() {
     restore_file web_dropin "$WEB_DROPIN" || rollback_failed=1
     restore_file sudoers "$SUDOERS" || rollback_failed=1
     restore_file receipt "$FINAL_RECEIPT" || rollback_failed=1
-    restore_file runtime_ready_stamp "$RUNTIME_READY_STAMP" || rollback_failed=1
-    restore_file worker_env "$WORKER_ENV" || rollback_failed=1
-    restore_file publisher_env "$PUBLISHER_ENV" || rollback_failed=1
-    restore_file release_env "$RELEASE_ENV" || rollback_failed=1
+    if [ "$preserve_runtime_helper" -eq 0 ]; then
+      restore_file runtime_cutover_helper "$RUNTIME_CUTOVER_TARGET" || rollback_failed=1
+    fi
+    if [ "$preserve_committed_gate_env" -eq 1 ]; then
+      # După ce toate cele trei fișiere au fost reparate ca generație committed,
+      # revenirea la snapshotul vechi ar recrea exact incidentul ownerless.  Cu
+      # jurnalul încă prezent recovery-ul va continua roll-forward; cu jurnalul
+      # consumat bytes-urile live sunt deja generația durabilă.
+      rm -f -- "$RUNTIME_READY_STAMP" >/dev/null 2>&1 || rollback_failed=1
+      sync -f "$RUNTIME_READY_ROOT" >/dev/null 2>&1 || rollback_failed=1
+    else
+      restore_file runtime_ready_stamp "$RUNTIME_READY_STAMP" || rollback_failed=1
+      restore_file worker_env "$WORKER_ENV" || rollback_failed=1
+      restore_file publisher_env "$PUBLISHER_ENV" || rollback_failed=1
+      restore_file release_env "$RELEASE_ENV" || rollback_failed=1
+    fi
     restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || rollback_failed=1
     restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || rollback_failed=1
     restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || rollback_failed=1
@@ -408,6 +479,7 @@ snapshot_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN"
 snapshot_file web_dropin "$WEB_DROPIN"
 snapshot_file sudoers "$SUDOERS"
 snapshot_file receipt "$FINAL_RECEIPT"
+snapshot_file runtime_cutover_helper "$RUNTIME_CUTOVER_TARGET"
 snapshot_file runtime_ready_stamp "$RUNTIME_READY_STAMP"
 snapshot_file worker_env "$WORKER_ENV"
 snapshot_file publisher_env "$PUBLISHER_ENV"
@@ -487,24 +559,24 @@ quiesce_gate_consumers() {
 
 # Freeze every consumer before touching either canonical Git repository or its
 # rootless Podman runtime. Timers stay stopped until the cutover and probes end.
+# Recovery remains enabled because it is part of the strict live contract; the
+# publication lock serializes it, iar starea inactive împiedică execuția aici.
 case "$RECOVERY_SERVICE_STATE" in
-  enabled:active|enabled:inactive)
-    systemctl disable kelion-runtime-config-recovery.service >/dev/null
-    ;;
+  enabled:active|enabled:inactive) ;;
   enabled:failed)
-    # Un eșec anterior al cutover-ului lasă corect recovery-ul enabled:failed.
-    # Îl ținem disabled pe durata finalizării și normalizăm numai latch-ul
-    # systemd; helperul pin-uit de mai jos recuperează jurnalul durabil real.
-    systemctl disable kelion-runtime-config-recovery.service >/dev/null
+    # Un eșec anterior lasă corect recovery-ul enabled:failed. Normalizăm numai
+    # latch-ul systemd; helperul pin-uit recuperează jurnalul durabil real.
     systemctl reset-failed kelion-runtime-config-recovery.service
     RECOVERY_SERVICE_STATE=enabled:inactive
     ;;
   *) fail "runtime recovery service is not canonical before finalization: $RECOVERY_SERVICE_STATE" ;;
 esac
 case "$(unit_state kelion-runtime-config-recovery.service)" in
-  disabled:active|disabled:inactive) ;;
-  *) fail 'runtime recovery service was not durably disabled before finalization' ;;
+  enabled:active|enabled:inactive) ;;
+  *) fail 'runtime recovery service is not enabled before finalization' ;;
 esac
+[ "$(systemctl show --property=MainPID --value kelion-runtime-config-recovery.service)" = 0 ]
+[ "$(systemctl show --property=ControlPID --value kelion-runtime-config-recovery.service)" = 0 ]
 quiesce_gate_consumers
 
 require_regular "$WORKER_ENV" root:root:640
@@ -618,6 +690,210 @@ if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
   printf 'STALE_DEPLOY_GATE_PREPARED_RECOVERED=yes\n'
 fi
 
+install_persistent_runtime_helper() {
+  local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal source_sha current_sha
+  for gate_artifact in "$gate_journal" "$RUNTIME_ROOT"/constructor-gate-txn.* \
+    "$RUNTIME_ROOT"/constructor-gate-discarded.* "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$gate_artifact" ] && [ ! -L "$gate_artifact" ] \
+      || fail 'a pending gate recovery blocks the persistent helper update'
+  done
+  require_regular "$RUNTIME_CUTOVER_TARGET" root:root:500
+  source_sha=$(sha256sum "$RUNTIME_CUTOVER_SOURCE" | awk '{print $1}')
+  [ "$source_sha" = "$EXPECTED_RUNTIME_CUTOVER_SHA256" ] \
+    || fail 'bundled runtime helper hash is not the pinned repair generation'
+  current_sha=$(sha256sum "$RUNTIME_CUTOVER_TARGET" | awk '{print $1}')
+  case "$current_sha" in
+    "$PREVIOUS_RUNTIME_CUTOVER_SHA256"|"$EXPECTED_RUNTIME_CUTOVER_SHA256") ;;
+    *) fail 'persistent runtime helper is not an allowed predecessor' ;;
+  esac
+  runtime_helper_candidate=$(mktemp "$RUNTIME_CUTOVER_TARGET.private-ai.XXXXXX")
+  install -o root -g root -m 0500 "$RUNTIME_CUTOVER_SOURCE" "$runtime_helper_candidate"
+  bash -n "$runtime_helper_candidate"
+  sync -f "$runtime_helper_candidate"
+  mv -f -- "$runtime_helper_candidate" "$RUNTIME_CUTOVER_TARGET"
+  preserve_runtime_helper=1
+  runtime_helper_candidate=''
+  sync -f "$RUNTIME_CUTOVER_TARGET"
+  sync -f "$(dirname -- "$RUNTIME_CUTOVER_TARGET")"
+  require_regular "$RUNTIME_CUTOVER_TARGET" root:root:500
+  cmp -s -- "$RUNTIME_CUTOVER_TARGET" "$RUNTIME_CUTOVER_SOURCE" \
+    || fail 'persistent runtime helper does not match the pinned bundle'
+  refresh_snapshot_file runtime_cutover_helper "$RUNTIME_CUTOVER_TARGET"
+  preserve_runtime_helper=0
+  printf 'PERSISTENT_RUNTIME_HELPER_UPDATED=yes\n'
+}
+
+install_persistent_runtime_helper
+
+repair_stale_committed_gate_journal() {
+  local recovery_root rollback_manifest recovery_compose backups_root observed expected
+  local journal_sha manifest_sha compose_sha logical target backup candidate temporary index
+  local runtime_journal=/root/kelion/runtime/runtime-config-cutover.journal
+  local live_vector_allowed=1
+  local -a logicals=(
+    constructor-config.codex-worker.env
+    constructor-config.constructor-publisher.env
+    constructor-config.constructor-release.env
+  )
+  local -a targets=("$WORKER_ENV" "$PUBLISHER_ENV" "$RELEASE_ENV")
+  local -a backup_shas=() candidates=()
+
+  [ "$runtime_journal" = "$RUNTIME_CUTOVER_JOURNAL" ]
+  if [ ! -e "$runtime_journal" ] && [ ! -L "$runtime_journal" ]; then
+    return 0
+  fi
+  require_regular "$runtime_journal" root:root:600
+  jq -e '
+    (keys | sort) == ["phase","schema","transactionRoot"] and
+    .schema == 1 and .phase == "committed" and
+    (.transactionRoot | strings |
+      test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$"))
+  ' "$runtime_journal" >/dev/null \
+    || fail 'runtime journal is not the exact stale committed gate incident'
+  recovery_root=$(jq -er '.transactionRoot' "$runtime_journal")
+  [[ "$recovery_root" =~ ^/root/kelion/runtime/runtime-config-txn\.[A-Za-z0-9]+$ ]]
+  [ -d "$recovery_root" ] && [ ! -L "$recovery_root" ] \
+    && [ "$(realpath -e -- "$recovery_root")" = "$recovery_root" ] \
+    && [ "$(stat -Lc '%U:%G:%a' "$recovery_root")" = root:root:700 ] \
+    || fail 'stale committed transaction root is unsafe'
+  rollback_manifest=$recovery_root/rollback-manifest
+  recovery_compose=$recovery_root/recovery-compose.yml
+  backups_root=$recovery_root/backups
+  observed=$(find "$recovery_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)
+  expected=$'backups:d\nrecovery-compose.yml:f\nrollback-manifest:f'
+  [ "$observed" = "$expected" ] \
+    || fail 'stale committed transaction has unexpected top-level entries'
+  [ -d "$backups_root" ] && [ ! -L "$backups_root" ] \
+    && [ "$(realpath -e -- "$backups_root")" = "$backups_root" ] \
+    && [ "$(stat -Lc '%U:%G:%a' "$backups_root")" = root:root:700 ] \
+    || fail 'stale committed backup root is unsafe'
+  require_regular "$rollback_manifest" root:root:600
+  require_regular "$recovery_compose" root:root:600
+  cmp -s -- "$recovery_compose" "$COMPOSE_SOURCE" \
+    || fail 'stale committed recovery compose differs from the pinned bundle'
+  mapfile -t committed_manifest < "$rollback_manifest"
+  [ "${#committed_manifest[@]}" -eq 3 ] \
+    && [ "${committed_manifest[0]}" = $'constructor-config.codex-worker.env\t1' ] \
+    && [ "${committed_manifest[1]}" = $'constructor-config.constructor-publisher.env\t1' ] \
+    && [ "${committed_manifest[2]}" = $'constructor-config.constructor-release.env\t1' ] \
+    || fail 'stale committed rollback manifest is not the exact three-gate allowlist'
+  observed=$(find "$backups_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)
+  expected=$'constructor-config.codex-worker.env:f\nconstructor-config.constructor-publisher.env:f\nconstructor-config.constructor-release.env:f'
+  [ "$observed" = "$expected" ] \
+    || fail 'stale committed backup inventory has an unexpected logical'
+
+  journal_sha=$(sha256sum "$runtime_journal" | awk '{print $1}')
+  manifest_sha=$(sha256sum "$rollback_manifest" | awk '{print $1}')
+  compose_sha=$(sha256sum "$recovery_compose" | awk '{print $1}')
+  committed_gate_repair_root=$(mktemp -d "$RUNTIME_ROOT/private-ai-committed-gate-repair.XXXXXX")
+  chown root:root "$committed_gate_repair_root"
+  chmod 0700 "$committed_gate_repair_root"
+
+  for index in "${!logicals[@]}"; do
+    logical=${logicals[$index]}
+    target=${targets[$index]}
+    backup=$backups_root/$logical
+    candidate=$committed_gate_repair_root/$logical
+    require_regular "$backup" root:root:640
+    require_regular "$target" root:root:640
+    backup_shas+=("$(sha256sum "$backup" | awk '{print $1}')")
+    if [ "$index" -lt 2 ]; then
+      [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$backup")" -eq 1 ] \
+        || fail "stale committed backup has a non-exact gate field: $logical"
+      awk -F= -v image="$EXPECTED_GATE_IMAGE" '
+        $1 == "KELION_CODEX_GATE_IMAGE" {
+          if (!written++) print "KELION_CODEX_GATE_IMAGE=" image
+          next
+        }
+        { print }
+      ' "$backup" > "$candidate"
+    else
+      install -o root -g root -m 0600 "$backup" "$candidate"
+    fi
+    chown root:root "$candidate"
+    chmod 0600 "$candidate"
+    if [ "$index" -lt 2 ]; then
+      [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$candidate")" -eq 1 ] \
+        || fail "repaired candidate has a non-exact gate field: $logical"
+      grep -Fqx "KELION_CODEX_GATE_IMAGE=$EXPECTED_GATE_IMAGE" "$candidate"
+    else
+      [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$candidate")" -eq 0 ]
+      cmp -s -- "$candidate" "$backup"
+    fi
+    KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
+      --validate-env-file "$logical" "$candidate"
+    cmp -s -- "$target" "$backup" || cmp -s -- "$target" "$candidate" \
+      || live_vector_allowed=0
+    candidates+=("$candidate")
+  done
+  [ "$live_vector_allowed" -eq 1 ] \
+    || fail 'live gate config is neither rollback nor reconstructed forward bytes'
+
+  # Reautentificăm toate dovezile imediat înainte de prima mutație live.
+  require_regular "$runtime_journal" root:root:600
+  [ "$(sha256sum "$runtime_journal" | awk '{print $1}')" = "$journal_sha" ]
+  [ "$(sha256sum "$rollback_manifest" | awk '{print $1}')" = "$manifest_sha" ]
+  [ "$(sha256sum "$recovery_compose" | awk '{print $1}')" = "$compose_sha" ]
+  for index in "${!logicals[@]}"; do
+    backup=$backups_root/${logicals[$index]}
+    target=${targets[$index]}
+    [ "$(sha256sum "$backup" | awk '{print $1}')" = "${backup_shas[$index]}" ]
+    cmp -s -- "$target" "$backup" || cmp -s -- "$target" "${candidates[$index]}"
+  done
+  quiesce_gate_consumers force
+  systemctl stop kelion-constructor-sync.service
+  case "$(systemctl is-active kelion-constructor-sync.service 2>/dev/null || true)" in
+    inactive|failed) ;;
+    *) fail 'constructor sync is not quiesced for committed gate repair' ;;
+  esac
+  if [ -e "$RUNTIME_READY_STAMP" ] || [ -L "$RUNTIME_READY_STAMP" ]; then
+    require_regular "$RUNTIME_READY_STAMP" root:root:444
+    [ "$(tr -d '\n' < "$RUNTIME_READY_STAMP")" = schema=1 ]
+    rm -f -- "$RUNTIME_READY_STAMP"
+    sync -f "$RUNTIME_READY_ROOT"
+  fi
+  systemctl is-enabled --quiet kelion-runtime-config-recovery.service
+  [ "$(systemctl show --property=MainPID --value kelion-runtime-config-recovery.service)" = 0 ]
+  [ "$(systemctl show --property=ControlPID --value kelion-runtime-config-recovery.service)" = 0 ]
+
+  for index in "${!logicals[@]}"; do
+    target=${targets[$index]}
+    candidate=${candidates[$index]}
+    temporary=$(mktemp "$target.private-ai-repair.XXXXXX")
+    install -o root -g root -m 0640 "$candidate" "$temporary"
+    sync -f "$temporary"
+    mv -f -- "$temporary" "$target"
+    sync -f "$target"
+    sync -f "$(dirname -- "$target")"
+    require_regular "$target" root:root:640
+    cmp -s -- "$target" "$candidate"
+  done
+  # Din acest prag toate cele trei ținte sunt generația forward completă.
+  # Rollbackul exterior nu mai are voie să le înlocuiască cu backupurile vechi.
+  preserve_committed_gate_env=1
+
+  KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
+    --recover-only "$COMPOSE_SOURCE" --leave-constructor-quiesced
+  [ ! -e "$runtime_journal" ] && [ ! -L "$runtime_journal" ] \
+    || fail 'recovered runtime journal was not consumed'
+
+  # Rebazăm rollbackul numai după consumarea durabilă a jurnalului. Până când
+  # toate snapshoturile sunt sincronizate, flagul de mai sus păstrează live-ul.
+  refresh_snapshot_file worker_env "$WORKER_ENV"
+  refresh_snapshot_file publisher_env "$PUBLISHER_ENV"
+  refresh_snapshot_file release_env "$RELEASE_ENV"
+  refresh_snapshot_file runtime_ready_stamp "$RUNTIME_READY_STAMP"
+  preserve_committed_gate_env=0
+  rm -rf --one-file-system -- "$committed_gate_repair_root"
+  committed_gate_repair_root=''
+  WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
+  PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
+  RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
+  printf 'STALE_RUNTIME_COMMITTED_GATE_REPAIRED=yes\n'
+}
+
+repair_stale_committed_gate_journal
+
 gate_cutover_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
 chown root:root "$gate_cutover_stage"
 chmod 0700 "$gate_cutover_stage"
@@ -656,6 +932,7 @@ sync -f "$gate_cutover_stage/manifest"
 sync -f "$gate_cutover_stage/files"
 sync -f "$gate_cutover_stage"
 
+systemctl is-enabled --quiet kelion-runtime-config-recovery.service
 KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
   "$gate_cutover_stage" "$COMPOSE_SOURCE" --leave-constructor-quiesced
 gate_cutover_stage=''

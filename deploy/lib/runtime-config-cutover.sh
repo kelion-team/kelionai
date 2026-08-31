@@ -1193,7 +1193,7 @@ fi
 
 validate_live_runtime_contract() {
   local index path config_count=0 marker_count=0 unit_count=0 unit runtime_checks publisher_checks release_checks
-  local worker_enabled publisher_enabled release_enabled
+  local worker_enabled publisher_enabled release_enabled worker_gate_image publisher_gate_image
   local -a config_logicals=(
     constructor-config.codex-worker.env
     constructor-config.constructor-publisher.env
@@ -1222,6 +1222,9 @@ validate_live_runtime_contract() {
     publisher_checks=$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "${constructor_configs[1]}")
     release_checks=$(sed -n 's/^CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=//p' "${constructor_configs[2]}")
     validate_constructor_checks_contract "$runtime_checks" "$publisher_checks" "$release_checks" || return 1
+    worker_gate_image=$(sed -n 's/^KELION_CODEX_GATE_IMAGE=//p' "${constructor_configs[0]}")
+    publisher_gate_image=$(sed -n 's/^KELION_CODEX_GATE_IMAGE=//p' "${constructor_configs[1]}")
+    [ -n "$worker_gate_image" ] && [ "$worker_gate_image" = "$publisher_gate_image" ] || return 1
   fi
   for index in "${!constructor_markers[@]}"; do
     path=${constructor_markers[$index]}

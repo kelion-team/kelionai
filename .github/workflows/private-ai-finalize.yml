@@ -11,8 +11,10 @@ on:
       - deploy/opencode-constructor.json
       - deploy/opencode-constructor-instructions.md
       - deploy/systemd/private-ai-web-full-access.conf
+      - deploy/lib/runtime-config-cutover.sh
       - constructor-desktop/**
       - .github/private-ai/finalize-private-ai-constructor.sh
+      - .github/private-ai/finalize-private-ai-constructor.test.mjs
       - .github/workflows/vps-codex-login.yml
       - .github/workflows/private-ai-finalize.yml
   workflow_dispatch:
@@ -61,6 +63,7 @@ jobs:
           [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
+          node --test .github/private-ai/finalize-private-ai-constructor.test.mjs
           bash -n deploy/lib/runtime-config-cutover.sh
           node --check deploy/codex-worker.mjs
           CODEX_WORKER_EXECUTOR=opencode node deploy/codex-worker.mjs --self-test \
