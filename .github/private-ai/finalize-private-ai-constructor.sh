@@ -449,6 +449,25 @@ validate_rootless_gate_image() {
 validate_rootless_gate_image kelion-codex /var/lib/kelion-codex /run/kelion-codex
 validate_rootless_gate_image kelion-publisher /var/lib/kelion-publisher /run/kelion-publisher
 
+deploy_quiesce_journal=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
+if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
+  require_regular "$deploy_quiesce_journal" root:root:600
+  jq -e '(.schema == 1 or .schema == 2) and
+    (.phase | strings) and
+    (.requestId | strings | test("^[0-9a-f-]{36}$")) and
+    (.commit | strings | test("^[0-9a-f]{40}$")) and
+    (.activeBefore | strings)' "$deploy_quiesce_journal" >/dev/null
+  printf 'DEPLOY_QUIESCE_DIAGNOSTIC='
+  jq -c '{schema,phase,requestId,commit,activeBefore,gateSha256,
+    targetGateSha256,committedGateSha256}' "$deploy_quiesce_journal"
+  printf 'DEPLOY_QUIESCE_ACTIVE_OBSERVED=%s\n' \
+    "$(sed -n '1p' "$RUNTIME_ROOT/release-state/active")"
+  printf 'DEPLOY_QUIESCE_CONFIG_SHA256='
+  sha256sum "$WORKER_ENV" "$PUBLISHER_ENV" "$RELEASE_ENV" \
+    | awk '{printf "%s%s", separator, $1; separator=","} END {print ""}'
+  fail 'active deploy quiesce journal requires explicit owner recovery'
+fi
+
 gate_cutover_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
 chown root:root "$gate_cutover_stage"
 chmod 0700 "$gate_cutover_stage"
