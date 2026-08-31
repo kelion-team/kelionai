@@ -1,0 +1,107 @@
+name: private-ai-max-model-unblock
+
+on:
+  push:
+    branches:
+      - ops/private-ai-install-20260830
+    paths:
+      - .github/workflows/private-ai-max-model-unblock.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  start-download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Pornește descărcarea fără a debloca activarea
+        shell: bash
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          readonly expected_sha=d4888f7d0a829232353fe91cf708c9a0e54c408a
+          readonly unit=/etc/systemd/system/private-ai-max-model-upgrade.service
+          readonly script=/root/private-ai-max-model/$expected_sha/upgrade.sh
+          readonly model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
+          [ -f "$unit" ] && [ ! -L "$unit" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$unit")" = '0:0:644:1' ]
+          [ -f "$script" ] && [ ! -L "$script" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$script")" = '0:0:700:1' ]
+          [ "$(sha256sum "$script" | awk '{print $1}')" = "$expected_sha" ]
+          grep -Fqx "ExecStart=/usr/bin/bash $script" "$unit"
+
+          if grep -Fqx 'After=network-online.target private-ai-constructor-finalize.service' "$unit"; then
+            systemctl stop private-ai-max-model-upgrade.service
+            candidate=$(mktemp /etc/systemd/system/.private-ai-max-model-unblock.XXXXXX)
+            sed 's/^After=network-online\.target private-ai-constructor-finalize\.service$/After=network-online.target/' \
+              "$unit" > "$candidate"
+            [ "$(grep -c '^After=network-online.target$' "$candidate")" -eq 1 ]
+            ! grep -Fq 'After=network-online.target private-ai-constructor-finalize.service' "$candidate"
+            chown root:root "$candidate"
+            chmod 0644 "$candidate"
+            mv -f -- "$candidate" "$unit"
+            sync -f "$unit"
+            systemctl daemon-reload
+            systemd-analyze verify "$unit"
+          else
+            grep -Fqx 'After=network-online.target' "$unit"
+          fi
+
+          systemctl reset-failed private-ai-max-model-upgrade.service >/dev/null 2>&1 || true
+          systemctl start --no-block private-ai-max-model-upgrade.service
+          for attempt in $(seq 1 60); do
+            state=$(systemctl is-active private-ai-max-model-upgrade.service 2>/dev/null || true)
+            [ "$state" != failed ] || {
+              journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
+                --lines=120 >&2
+              exit 1
+            }
+            [ -d "$model_root" ] && break
+            [ "$attempt" -lt 60 ]
+            sleep 2
+          done
+          [ -d "$model_root" ] && [ ! -L "$model_root" ]
+          sleep 5
+          downloaded=$(find "$model_root" -maxdepth 1 -type f \
+            \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' \
+            | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+          printf 'MAX_MODEL_DOWNLOAD_STARTED=yes\n'
+          printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$downloaded"
+          printf 'MAX_MODEL_UPGRADE_STATE=%s\n' \
+            "$(systemctl is-active private-ai-max-model-upgrade.service 2>/dev/null || true)"
+          REMOTE

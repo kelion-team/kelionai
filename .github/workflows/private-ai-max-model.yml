@@ -136,7 +136,7 @@ jobs:
             cat > "$unit_candidate" <<UNIT
           [Unit]
           Description=Kelion private AI maximum stable model upgrade
-          After=network-online.target private-ai-constructor-finalize.service
+          After=network-online.target
           Wants=network-online.target
           StartLimitIntervalSec=3600
           StartLimitBurst=3
