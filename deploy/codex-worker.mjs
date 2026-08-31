@@ -357,7 +357,7 @@ async function post(secret, path, body) {
 
 function commandResult(command, args, cwd = undefined, env = undefined) {
   return spawnSync(command, args, {
-    cwd,
+    cwd: cwd ?? '/var/lib/kelion-codex',
     env,
     encoding: 'utf8',
     maxBuffer: 256 * 1024,
