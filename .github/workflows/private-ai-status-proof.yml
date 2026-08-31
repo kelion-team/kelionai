@@ -77,9 +77,13 @@ jobs:
           printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
           max_model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
           max_model_total=76536964608
-          max_model_downloaded=$(find "$max_model_root" -maxdepth 1 -type f \
-            \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' 2>/dev/null \
-            | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+          if [ -d "$max_model_root" ]; then
+            max_model_downloaded=$(find "$max_model_root" -maxdepth 1 -type f \
+              \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' \
+              | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+          else
+            max_model_downloaded=0
+          fi
           printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$max_model_downloaded"
           awk -v bytes="$max_model_downloaded" -v total="$max_model_total" \
             'BEGIN {printf "MAX_MODEL_DOWNLOAD_PERCENT=%.2f\n", bytes * 100 / total}'
