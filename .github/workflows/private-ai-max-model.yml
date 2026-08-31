@@ -96,10 +96,147 @@ jobs:
             -o ServerAliveCountMax=8
           )
 
-          remote_candidate="/root/private-ai-max-model.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.sh"
-          scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_candidate"
-          proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
-            "$remote_candidate" "$installer_sha" <<'REMOTE'
+          # A queued rerun after a completed 122B cutover must be observational only.
+          # The root-owned receipt is the SHA attestation created only after the full
+          # installer proof.  Revalidate its exact contract, live files and services,
+          # but do not upload, hash 76 GB again, start or restart any unit on this path.
+          set +e
+          fast_proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE_FAST'
+          set -uo pipefail
+
+          fast_miss() { exit 42; }
+
+          readonly model_id='llama.cpp/qwen3.5-122b-a10b-local'
+          readonly model_alias='qwen3.5-122b-a10b-local'
+          readonly model_root='/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m'
+          readonly model_first='Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf'
+          readonly receipt='/etc/private-ai/.max-model-complete'
+          readonly dropin='/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf'
+          readonly config='/srv/private-ai/home/.config/opencode/opencode.json'
+          readonly worker='/opt/kelion-codex/codex-worker.mjs'
+          readonly worker_unit='/etc/systemd/system/kelion-codex-worker.service'
+          readonly opencode='/opt/private-ai/bin/opencode'
+
+          [ -f "$receipt" ] && [ ! -L "$receipt" ] || fast_miss
+          [ "$(stat -Lc '%u:%g:%a:%h' "$receipt" 2>/dev/null)" = '0:0:600:1' ] || fast_miss
+          mapfile -t max_lines < "$receipt" || fast_miss
+          [ "${#max_lines[@]}" -eq 12 ] || fast_miss
+          [ "${max_lines[0]}" = 'schema=1' ] || fast_miss
+          [ "${max_lines[1]}" = 'model=llama.cpp/qwen3.5-122b-a10b-local' ] || fast_miss
+          [ "${max_lines[2]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] || fast_miss
+          [ "${max_lines[3]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] || fast_miss
+          [ "${max_lines[4]}" = 'model_quant=Q4_K_M' ] || fast_miss
+          [ "${max_lines[5]}" = 'model_total_bytes=76536964608' ] || fast_miss
+          [ "${max_lines[6]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] || fast_miss
+          [ "${max_lines[7]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] || fast_miss
+          [ "${max_lines[8]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] || fast_miss
+          [ "${max_lines[9]}" = 'context=16384' ] || fast_miss
+          [ "${max_lines[10]}" = 'worker_unit_model=llama.cpp/qwen3.5-122b-a10b-local' ] || fast_miss
+          [[ "${max_lines[11]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || fast_miss
+
+          [ -d "$model_root" ] && [ ! -L "$model_root" ] || fast_miss
+          [ "$(stat -Lc '%U:%G:%a' "$model_root" 2>/dev/null)" = 'privateai:privateai:700' ] || fast_miss
+          while IFS='|' read -r shard bytes; do
+            path="$model_root/$shard"
+            [ -f "$path" ] && [ ! -L "$path" ] || fast_miss
+            [ "$(stat -Lc '%U:%G:%s:%h' "$path" 2>/dev/null)" = "privateai:privateai:${bytes}:1" ] || fast_miss
+          done <<'SHARDS'
+          Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf|10943552
+          Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf|49968146912
+          Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf|26557874144
+          SHARDS
+
+          [ -f "$dropin" ] && [ ! -L "$dropin" ] || fast_miss
+          [ "$(stat -Lc '%u:%g:%a:%h' "$dropin" 2>/dev/null)" = '0:0:644:1' ] || fast_miss
+          expected_dropin=$(cat <<'DROPIN'
+          [Service]
+          ExecStart=
+          ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+          TimeoutStartSec=3600
+          CPUQuota=1600%
+          MemoryHigh=84G
+          MemoryMax=88G
+          DROPIN
+          )
+          [ "$(<"$dropin")" = "$expected_dropin" ] || fast_miss
+          [ "$(systemctl show private-ai-llm.service -p DropInPaths --value 2>/dev/null)" = "$dropin" ] || fast_miss
+
+          [ -f "$config" ] && [ ! -L "$config" ] || fast_miss
+          [ "$(stat -Lc '%U:%G:%a:%h' "$config" 2>/dev/null)" = 'root:privateai:640:1' ] || fast_miss
+          jq -e --arg model "$model_id" --arg alias "$model_alias" '
+            .model == $model and .small_model == $model and
+            .enabled_providers == ["llama.cpp"] and
+            .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            .provider["llama.cpp"].models[$alias].limit.context == 16384 and
+            .provider["llama.cpp"].models[$alias].limit.output == 4096
+          ' "$config" >/dev/null 2>&1 || fast_miss
+
+          [ -x "$opencode" ] && [ -f "$opencode" ] && [ ! -L "$opencode" ] || fast_miss
+          [ -f "$worker" ] && [ ! -L "$worker" ] || fast_miss
+          [ -f "$worker_unit" ] && [ ! -L "$worker_unit" ] || fast_miss
+          [ "$(stat -Lc '%u:%g:%a:%h' "$worker_unit" 2>/dev/null)" = '0:0:644:1' ] || fast_miss
+          [ "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' "$worker_unit")" -eq 1 ] || fast_miss
+          ! grep -Fq 'qwen3.6-35b-a3b-local' "$worker_unit" || fast_miss
+
+          systemctl is-active --quiet private-ai-llm.service || fast_miss
+          systemctl is-active --quiet private-ai-web.service || fast_miss
+          systemctl is-active --quiet kelion-codex-worker.timer || fast_miss
+          systemctl is-enabled --quiet kelion-codex-worker.timer || fast_miss
+          systemctl show kelion-codex-worker.service -p Environment --value 2>/dev/null \
+            | tr ' ' '\n' \
+            | grep -qx 'OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local' || fast_miss
+
+          llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value 2>/dev/null)
+          [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || fast_miss
+          [ -r "/proc/$llm_pid/maps" ] || fast_miss
+          awk -v target="$model_root/$model_first" '$NF == target {found=1} END {exit !found}' \
+            "/proc/$llm_pid/maps" || fast_miss
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080' || fast_miss
+          ! ss -ltnH | awk '{print $4}' | grep -Eq '(0[.]0[.]0[.]0|\[::\]):24080$' || fast_miss
+
+          curl --fail --silent --show-error --max-time 15 \
+            http://127.0.0.1:24080/health >/dev/null || fast_miss
+          models=$(curl --fail --silent --show-error --max-time 30 \
+            http://127.0.0.1:24080/v1/models) || fast_miss
+          jq -e --arg id "$model_alias" '.data | any(.id == $id)' \
+            <<<"$models" >/dev/null 2>&1 || fast_miss
+          reply=$(curl --fail --silent --show-error --max-time 1800 \
+            -H 'Content-Type: application/json' \
+            --data-binary '{"model":"qwen3.5-122b-a10b-local","messages":[{"role":"user","content":"Reply only with OK."}],"max_tokens":16,"temperature":0}' \
+            http://127.0.0.1:24080/v1/chat/completions) || fast_miss
+          jq -e '.choices[0].message.content | type == "string" and length > 0' \
+            <<<"$reply" >/dev/null 2>&1 || fast_miss
+          HOME=/srv/private-ai/home XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+            "$opencode" models llama.cpp | grep -Fq "$model_alias" || fast_miss
+          node "$worker" --self-test | grep -qx 'codex-worker self-test: TRECE' || fast_miss
+
+          printf 'FAST_PATH=existing-valid\n'
+          printf 'MODEL_ID=%s\n' "$model_id"
+          printf 'MODEL_REPO=unsloth/Qwen3.5-122B-A10B-GGUF\n'
+          printf 'MODEL_REVISION=a97b483a9f8cad9788776aa0112a2c63bf349e9e\n'
+          printf 'MODEL_QUANT=Q4_K_M\n'
+          printf 'MODEL_TOTAL_BYTES=76536964608\n'
+          printf 'MODEL_CONTEXT=16384\n'
+          printf 'VPS_MEMORY_TOTAL_BYTES=%s\n' "$(awk '/MemTotal:/ {print $2 * 1024}' /proc/meminfo | cut -d. -f1)"
+          printf 'VPS_CPU_THREADS=%s\n' "$(nproc)"
+          printf 'LLAMA_HEALTH=ok\n'
+          printf 'LLAMA_INFERENCE=passed\n'
+          printf 'OPENCODE_PROVIDER=passed\n'
+          printf 'WORKER_SELF_TEST=passed\n'
+          printf 'WORKER_UNIT_MODEL=passed\n'
+          printf 'MAX_MODEL_INSTALLED=yes\n'
+          REMOTE_FAST
+          )
+          fast_status=$?
+          set -e
+
+          if [ "$fast_status" -eq 0 ]; then
+            proof=$fast_proof
+          elif [ "$fast_status" -eq 42 ]; then
+            remote_candidate="/root/private-ai-max-model.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.sh"
+            scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_candidate"
+            proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+              "$remote_candidate" "$installer_sha" <<'REMOTE'
           set -Eeuo pipefail
           umask 077
           candidate=$1
@@ -191,14 +328,32 @@ jobs:
 
           [ -f /etc/private-ai/.max-model-complete ]
           [ ! -L /etc/private-ai/.max-model-complete ]
-          grep -qx 'model=llama.cpp/qwen3.5-122b-a10b-local' \
-            /etc/private-ai/.max-model-complete
+          [ "$(stat -Lc '%u:%g:%a:%h' /etc/private-ai/.max-model-complete)" = '0:0:600:1' ]
+          mapfile -t max_lines < /etc/private-ai/.max-model-complete
+          [ "${#max_lines[@]}" -eq 12 ]
+          [ "${max_lines[0]}" = 'schema=1' ]
+          [ "${max_lines[1]}" = 'model=llama.cpp/qwen3.5-122b-a10b-local' ]
+          [ "${max_lines[2]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ]
+          [ "${max_lines[3]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ]
+          [ "${max_lines[4]}" = 'model_quant=Q4_K_M' ]
+          [ "${max_lines[5]}" = 'model_total_bytes=76536964608' ]
+          [ "${max_lines[6]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ]
+          [ "${max_lines[7]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ]
+          [ "${max_lines[8]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ]
+          [ "${max_lines[9]}" = 'context=16384' ]
+          [ "${max_lines[10]}" = 'worker_unit_model=llama.cpp/qwen3.5-122b-a10b-local' ]
+          [[ "${max_lines[11]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
           systemctl is-active --quiet private-ai-llm.service
           systemctl is-active --quiet private-ai-web.service
           systemctl is-active --quiet kelion-codex-worker.timer
           journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$success_invocation"
           REMOTE
-          )
+            )
+          else
+            printf 'Fast-path SSH failed with exit %s; refusing an ambiguous fallback.\n' \
+              "$fast_status" >&2
+            exit "$fast_status"
+          fi
 
           printf '%s\n' "$proof"
           grep -qx 'MODEL_ID=llama.cpp/qwen3.5-122b-a10b-local' <<<"$proof"
