@@ -223,7 +223,7 @@ test('rollbackul tratează atomic țintele absente și artefactele legacy', () =
   ordered(restoreLegacy, [
     ['candidatul sibling', 'mktemp "$parent/.$base.rollback.XXXXXX"'],
     ['copierea fără dereference', 'cp -a --no-dereference'],
-    ['rename atomic', 'mv -f -- "$candidate" "$target"'],
+    ['rename atomic', 'mv -fT -- "$candidate" "$target"'],
     ['fsync director', 'sync -f "$parent"'],
   ])
 })
@@ -264,8 +264,20 @@ test('rollbackul identifică pasul eșuat și restaurează enabled-runtime exact
 
 test('credentiala systemd 0444 este acceptată numai din mountul privat și rămâne read-only', () => {
   assert.match(worker, /startsWith\('\/run\/credentials\/'\)/)
+  assert.match(worker, /realpathSync\(directory\) !== directory/)
+  assert.match(worker, /CODEX_WORKER_SECRET_FILE && process[.]env[.]CREDENTIALS_DIRECTORY/)
   assert.match(worker, /location[.]systemd[\s\S]*info[.]mode & 0o222/)
   assert.match(worker, /CODEX_WORKER_SECRET_FILE[\s\S]*systemd: false/)
   assert.match(worker, /systemd: false[\s\S]*info[.]mode & 0o077/)
   assert.match(worker, /lstatSync\(location[.]path\)/)
+})
+
+
+test('diagnosticul claimului și rollbackul legacy păstrează dovezi fără conținut secret', () => {
+  assert.match(finalizer, /PRIVATE_AI_WORKER_CLAIM_FAILED/)
+  assert.match(finalizer, /ExecMainStatus/)
+  const restoreLegacy = shellFunction('restore_legacy_path')
+  assert.match(restoreLegacy, /legacy_restore_failure/)
+  assert.match(restoreLegacy, /mv -fT --/)
+  assert.match(finalizer, /PRIVATE_AI_RESTORE_LEGACY_FAILED/)
 })

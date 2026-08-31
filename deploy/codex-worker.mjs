@@ -323,12 +323,18 @@ export function signedHeaders(secret, method, path, body, timestamp, nonce) {
 }
 
 function secretLocation() {
+  if (process.env.CODEX_WORKER_SECRET_FILE && process.env.CREDENTIALS_DIRECTORY) {
+    fail('Sursele credentialei worker sunt ambigue')
+  }
   if (process.env.CODEX_WORKER_SECRET_FILE) {
     return { path: resolve(process.env.CODEX_WORKER_SECRET_FILE), systemd: false }
   }
   if (process.env.CREDENTIALS_DIRECTORY) {
     const directory = resolve(process.env.CREDENTIALS_DIRECTORY)
-    if (!directory.startsWith('/run/credentials/')) {
+    if (
+      !directory.startsWith('/run/credentials/')
+      || realpathSync(directory) !== directory
+    ) {
       fail('Directorul credentialei systemd nu este canonic')
     }
     const directoryEntry = lstatSync(directory)

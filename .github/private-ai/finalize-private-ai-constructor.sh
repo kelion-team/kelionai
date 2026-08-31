@@ -364,48 +364,93 @@ snapshot_legacy_path() {
   fi
 }
 
+legacy_restore_failure() {
+  local key=$1 phase=$2 source=$3 target=$4 parent=$5
+  printf 'PRIVATE_AI_RESTORE_LEGACY_FAILED key=%s phase=%s source=%s target=%s parent=%s\n' \
+    "$key" "$phase" \
+    "$(stat -c '%F:%u:%g:%a:%h' -- "$source" 2>/dev/null || printf absent)" \
+    "$(stat -c '%F:%u:%g:%a:%h' -- "$target" 2>/dev/null || printf absent)" \
+    "$(stat -Lc '%F:%u:%g:%a:%h' -- "$parent" 2>/dev/null || printf absent)" >&2
+  return 1
+}
+
 restore_legacy_path() {
   local key=$1 target=$2 parent base candidate='' source link_target=''
   parent=$(dirname -- "$target")
+  source=$rollback_root/$key
   if [ -f "$rollback_root/$key.absent" ]; then
     if [ -e "$target" ] || [ -L "$target" ]; then
-      [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
-      rm -f -- "$target" && sync -f "$parent"
+      [ -d "$parent" ] && [ ! -L "$parent" ] || {
+        legacy_restore_failure "$key" absent-parent "$source" "$target" "$parent"
+        return 1
+      }
+      rm -f -- "$target" || {
+        legacy_restore_failure "$key" absent-remove "$source" "$target" "$parent"
+        return 1
+      }
+      sync -f "$parent" || {
+        legacy_restore_failure "$key" absent-sync "$source" "$target" "$parent"
+        return 1
+      }
     else
-      [ ! -L "$parent" ] && { [ ! -e "$parent" ] || [ -d "$parent" ]; }
+      [ ! -L "$parent" ] && { [ ! -e "$parent" ] || [ -d "$parent" ]; } || {
+        legacy_restore_failure "$key" absent-parent-state "$source" "$target" "$parent"
+        return 1
+      }
     fi
-    return
+    return 0
   fi
 
-  [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
-  source=$rollback_root/$key
+  [ -d "$parent" ] && [ ! -L "$parent" ] || {
+    legacy_restore_failure "$key" parent "$source" "$target" "$parent"
+    return 1
+  }
   base=${target##*/}
-  candidate=$(mktemp "$parent/.$base.rollback.XXXXXX") || return 1
+  candidate=$(mktemp "$parent/.$base.rollback.XXXXXX") || {
+    legacy_restore_failure "$key" mktemp "$source" "$target" "$parent"
+    return 1
+  }
   if [ -L "$source" ]; then
     link_target=$(readlink -- "$source") || {
       rm -f -- "$candidate"
+      legacy_restore_failure "$key" readlink "$source" "$target" "$parent"
       return 1
     }
-    rm -f -- "$candidate" || return 1
+    rm -f -- "$candidate" || {
+      legacy_restore_failure "$key" symlink-unlink-candidate "$source" "$target" "$parent"
+      return 1
+    }
     ln -s -- "$link_target" "$candidate" || {
       rm -f -- "$candidate"
+      legacy_restore_failure "$key" symlink-create "$source" "$target" "$parent"
       return 1
     }
   elif [ -f "$source" ]; then
-    if ! cp -a --no-dereference -T -- "$source" "$candidate" \
-      || ! sync -f "$candidate"; then
+    cp -a --no-dereference -T -- "$source" "$candidate" || {
       rm -f -- "$candidate"
+      legacy_restore_failure "$key" copy "$source" "$target" "$parent"
       return 1
-    fi
+    }
+    sync -f "$candidate" || {
+      rm -f -- "$candidate"
+      legacy_restore_failure "$key" candidate-sync "$source" "$target" "$parent"
+      return 1
+    }
   else
     rm -f -- "$candidate"
+    legacy_restore_failure "$key" snapshot-type "$source" "$target" "$parent"
     return 1
   fi
-  if mv -f -- "$candidate" "$target" && sync -f "$parent"; then
-    return 0
-  fi
-  rm -f -- "$candidate"
-  return 1
+  mv -fT -- "$candidate" "$target" || {
+    rm -f -- "$candidate"
+    legacy_restore_failure "$key" rename "$source" "$target" "$parent"
+    return 1
+  }
+  sync -f "$parent" || {
+    legacy_restore_failure "$key" parent-sync "$source" "$target" "$parent"
+    return 1
+  }
+  return 0
 }
 
 rollback() {
@@ -1403,7 +1448,23 @@ for _ in $(seq 1 60); do
   fi
   sleep 2
 done
-[ -n "$claim_proof" ] || fail 'the real worker invocation produced no validated queue claim marker'
+if [ -z "$claim_proof" ]; then
+  claim_unit_state=$(systemctl show kelion-codex-worker.service --no-pager \
+    -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
+    -p InvocationID -p ConditionResult -p AssertResult 2>&1 || true)
+  claim_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
+    --unit=kelion-codex-worker.service --after-cursor="$claim_cursor" \
+    --lines=200 2>&1 || true)
+  if [ -z "$claim_diagnostic" ]; then
+    claim_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
+      --unit=kelion-codex-worker.service --lines=200 2>&1 || true)
+  fi
+  claim_diagnostic=$(printf '%s\n' "$claim_diagnostic" \
+    | tail -c 16384 | LC_ALL=C tr -cd '\11\12\15\40-\176')
+  printf 'PRIVATE_AI_WORKER_CLAIM_FAILED state-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_STATE_END=yes diagnostic-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_DIAGNOSTIC_END=yes\n' \
+    "$claim_unit_state" "$claim_diagnostic" >&2
+  fail 'the real worker invocation produced no validated queue claim marker'
+fi
 printf 'WORKER_CLAIM_INVOCATION_ID=%s\n' "$claim_invocation"
 printf '%s\n' "$claim_proof"
 printf 'WORKER_CLAIM_E2E=passed\n'
