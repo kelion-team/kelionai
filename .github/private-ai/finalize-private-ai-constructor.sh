@@ -45,6 +45,8 @@ readonly WEB_DROPIN=$WEB_DROPIN_DIR/90-kelion-constructor-full-access.conf
 readonly SUDOERS=/etc/sudoers.d/kelion-constructor-full-access
 readonly FINAL_RECEIPT=$PRIVATE_AI_CONFIG/.constructor-finalized
 readonly RUNTIME_ROOT=/root/kelion/runtime
+readonly RUNTIME_READY_ROOT=/run/kelion
+readonly RUNTIME_READY_STAMP=$RUNTIME_READY_ROOT/runtime-config-recovery.ready
 readonly PUBLICATION_LOCK=/root/kelion/publicare.lock
 readonly WORKER_ENV=/root/kelion/config/codex-worker.env
 readonly PUBLISHER_ENV=/root/kelion/config/constructor-publisher.env
@@ -73,17 +75,42 @@ unit_state() {
 }
 
 restore_unit_state() {
-  local unit=$1 state=$2 enabled active
+  local unit=$1 state=$2 enabled active failed=0
   enabled=${state%%:*}
   active=${state#*:}
   case "$enabled" in
-    enabled|enabled-runtime) systemctl enable "$unit" >/dev/null 2>&1 || true ;;
-    *) systemctl disable "$unit" >/dev/null 2>&1 || true ;;
+    enabled|enabled-runtime) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+    *) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
   esac
   case "$active" in
-    active|activating) systemctl start "$unit" >/dev/null 2>&1 || true ;;
-    *) systemctl stop "$unit" >/dev/null 2>&1 || true ;;
+    active|activating) systemctl start "$unit" >/dev/null 2>&1 || failed=1 ;;
+    *) systemctl stop "$unit" >/dev/null 2>&1 || failed=1 ;;
   esac
+  [ "$(unit_state "$unit")" = "$state" ] || failed=1
+  [ "$failed" = 0 ]
+}
+
+publish_finalizer_runtime_ready_stamp() {
+  local candidate
+  [ -d "$RUNTIME_READY_ROOT" ] && [ ! -L "$RUNTIME_READY_ROOT" ] \
+    && [ "$(stat -Lc '%U:%G:%a' "$RUNTIME_READY_ROOT")" = root:root:755 ] \
+    || fail 'runtime ready root is unsafe'
+  if [ -e "$RUNTIME_READY_STAMP" ] || [ -L "$RUNTIME_READY_STAMP" ]; then
+    require_regular "$RUNTIME_READY_STAMP" root:root:444
+    [ "$(tr -d '\n' < "$RUNTIME_READY_STAMP")" = schema=1 ] \
+      || fail 'existing runtime ready stamp is invalid'
+    return 0
+  fi
+  candidate=$(mktemp "$RUNTIME_READY_ROOT/.runtime-config-recovery.ready.XXXXXX")
+  printf 'schema=1\n' > "$candidate"
+  chown root:root "$candidate"
+  chmod 0444 "$candidate"
+  sync -f "$candidate"
+  mv -f -- "$candidate" "$RUNTIME_READY_STAMP"
+  sync -f "$RUNTIME_READY_ROOT"
+  require_regular "$RUNTIME_READY_STAMP" root:root:444
+  [ "$(tr -d '\n' < "$RUNTIME_READY_STAMP")" = schema=1 ] \
+    || fail 'published runtime ready stamp is invalid'
 }
 
 [ "$(id -u)" -eq 0 ] || fail 'root is required'
@@ -92,26 +119,6 @@ bundle_id=${BUNDLE_ROOT##*/}
 [[ "$bundle_id" =~ ^[0-9a-f]{64}$ ]] || fail 'bundle id is invalid'
 attempt_root=/var/lib/private-ai/finalizer-attempts
 attempt_file=$attempt_root/$bundle_id
-install -d -o root -g root -m 0700 "$attempt_root"
-[ -d "$attempt_root" ] && [ ! -L "$attempt_root" ]
-attempt_count=0
-if [ -e "$attempt_file" ] || [ -L "$attempt_file" ]; then
-  require_regular "$attempt_file" root:root:600
-  attempt_count=$(<"$attempt_file")
-  [[ "$attempt_count" =~ ^[0-9]+$ ]] || fail 'persistent attempt counter is invalid'
-fi
-if [ "$attempt_count" -ge 3 ]; then
-  systemctl disable private-ai-constructor-finalize.service >/dev/null 2>&1 || true
-  printf 'private-ai-finalize: ERROR: hard retry limit reached for bundle %s\n' "$bundle_id" >&2
-  exit 75
-fi
-attempt_candidate=$(mktemp "$attempt_root/.attempt.XXXXXX")
-printf '%s\n' "$((attempt_count + 1))" > "$attempt_candidate"
-chown root:root "$attempt_candidate"
-chmod 0600 "$attempt_candidate"
-sync -f "$attempt_candidate"
-mv -f -- "$attempt_candidate" "$attempt_file"
-sync -f "$attempt_root"
 [ -f "$WORKER_SOURCE" ] && [ ! -L "$WORKER_SOURCE" ] || fail 'worker source missing'
 [ -f "$WORKER_UNIT_SOURCE" ] && [ ! -L "$WORKER_UNIT_SOURCE" ] || fail 'worker unit source missing'
 [ -f "$SUDOERS_SOURCE" ] && [ ! -L "$SUDOERS_SOURCE" ] || fail 'worker sudoers source missing'
@@ -226,10 +233,34 @@ chown root:root /proc/$$/fd/9
 chmod 0600 /proc/$$/fd/9
 flock -n 9 || fail 'constructor/release publication is active'
 
+# Numai o încercare care deține lock-ul global poate consuma bugetul durabil.
+# Contenția cu un deploy/publicator activ nu poate epuiza retry-urile.
+install -d -o root -g root -m 0700 "$attempt_root"
+[ -d "$attempt_root" ] && [ ! -L "$attempt_root" ]
+attempt_count=0
+if [ -e "$attempt_file" ] || [ -L "$attempt_file" ]; then
+  require_regular "$attempt_file" root:root:600
+  attempt_count=$(<"$attempt_file")
+  [[ "$attempt_count" =~ ^[0-9]+$ ]] || fail 'persistent attempt counter is invalid'
+fi
+if [ "$attempt_count" -ge 3 ]; then
+  systemctl disable private-ai-constructor-finalize.service >/dev/null 2>&1 || true
+  printf 'private-ai-finalize: ERROR: hard retry limit reached for bundle %s\n' "$bundle_id" >&2
+  exit 75
+fi
+attempt_candidate=$(mktemp "$attempt_root/.attempt.XXXXXX")
+printf '%s\n' "$((attempt_count + 1))" > "$attempt_candidate"
+chown root:root "$attempt_candidate"
+chmod 0600 "$attempt_candidate"
+sync -f "$attempt_candidate"
+mv -f -- "$attempt_candidate" "$attempt_file"
+sync -f "$attempt_root"
+
 WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
 WEB_STATE=$(unit_state private-ai-web.service)
 PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
 RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
+RECOVERY_SERVICE_STATE=$(unit_state kelion-runtime-config-recovery.service)
 rollback_root=$(mktemp -d "$RUNTIME_ROOT/private-ai-finalize.XXXXXX")
 chmod 0700 "$rollback_root"
 rollback_armed=0
@@ -291,7 +322,7 @@ restore_legacy_path() {
 }
 
 rollback() {
-  local status=$?
+  local status=$? rollback_failed=0
   if [ "$#" -gt 0 ]; then status=$1; fi
   if [ "$BASHPID" != "$FINALIZER_MAIN_BASHPID" ]; then return "$status"; fi
   if [ "$status" -eq 0 ]; then return 0; fi
@@ -319,36 +350,48 @@ rollback() {
       kelion-constructor-release.timer \
       kelion-codex-worker.service \
       kelion-constructor-publisher.service \
-      kelion-constructor-release.service >/dev/null 2>&1 || true
+      kelion-constructor-release.service >/dev/null 2>&1 || rollback_failed=1
     if [ "$web_cutover_started" -eq 1 ]; then
-      systemctl stop private-ai-web.service >/dev/null 2>&1 || true
+      systemctl stop private-ai-web.service >/dev/null 2>&1 || rollback_failed=1
     fi
-    restore_file worker "$WORKER_TARGET" || true
-    restore_file worker_unit "$WORKER_UNIT_TARGET" || true
-    restore_file config "$OPENCODE_CONFIG" || true
-    restore_file instructions "$OPENCODE_INSTRUCTIONS" || true
-    restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || true
-    restore_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN" || true
-    restore_file web_dropin "$WEB_DROPIN" || true
-    restore_file sudoers "$SUDOERS" || true
-    restore_file receipt "$FINAL_RECEIPT" || true
-    restore_file worker_env "$WORKER_ENV" || true
-    restore_file publisher_env "$PUBLISHER_ENV" || true
-    restore_file release_env "$RELEASE_ENV" || true
-    restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || true
-    restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || true
-    restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || true
-    restore_legacy_path legacy_sudoers "$LEGACY_SUDOERS" || true
+    restore_file worker "$WORKER_TARGET" || rollback_failed=1
+    restore_file worker_unit "$WORKER_UNIT_TARGET" || rollback_failed=1
+    restore_file config "$OPENCODE_CONFIG" || rollback_failed=1
+    restore_file instructions "$OPENCODE_INSTRUCTIONS" || rollback_failed=1
+    restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || rollback_failed=1
+    restore_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN" || rollback_failed=1
+    restore_file web_dropin "$WEB_DROPIN" || rollback_failed=1
+    restore_file sudoers "$SUDOERS" || rollback_failed=1
+    restore_file receipt "$FINAL_RECEIPT" || rollback_failed=1
+    restore_file runtime_ready_stamp "$RUNTIME_READY_STAMP" || rollback_failed=1
+    restore_file worker_env "$WORKER_ENV" || rollback_failed=1
+    restore_file publisher_env "$PUBLISHER_ENV" || rollback_failed=1
+    restore_file release_env "$RELEASE_ENV" || rollback_failed=1
+    restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || rollback_failed=1
+    restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || rollback_failed=1
+    restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || rollback_failed=1
+    restore_legacy_path legacy_sudoers "$LEGACY_SUDOERS" || rollback_failed=1
     if [ "$canonical_codex_fake" -eq 1 ]; then
-      restore_legacy_path canonical_codex "$CANONICAL_CODEX" || true
+      restore_legacy_path canonical_codex "$CANONICAL_CODEX" || rollback_failed=1
     fi
-    systemctl daemon-reload >/dev/null 2>&1 || true
-    restore_unit_state private-ai-web.service "$WEB_STATE"
-    restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE"
-    restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE"
-    restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE"
+    systemctl daemon-reload >/dev/null 2>&1 || rollback_failed=1
+    restore_unit_state private-ai-web.service "$WEB_STATE" || rollback_failed=1
+    restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE" || rollback_failed=1
+    restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE" || rollback_failed=1
+    restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE" || rollback_failed=1
+    restore_unit_state kelion-runtime-config-recovery.service "$RECOVERY_SERVICE_STATE" \
+      || rollback_failed=1
   fi
-  printf 'PRIVATE_AI_FINALIZE_ROLLED_BACK=yes EXIT=%s\n' "$status" >&2
+  if [ "$rollback_failed" = 0 ]; then
+    printf 'PRIVATE_AI_FINALIZE_ROLLED_BACK=yes EXIT=%s\n' "$status" >&2
+  else
+    rm -f -- "$RUNTIME_READY_STAMP" >/dev/null 2>&1 || true
+    systemctl disable --now \
+      kelion-codex-worker.timer \
+      kelion-constructor-publisher.timer \
+      kelion-constructor-release.timer >/dev/null 2>&1 || true
+    printf 'PRIVATE_AI_FINALIZE_ROLLBACK_INCOMPLETE=yes EXIT=%s\n' "$status" >&2
+  fi
   exit "$status"
 }
 trap rollback ERR EXIT
@@ -365,6 +408,7 @@ snapshot_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN"
 snapshot_file web_dropin "$WEB_DROPIN"
 snapshot_file sudoers "$SUDOERS"
 snapshot_file receipt "$FINAL_RECEIPT"
+snapshot_file runtime_ready_stamp "$RUNTIME_READY_STAMP"
 snapshot_file worker_env "$WORKER_ENV"
 snapshot_file publisher_env "$PUBLISHER_ENV"
 snapshot_file release_env "$RELEASE_ENV"
@@ -443,6 +487,11 @@ quiesce_gate_consumers() {
 
 # Freeze every consumer before touching either canonical Git repository or its
 # rootless Podman runtime. Timers stay stopped until the cutover and probes end.
+[ "$RECOVERY_SERVICE_STATE" = enabled:active ] \
+  || fail "runtime recovery service is not canonical before finalization: $RECOVERY_SERVICE_STATE"
+systemctl disable kelion-runtime-config-recovery.service >/dev/null
+[ "$(unit_state kelion-runtime-config-recovery.service)" = disabled:active ] \
+  || fail 'runtime recovery service was not durably disabled before finalization'
 quiesce_gate_consumers
 
 require_regular "$WORKER_ENV" root:root:640
@@ -595,14 +644,21 @@ sync -f "$gate_cutover_stage/files"
 sync -f "$gate_cutover_stage"
 
 KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
-  "$gate_cutover_stage" "$COMPOSE_SOURCE"
+  "$gate_cutover_stage" "$COMPOSE_SOURCE" --leave-constructor-quiesced
 gate_cutover_stage=''
 quiesce_gate_consumers force
 [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   || fail 'unit-only migration barrier remains after the strict cutover'
-require_regular /run/kelion/runtime-config-recovery.ready root:root:444
-[ "$(tr -d '\n' < /run/kelion/runtime-config-recovery.ready)" = schema=1 ]
+[ ! -e "$RUNTIME_READY_STAMP" ] && [ ! -L "$RUNTIME_READY_STAMP" ] \
+  || fail 'runtime ready stamp was published before the OpenCode cutover proof'
+for quiesced_timer in \
+  kelion-codex-worker.timer \
+  kelion-constructor-publisher.timer \
+  kelion-constructor-release.timer; do
+  [ "$(unit_state "$quiesced_timer")" = disabled:inactive ] \
+    || fail "timer is not exactly quiesced after gate refresh: $quiesced_timer"
+done
 require_regular "$WORKER_ENV" root:root:640
 require_regular "$PUBLISHER_ENV" root:root:640
 grep -Fqx "KELION_CODEX_GATE_IMAGE=$EXPECTED_GATE_IMAGE" "$WORKER_ENV"
@@ -949,6 +1005,15 @@ grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke
 printf '%s\n' "$transport_smoke"
 printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
 
+require_regular /etc/kelion/codex-worker.enabled root:root:444
+[ ! -e /run/kelion/constructor-activation.pending ] \
+  && [ ! -L /run/kelion/constructor-activation.pending ] \
+  || fail 'Constructor activation barrier is pending'
+publish_finalizer_runtime_ready_stamp
+printf 'CONSTRUCTOR_RUNTIME_READY_PUBLISHED=yes\n'
+require_regular "$RUNTIME_READY_STAMP" root:root:444
+[ "$(tr -d '\n' < "$RUNTIME_READY_STAMP")" = schema=1 ]
+
 systemctl enable --now \
   kelion-constructor-publisher.timer \
   kelion-constructor-release.timer >/dev/null
@@ -956,13 +1021,6 @@ systemctl enable --now \
   || fail 'publisher timer is not enabled and active after gate recovery'
 [ "$(unit_state kelion-constructor-release.timer)" = enabled:active ] \
   || fail 'release timer is not enabled and active after gate recovery'
-
-require_regular /etc/kelion/codex-worker.enabled root:root:444
-require_regular /run/kelion/runtime-config-recovery.ready root:root:444
-[ "$(tr -d '\n' < /run/kelion/runtime-config-recovery.ready)" = schema=1 ]
-[ ! -e /run/kelion/constructor-activation.pending ] \
-  && [ ! -L /run/kelion/constructor-activation.pending ] \
-  || fail 'Constructor activation barrier is pending'
 
 claim_cursor=$(journalctl --no-pager --lines=0 --show-cursor \
   | sed -n 's/^-- cursor: //p')
@@ -1052,9 +1110,15 @@ receipt_candidate=''
 sync -f "$PRIVATE_AI_CONFIG"
 final_receipt_sha=$(sha256sum "$FINAL_RECEIPT" | awk '{print $1}')
 
+systemctl enable kelion-runtime-config-recovery.service >/dev/null
+[ "$(unit_state kelion-runtime-config-recovery.service)" = enabled:active ] \
+  || fail 'runtime recovery service was not restored after final receipt commit'
+
 rollback_armed=0
 trap - ERR HUP INT TERM EXIT
 rm -rf --one-file-system -- "$rollback_root"
+rm -f -- "$attempt_file"
+sync -f "$attempt_root"
 printf 'WORKER_INSTALLED_SHA256=%s\n' "$worker_sha"
 printf 'WORKER_UNIT_INSTALLED_SHA256=%s\n' "$worker_unit_sha"
 printf 'WORKER_SUDOERS_INSTALLED_SHA256=%s\n' "$sudoers_sha"

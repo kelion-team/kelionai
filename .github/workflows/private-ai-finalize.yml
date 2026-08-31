@@ -323,7 +323,7 @@ jobs:
           cat > "$unit_candidate" <<UNIT
           [Unit]
           Description=Kelion private AI Constructor durable finalization
-          After=network-online.target private-ai-llm.service
+          After=network-online.target private-ai-llm.service kelion-runtime-config-recovery.service
           Wants=network-online.target
           Requires=private-ai-llm.service
           StartLimitIntervalSec=3600
@@ -393,7 +393,7 @@ jobs:
               break
             fi
             restarts=$(systemctl show private-ai-constructor-finalize.service -p NRestarts --value)
-            if [ "$active" = failed ] && [[ "$restarts" =~ ^[0-9]+$ ]] && [ "$restarts" -ge 2 ]; then
+            if [ "$active" = failed ]; then
               if [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
                 journalctl --no-pager --output=cat "_SYSTEMD_INVOCATION_ID=$invocation" >&2
               else
@@ -451,6 +451,7 @@ jobs:
           grep -qx 'OPENCODE_EXECUTOR_GIT_VERIFIED status=porcelain-v1' <<<"$proof"
           grep -qx 'OPENCODE_EXECUTOR_E2E=passed' <<<"$proof"
           grep -qx 'WORKER_HMAC_HEARTBEAT_E2E=passed' <<<"$proof"
+          grep -qx 'CONSTRUCTOR_RUNTIME_READY_PUBLISHED=yes' <<<"$proof"
           grep -Eq '^WORKER_CLAIM_INVOCATION_ID=[0-9a-f]{32}$' <<<"$proof"
           grep -Eq '^OPENCODE_WORKER_CLAIM_VERIFIED state=(no_claimable_job|pipeline_active|claimed)$' <<<"$proof"
           grep -qx 'WORKER_CLAIM_E2E=passed' <<<"$proof"
