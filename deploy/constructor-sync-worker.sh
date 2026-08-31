@@ -13,14 +13,14 @@ repository=${KELION_GITHUB_REPOSITORY:-}
   || { echo 'askpass invalid' >&2; exit 1; }
 [[ -f "$token" && ! -L "$token" ]] || { echo 'credentială GitHub read-only lipsă' >&2; exit 1; }
 
-origin=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
+origin=$(/usr/sbin/runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$repo" remote get-url origin)
 [[ "$origin" == "https://github.com/$repository.git" ]] || {
   echo 'remote worker necanonic' >&2
   exit 1
 }
-config_keys=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
+config_keys=$(/usr/sbin/runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$repo" config --local --name-only --list | sort -u)
 unexpected=$(printf '%s\n' "$config_keys" | grep -Ev \
@@ -36,5 +36,5 @@ env HOME=/root \
   git -c safe.directory="$repo" -C "$repo" -c core.hooksPath=/dev/null -c core.fsmonitor=false \
   fetch --prune --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
 chown -R kelion-codex:kelion-codex "$repo/.git"
-runuser -u kelion-codex -- git -C "$repo" rev-parse --verify 'origin/master^{commit}' >/dev/null
+/usr/sbin/runuser -u kelion-codex -- git -C "$repo" rev-parse --verify 'origin/master^{commit}' >/dev/null
 printf '%s\n' 'clona privată a workerului este sincronizată'

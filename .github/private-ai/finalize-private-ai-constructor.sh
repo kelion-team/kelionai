@@ -157,6 +157,10 @@ grep -Fq "stat -Lc '%u:%g:%a:%h'" "$SYNC_WORKER_SOURCE" \
   || fail 'sync worker does not validate exact askpass metadata'
 grep -Fq "'0:0:555:1'" "$SYNC_WORKER_SOURCE" \
   || fail 'sync worker askpass metadata contract is missing'
+[ "$(grep -Fc '/usr/sbin/runuser -u kelion-codex' "$SYNC_WORKER_SOURCE")" -eq 3 ] \
+  || fail 'sync worker must use the absolute runuser path'
+! grep -Eq '(^|[^/[:alnum:]_])runuser -u kelion-codex' "$SYNC_WORKER_SOURCE" \
+  || fail 'sync worker contains an unqualified runuser call'
 grep -q 'OPENCODE_BIN' "$WORKER_SOURCE" || fail 'worker has no direct OpenCode executor'
 ! grep -q 'KELION_LOCAL_QWEN_WRAPPER' "$WORKER_SOURCE" || fail 'fake Codex wrapper found in worker source'
 grep -qx 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$SUDOERS_SOURCE"

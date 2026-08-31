@@ -290,6 +290,8 @@ test('sync-ul root validează metadata askpass și claimul aparține invocării 
   assert.doesNotMatch(syncWorker, /! -w "\$askpass"/)
   assert.match(syncWorker, /stat -Lc '%u:%g:%a:%h'/)
   assert.match(syncWorker, /0:0:555:1/)
+  assert.equal((syncWorker.match(/\/usr\/sbin\/runuser -u kelion-codex/g) ?? []).length, 3)
+  assert.doesNotMatch(syncWorker, /(^|[^/A-Za-z0-9_])runuser -u kelion-codex/m)
   assert.match(finalizer, /SYNC_WORKER_SOURCE/)
   assert.match(finalizer, /restore_file sync_worker/)
   assert.match(finalizer, /snapshot_file sync_worker/)
