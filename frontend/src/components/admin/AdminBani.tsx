@@ -134,7 +134,7 @@ export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: impo
               </span>
             </div>
             <div className="fin-sub">
-              Perioadă UTC: {new Date(finance.providerOpenAI.period.start).toLocaleString('ro-RO')} – {new Date(finance.providerOpenAI.period.end).toLocaleString('ro-RO')}. Cheia Admin este folosită numai pentru aceste citiri; starea chatului rămâne separată.
+              Perioadă UTC: {new Date(finance.providerOpenAI.period.start).toLocaleString('ro-RO', { timeZone: 'UTC' })} – {new Date(finance.providerOpenAI.period.end).toLocaleString('ro-RO', { timeZone: 'UTC' })}. Cheia Admin este folosită numai pentru aceste citiri; starea chatului rămâne separată.
             </div>
           </div>
           <div className="admin-card">
