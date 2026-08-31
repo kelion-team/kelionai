@@ -197,38 +197,8 @@ jobs:
           worker_unit=/etc/systemd/system/kelion-codex-worker.service
           printf 'WORKER_OLD_ALIAS_COUNT=%s\n' "$(grep -Fc 'qwen3.6-35b-a3b-local' "$worker" || true)"
           printf 'WORKER_NEW_ALIAS_COUNT=%s\n' "$(grep -Fc 'qwen3.5-122b-a10b-local' "$worker" || true)"
-          printf 'WORKER_UNIT_OLD_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local          systemctl show private-ai-llm.service \
-            -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
-            -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak --no-pager 2>/dev/null || true
-          systemctl cat private-ai-llm.service --no-pager 2>/dev/null || true
-          journalctl --no-pager --output=cat --unit=private-ai-llm.service \
-            --since='-30 minutes' --lines=300 2>/dev/null \
-            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
-          if [ -f /root/private-ai-install-resume.log ]; then
-            printf '%s\n' '--- RESUME LOG TAIL ---'
-            tail -n 160 /root/private-ai-install-resume.log \
-              | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig'
-          else
-            printf 'RESUME_LOG=missing\n'
-          fi
-          REMOTE
- "$worker_unit" || true)"
-          printf 'WORKER_UNIT_NEW_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local          systemctl show private-ai-llm.service \
-            -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
-            -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak --no-pager 2>/dev/null || true
-          systemctl cat private-ai-llm.service --no-pager 2>/dev/null || true
-          journalctl --no-pager --output=cat --unit=private-ai-llm.service \
-            --since='-30 minutes' --lines=300 2>/dev/null \
-            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
-          if [ -f /root/private-ai-install-resume.log ]; then
-            printf '%s\n' '--- RESUME LOG TAIL ---'
-            tail -n 160 /root/private-ai-install-resume.log \
-              | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig'
-          else
-            printf 'RESUME_LOG=missing\n'
-          fi
-          REMOTE
- "$worker_unit" || true)"
+          printf 'WORKER_UNIT_OLD_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local$' "$worker_unit" || true)"
+          printf 'WORKER_UNIT_NEW_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' "$worker_unit" || true)"
           set +e
           systemd-analyze verify private-ai-llm.service >/tmp/private-ai-llm-verify.out 2>&1
           llm_verify_rc=$?
