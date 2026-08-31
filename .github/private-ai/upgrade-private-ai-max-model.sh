@@ -14,6 +14,7 @@ readonly LLAMA_BIN='/opt/private-ai/bin/llama-server'
 readonly OPENCODE_BIN='/opt/private-ai/bin/opencode'
 readonly OPENCODE_CONFIG='/srv/private-ai/home/.config/opencode/opencode.json'
 readonly WORKER='/opt/kelion-codex/codex-worker.mjs'
+readonly WORKER_UNIT='/etc/systemd/system/kelion-codex-worker.service'
 readonly DROPIN_DIR='/etc/systemd/system/private-ai-llm.service.d'
 readonly DROPIN="$DROPIN_DIR/90-qwen35-122b-max.conf"
 readonly RECEIPT='/etc/private-ai/.max-model-complete'
@@ -87,6 +88,7 @@ require_regular "$LLAMA_BIN"
 require_regular "$OPENCODE_BIN"
 require_regular "$OPENCODE_CONFIG"
 require_regular "$WORKER"
+require_regular "$WORKER_UNIT"
 [ -x "$LLAMA_BIN" ] && [ -x "$OPENCODE_BIN" ] || fail 'binarele private AI nu sunt executabile'
 [ "$(awk '/MemTotal:/ {print $2}' /proc/meminfo)" -ge 94371840 ] \
   || fail 'Qwen3.5-122B Q4 necesită VPS-ul de 96 GB RAM'
@@ -119,6 +121,7 @@ timer_enabled=$(systemctl is-enabled kelion-codex-worker.timer 2>/dev/null || tr
 timer_active=$(systemctl is-active kelion-codex-worker.timer 2>/dev/null || true)
 cp -a -- "$OPENCODE_CONFIG" "$rollback_root/opencode.json"
 cp -a -- "$WORKER" "$rollback_root/codex-worker.mjs"
+cp -a -- "$WORKER_UNIT" "$rollback_root/kelion-codex-worker.service"
 if [ -f "$DROPIN" ] && [ ! -L "$DROPIN" ]; then
   had_dropin=1
   cp -a -- "$DROPIN" "$rollback_root/llm-dropin.conf"
@@ -133,6 +136,7 @@ rollback() {
     set +e
     install -o root -g privateai -m 0640 "$rollback_root/opencode.json" "$OPENCODE_CONFIG"
     install -o root -g root -m 0555 "$rollback_root/codex-worker.mjs" "$WORKER"
+    install -o root -g root -m 0644 "$rollback_root/kelion-codex-worker.service" "$WORKER_UNIT"
     if [ "$had_dropin" = 1 ]; then
       install -d -o root -g root -m 0755 "$DROPIN_DIR"
       install -o root -g root -m 0644 "$rollback_root/llm-dropin.conf" "$DROPIN"
@@ -222,6 +226,18 @@ chmod 0555 "$worker_candidate"
 mv -f -- "$worker_candidate" "$WORKER"
 sync -f "$WORKER"
 
+worker_unit_candidate=$(mktemp /etc/systemd/system/.kelion-codex-worker.max.XXXXXX)
+sed 's#^Environment=OPENCODE_MODEL=llama\.cpp/qwen3\.6-35b-a3b-local$#Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local#' \
+  "$WORKER_UNIT" > "$worker_unit_candidate"
+[ "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' \
+  "$worker_unit_candidate")" -eq 1 ]
+! grep -Fq 'Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local' \
+  "$worker_unit_candidate"
+chown root:root "$worker_unit_candidate"
+chmod 0644 "$worker_unit_candidate"
+mv -f -- "$worker_unit_candidate" "$WORKER_UNIT"
+sync -f "$WORKER_UNIT"
+
 install -d -o root -g root -m 0755 "$DROPIN_DIR"
 dropin_candidate=$(mktemp "$DROPIN_DIR/.90-qwen35-122b-max.XXXXXX")
 cat > "$dropin_candidate" <<EOF
@@ -240,6 +256,7 @@ sync -f "$DROPIN"
 
 systemctl daemon-reload
 systemd-analyze verify private-ai-llm.service
+systemd-analyze verify "$WORKER_UNIT"
 systemctl restart private-ai-llm.service
 
 deadline=$((SECONDS + 3600))
@@ -270,6 +287,9 @@ done
 HOME=/srv/private-ai/home XDG_CONFIG_HOME=/srv/private-ai/home/.config \
   "$OPENCODE_BIN" models llama.cpp | grep -Fq "$MODEL_ALIAS"
 node "$WORKER" --self-test | grep -qx 'codex-worker self-test: TRECE'
+systemctl show kelion-codex-worker.service -p Environment --value \
+  | tr ' ' '\n' \
+  | grep -qx 'OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local'
 systemctl enable kelion-codex-worker.timer >/dev/null
 systemctl restart kelion-codex-worker.timer
 
@@ -291,6 +311,7 @@ receipt_candidate=$(mktemp /etc/private-ai/.max-model-complete.XXXXXX)
     printf 'shard_%s_sha256=%s\n' "$((index + 1))" "${SHARD_SHA256[$index]}"
   done
   printf 'context=16384\n'
+  printf 'worker_unit_model=%s\n' "$MODEL_ID"
   printf 'verified_at=%s\n' "$(date -u +%FT%TZ)"
 } > "$receipt_candidate"
 chown root:root "$receipt_candidate"
@@ -314,4 +335,5 @@ printf 'LLAMA_HEALTH=ok\n'
 printf 'LLAMA_INFERENCE=passed\n'
 printf 'OPENCODE_PROVIDER=passed\n'
 printf 'WORKER_SELF_TEST=passed\n'
+printf 'WORKER_UNIT_MODEL=passed\n'
 printf 'MAX_MODEL_INSTALLED=yes\n'
