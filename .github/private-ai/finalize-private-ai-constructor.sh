@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# One-shot source alignment is validated before any VPS mutation.
 set -Eeuo pipefail
 umask 077
 
