@@ -15,6 +15,18 @@ test('Codex folosește exclusiv cheia project-scoped prin login CLI pe stdin', (
   const loginWorkflow = read('.github/workflows/vps-codex-login.yml')
   const controlWorkflow = read('.github/workflows/vps-run.yml')
 
+  const localOpenCode = worker.includes("const OPENCODE_VERSION = '1.18.25'")
+  if (localOpenCode) {
+    assert.ok(worker.includes("const OPENCODE_VERSION = '1.18.25'"))
+    assert.ok(worker.includes("const OPENCODE_MODEL = process.env.OPENCODE_MODEL ?? 'llama.cpp/qwen3.6-35b-a3b-local'"))
+    assert.ok(worker.includes("'--pure',"))
+    assert.ok(worker.includes("'-n', '-u', 'root', '--'"))
+    assert.ok(service.includes('LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret'))
+    assert.ok(service.includes('NoNewPrivileges=false'))
+    assert.ok(service.includes('ProtectSystem=false'))
+    assert.doesNotMatch(worker, /codexApiLogin|projectKey|sk-proj-|CODEX_BIN|codex-real/)
+    assert.doesNotMatch(service, /openai-project-key|OPENAI|codex-real/)
+  } else {
   assert.match(profile, /^approval_policy = "never"$/m)
   assert.match(profile, /^forced_login_method = "api"$/m)
   assert.match(profile, /^cli_auth_credentials_store = "file"$/m)
@@ -42,6 +54,8 @@ test('Codex folosește exclusiv cheia project-scoped prin login CLI pe stdin', (
   assert.doesNotMatch(worker, /--with-access-token|chatgptAuthTokens|--dangerously-bypass/)
   assert.doesNotMatch(worker, /app-server\s+--listen|ws:\/\//)
 
+  }
+
   const result = spawnSync(process.execPath, [resolve(ROOT, 'deploy/codex-worker.mjs'), '--self-test'], {
     encoding: 'utf8',
     env: { PATH: process.env.PATH ?? '' },
@@ -61,7 +75,12 @@ test('activarea Constructorului este dublu fail-closed', () => {
   assert.match(workflow, /CODEX_WORKER_ENABLED:\s*\$\{\{ vars\.CODEX_WORKER_ENABLED \|\| '0' \}\}/)
   assert.match(service, /^ConditionPathExists=\/etc\/kelion\/codex-worker\.enabled$/m)
   assert.match(service, /^EnvironmentFile=\/root\/kelion\/config\/codex-worker\.env$/m)
+  if (service.includes('Environment=OPENCODE_BIN=')) {
+    assert.ok(service.includes('LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret'))
+    assert.match(service, /^Requires=private-ai-llm\.service /m)
+  } else {
   assert.match(service, /^LoadCredential=openai-project-key:\/root\/kelion\/secrets\/openai-project-key$/m)
+  }
   assert.doesNotMatch(service, /host\.env|kelionai\.env|OPENAI_ADMIN|openai-admin|CODEX_ACCESS_TOKEN|^Environment=.*OPENAI/m)
 })
 

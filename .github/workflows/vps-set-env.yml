@@ -507,8 +507,26 @@ jobs:
             [ -f "$work/deploy/systemd/$unit" ] && [ ! -L "$work/deploy/systemd/$unit" ]
           done
 
-          exec 9>/root/kelion/publicare.lock
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<>"$publication_lock"
+          publication_fd_path=$(readlink /proc/$$/fd/9)
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_path" = "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
           flock -n 9
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+            && [ ! -L "$publication_lock" ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          [ ! -e "$constructor_upgrade_journal" ] && [ ! -L "$constructor_upgrade_journal" ] \
+            || { echo 'un upgrade Constructor exterior este pending; rotația runtime este refuzată' >&2; exit 1; }
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          [ ! -e "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ] \
+            || { echo 'o barieră unit-only Constructor este pending; rotația runtime este refuzată' >&2; exit 1; }
           export KELION_CUTOVER_LOCK_HELD=1
           deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
           if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
