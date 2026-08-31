@@ -135,11 +135,11 @@ jobs:
           [[ "${max_lines[11]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || fast_miss
 
           [ -d "$model_root" ] && [ ! -L "$model_root" ] || fast_miss
-          [ "$(stat -Lc '%U:%G:%a' "$model_root" 2>/dev/null)" = 'privateai:privateai:700' ] || fast_miss
+          [ "$(stat -Lc '%U:%G:%a' "$model_root" 2>/dev/null)" = 'root:privateai:750' ] || fast_miss
           while IFS='|' read -r shard bytes; do
             path="$model_root/$shard"
             [ -f "$path" ] && [ ! -L "$path" ] || fast_miss
-            [ "$(stat -Lc '%U:%G:%s:%h' "$path" 2>/dev/null)" = "privateai:privateai:${bytes}:1" ] || fast_miss
+            [ "$(stat -Lc '%U:%G:%a:%s:%h' "$path" 2>/dev/null)" = "root:privateai:440:${bytes}:1" ] || fast_miss
           done <<'SHARDS'
           Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf|10943552
           Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf|49968146912

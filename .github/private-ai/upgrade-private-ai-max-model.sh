@@ -52,34 +52,52 @@ verify_shard() {
 }
 
 download_shard() {
-  local index=$1 name bytes sha destination partial relative url
+  local index=$1 name bytes sha destination partial relative url partial_size
   name=${SHARD_NAMES[$index]}
   bytes=${SHARD_BYTES[$index]}
   sha=${SHARD_SHA256[$index]}
   destination="$MODEL_ROOT/$name"
   partial="$destination.part"
   if [ -f "$destination" ] && verify_shard "$destination" "$bytes" "$sha"; then
+    chown root:privateai "$destination"
+    chmod 0440 "$destination"
     log "Shard $((index + 1))/3 deja verificat."
     return 0
   fi
   [ ! -e "$destination" ] || fail "shard final existent dar invalid: $destination"
+  if [ -e "$partial" ] || [ -L "$partial" ]; then
+    require_regular "$partial"
+    [ "$(stat -Lc '%U:%G:%h' "$partial")" = 'privateai:privateai:1' ] \
+      || fail "metadate nesigure pentru descărcarea parțială: $name"
+    partial_size=$(stat -Lc '%s' "$partial")
+    [[ "$partial_size" =~ ^[0-9]+$ ]] && [ "$partial_size" -le "$bytes" ] \
+      || fail "dimensiune parțială invalidă: $name"
+  else
+    partial_size=0
+  fi
   relative="Q4_K_M/$name"
   url="https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/${relative}?download=true"
-  log "Descarc shard $((index + 1))/3 ($bytes bytes), reluabil."
-  timeout --signal=TERM --kill-after=2m 21600 \
-    runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
-    curl --fail --location --silent --show-error \
-      --retry 20 --retry-delay 5 --retry-all-errors \
-      --connect-timeout 30 --continue-at - \
-      --output "$partial" "$url"
+  if [ "$partial_size" -lt "$bytes" ]; then
+    log "Descarc shard $((index + 1))/3 ($bytes bytes), reluabil de la $partial_size."
+    timeout --signal=TERM --kill-after=2m 21600 \
+      runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+      curl --fail --location --silent --show-error \
+        --retry 20 --retry-delay 5 --retry-all-errors \
+        --connect-timeout 30 --continue-at - \
+        --output "$partial" "$url"
+  else
+    log "Shard $((index + 1))/3 complet ca dimensiune; verific SHA-256 fără redescărcare."
+  fi
   [ "$(stat -Lc '%U:%G:%s:%h' "$partial")" = "privateai:privateai:${bytes}:1" ] \
     || fail "metadate invalide după descărcare: $name"
   [ "$(sha256sum "$partial" | awk '{print $1}')" = "$sha" ] \
     || fail "SHA-256 invalid după descărcare: $name"
   mv -f -- "$partial" "$destination"
+  chown root:privateai "$destination"
+  chmod 0440 "$destination"
   sync -f "$destination"
-  verify_shard "$destination" "$bytes" "$sha" \
-    || fail "verificarea finală a shardului a eșuat: $name"
+  [ "$(stat -Lc '%U:%G:%a:%s:%h' "$destination")" = "root:privateai:440:${bytes}:1" ] \
+    || fail "metadate invalide după publicarea shardului: $name"
 }
 
 [ "$(id -u)" = 0 ] || fail 'root este obligatoriu'
@@ -113,11 +131,17 @@ done
 
 sum=0
 for index in 0 1 2; do
-  verify_shard "$MODEL_ROOT/${SHARD_NAMES[$index]}" "${SHARD_BYTES[$index]}" "${SHARD_SHA256[$index]}" \
+  require_regular "$MODEL_ROOT/${SHARD_NAMES[$index]}"
+  [ "$(stat -Lc '%U:%G:%a:%s:%h' "$MODEL_ROOT/${SHARD_NAMES[$index]}")" \
+      = "root:privateai:440:${SHARD_BYTES[$index]}:1" ] \
     || fail "shard invalid înainte de activare: ${SHARD_NAMES[$index]}"
   sum=$((sum + ${SHARD_BYTES[$index]}))
 done
 [ "$sum" = "$MODEL_TOTAL_BYTES" ] || fail 'dimensiunea totală a modelului nu corespunde'
+chown root:privateai "$MODEL_ROOT"
+chmod 0750 "$MODEL_ROOT"
+[ "$(stat -Lc '%U:%G:%a' "$MODEL_ROOT")" = 'root:privateai:750' ] \
+  || fail 'directorul modelului nu a putut fi sigilat'
 
 while systemctl is-active --quiet private-ai-constructor-finalize.service 2>/dev/null; do
   log 'Aștept finalizarea tranzacției Constructor deja active.'
