@@ -75,6 +75,16 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
           set -Eeuo pipefail
           printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
+          max_model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
+          max_model_total=76536964608
+          max_model_downloaded=$(find "$max_model_root" -maxdepth 1 -type f \
+            \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' 2>/dev/null \
+            | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+          printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$max_model_downloaded"
+          awk -v bytes="$max_model_downloaded" -v total="$max_model_total" \
+            'BEGIN {printf "MAX_MODEL_DOWNLOAD_PERCENT=%.2f\n", bytes * 100 / total}'
+          printf 'MAX_MODEL_UPGRADE_STATE='
+          systemctl is-active private-ai-max-model-upgrade.service 2>/dev/null || true
           if pgrep -af '/root/private-ai-installer\.' >/dev/null; then
             printf 'INSTALLER_PROCESS=running\n'
           else
