@@ -452,20 +452,38 @@ validate_rootless_gate_image kelion-publisher /var/lib/kelion-publisher /run/kel
 deploy_quiesce_journal=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
   require_regular "$deploy_quiesce_journal" root:root:600
-  jq -e '(.schema == 1 or .schema == 2) and
-    (.phase | strings) and
-    (.requestId | strings | test("^[0-9a-f-]{36}$")) and
+  jq -e '.schema == 2 and .phase == "gate-prepared" and
+    (.requestId | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) and
     (.commit | strings | test("^[0-9a-f]{40}$")) and
-    (.activeBefore | strings)' "$deploy_quiesce_journal" >/dev/null
-  printf 'DEPLOY_QUIESCE_DIAGNOSTIC='
-  jq -c '{schema,phase,requestId,commit,activeBefore,gateSha256,
-    targetGateSha256,committedGateSha256}' "$deploy_quiesce_journal"
-  printf 'DEPLOY_QUIESCE_ACTIVE_OBSERVED=%s\n' \
-    "$(sed -n '1p' "$RUNTIME_ROOT/release-state/active")"
-  printf 'DEPLOY_QUIESCE_CONFIG_SHA256='
-  sha256sum "$WORKER_ENV" "$PUBLISHER_ENV" "$RELEASE_ENV" \
-    | awk '{printf "%s%s", separator, $1; separator=","} END {print ""}'
-  fail 'active deploy quiesce journal requires explicit owner recovery'
+    (.activeBefore | strings | test("^[0-9a-f]{40}$")) and
+    .commit != .activeBefore and .committedGateSha256 == null and
+    ([.gateSha256.worker,.gateSha256.publisher,.gateSha256.release,
+      .targetGateSha256.worker,.targetGateSha256.publisher,.targetGateSha256.release] |
+      all(.[]; type == "string" and test("^[0-9a-f]{64}$")))' \
+    "$deploy_quiesce_journal" >/dev/null \
+    || fail 'active deploy journal is not the exact recoverable gate-prepared incident'
+  deploy_request=$(jq -er '.requestId' "$deploy_quiesce_journal")
+  deploy_commit=$(jq -er '.commit' "$deploy_quiesce_journal")
+  deploy_active=$(jq -er '.activeBefore' "$deploy_quiesce_journal")
+  [ "$(sed -n '1p' "$RUNTIME_ROOT/release-state/active")" = "$deploy_active" ] \
+    || fail 'active release differs from the recoverable deploy generation'
+  [ "$(sha256sum "$WORKER_ENV" | awk '{print $1}')" = \
+      "$(jq -er '.gateSha256.worker' "$deploy_quiesce_journal")" ]
+  [ "$(sha256sum "$PUBLISHER_ENV" | awk '{print $1}')" = \
+      "$(jq -er '.gateSha256.publisher' "$deploy_quiesce_journal")" ]
+  [ "$(sha256sum "$RELEASE_ENV" | awk '{print $1}')" = \
+      "$(jq -er '.gateSha256.release' "$deploy_quiesce_journal")" ]
+  live_compose=/root/kelion/config/compose.production.yml
+  require_regular "$live_compose" root:root:444
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_PROOF=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$deploy_request" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$deploy_commit" \
+    bash "$RUNTIME_CUTOVER_SOURCE" --discard-unmutated-gate-prepared \
+      "$deploy_request" "$deploy_commit" "$deploy_active" "$live_compose"
+  [ ! -e "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
+    || fail 'recovered deploy journal was not consumed'
+  printf 'STALE_DEPLOY_GATE_PREPARED_RECOVERED=yes\n'
 fi
 
 gate_cutover_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
