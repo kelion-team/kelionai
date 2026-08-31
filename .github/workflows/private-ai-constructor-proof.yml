@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -64,7 +64,7 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -167,7 +167,9 @@ jobs:
             "$expected_model_revision" \
             "$expected_model_file" \
             "$expected_model_bytes" \
-            "$expected_model_sha" <<'REMOTE'
+            "$expected_model_sha" \
+            "$expected_llama_server_sha" \
+            "$expected_opencode_bin_sha" <<'REMOTE'
           set -Eeuo pipefail
           umask 077
 
@@ -190,6 +192,8 @@ jobs:
           expected_model_file=${17}
           expected_model_bytes=${18}
           expected_model_sha=${19}
+          expected_llama_server_sha=${20}
+          expected_opencode_bin_sha=${21}
           [[ "$expected_worker_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
           [[ "$expected_llama_ref" =~ ^[0-9a-f]{40}$ ]]
@@ -209,6 +213,8 @@ jobs:
           [[ "$expected_model_file" =~ ^[A-Za-z0-9_.-]+\.gguf$ ]]
           [[ "$expected_model_bytes" =~ ^[1-9][0-9]+$ ]]
           [[ "$expected_model_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_llama_server_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_opencode_bin_sha" =~ ^[0-9a-f]{64}$ ]]
 
           proof_tmp=$(mktemp -d /run/kelion-constructor-proof.XXXXXX)
           cleanup_remote() { rm -rf -- "$proof_tmp"; }
@@ -650,16 +656,15 @@ jobs:
               mapfile -d '' -t opencode_argv < "/proc/$pid/cmdline"
               expected_opencode_argv=(
                 /opt/private-ai/bin/opencode --pure run
-                --dir "$state_dir/worktree"
                 --model llama.cpp/qwen3.6-35b-a3b-local
-                --auto --file "$state_dir/order.md"
+                --file "$state_dir/order.md"
                 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
               )
               [ "${#opencode_argv[@]}" -eq "${#expected_opencode_argv[@]}" ]
               for argv_index in "${!expected_opencode_argv[@]}"; do
                 [ "${opencode_argv[$argv_index]}" = "${expected_opencode_argv[$argv_index]}" ]
               done
-              [ "$(readlink -f -- "/proc/$pid/cwd")" = "$state_dir" ]
+              [ "$(readlink -f -- "/proc/$pid/cwd")" = "$state_dir/worktree" ]
               opencode_process=$((opencode_process + 1))
             fi
           done < "/sys/fs/cgroup${control_group}/cgroup.procs"
