@@ -14,6 +14,10 @@ const worker = readFileSync(
   new URL('../../deploy/codex-worker.mjs', import.meta.url),
   'utf8',
 )
+const syncWorker = readFileSync(
+  new URL('../../deploy/constructor-sync-worker.sh', import.meta.url),
+  'utf8',
+)
 
 function shellFunction(name) {
   const match = new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(finalizer)
@@ -280,4 +284,18 @@ test('diagnosticul claimului și rollbackul legacy păstrează dovezi fără con
   assert.match(restoreLegacy, /legacy_restore_failure/)
   assert.match(restoreLegacy, /mv -fT --/)
   assert.match(finalizer, /PRIVATE_AI_RESTORE_LEGACY_FAILED/)
+})
+
+test('sync-ul root validează metadata askpass și claimul aparține invocării exacte', () => {
+  assert.doesNotMatch(syncWorker, /! -w "\$askpass"/)
+  assert.match(syncWorker, /stat -Lc '%u:%g:%a:%h'/)
+  assert.match(syncWorker, /0:0:555:1/)
+  assert.match(finalizer, /SYNC_WORKER_SOURCE/)
+  assert.match(finalizer, /restore_file sync_worker/)
+  assert.match(finalizer, /snapshot_file sync_worker/)
+  assert.match(finalizer, /_SYSTEMD_INVOCATION_ID=\$claim_invocation/)
+  assert.match(finalizer, /PRIVATE_AI_SYNC_DIAGNOSTIC_END=yes/)
+  const marker = finalizer.indexOf("printf 'WORKER_CLAIM_E2E=passed\\n'")
+  const timer = finalizer.indexOf('systemctl enable --now kelion-codex-worker.timer', marker)
+  assert.ok(marker >= 0 && timer > marker, 'timerul worker trebuie activat numai după dovada exactă')
 })

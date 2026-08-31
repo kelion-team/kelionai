@@ -6,6 +6,7 @@ on:
       - ops/private-ai-install-20260830
     paths:
       - deploy/codex-worker.mjs
+      - deploy/constructor-sync-worker.sh
       - deploy/systemd/kelion-codex-worker.service
       - deploy/sudoers/kelion-codex-full-access
       - deploy/opencode-constructor.json
@@ -65,6 +66,7 @@ jobs:
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
           node --test .github/private-ai/finalize-private-ai-constructor.test.mjs
           bash -n deploy/lib/runtime-config-cutover.sh
+          bash -n deploy/constructor-sync-worker.sh
           node --check deploy/codex-worker.mjs
           CODEX_WORKER_EXECUTOR=opencode node deploy/codex-worker.mjs --self-test \
             | grep -qx 'codex-worker self-test: TRECE'
@@ -120,6 +122,7 @@ jobs:
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
           node --check deploy/codex-worker.mjs
           expected_worker_sha=$(sha256sum deploy/codex-worker.mjs | awk '{print $1}')
+          expected_sync_worker_sha=$(sha256sum deploy/constructor-sync-worker.sh | awk '{print $1}')
           expected_worker_unit_sha=$(sha256sum deploy/systemd/kelion-codex-worker.service | awk '{print $1}')
           expected_sudoers_sha=$(sha256sum deploy/sudoers/kelion-codex-full-access | awk '{print $1}')
           expected_config_sha=$(sha256sum deploy/opencode-constructor.json | awk '{print $1}')
@@ -146,6 +149,8 @@ jobs:
           install -m 0700 .github/private-ai/finalize-private-ai-constructor.sh \
             "$bundle_root/.github/private-ai/finalize-private-ai-constructor.sh"
           install -m 0600 deploy/codex-worker.mjs "$bundle_root/deploy/codex-worker.mjs"
+          install -m 0600 deploy/constructor-sync-worker.sh \
+            "$bundle_root/deploy/constructor-sync-worker.sh"
           install -m 0600 deploy/opencode-constructor.json \
             "$bundle_root/deploy/opencode-constructor.json"
           install -m 0600 deploy/opencode-constructor-instructions.md \
@@ -166,6 +171,7 @@ jobs:
               .github/private-ai/finalize-private-ai-constructor.sh \
               deploy/codex-worker.mjs \
               deploy/compose.production.yml \
+              deploy/constructor-sync-worker.sh \
               deploy/lib/runtime-config-cutover.sh \
               deploy/opencode-constructor-instructions.md \
               deploy/opencode-constructor.json \
@@ -180,6 +186,7 @@ jobs:
             .github/private-ai/finalize-private-ai-constructor.sh \
             deploy/codex-worker.mjs \
             deploy/compose.production.yml \
+            deploy/constructor-sync-worker.sh \
             deploy/lib/runtime-config-cutover.sh \
             deploy/opencode-constructor-instructions.md \
             deploy/opencode-constructor.json \
@@ -304,6 +311,7 @@ jobs:
           .github/private-ai/finalize-private-ai-constructor.sh
           deploy/codex-worker.mjs
           deploy/compose.production.yml
+          deploy/constructor-sync-worker.sh
           deploy/lib/runtime-config-cutover.sh
           deploy/opencode-constructor-instructions.md
           deploy/opencode-constructor.json
@@ -417,6 +425,8 @@ jobs:
           [ "$(systemctl is-enabled private-ai-constructor-finalize.service 2>/dev/null || true)" = disabled ]
           [ "$(sha256sum /opt/kelion-codex/codex-worker.mjs | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/codex-worker.mjs" | awk '{print $1}')" ]
+          [ "$(sha256sum /opt/kelion-constructor/constructor-sync-worker.sh | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/constructor-sync-worker.sh" | awk '{print $1}')" ]
           [ "$(sha256sum /etc/systemd/system/kelion-codex-worker.service | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/systemd/kelion-codex-worker.service" | awk '{print $1}')" ]
           [ "$(sha256sum /etc/sudoers.d/kelion-constructor-full-access | awk '{print $1}')" = \
@@ -435,6 +445,7 @@ jobs:
           )
           printf '%s\n' "$proof"
           grep -qx "WORKER_INSTALLED_SHA256=$expected_worker_sha" <<<"$proof"
+          grep -qx "SYNC_WORKER_INSTALLED_SHA256=$expected_sync_worker_sha" <<<"$proof"
           grep -qx "WORKER_UNIT_INSTALLED_SHA256=$expected_worker_unit_sha" <<<"$proof"
           grep -qx "WORKER_SUDOERS_INSTALLED_SHA256=$expected_sudoers_sha" <<<"$proof"
           grep -qx "OPENCODE_CONFIG_SHA256=$expected_config_sha" <<<"$proof"

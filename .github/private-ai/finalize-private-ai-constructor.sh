@@ -8,6 +8,8 @@ readonly WORKER_SOURCE="$BUNDLE_ROOT/deploy/codex-worker.mjs"
 readonly WORKER_TARGET=/opt/kelion-codex/codex-worker.mjs
 readonly WORKER_UNIT_SOURCE="$BUNDLE_ROOT/deploy/systemd/kelion-codex-worker.service"
 readonly WORKER_UNIT_TARGET=/etc/systemd/system/kelion-codex-worker.service
+readonly SYNC_WORKER_SOURCE="$BUNDLE_ROOT/deploy/constructor-sync-worker.sh"
+readonly SYNC_WORKER_TARGET=/opt/kelion-constructor/constructor-sync-worker.sh
 readonly SUDOERS_SOURCE="$BUNDLE_ROOT/deploy/sudoers/kelion-codex-full-access"
 readonly OPENCODE_CONFIG_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor.json"
 readonly OPENCODE_INSTRUCTIONS_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor-instructions.md"
@@ -134,6 +136,7 @@ attempt_root=/var/lib/private-ai/finalizer-attempts
 attempt_file=$attempt_root/$bundle_id
 [ -f "$WORKER_SOURCE" ] && [ ! -L "$WORKER_SOURCE" ] || fail 'worker source missing'
 [ -f "$WORKER_UNIT_SOURCE" ] && [ ! -L "$WORKER_UNIT_SOURCE" ] || fail 'worker unit source missing'
+[ -f "$SYNC_WORKER_SOURCE" ] && [ ! -L "$SYNC_WORKER_SOURCE" ] || fail 'sync worker source missing'
 [ -f "$SUDOERS_SOURCE" ] && [ ! -L "$SUDOERS_SOURCE" ] || fail 'worker sudoers source missing'
 [ -f "$OPENCODE_CONFIG_SOURCE" ] && [ ! -L "$OPENCODE_CONFIG_SOURCE" ] \
   || fail 'canonical OpenCode config source missing'
@@ -146,7 +149,14 @@ attempt_file=$attempt_root/$bundle_id
 [ -f "$COMPOSE_SOURCE" ] && [ ! -L "$COMPOSE_SOURCE" ] \
   || fail 'canonical production compose source missing'
 node --check "$WORKER_SOURCE"
+bash -n "$SYNC_WORKER_SOURCE"
 bash -n "$RUNTIME_CUTOVER_SOURCE"
+! grep -Fq -- '! -w "$askpass"' "$SYNC_WORKER_SOURCE" \
+  || fail 'sync worker uses the root-incorrect writable predicate'
+grep -Fq "stat -Lc '%u:%g:%a:%h'" "$SYNC_WORKER_SOURCE" \
+  || fail 'sync worker does not validate exact askpass metadata'
+grep -Fq "'0:0:555:1'" "$SYNC_WORKER_SOURCE" \
+  || fail 'sync worker askpass metadata contract is missing'
 grep -q 'OPENCODE_BIN' "$WORKER_SOURCE" || fail 'worker has no direct OpenCode executor'
 ! grep -q 'KELION_LOCAL_QWEN_WRAPPER' "$WORKER_SOURCE" || fail 'fake Codex wrapper found in worker source'
 grep -qx 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$SUDOERS_SOURCE"
@@ -293,6 +303,7 @@ web_cutover_started=0
 canonical_codex_fake=0
 worker_candidate=''
 unit_candidate=''
+sync_worker_candidate=''
 sudoers_candidate=''
 canonical_codex_candidate=''
 config_candidate=''
@@ -465,7 +476,7 @@ rollback() {
     "$WORKER_TIMER_STATE" "$WEB_STATE" "$PUBLISHER_TIMER_STATE" \
     "$RELEASE_TIMER_STATE" "$RECOVERY_SERVICE_STATE" >&2
   for temporary in \
-    "$worker_candidate" "$unit_candidate" "$sudoers_candidate" \
+    "$worker_candidate" "$unit_candidate" "$sync_worker_candidate" "$sudoers_candidate" \
     "$canonical_codex_candidate" "$config_candidate" "$auth_config" \
     "$web_dropin_candidate" "$instructions_candidate" \
     "$receipt_candidate" "$runtime_helper_candidate"; do
@@ -491,6 +502,7 @@ rollback() {
       kelion-constructor-publisher.timer \
       kelion-constructor-release.timer \
       kelion-codex-worker.service \
+      kelion-constructor-sync.service \
       kelion-constructor-publisher.service \
       kelion-constructor-release.service >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     if [ "$web_cutover_started" -eq 1 ]; then
@@ -498,6 +510,7 @@ rollback() {
     fi
     restore_file worker "$WORKER_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file worker_unit "$WORKER_UNIT_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file sync_worker "$SYNC_WORKER_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file config "$OPENCODE_CONFIG" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file instructions "$OPENCODE_INSTRUCTIONS" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
@@ -555,6 +568,7 @@ trap 'rollback 143' TERM
 
 snapshot_file worker "$WORKER_TARGET"
 snapshot_file worker_unit "$WORKER_UNIT_TARGET"
+snapshot_file sync_worker "$SYNC_WORKER_TARGET"
 snapshot_file config "$OPENCODE_CONFIG"
 snapshot_file instructions "$OPENCODE_INSTRUCTIONS"
 snapshot_file retired_worker_dropin "$RETIRED_WORKER_DROPIN"
@@ -1047,7 +1061,7 @@ case "$worker_before" in
   *) fail "worker is not quiescent; retry after the current queue turn: $worker_before" ;;
 esac
 worker_cutover_started=1
-systemctl stop kelion-codex-worker.service
+systemctl stop kelion-codex-worker.service kelion-constructor-sync.service
 web_cutover_started=1
 systemctl stop private-ai-web.service
 
@@ -1063,6 +1077,16 @@ node --input-type=module --check < "$worker_candidate"
 mv -f -- "$worker_candidate" "$WORKER_TARGET"
 sync -f "$WORKER_TARGET"
 sync -f "$(dirname "$WORKER_TARGET")"
+
+sync_worker_candidate=$(mktemp "$SYNC_WORKER_TARGET.candidate.XXXXXX")
+install -o root -g root -m 0555 "$SYNC_WORKER_SOURCE" "$sync_worker_candidate"
+bash -n "$sync_worker_candidate"
+mv -f -- "$sync_worker_candidate" "$SYNC_WORKER_TARGET"
+sync_worker_candidate=''
+sync -f "$SYNC_WORKER_TARGET"
+sync -f "$(dirname "$SYNC_WORKER_TARGET")"
+require_regular "$SYNC_WORKER_TARGET" root:root:555
+cmp -s -- "$SYNC_WORKER_SOURCE" "$SYNC_WORKER_TARGET"
 
 unit_candidate=$(mktemp "$WORKER_UNIT_TARGET.candidate.XXXXXX")
 install -o root -g root -m 0444 "$WORKER_UNIT_SOURCE" "$unit_candidate"
@@ -1425,49 +1449,75 @@ systemctl enable --now \
 [ "$(unit_state kelion-constructor-release.timer)" = enabled:active ] \
   || fail 'release timer is not enabled and active after gate recovery'
 
+systemctl disable --now kelion-codex-worker.timer >/dev/null
+old_claim_invocation=$(systemctl show kelion-codex-worker.service -p InvocationID --value 2>/dev/null || true)
+[ -z "$old_claim_invocation" ] || [[ "$old_claim_invocation" =~ ^[0-9a-f]{32}$ ]] \
+  || fail 'worker exposed an invalid previous invocation id'
+systemctl reset-failed kelion-codex-worker.service kelion-constructor-sync.service >/dev/null 2>&1 || true
 claim_cursor=$(journalctl --no-pager --lines=0 --show-cursor \
   | sed -n 's/^-- cursor: //p')
 [ -n "$claim_cursor" ] || fail 'journald did not provide a queue-proof cursor'
-systemctl enable --now kelion-codex-worker.timer >/dev/null
 systemctl start --no-block kelion-codex-worker.service
 claim_proof=''
 claim_invocation=''
-for _ in $(seq 1 60); do
-  claim_record=$(journalctl --no-pager --quiet --output=json \
-    --unit=kelion-codex-worker.service --after-cursor="$claim_cursor" \
-    | jq -r '
-        select((.MESSAGE // "")
-          | test("^OPENCODE_WORKER_CLAIM_VERIFIED state=(no_claimable_job|pipeline_active|claimed)$"))
-        | [._SYSTEMD_INVOCATION_ID, .MESSAGE] | @tsv
-      ' \
-    | tail -n 1 || true)
-  if [ -n "$claim_record" ]; then
-    IFS=$'\t' read -r claim_invocation claim_proof <<<"$claim_record"
-    [[ "$claim_invocation" =~ ^[0-9a-f]{32}$ ]]
+for _ in $(seq 1 420); do
+  current_claim_invocation=$(systemctl show kelion-codex-worker.service -p InvocationID --value 2>/dev/null || true)
+  if [[ "$current_claim_invocation" =~ ^[0-9a-f]{32}$ ]] \
+    && [ "$current_claim_invocation" != "$old_claim_invocation" ]; then
+    claim_invocation=$current_claim_invocation
+    claim_proof=$(journalctl --no-pager --quiet --output=cat \
+      --unit=kelion-codex-worker.service "_SYSTEMD_INVOCATION_ID=$claim_invocation" \
+      | grep -E '^OPENCODE_WORKER_CLAIM_VERIFIED state=(no_claimable_job|pipeline_active|claimed)$' \
+      | tail -n 1 || true)
+    [ -z "$claim_proof" ] || break
+  fi
+  sync_active=$(systemctl show kelion-constructor-sync.service -p ActiveState --value 2>/dev/null || true)
+  sync_result=$(systemctl show kelion-constructor-sync.service -p Result --value 2>/dev/null || true)
+  if [ "$sync_active" = failed ] || [[ "$sync_result" =~ ^(exit-code|signal|timeout|watchdog|resources|protocol)$ ]]; then
     break
   fi
-  sleep 2
+  sleep 1
 done
 if [ -z "$claim_proof" ]; then
   claim_unit_state=$(systemctl show kelion-codex-worker.service --no-pager \
     -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
     -p InvocationID -p ConditionResult -p AssertResult 2>&1 || true)
-  claim_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
-    --unit=kelion-codex-worker.service --after-cursor="$claim_cursor" \
-    --lines=200 2>&1 || true)
-  if [ -z "$claim_diagnostic" ]; then
+  sync_unit_state=$(systemctl show kelion-constructor-sync.service --no-pager \
+    -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
+    -p InvocationID -p ConditionResult -p AssertResult 2>&1 || true)
+  if [[ "$claim_invocation" =~ ^[0-9a-f]{32}$ ]]; then
     claim_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
-      --unit=kelion-codex-worker.service --lines=200 2>&1 || true)
+      --unit=kelion-codex-worker.service "_SYSTEMD_INVOCATION_ID=$claim_invocation" \
+      --lines=200 2>&1 || true)
+  else
+    claim_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
+      --unit=kelion-codex-worker.service --after-cursor="$claim_cursor" \
+      --lines=200 2>&1 || true)
+  fi
+  sync_invocation=$(systemctl show kelion-constructor-sync.service -p InvocationID --value 2>/dev/null || true)
+  if [[ "$sync_invocation" =~ ^[0-9a-f]{32}$ ]]; then
+    sync_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
+      --unit=kelion-constructor-sync.service "_SYSTEMD_INVOCATION_ID=$sync_invocation" \
+      --lines=200 2>&1 || true)
+  else
+    sync_diagnostic=$(journalctl --no-pager --quiet --output=short-iso \
+      --unit=kelion-constructor-sync.service --after-cursor="$claim_cursor" \
+      --lines=200 2>&1 || true)
   fi
   claim_diagnostic=$(printf '%s\n' "$claim_diagnostic" \
     | tail -c 16384 | LC_ALL=C tr -cd '\11\12\15\40-\176')
-  printf 'PRIVATE_AI_WORKER_CLAIM_FAILED state-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_STATE_END=yes diagnostic-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_DIAGNOSTIC_END=yes\n' \
-    "$claim_unit_state" "$claim_diagnostic" >&2
-  fail 'the real worker invocation produced no validated queue claim marker'
+  sync_diagnostic=$(printf '%s\n' "$sync_diagnostic" \
+    | tail -c 16384 | LC_ALL=C tr -cd '\11\12\15\40-\176')
+  printf 'PRIVATE_AI_WORKER_CLAIM_FAILED worker-state-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_STATE_END=yes worker-diagnostic-begin\n%s\nPRIVATE_AI_WORKER_CLAIM_DIAGNOSTIC_END=yes sync-state-begin\n%s\nPRIVATE_AI_SYNC_STATE_END=yes sync-diagnostic-begin\n%s\nPRIVATE_AI_SYNC_DIAGNOSTIC_END=yes\n' \
+    "$claim_unit_state" "$claim_diagnostic" "$sync_unit_state" "$sync_diagnostic" >&2
+  fail 'the exact real worker invocation produced no validated queue claim marker'
 fi
 printf 'WORKER_CLAIM_INVOCATION_ID=%s\n' "$claim_invocation"
 printf '%s\n' "$claim_proof"
 printf 'WORKER_CLAIM_E2E=passed\n'
+systemctl enable --now kelion-codex-worker.timer >/dev/null
+[ "$(unit_state kelion-codex-worker.timer)" = enabled:active ] \
+  || fail 'worker timer is not enabled and active after the exact claim proof'
 
 worker_active=$(systemctl is-active kelion-codex-worker.service 2>/dev/null || true)
 worker_result=$(systemctl show kelion-codex-worker.service -p Result --value)
@@ -1481,6 +1531,8 @@ systemctl is-enabled --quiet kelion-codex-worker.timer
 systemctl is-active --quiet kelion-codex-worker.timer
 
 worker_sha=$(sha256sum "$WORKER_TARGET" | awk '{print $1}')
+sync_worker_sha=$(sha256sum "$SYNC_WORKER_TARGET" | awk '{print $1}')
+[ "$sync_worker_sha" = "$(sha256sum "$SYNC_WORKER_SOURCE" | awk '{print $1}')" ]
 worker_unit_sha=$(sha256sum "$WORKER_UNIT_TARGET" | awk '{print $1}')
 sudoers_sha=$(sha256sum "$SUDOERS" | awk '{print $1}')
 config_sha=$(sha256sum "$OPENCODE_CONFIG" | awk '{print $1}')
@@ -1542,6 +1594,7 @@ rm -rf --one-file-system -- "$rollback_root"
 rm -f -- "$attempt_file"
 sync -f "$attempt_root"
 printf 'WORKER_INSTALLED_SHA256=%s\n' "$worker_sha"
+printf 'SYNC_WORKER_INSTALLED_SHA256=%s\n' "$sync_worker_sha"
 printf 'WORKER_UNIT_INSTALLED_SHA256=%s\n' "$worker_unit_sha"
 printf 'WORKER_SUDOERS_INSTALLED_SHA256=%s\n' "$sudoers_sha"
 printf 'OPENCODE_CONFIG_SHA256=%s\n' "$config_sha"

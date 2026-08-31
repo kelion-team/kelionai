@@ -8,7 +8,9 @@ token=${CREDENTIALS_DIRECTORY:?lipsește directorul systemd credentials}/github-
 repository=${KELION_GITHUB_REPOSITORY:-}
 [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo 'repository configurat invalid' >&2; exit 1; }
 [[ -d "$repo/.git" && ! -L "$repo" && ! -L "$repo/.git" && -f "$repo/.git/config" && ! -L "$repo/.git/config" ]] || { echo 'clona workerului lipsește sau nu este canonică' >&2; exit 1; }
-[[ -f "$askpass" && ! -L "$askpass" && ! -w "$askpass" ]] || { echo 'askpass invalid' >&2; exit 1; }
+[[ -f "$askpass" && ! -L "$askpass" \
+  && "$(stat -Lc '%u:%g:%a:%h' "$askpass")" = '0:0:555:1' ]] \
+  || { echo 'askpass invalid' >&2; exit 1; }
 [[ -f "$token" && ! -L "$token" ]] || { echo 'credentială GitHub read-only lipsă' >&2; exit 1; }
 
 origin=$(runuser -u kelion-codex -- env HOME=/var/lib/kelion-codex \
