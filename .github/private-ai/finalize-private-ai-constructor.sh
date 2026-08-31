@@ -11,6 +11,8 @@ readonly SUDOERS_SOURCE="$BUNDLE_ROOT/deploy/sudoers/kelion-codex-full-access"
 readonly OPENCODE_CONFIG_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor.json"
 readonly OPENCODE_INSTRUCTIONS_SOURCE="$BUNDLE_ROOT/deploy/opencode-constructor-instructions.md"
 readonly WEB_DROPIN_SOURCE="$BUNDLE_ROOT/deploy/systemd/private-ai-web-full-access.conf"
+readonly RUNTIME_CUTOVER_SOURCE="$BUNDLE_ROOT/deploy/lib/runtime-config-cutover.sh"
+readonly COMPOSE_SOURCE="$BUNDLE_ROOT/deploy/compose.production.yml"
 readonly PRIVATE_AI_ROOT=/srv/private-ai
 readonly PRIVATE_AI_HOME=$PRIVATE_AI_ROOT/home
 readonly PRIVATE_AI_CONFIG=/etc/private-ai
@@ -43,6 +45,11 @@ readonly SUDOERS=/etc/sudoers.d/kelion-constructor-full-access
 readonly FINAL_RECEIPT=$PRIVATE_AI_CONFIG/.constructor-finalized
 readonly RUNTIME_ROOT=/root/kelion/runtime
 readonly PUBLICATION_LOCK=/root/kelion/publicare.lock
+readonly WORKER_ENV=/root/kelion/config/codex-worker.env
+readonly PUBLISHER_ENV=/root/kelion/config/constructor-publisher.env
+readonly RELEASE_ENV=/root/kelion/config/constructor-release.env
+readonly EXPECTED_GATE_COMMIT=a2a5c9bcfdf68f28c7709ee31de2c006bef89b85
+readonly EXPECTED_GATE_IMAGE=ghcr.io/kelion-team/kelionai/codex-gates@sha256:8487e0c8d3042e6af3c482a54bb0ddfa00e2ac4b7a3425f40203bc795cd92c80
 
 fail() {
   printf 'private-ai-finalize: ERROR: %s\n' "$*" >&2
@@ -113,7 +120,12 @@ sync -f "$attempt_root"
   || fail 'canonical OpenCode instructions source missing'
 [ -f "$WEB_DROPIN_SOURCE" ] && [ ! -L "$WEB_DROPIN_SOURCE" ] \
   || fail 'canonical OpenCode web full-access drop-in source missing'
+[ -f "$RUNTIME_CUTOVER_SOURCE" ] && [ ! -L "$RUNTIME_CUTOVER_SOURCE" ] \
+  || fail 'canonical runtime cutover helper source missing'
+[ -f "$COMPOSE_SOURCE" ] && [ ! -L "$COMPOSE_SOURCE" ] \
+  || fail 'canonical production compose source missing'
 node --check "$WORKER_SOURCE"
+bash -n "$RUNTIME_CUTOVER_SOURCE"
 grep -q 'OPENCODE_BIN' "$WORKER_SOURCE" || fail 'worker has no direct OpenCode executor'
 ! grep -q 'KELION_LOCAL_QWEN_WRAPPER' "$WORKER_SOURCE" || fail 'fake Codex wrapper found in worker source'
 grep -qx 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$SUDOERS_SOURCE"
@@ -234,6 +246,7 @@ web_dropin_candidate=''
 instructions_candidate=''
 auth_config=''
 receipt_candidate=''
+gate_cutover_stage=''
 
 snapshot_file() {
   local key=$1 target=$2
@@ -291,6 +304,13 @@ rollback() {
     "$receipt_candidate"; do
     [ -z "$temporary" ] || rm -f -- "$temporary" >/dev/null 2>&1 || true
   done
+  case "$gate_cutover_stage" in
+    /root/kelion/runtime/runtime-cutover.[A-Za-z0-9]*)
+      if [ -d "$gate_cutover_stage" ] && [ ! -L "$gate_cutover_stage" ]; then
+        rm -rf --one-file-system -- "$gate_cutover_stage" >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
   if [ "$rollback_armed" -eq 1 ]; then
     if [ "$worker_cutover_started" -eq 1 ]; then
       systemctl stop kelion-codex-worker.service >/dev/null 2>&1 || true
@@ -307,6 +327,9 @@ rollback() {
     restore_file web_dropin "$WEB_DROPIN" || true
     restore_file sudoers "$SUDOERS" || true
     restore_file receipt "$FINAL_RECEIPT" || true
+    restore_file worker_env "$WORKER_ENV" || true
+    restore_file publisher_env "$PUBLISHER_ENV" || true
+    restore_file release_env "$RELEASE_ENV" || true
     restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || true
     restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || true
     restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || true
@@ -335,6 +358,9 @@ snapshot_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN"
 snapshot_file web_dropin "$WEB_DROPIN"
 snapshot_file sudoers "$SUDOERS"
 snapshot_file receipt "$FINAL_RECEIPT"
+snapshot_file worker_env "$WORKER_ENV"
+snapshot_file publisher_env "$PUBLISHER_ENV"
+snapshot_file release_env "$RELEASE_ENV"
 snapshot_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL"
 snapshot_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER"
 snapshot_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY"
@@ -363,6 +389,91 @@ if [ "$canonical_codex_fake" -eq 1 ]; then
 fi
 sync -f "$rollback_root"
 rollback_armed=1
+
+require_regular "$WORKER_ENV" root:root:640
+require_regular "$PUBLISHER_ENV" root:root:640
+require_regular "$RELEASE_ENV" root:root:640
+
+worker_source_commit=$(runuser -u kelion-codex -- env -i \
+  HOME=/var/lib/kelion-codex PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C /var/lib/kelion-codex/repo rev-parse 'origin/master^{commit}')
+publisher_source_commit=$(runuser -u kelion-publisher -- env -i \
+  HOME=/var/lib/kelion-publisher PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C /var/lib/kelion-publisher/repo rev-parse 'origin/master^{commit}')
+[ "$worker_source_commit" = "$EXPECTED_GATE_COMMIT" ] \
+  || fail 'worker origin/master differs from the signed gate commit'
+[ "$publisher_source_commit" = "$EXPECTED_GATE_COMMIT" ] \
+  || fail 'publisher origin/master differs from the signed gate commit'
+
+validate_rootless_gate_image() {
+  local user=$1 home=$2 runtime=$3 digest revision
+  [ -d "$runtime" ] && [ ! -L "$runtime" ] \
+    && [ "$(stat -Lc '%U:%G:%a' "$runtime")" = "$user:$user:700" ] \
+    || fail "unsafe rootless Podman runtime for $user"
+  digest=$(cd "$runtime" && runuser -u "$user" -- env -i \
+    HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+    podman image inspect --format '{{.Digest}}' "$EXPECTED_GATE_IMAGE")
+  [ "$digest" = "${EXPECTED_GATE_IMAGE##*@}" ] \
+    || fail "gate image digest mismatch for $user"
+  revision=$(cd "$runtime" && runuser -u "$user" -- env -i \
+    HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+    podman image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+      "$EXPECTED_GATE_IMAGE")
+  [ "$revision" = "$EXPECTED_GATE_COMMIT" ] \
+    || fail "gate image revision mismatch for $user"
+}
+
+validate_rootless_gate_image kelion-codex /var/lib/kelion-codex /run/kelion-codex
+validate_rootless_gate_image kelion-publisher /var/lib/kelion-publisher /run/kelion-publisher
+
+gate_cutover_stage=$(mktemp -d "$RUNTIME_ROOT/runtime-cutover.XXXXXX")
+chown root:root "$gate_cutover_stage"
+chmod 0700 "$gate_cutover_stage"
+install -d -o root -g root -m 0700 "$gate_cutover_stage/files"
+: > "$gate_cutover_stage/manifest"
+chown root:root "$gate_cutover_stage/manifest"
+chmod 0600 "$gate_cutover_stage/manifest"
+
+stage_gate_env() {
+  local source=$1 logical=$2 target=$gate_cutover_stage/files/$logical
+  [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$source")" -eq 1 ] \
+    || fail "gate image field is not exact in $source"
+  awk -F= -v image="$EXPECTED_GATE_IMAGE" '
+    $1 == "KELION_CODEX_GATE_IMAGE" {
+      if (!written++) print "KELION_CODEX_GATE_IMAGE=" image
+      next
+    }
+    { print }
+  ' "$source" > "$target"
+  chown root:root "$target"
+  chmod 0600 "$target"
+  [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$target")" -eq 1 ]
+  grep -Fqx "KELION_CODEX_GATE_IMAGE=$EXPECTED_GATE_IMAGE" "$target"
+  printf '%s\n' "$logical" >> "$gate_cutover_stage/manifest"
+}
+
+stage_gate_env "$WORKER_ENV" constructor-config.codex-worker.env
+stage_gate_env "$PUBLISHER_ENV" constructor-config.constructor-publisher.env
+install -o root -g root -m 0600 "$RELEASE_ENV" \
+  "$gate_cutover_stage/files/constructor-config.constructor-release.env"
+printf '%s\n' constructor-config.constructor-release.env >> "$gate_cutover_stage/manifest"
+sync -f "$gate_cutover_stage/manifest"
+sync -f "$gate_cutover_stage/files"
+sync -f "$gate_cutover_stage"
+
+KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
+  "$gate_cutover_stage" "$COMPOSE_SOURCE"
+gate_cutover_stage=''
+[ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  || fail 'unit-only migration barrier remains after the strict cutover'
+require_regular /run/kelion/runtime-config-recovery.ready root:root:444
+[ "$(tr -d '\n' < /run/kelion/runtime-config-recovery.ready)" = schema=1 ]
+require_regular "$WORKER_ENV" root:root:640
+require_regular "$PUBLISHER_ENV" root:root:640
+grep -Fqx "KELION_CODEX_GATE_IMAGE=$EXPECTED_GATE_IMAGE" "$WORKER_ENV"
+grep -Fqx "KELION_CODEX_GATE_IMAGE=$EXPECTED_GATE_IMAGE" "$PUBLISHER_ENV"
+printf 'CONSTRUCTOR_GATE_IMAGE_REFRESHED=%s\n' "$EXPECTED_GATE_IMAGE"
 
 systemctl stop kelion-codex-worker.timer
 worker_before=$(systemctl is-active kelion-codex-worker.service 2>/dev/null || true)

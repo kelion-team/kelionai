@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: private-ai-constructor-finalize
@@ -60,6 +61,7 @@ jobs:
           [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
+          bash -n deploy/lib/runtime-config-cutover.sh
           node --check deploy/codex-worker.mjs
           CODEX_WORKER_EXECUTOR=opencode node deploy/codex-worker.mjs --self-test \
             | grep -qx 'codex-worker self-test: TRECE'
@@ -101,6 +103,7 @@ jobs:
           VPS_USER: ${{ vars.VPS_USER }}
           VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          REGISTRY_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
@@ -108,7 +111,8 @@ jobs:
           [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           [ "$VPS_USER" = root ]
-          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ] \
+            && [ -n "$REGISTRY_TOKEN" ]
 
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
           node --check deploy/codex-worker.mjs
@@ -120,13 +124,20 @@ jobs:
           expected_web_dropin_sha=$(sha256sum deploy/systemd/private-ai-web-full-access.conf | awk '{print $1}')
           bundle_root=$(mktemp -d)
           cleanup() {
+            if [ -n "${remote_registry_token:-}" ] && [ -n "${key_file:-}" ] \
+              && [ -n "${known_hosts:-}" ]; then
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+                "rm -f -- '$remote_registry_token'" >/dev/null 2>&1 || true
+            fi
             rm -rf -- "$bundle_root"
-            rm -f -- "${key_file:-}" "${known_hosts:-}" "${bundle:-}"
+            rm -f -- "${key_file:-}" "${known_hosts:-}" "${bundle:-}" \
+              "${registry_token_file:-}"
           }
           trap cleanup EXIT
           install -d \
             "$bundle_root/.github/private-ai" \
             "$bundle_root/deploy" \
+            "$bundle_root/deploy/lib" \
             "$bundle_root/deploy/systemd" \
             "$bundle_root/deploy/sudoers"
           install -m 0700 .github/private-ai/finalize-private-ai-constructor.sh \
@@ -142,11 +153,17 @@ jobs:
             "$bundle_root/deploy/systemd/private-ai-web-full-access.conf"
           install -m 0600 deploy/sudoers/kelion-codex-full-access \
             "$bundle_root/deploy/sudoers/kelion-codex-full-access"
+          install -m 0600 deploy/lib/runtime-config-cutover.sh \
+            "$bundle_root/deploy/lib/runtime-config-cutover.sh"
+          install -m 0600 deploy/compose.production.yml \
+            "$bundle_root/deploy/compose.production.yml"
           (
             cd "$bundle_root"
             sha256sum \
               .github/private-ai/finalize-private-ai-constructor.sh \
               deploy/codex-worker.mjs \
+              deploy/compose.production.yml \
+              deploy/lib/runtime-config-cutover.sh \
               deploy/opencode-constructor-instructions.md \
               deploy/opencode-constructor.json \
               deploy/sudoers/kelion-codex-full-access \
@@ -159,6 +176,8 @@ jobs:
             -C "$bundle_root" -czf "$bundle" \
             .github/private-ai/finalize-private-ai-constructor.sh \
             deploy/codex-worker.mjs \
+            deploy/compose.production.yml \
+            deploy/lib/runtime-config-cutover.sh \
             deploy/opencode-constructor-instructions.md \
             deploy/opencode-constructor.json \
             deploy/sudoers/kelion-codex-full-access \
@@ -187,6 +206,66 @@ jobs:
           )
           remote_bundle="/root/private-ai-finalize.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
           scp "${ssh_opts[@]}" "$bundle" "$VPS_USER@$VPS_HOST:$remote_bundle"
+          expected_gate_commit=a2a5c9bcfdf68f28c7709ee31de2c006bef89b85
+          expected_gate_image=ghcr.io/kelion-team/kelionai/codex-gates@sha256:8487e0c8d3042e6af3c482a54bb0ddfa00e2ac4b7a3425f40203bc795cd92c80
+          [ "$(GH_TOKEN="$REGISTRY_TOKEN" gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')" = \
+            "$expected_gate_commit" ]
+          registry_token_file=$(mktemp)
+          printf '%s' "$REGISTRY_TOKEN" > "$registry_token_file"
+          chmod 0600 "$registry_token_file"
+          remote_registry_token="/root/private-ai-registry.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.token"
+          scp "${ssh_opts[@]}" "$registry_token_file" \
+            "$VPS_USER@$VPS_HOST:$remote_registry_token"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_registry_token" "$expected_gate_image" "$expected_gate_commit" <<'GATE'
+          set -Eeuo pipefail
+          umask 077
+          token_file=$1
+          gate_image=$2
+          gate_commit=$3
+          cleanup_gate_pull() {
+            rm -f -- "$token_file"
+            for auth in "${authfiles[@]:-}"; do [ -z "$auth" ] || rm -f -- "$auth"; done
+          }
+          trap cleanup_gate_pull EXIT
+          [ -f "$token_file" ] && [ ! -L "$token_file" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$token_file")" = '0:0:600:1' ]
+          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]]
+          [[ "$gate_commit" =~ ^[0-9a-f]{40}$ ]]
+          authfiles=()
+          for identity in \
+            'kelion-codex:/var/lib/kelion-codex:/run/kelion-codex' \
+            'kelion-publisher:/var/lib/kelion-publisher:/run/kelion-publisher'; do
+            IFS=: read -r user home runtime <<<"$identity"
+            install -d -o "$user" -g "$user" -m 0700 "$runtime"
+            auth=$(mktemp "$runtime/.constructor-gate-auth.XXXXXX")
+            authfiles+=("$auth")
+            chown "$user:$user" "$auth"
+            chmod 0600 "$auth"
+            printf '%s' "$(<"$token_file")" | (cd "$runtime" && runuser -u "$user" -- env -i \
+              HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+              podman login --authfile "$auth" ghcr.io --username kelion-team --password-stdin) >/dev/null
+            (cd "$runtime" && runuser -u "$user" -- env -i \
+              HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+              podman pull --authfile "$auth" "$gate_image") >/dev/null
+            digest=$(cd "$runtime" && runuser -u "$user" -- env -i \
+              HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+              podman image inspect --format '{{.Digest}}' "$gate_image")
+            [ "$digest" = "${gate_image##*@}" ]
+            revision=$(cd "$runtime" && runuser -u "$user" -- env -i \
+              HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+              podman image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+                "$gate_image")
+            [ "$revision" = "$gate_commit" ]
+            (cd "$runtime" && runuser -u "$user" -- env -i \
+              HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
+              podman logout --authfile "$auth" ghcr.io) >/dev/null
+            rm -f -- "$auth"
+          done
+          rm -f -- "$token_file"
+          GATE
+          remote_registry_token=''
           proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
             "$remote_bundle" "$bundle_sha" <<'REMOTE'
           set -Eeuo pipefail
@@ -220,6 +299,8 @@ jobs:
           diff -u - "$extract/entries" <<'ENTRIES'
           .github/private-ai/finalize-private-ai-constructor.sh
           deploy/codex-worker.mjs
+          deploy/compose.production.yml
+          deploy/lib/runtime-config-cutover.sh
           deploy/opencode-constructor-instructions.md
           deploy/opencode-constructor.json
           deploy/sudoers/kelion-codex-full-access
