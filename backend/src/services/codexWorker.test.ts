@@ -3,7 +3,7 @@ import { parseStoredCodexWorkerStatus, projectCodexWorkerState } from './codexWo
 
 const now = Date.parse('2026-08-26T12:00:00.000Z')
 
-describe('Codex worker public state', () => {
+describe('Constructor local worker public state', () => {
   it('preserves busy and degraded heartbeats instead of painting them ready', () => {
     for (const storedStatus of ['busy', 'degraded'] as const) {
       expect(projectCodexWorkerState({
@@ -26,6 +26,7 @@ describe('Codex worker public state', () => {
     expect(parseStoredCodexWorkerStatus(JSON.stringify({ status: 'garbage', at: new Date(now).toISOString() }))).toBeNull()
     expect(parseStoredCodexWorkerStatus(JSON.stringify({ status: 'ready', at: 'today' }))).toBeNull()
     expect(parseStoredCodexWorkerStatus(JSON.stringify({ status: 'ready', at: new Date(now).toISOString(), internalCostUsdMicros: -1 }))).toBeNull()
+    expect(parseStoredCodexWorkerStatus(JSON.stringify({ status: 'ready', at: new Date(now).toISOString(), taskUrl: 'https://example.test/task' }))).toBeNull()
     expect(parseStoredCodexWorkerStatus(JSON.stringify({ status: 'busy', at: new Date(now).toISOString(), detail: 'lucrează' })))
       .toMatchObject({ status: 'busy', detail: 'lucrează' })
   })

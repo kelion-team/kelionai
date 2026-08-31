@@ -89,7 +89,9 @@ export function projectConstructorWorkCard(
     acceptanceCriteria: metadata.acceptanceCriteria,
     contextLinks: metadata.contextLinks,
     owner: job.orderedBy ?? null,
-    actor: job.brain ?? null,
+    actor: job.brain === 'codex-worker'
+      ? 'OpenCode + Qwen local (llama.cpp)'
+      : job.brain ?? null,
     plan: orderedStages.map((stage) => ({
       key: stage.key,
       label: stage.label,

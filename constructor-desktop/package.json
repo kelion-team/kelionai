@@ -1,0 +1,16 @@
+{
+  "name": "kelion-constructor-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Client Windows dedicat pentru aceeași coadă Kelion Constructor.",
+  "scripts": {
+    "bundle:web": "npm --prefix ../frontend run build && node ../scripts/genereaza-config-platforme.mjs --target constructor-desktop && node ../scripts/pregateste-bundle-nativ.mjs --target constructor-desktop",
+    "dev": "node ../scripts/genereaza-config-platforme.mjs --target constructor-desktop && tauri dev",
+    "build": "node ../scripts/genereaza-config-platforme.mjs --target constructor-desktop && tauri build",
+    "verify": "node ../scripts/verifica-clienti-nativi.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "sharp": "0.35.3"
+  }
+}

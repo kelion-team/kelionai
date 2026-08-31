@@ -30,14 +30,12 @@ describe('admin product contract', () => {
     expect(source('pages/Stage.tsx')).toContain('if (isAdminTab(sec)) setAdminTab(sec)')
   })
 
-  it('keeps Codex login in the private worker and never renders server setup secrets', () => {
+  it('presents the Constructor as OpenCode plus local Qwen on build_jobs', () => {
     const admin = source('components/admin/AdminProductie.tsx')
-    expect(admin).toContain('codex login --with-api-key')
-    expect(admin).toContain('openai-project-key')
-    expect(admin).not.toContain('{codex.setupInstructions}')
-    expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
-    expect(admin).toContain('Aceeași cheie OpenAI project-scoped')
-    expect(admin).toContain('cheia admin de control-plane nu este folosită aici')
+    expect(admin).toContain('Constructor — OpenCode + Qwen local (llama.cpp)')
+    expect(admin).toContain("constructorWorker.queue ?? 'build_jobs'")
+    expect(admin).not.toMatch(/codex login|openai-project-key|Conectează Codex|connectUrl|Codex.*OAuth|chatgpt\.com\/codex/i)
+    expect(admin).not.toMatch(/ai\.bec|credit necunoscut/)
     expect(admin).toContain("adminBilling.creditsUsed")
     expect(admin).not.toMatch(/·\s*0\s+credite consumate/i)
   })

@@ -5,6 +5,7 @@
   "githubRepository": "kelion-team/kelionai",
   "supportEmail": "contact@kelionai.app",
   "nativeScheme": "kelionai",
+  "constructorNativeScheme": "kelion-constructor",
   "nativeOrigins": [
     "capacitor://localhost",
     "http://tauri.localhost",
@@ -12,7 +13,8 @@
   ],
   "nativeRedirects": {
     "ios": "https://kelionai.app/auth/native/complete",
-    "desktop": "kelionai://auth/native/complete"
+    "desktop": "kelionai://auth/native/complete",
+    "constructorDesktop": "kelion-constructor://auth/native/complete"
   },
   "androidApplicationId": "app.kelionai.twa",
   "androidVersionCode": 3,
@@ -22,5 +24,6 @@
   ],
   "iosBundleId": "app.kelionai.ios",
   "iosTeamId": "982XP625JT",
-  "desktopBundleId": "app.kelionai.desktop"
+  "desktopBundleId": "app.kelionai.desktop",
+  "constructorDesktopBundleId": "app.kelionai.constructor"
 }

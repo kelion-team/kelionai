@@ -3,12 +3,10 @@ import { adminStrings } from '../../lib/adminText'
 import {
   fetchCreier,
   type CreierAdmin,
-  fetchCodexAdmin,
-  codexTaskUrl,
-  type CodexAdmin,
+  fetchConstructorWorkerAdmin,
+  type ConstructorWorkerAdmin,
   evalueazaOrdinConstructor,
   type EvalConstructor,
-  clasaBec,
 } from '../../lib/admin'
 import { fetchBalance, formatMinorMoney, type WalletStatus } from '../../lib/billing'
 import { apiFetch } from '../../lib/transport'
@@ -39,7 +37,7 @@ import {
 
 // ── CONSTRUCTOR tab ─────────────────────────────────────────────────────────
 
-export function AdminConstructor() {
+export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?: boolean } = {}) {
   const A = adminStrings()
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
   const [buildArchive, setBuildArchive] = useState<{
@@ -372,7 +370,7 @@ export function AdminConstructor() {
     <div className="admin-tab-content">
       <div className="admin-card">
         <div className="admin-card-head">
-          Constructorul — dai ordinul, Kelion construiește pe server (build + teste), deschide PR-ul; după verificări și aprobarea ta, publisherul separat îl îmbină. Poți ordona și prin voce/chat: „Kelion, construiește…".
+          Constructor — OpenCode + Qwen local (llama.cpp). Ordinul intră în build_jobs; workerul rulează buildul și testele, apoi deschide PR-ul. După verificări și aprobarea ta, publisherul separat îl îmbină. Poți ordona și prin voce/chat: „Kelion, construiește…".
         </div>
         <div className="admin-constructor-status">
           <span
@@ -434,9 +432,9 @@ export function AdminConstructor() {
             </div>
           )}
           <div className="admin-constructor-meta">
-            Creier cloud: <b>OpenAI</b>. Constructor:{' '}
+            <><b>Worker privat: OpenCode + Qwen local (llama.cpp)</b> · coada canonică <b>build_jobs</b>. Stare:{' '}</>
             {constructorId == null ? 'se citește de pe server…'
-              : constructorAcceptingWork === true ? <><b>Codex worker</b> — {constructorId.motiv}</>
+              : constructorAcceptingWork === true ? <><b>OpenCode + Qwen local (llama.cpp)</b> — {constructorId.motiv}</>
               : <>{constructorId.motiv}</>}
           </div>
         </div>
@@ -458,7 +456,6 @@ export function AdminConstructor() {
               <div className="eval-ai-lista">
                 {evalOrdin.clasament.map((ai) => (
                   <div className={`eval-ai ${ai.cheie === evalOrdin.aiRecomandat ? 'recomandat' : ''}`} key={ai.cheie}>
-                    <span className={clasaBec(ai.bec ?? 'gri')} title={ai.bec ? `credit: ${ai.bec}` : 'credit necunoscut'} />
                     <div className="eval-ai-text">
                       <div className="eval-ai-cap">
                         <strong>{ai.nume}</strong>
@@ -475,7 +472,7 @@ export function AdminConstructor() {
         )}
       </div>
 
-      <div className="admin-card" style={{ marginTop: 12 }}>
+      {!dedicatedClient && <div className="admin-card" style={{ marginTop: 12 }}>
         <div className="admin-card-head">Agent specializat</div>
         <p className="chat-hint">Creează un agent prin același sistem A2A și aceeași sesiune admin, fără o consolă paralelă.</p>
         <form onSubmit={(event) => void addCustomAgent(event)}>
@@ -496,7 +493,7 @@ export function AdminConstructor() {
           </button>
         </form>
         {agentMsg && <div className="chat-hint" role="status">{agentMsg}</div>}
-      </div>
+      </div>}
 
       <div className="admin-card" style={{ marginTop: 12 }}>
         <div className="admin-card-head admin-card-head-row">
@@ -561,9 +558,6 @@ export function AdminConstructor() {
                   : j.status === 'cancelled' ? 'anulat'
                   : 'eșuat'}
               </span>{' '}
-              {j.workerTaskUrl && codexTaskUrl(j.workerTaskUrl) ? (
-                <a className="vis-badge human" href={codexTaskUrl(j.workerTaskUrl) ?? undefined} target="_blank" rel="noopener noreferrer">Codex ↗</a>
-              ) : null}{' '}
               {j.nume || j.orderText.slice(0, 90)}{(j.nume ?? j.orderText).length > 90 ? '…' : ''}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -636,19 +630,19 @@ export function AdminConstructor() {
 
 export function AdminCreier() {
   const [creier, setCreierState] = useState<CreierAdmin | null | 'necitit'>('necitit')
-  const [codex, setCodex] = useState<CodexAdmin | null | 'necitit'>('necitit')
+  const [constructorWorker, setConstructorWorker] = useState<ConstructorWorkerAdmin | null | 'necitit'>('necitit')
   const [adminBilling, setAdminBilling] = useState<WalletStatus | null | 'necitit'>('necitit')
 
   useEffect(() => {
     setCreierState('necitit')
     void fetchCreier().then(setCreierState)
-    setCodex('necitit')
-    void fetchCodexAdmin().then(setCodex)
+    setConstructorWorker('necitit')
+    void fetchConstructorWorkerAdmin().then(setConstructorWorker)
     void fetchBalance().then(setAdminBilling)
   }, [])
 
   useEffect(() => {
-    const id = window.setInterval(() => { void fetchCodexAdmin().then(setCodex) }, 15_000)
+    const id = window.setInterval(() => { void fetchConstructorWorkerAdmin().then(setConstructorWorker) }, 15_000)
     return () => window.clearInterval(id)
   }, [])
 
@@ -667,56 +661,47 @@ export function AdminCreier() {
   return (
     <div className="admin-tab-content">
       <div className="admin-card">
-        <div className="admin-card-head">Creier OpenAI</div>
+        <div className="admin-card-head">Creier conversațional și Constructor</div>
         <div className="admin-subcard">
-          <div className="admin-subcard-title">Codex — worker privat separat</div>
-          {codex === 'necitit' && <p className="chat-hint">Se citește configurația…</p>}
-          {codex === null && (
+          <div className="admin-subcard-title">Constructor — OpenCode + Qwen local (llama.cpp)</div>
+          {constructorWorker === 'necitit' && <p className="chat-hint">Se citește configurația…</p>}
+          {constructorWorker === null && (
             <p className="chat-hint" style={{ color: '#e6a23c' }}>
-              ⚠ Codex: setup_required. Metadata workerului nu poate fi verificată; această pagină nu pornește autentificarea și nu afișează coduri sau tokenuri.
+              ⚠ Constructor: setup_required. Starea workerului local nu poate fi verificată; această pagină nu execută procese și nu afișează secrete.
             </p>
           )}
-          {typeof codex === 'object' && codex !== null && (
+          {typeof constructorWorker === 'object' && constructorWorker !== null && (
             <>
               <p className="chat-hint">
                 Worker: <b>
-                  {codex.worker.state === 'ready' ? 'pregătit'
-                  : codex.worker.state === 'busy' ? 'ocupat'
-                  : codex.worker.state === 'offline' ? 'offline'
-                  : codex.worker.state === 'setup_required' ? 'necesită configurare'
-                  : codex.worker.state === 'degraded' ? 'degradat'
+                  {constructorWorker.worker.state === 'ready' ? 'pregătit'
+                  : constructorWorker.worker.state === 'busy' ? 'ocupat'
+                  : constructorWorker.worker.state === 'offline' ? 'offline'
+                  : constructorWorker.worker.state === 'setup_required' ? 'necesită configurare'
+                  : constructorWorker.worker.state === 'degraded' ? 'degradat'
                   : 'stare necunoscută'}
-                </b>.{codex.status ? ` ${codex.status}` : ''}
+                </b>.{constructorWorker.status ? ` ${constructorWorker.status}` : ''}
               </p>
               <p className="chat-hint">
-                Ultimul heartbeat: {codex.worker.lastHeartbeat ? new Date(codex.worker.lastHeartbeat).toLocaleString('ro-RO') : 'neînregistrat'}
+                Executor: <b>{constructorWorker.executor ?? 'OpenCode + Qwen local (llama.cpp)'}</b> · coadă: <b>{constructorWorker.queue ?? 'build_jobs'}</b>.<br />
+                Ultimul heartbeat: {constructorWorker.worker.lastHeartbeat ? new Date(constructorWorker.worker.lastHeartbeat).toLocaleString('ro-RO') : 'neînregistrat'}
               </p>
-              {(codex.worker.state === 'setup_required' || codex.worker.state === 'unknown') && (
+              {(constructorWorker.worker.state === 'setup_required' || constructorWorker.worker.state === 'unknown') && (
                 <p className="chat-hint">
-                  Autentificarea se reface exclusiv în workerul privat din credentiala systemd <code>openai-project-key</code>, prin clientul oficial <code>codex login --with-api-key</code>. Cheia este transmisă numai pe stdin și nu intră în browser, environment, argumente, baza de date sau loguri; pentru recuperare rulează bridge-ul VPS dedicat.
+                  {constructorWorker.setupInstructions ?? 'Verifică preflightul OpenCode 1.18.25 + Qwen local (llama.cpp) și autentificarea HMAC a cozii build_jobs.'}
                 </p>
               )}
-              {codex.worker.state === 'offline' && <p className="chat-hint">Workerul nu răspunde. Kelionai nu încearcă să refacă autentificarea Codex în browser.</p>}
-              {codex.worker.state === 'degraded' && (
+              {constructorWorker.worker.state === 'offline' && <p className="chat-hint">Workerul local nu răspunde. Verifică OpenCode + Qwen local (llama.cpp) și endpointul loopback al modelului.</p>}
+              {constructorWorker.worker.state === 'degraded' && (
                 <p className="chat-hint" style={{ color: '#8a6d1a' }}>Workerul răspunde, dar a raportat o stare degradată. Cauza afișată mai sus trebuie rezolvată înainte ca panoul să-l considere pregătit.</p>
               )}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {codex.taskUrl ? (
-                  <a className="ghost" href={codex.taskUrl} target="_blank" rel="noopener noreferrer">Deschide în Codex</a>
-                ) : (
-                  <button type="button" className="ghost" disabled>Deschide în Codex</button>
-                )}
-              </div>
               <p className="chat-hint" style={{ marginTop: 8 }}>
                 {adminKelionCost && adminCreditsUsed !== null
                   ? <><b>Cost Kelion admin: {adminKelionCost} · {adminCreditsUsed.toLocaleString('ro-RO')} credite consumate</b>.</>
                   : <><b>Starea debitului Kelion pentru admin nu poate fi verificată.</b></>}
-                {' '}Cost OpenAI intern:{' '}
-                <b>{codex.internalCostUsd == null ? 'necitit'
-                  : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(codex.internalCostUsd)}</b>.
               </p>
               <p className="chat-hint" style={{ marginTop: 8 }}>
-                Aceeași cheie OpenAI project-scoped alimentează backendul și Constructorul prin boundary-uri separate. Realtime, TTS, imaginea, video și Codex rămân exclusiv server-side; cheia admin de control-plane nu este folosită aici. Costurile rămân cheltuieli interne și nu debitează portofelul admin.
+                OpenCode + Qwen local (llama.cpp) execută exclusiv ordinele validate din build_jobs; browserul doar scrie în coadă și citește starea autorizată.
               </p>
             </>
           )}

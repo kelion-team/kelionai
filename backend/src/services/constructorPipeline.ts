@@ -492,7 +492,7 @@ function publisherIncident(code: string): {
     state: 'diagnosing',
     causeCode: 'test_failure',
     summary: 'Revalidarea izolată a publisherului a respins handoff-ul workerului.',
-    nextAction: 'Reproduce porțile în execuția Codex și repară diferența înainte de un handoff nou.',
+    nextAction: 'Reproduce porțile în execuția OpenCode + Qwen local (llama.cpp) și repară diferența înainte de un handoff nou.',
   }
   if (code === 'stale_base') return {
     state: 'diagnosing',

@@ -1,0 +1,348 @@
+name: constructor-desktop-release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - constructor-desktop/**
+      - frontend/**
+      - desktop/src-tauri/src/shell.rs
+      - desktop/src-tauri/icons/**
+      - backend/src/routes/auth.ts
+      - backend/src/routes/constructor.ts
+      - backend/src/nativeAuthSecurity.test.ts
+      - backend/migrations/20260910_constructor_desktop_auth.sql
+      - config/endpoints.json
+      - config/product.json
+      - scripts/genereaza-config-platforme.mjs
+      - scripts/pregateste-bundle-nativ.mjs
+      - scripts/verifica-clienti-nativi.mjs
+      - .github/workflows/constructor-desktop-release.yml
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Commitul integral, deja verde pe master
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: constructor-desktop-release
+  cancel-in-progress: false
+
+jobs:
+  guard-source:
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă diferită de masterul canonic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
+  package-windows:
+    needs: guard-source
+    runs-on: windows-latest
+    timeout-minutes: 150
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verifică sursa master și CI-ul exact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'release_sha invalid' }
+          if ($env:RELEASE_SHA -ne $env:GITHUB_SHA) { throw 'release_sha trebuie să fie exact commitul workflow-ului curent' }
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'checkout diferit de release_sha' }
+          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
+          if ($master -ne $env:RELEASE_SHA) { throw 'release_sha nu este capul master' }
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(60)
+          $latest = $null
+          while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
+            $runs = @($payload.workflow_runs | Where-Object {
+              $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
+            } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
+            if ($runs.Count -ge 1) {
+              $latest = $runs[0]
+              if ($latest.status -eq 'completed') { break }
+            }
+            Start-Sleep -Seconds 15
+          }
+          if ($null -eq $latest -or $latest.status -ne 'completed') {
+            throw 'Rularea pr-verify canonică nu s-a terminat în 60 de minute.'
+          }
+          if ($latest.conclusion -ne 'success') {
+            throw "Ultimul pr-verify canonic nu este verde: $($latest.status)/$($latest.conclusion)"
+          }
+          $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($latest.id)/jobs?per_page=100" | ConvertFrom-Json
+          $requiredJobs = @('release-train-preflight', 'verify', 'container-isolation')
+          foreach ($required in $requiredJobs) {
+            $matches = @($jobsPayload.jobs | Where-Object { $_.name -eq $required })
+            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or $matches[0].conclusion -ne 'success') {
+              throw "Jobul obligatoriu $required nu este unic și verde în ultimul pr-verify."
+            }
+          }
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            constructor-desktop/package-lock.json
+
+      - name: Instalează toolchain-ul Rust fixat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustc --version
+          cargo --version
+
+      - name: Verifică autentificarea și contractul aceleiași cozi
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm --prefix backend ci --no-audit --no-fund
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix constructor-desktop ci --no-audit --no-fund
+          npm --prefix backend run typecheck
+          npm --prefix backend test -- src/nativeAuthSecurity.test.ts
+          npm --prefix frontend test -- src/nativeAuth.test.ts src/constructorDesktopContract.test.ts
+          node scripts/verifica-clienti-nativi.mjs
+
+      - name: Construiește executabilul Windows înainte de bundle
+        shell: pwsh
+        run: npm --prefix constructor-desktop run build -- --no-bundle
+
+      - name: Revalidează masterul și CI-ul imediat înainte de semnare
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -ne $env:GITHUB_SHA) {
+            throw 'Commitul de release nu mai corespunde workflow-ului canonic.'
+          }
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'Checkout diferit de release_sha.' }
+          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
+          if ($master -ne $env:RELEASE_SHA) { throw 'Masterul a avansat înainte de semnare; release refuzat.' }
+          $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
+          $runs = @($payload.workflow_runs | Where-Object {
+            $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
+          } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
+          if ($runs.Count -lt 1 -or $runs[0].status -ne 'completed' -or $runs[0].conclusion -ne 'success') {
+            throw 'Ultimul pr-verify canonic nu mai este complet și verde înainte de semnare.'
+          }
+          $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($runs[0].id)/jobs?per_page=100" | ConvertFrom-Json
+          foreach ($required in @('release-train-preflight', 'verify', 'container-isolation')) {
+            $matches = @($jobsPayload.jobs | Where-Object { $_.name -eq $required })
+            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or $matches[0].conclusion -ne 'success') {
+              throw "Jobul obligatoriu $required nu mai este unic și verde înainte de semnare."
+            }
+          }
+
+      - name: Semnează Authenticode executabilul, MSI și NSIS cu timestamp
+        shell: pwsh
+        env:
+          AUTHENTICODE_PFX_BASE64: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_BASE64 }}
+          AUTHENTICODE_PFX_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_PASSWORD }}
+          AUTHENTICODE_EXPECTED_THUMBPRINT: ${{ vars.WINDOWS_AUTHENTICODE_CERT_THUMBPRINT }}
+          AUTHENTICODE_EXPECTED_SUBJECT: ${{ vars.WINDOWS_AUTHENTICODE_CERT_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ([string]::IsNullOrWhiteSpace($env:AUTHENTICODE_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_PFX_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_EXPECTED_THUMBPRINT) -or
+              [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_EXPECTED_SUBJECT)) {
+            throw 'Lipsesc credentialele sau identitatea Authenticode fixată pentru distribuția Windows.'
+          }
+          $expectedThumbprint = ($env:AUTHENTICODE_EXPECTED_THUMBPRINT -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$') {
+            throw 'Thumbprintul Authenticode așteptat este invalid.'
+          }
+          function Assert-KelionSignature([string]$Path) {
+            $signature = Get-AuthenticodeSignature $Path
+            $actualThumbprint = ($signature.SignerCertificate.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+            if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
+                $actualThumbprint -cne $expectedThumbprint -or
+                $signature.SignerCertificate.Subject -cne $env:AUTHENTICODE_EXPECTED_SUBJECT) {
+              throw "Semnătura Authenticode nu corespunde identității Kelion fixate: $Path"
+            }
+            return $signature
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'kelion-constructor-codesign.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:AUTHENTICODE_PFX_BASE64))
+            $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $pfx,
+              $env:AUTHENTICODE_PFX_PASSWORD,
+              [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            )
+            $pfxThumbprint = ($certificate.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+            if (-not $certificate.HasPrivateKey -or $pfxThumbprint -cne $expectedThumbprint -or
+                $certificate.Subject -cne $env:AUTHENTICODE_EXPECTED_SUBJECT -or
+                $certificate.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow) {
+              throw 'Certificatul PFX nu corespunde identității Kelion fixate sau este expirat.'
+            }
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -File |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw 'signtool.exe lipsește din runner.' }
+            $appExe = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release' -Filter '*.exe' -File |
+              Where-Object { $_.Name -notmatch 'build-script|deps' })
+            if ($appExe.Count -ne 1) { throw "Așteptat executabilul aplicației, găsite $($appExe.Count)." }
+            & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:AUTHENTICODE_PFX_PASSWORD `
+              /tr 'http://timestamp.digicert.com' /td SHA256 $appExe[0].FullName
+            & $signtool.FullName verify /pa /all /v $appExe[0].FullName | Out-Null
+            $null = Assert-KelionSignature $appExe[0].FullName
+
+            npm --prefix constructor-desktop exec -- tauri bundle --bundles nsis msi --ci --no-sign
+            $packages = @(
+              Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File
+              Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/msi' -Filter '*.msi' -File
+            )
+            if ($packages.Count -ne 2) { throw "Așteptate MSI și NSIS, găsite $($packages.Count)." }
+            foreach ($package in $packages) {
+              & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:AUTHENTICODE_PFX_PASSWORD `
+                /tr 'http://timestamp.digicert.com' /td SHA256 $package.FullName
+              & $signtool.FullName verify /pa /all /v $package.FullName | Out-Null
+              $null = Assert-KelionSignature $package.FullName
+            }
+          } finally {
+            if ($certificate) { $certificate.Dispose() }
+            Remove-Item -Force -ErrorAction SilentlyContinue $pfx
+            $env:AUTHENTICODE_PFX_BASE64 = $null
+            $env:AUTHENTICODE_PFX_PASSWORD = $null
+          }
+
+      - name: Verifică pachetele și scrie manifestul măsurat
+        shell: pwsh
+        env:
+          AUTHENTICODE_EXPECTED_THUMBPRINT: ${{ vars.WINDOWS_AUTHENTICODE_CERT_THUMBPRINT }}
+          AUTHENTICODE_EXPECTED_SUBJECT: ${{ vars.WINDOWS_AUTHENTICODE_CERT_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $expectedThumbprint = ($env:AUTHENTICODE_EXPECTED_THUMBPRINT -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+          if ($expectedThumbprint -notmatch '^[0-9A-F]{40}$' -or
+              [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_EXPECTED_SUBJECT)) {
+            throw 'Identitatea Authenticode fixată lipsește sau este invalidă.'
+          }
+          function Assert-KelionSignature([string]$Path) {
+            $signature = Get-AuthenticodeSignature $Path
+            $actualThumbprint = ($signature.SignerCertificate.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+            if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
+                $actualThumbprint -cne $expectedThumbprint -or
+                $signature.SignerCertificate.Subject -cne $env:AUTHENTICODE_EXPECTED_SUBJECT) {
+              throw "Semnătura Authenticode nu corespunde identității Kelion fixate: $Path"
+            }
+            return $signature
+          }
+          $nsis = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)
+          $msi = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release/bundle/msi' -Filter '*.msi' -File)
+          if ($nsis.Count -ne 1) { throw "Așteptat un NSIS, găsite $($nsis.Count)" }
+          if ($msi.Count -ne 1) { throw "Așteptat un MSI, găsite $($msi.Count)" }
+          7z t $nsis[0].FullName | Out-Null
+          $nsisExtract = Join-Path $env:RUNNER_TEMP 'constructor-nsis-extract'
+          New-Item -ItemType Directory -Force $nsisExtract | Out-Null
+          7z x "-o$nsisExtract" $nsis[0].FullName | Out-Null
+          $nsisEmbedded = @(Get-ChildItem $nsisExtract -Recurse -Filter 'kelion-constructor-desktop.exe' -File)
+          if ($nsisEmbedded.Count -ne 1) { throw 'NSIS nu conține exact executabilul Constructor așteptat.' }
+          $null = Assert-KelionSignature $nsisEmbedded[0].FullName
+          $extract = Join-Path $env:RUNNER_TEMP 'constructor-msi-extract'
+          $process = Start-Process msiexec.exe -ArgumentList @('/a', $msi[0].FullName, '/qn', "TARGETDIR=$extract") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Validarea MSI a eșuat: $($process.ExitCode)" }
+          $embedded = @(Get-ChildItem $extract -Recurse -Filter 'kelion-constructor-desktop.exe' -File)
+          if ($embedded.Count -ne 1) { throw 'MSI-ul nu conține exact executabilul Constructor așteptat.' }
+          $null = Assert-KelionSignature $embedded[0].FullName
+          New-Item -ItemType Directory -Force 'constructor-desktop/artifact' | Out-Null
+          Copy-Item $nsis[0].FullName 'constructor-desktop/artifact/'
+          Copy-Item $msi[0].FullName 'constructor-desktop/artifact/'
+          $files = Get-ChildItem 'constructor-desktop/artifact/*' | Sort-Object Name
+          $manifest = [ordered]@{
+            schema = 2
+            product = 'Kelion Constructor'
+            commit = $env:RELEASE_SHA
+            api = (Get-Content 'config/product.json' | ConvertFrom-Json).publicAppOrigin
+            queueEndpoint = '/api/admin/constructor'
+            packages = @($files | ForEach-Object {
+              $signature = Assert-KelionSignature $_.FullName
+              [ordered]@{
+                name = $_.Name
+                bytes = $_.Length
+                sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                authenticode = $signature.Status.ToString()
+                signer = $signature.SignerCertificate.Subject
+                signerThumbprint = $signature.SignerCertificate.Thumbprint.ToLowerInvariant()
+                timestamped = [bool]$signature.TimeStamperCertificate
+              }
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content 'constructor-desktop/artifact/manifest.json' -Encoding utf8
+          if ($manifest.packages.Count -ne 2) { throw 'Manifestul nu conține ambele pachete.' }
+
+      - name: Revalidează masterul și CI-ul imediat înainte de publicare
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -ne $env:GITHUB_SHA) {
+            throw 'Commitul de release nu mai corespunde workflow-ului canonic.'
+          }
+          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'Checkout diferit de release_sha.' }
+          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
+          if ($master -ne $env:RELEASE_SHA) { throw 'Masterul a avansat înainte de publicare; release refuzat.' }
+          $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
+          $runs = @($payload.workflow_runs | Where-Object {
+            $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
+          } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
+          if ($runs.Count -lt 1 -or $runs[0].status -ne 'completed' -or $runs[0].conclusion -ne 'success') {
+            throw 'Ultimul pr-verify canonic nu mai este complet și verde înainte de publicare.'
+          }
+          $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($runs[0].id)/jobs?per_page=100" | ConvertFrom-Json
+          foreach ($required in @('release-train-preflight', 'verify', 'container-isolation')) {
+            $matches = @($jobsPayload.jobs | Where-Object { $_.name -eq $required })
+            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or $matches[0].conclusion -ne 'success') {
+              throw "Jobul obligatoriu $required nu mai este unic și verde înainte de publicare."
+            }
+          }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kelion-constructor-windows-${{ inputs.release_sha || github.sha }}
+          path: constructor-desktop/artifact/
+          if-no-files-found: error
+          retention-days: 30

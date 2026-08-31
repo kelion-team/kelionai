@@ -19,7 +19,63 @@ permissions:
   pull-requests: read
 
 jobs:
+  guard-source:
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Leagă sursa exactă de evenimentul canonic
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
+          case "$EVENT_NAME" in
+            pull_request)
+              [[ "$EVENT_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+              [ "$EVENT_PR_BASE_REF" = master ]
+              [ "$EVENT_PR_MERGE_SHA" = "$GITHUB_SHA" ]
+              [ "$GITHUB_REF" = "refs/pull/$EVENT_PR_NUMBER/merge" ]
+              [ "$GITHUB_REF_NAME" = "$EVENT_PR_NUMBER/merge" ]
+              ;;
+            merge_group)
+              [ "$MERGE_GROUP_BASE_REF" = refs/heads/master ]
+              [ "$MERGE_GROUP_HEAD_SHA" = "$GITHUB_SHA" ]
+              [[ "$GITHUB_REF" == refs/heads/gh-readonly-queue/master/* ]]
+              [[ "$GITHUB_REF_NAME" == gh-readonly-queue/master/* ]]
+              ;;
+            workflow_dispatch)
+              [[ "$DISPATCH_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+              pr=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$DISPATCH_PR_NUMBER")
+              [ "$(jq -r '.base.ref' <<<"$pr")" = master ]
+              [ "$(jq -r '.state' <<<"$pr")" = open ]
+              [ "$(jq -r '.head.repo.full_name' <<<"$pr")" = "$GITHUB_REPOSITORY" ]
+              [ "$(jq -r '.head.sha' <<<"$pr")" = "$GITHUB_SHA" ]
+              head_ref=$(jq -er '.head.ref' <<<"$pr")
+              [ "$GITHUB_REF" = "refs/heads/$head_ref" ]
+              [ "$GITHUB_REF_NAME" = "$head_ref" ]
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+
   merge-policy:
+    needs: guard-source
     name: merge-policy
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -50,7 +106,15 @@ jobs:
           [ "$(jq -r '.base.ref' <<<"$pr")" = master ]
           [ "$(jq -r '.state' <<<"$pr")" = open ]
           [ "$(jq -r '.draft' <<<"$pr")" = false ]
-          head_ref=$(jq -r '.head.ref' <<<"$pr")
+          head_ref=$(jq -er '.head.ref' <<<"$pr")
+          head_sha=$(jq -er '.head.sha' <<<"$pr")
+          head_repository=$(jq -er '.head.repo.full_name' <<<"$pr")
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            [ "$head_repository" = "$GITHUB_REPOSITORY" ]
+            [ "$head_sha" = "$GITHUB_SHA" ]
+            [ "$GITHUB_REF" = "refs/heads/$head_ref" ]
+            [ "$GITHUB_REF_NAME" = "$head_ref" ]
+          fi
 
           allowed='[
             ".github/workflows/deploy.yml",

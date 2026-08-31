@@ -146,8 +146,8 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
     probleme.push({
       cod: 'codex_worker_offline',
       severitate: 'critic',
-      ce: 'Workerul Codex separat nu are un heartbeat recent de stare ready; comenzile rămân în coadă.',
-      recomandare: 'Verifică credentiala systemd `openai-project-key` și reînnoiește cache-ul prin bridge-ul VPS; loginul Codex primește cheia numai pe stdin, iar procesul web nu o primește.',
+      ce: 'Workerul Constructor OpenCode + Qwen local (llama.cpp) nu are un heartbeat recent de stare ready; ordinele rămân în build_jobs.',
+      recomandare: 'Verifică preflightul OpenCode 1.18.25, modelul Qwen local din endpointul loopback llama.cpp și autentificarea HMAC a cozii build_jobs.',
     })
   }
   if (!publisherReady) {
@@ -211,7 +211,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
       cod: 'codex_job_long_running',
       severitate: 'atentie',
       ce: `Cel mai vechi ordin rulează de peste ${Math.round((runningSec ?? 0) / 3600)} ore.`,
-      recomandare: 'Verifică taskul Codex și etapa raportată; anulează numai dacă workerul confirmă oprirea.',
+      recomandare: 'Verifică worktree-ul executorului OpenCode + Qwen local (llama.cpp) și etapa persistată; anulează numai dacă workerul confirmă oprirea.',
     })
   }
   const stalledPublisher = running.find((job) =>

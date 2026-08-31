@@ -62,7 +62,6 @@ export interface BuildJobRow {
   updatedAt: string
   progress?: string | null
   pct?: number | null
-  workerTaskUrl?: string | null
   continuity?: ConstructorContinuity
   workCard?: ConstructorWorkCard | null
 }
@@ -83,7 +82,6 @@ function isBuildJobRow(value: unknown, projected: boolean): value is BuildJobRow
     && isStringOrNull(value.brain)
     && isDateString(value.updatedAt)
     && isStringOrNull(value.progress)
-    && (value.workerTaskUrl === undefined || isStringOrNull(value.workerTaskUrl))
   if (!base) return false
   if (!projected) {
     return (value.nume === undefined || typeof value.nume === 'string')

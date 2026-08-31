@@ -5,22 +5,44 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
-permissions:
-  actions: write
-  checks: read
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: vps-remediation-watchdog
   cancel-in-progress: false
 
 jobs:
+  guard-source:
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă diferită de masterul canonic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
   remediate-and-track:
-    name: Track, retry twice, then escalate to L2
+    needs: guard-source
+    name: Track, retry twice, then open an incident
     runs-on: ubuntu-latest
     timeout-minutes: 95
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -29,10 +51,7 @@ jobs:
       - name: Rulează trackerul persistent și remediatorul fail-closed
         env:
           GH_TOKEN: ${{ github.token }}
-          VPS_REMEDIATOR_CODEX_BIN: ${{ vars.VPS_REMEDIATOR_CODEX_BIN || 'codex' }}
-          VPS_REMEDIATOR_CODEX_HOME: ${{ vars.VPS_REMEDIATOR_CODEX_HOME }}
-          VPS_REMEDIATOR_FEEDBACK_MINUTES: ${{ vars.VPS_REMEDIATOR_FEEDBACK_MINUTES || '1' }}
-          VPS_REMEDIATOR_INSTALL_CODEX: ${{ vars.VPS_REMEDIATOR_INSTALL_CODEX || '1' }}
+          VPS_REMEDIATOR_FEEDBACK_MINUTES: ${{ vars.VPS_REMEDIATOR_FEEDBACK_MINUTES || '20' }}
           VPS_REMEDIATOR_LIVE_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
         run: |
           set -euo pipefail

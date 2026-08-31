@@ -13,7 +13,7 @@ if [[ ! "$constructor_install_source_commit" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 readonly -a constructor_install_phases=(
   preflight publication-lock identity-layout recovery-preflight transaction-prepare
-  quiesce transaction-supersede artifact-publication unit-validation unit-cutover systemd-publication
+  quiesce transaction-supersede legacy-retirement artifact-publication unit-validation unit-cutover systemd-publication
   published-validation commit
 )
 set_constructor_install_phase() {
@@ -55,8 +55,9 @@ trap 'capture_constructor_install_failure "$LINENO"' ERR
 trap report_constructor_install_failure EXIT
 set_constructor_install_phase preflight
 
-# Instalează numai codul, identitățile și unitățile dezactivate. Nu creează
-# credentiale, nu clonează, nu activează timere și nu pornește servicii.
+# Instalează codul, configul OpenCode local, identitățile, regula sudoers și
+# unitățile dezactivate. Retrage cache-ul/adaptoarele Codex vechi, dar nu
+# creează credentiale, nu clonează, nu activează timere și nu pornește servicii.
 [[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 [[ "${KELION_CONSTRUCTOR_INSTALL:-0}" == "1" ]] || {
   echo 'setează KELION_CONSTRUCTOR_INSTALL=1 după review' >&2
@@ -68,9 +69,113 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
   echo 'sursa instalării nu este repository-ul Kelion validat' >&2
   constructor_install_failure_line=$LINENO; exit 1
 }
-for tool in awk cmp flock getent grep jq mktemp python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod; do
+for tool in awk cmp curl find flock getent grep jq mktemp python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod visudo wc; do
   command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
+getent group privateai >/dev/null 2>&1 || {
+  echo 'runtime-ul AI privat trebuie instalat înaintea Constructorului' >&2
+  constructor_install_failure_line=$LINENO; exit 1
+}
+
+validate_opencode_constructor_config() {
+  local file=$1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  jq -e '
+    . as $config |
+    $config.autoupdate == false and $config.share == "disabled" and
+    $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+    ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+    $config.enabled_providers == ["llama.cpp"] and
+    ($config.provider | keys) == ["llama.cpp"] and
+    $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+    $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+    ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+    ($config.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local")) and
+    (["*","read","glob","grep","edit","bash","task","skill","webfetch","websearch","external_directory"]
+      | all(.[]; $config.permission[.] == "allow")) and
+    $config.instructions == ["instructions.md"] and
+    $config.server == {hostname:"127.0.0.1",port:24096,mdns:false}
+  ' "$file" >/dev/null
+}
+
+validate_private_ai_base() {
+  local receipt=/etc/private-ai/.install-complete config=/srv/private-ai/home/.config/opencode/opencode.json
+  local instructions=/srv/private-ai/home/.config/opencode/instructions.md
+  local llama_server=/opt/private-ai/bin/llama-server llama_source=/opt/private-ai/src/llama.cpp
+  local llama_state=/var/lib/private-ai/llama-cpp.commit model_cache=/srv/private-ai/models
+  local model_file_path llm_pid
+  local -a receipt_lines=()
+  local -a model_candidates=()
+  for directory in /etc/private-ai /opt/private-ai /opt/private-ai/bin /srv/private-ai /srv/private-ai/home \
+    /srv/private-ai/home/.config /srv/private-ai/home/.config/opencode; do
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+      && [ "$(realpath -e -- "$directory")" = "$directory" ] || return 1
+  done
+  [ "$(stat -Lc '%U:%G:%a' /srv/private-ai/home/.config)" = 'root:privateai:750' ] || return 1
+  [ "$(stat -Lc '%U:%G:%a' /srv/private-ai/home/.config/opencode)" = 'root:privateai:750' ] || return 1
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
+  mapfile -t receipt_lines < "$receipt"
+  [ "${#receipt_lines[@]}" -eq 6 ] || return 1
+  [ "${receipt_lines[0]}" = 'installer_id=private-ai-contabo-v1' ] || return 1
+  [[ "${receipt_lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  [ "${receipt_lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ] || return 1
+  [ "${receipt_lines[3]}" = 'opencode_version=1.18.25' ] || return 1
+  [ "${receipt_lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ] || return 1
+  [ "${receipt_lines[5]}" = 'model_quant=Q4_K_M' ] || return 1
+  [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /opt/private-ai/bin/opencode)" = '0:0:755:1' ] || return 1
+  [ "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')" = \
+    d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb ] || return 1
+  [ "$(env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin /opt/private-ai/bin/opencode --version)" = '1.18.25' ] || return 1
+  [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
+  [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
+    bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0 ] || return 1
+  [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
+    && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
+  [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
+  [ -d "$llama_source/.git" ] && [ ! -L "$llama_source" ] || return 1
+  [ "$(runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+    git -C "$llama_source" rev-parse HEAD)" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
+  mapfile -d '' -t model_candidates < <(
+    find "$model_cache" -xdev -type f -size 20419565568c -print0
+  )
+  [ "${#model_candidates[@]}" -eq 1 ] || return 1
+  model_file_path=${model_candidates[0]}
+  [ -f "$model_file_path" ] && [ ! -L "$model_file_path" ] \
+    && [ "$(stat -Lc '%U:%G:%s:%h' "$model_file_path")" = \
+      'privateai:privateai:20419565568:1' ] || return 1
+  [ "$(sha256sum "$model_file_path" | awk '{print $1}')" = \
+    671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7 ] || return 1
+  [ -f "$config" ] && [ ! -L "$config" ] \
+    && [ "$(stat -Lc '%U:%G:%a:%h' "$config")" = 'root:privateai:640:1' ] || return 1
+  [ -f "$instructions" ] && [ ! -L "$instructions" ] \
+    && [ "$(stat -Lc '%U:%G:%a:%h' "$instructions")" = 'root:privateai:640:1' ] || return 1
+  jq -e '
+    .enabled_providers == ["llama.cpp"] and
+    (.provider | keys) == ["llama.cpp"] and
+    .provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+    .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+    (.provider["llama.cpp"].options | has("apiKey") | not) and
+    (.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local"))
+  ' "$config" >/dev/null || return 1
+  systemctl is-active --quiet private-ai-llm.service || return 1
+  systemctl is-active --quiet private-ai-web.service || return 1
+  llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
+  [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ] || return 1
+  awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
+    "/proc/$llm_pid/maps" || return 1
+  curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null || return 1
+  curl --fail --silent --show-error --max-time 30 http://127.0.0.1:24080/v1/models \
+    | jq -e '.data | type == "array" and length == 1 and .[0].id == "qwen3.6-35b-a3b-local"' >/dev/null
+}
+
+validate_opencode_constructor_config "$repo_root/deploy/opencode-constructor.json" \
+  || { echo 'configurația OpenCode Constructor din bundle este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+validate_private_ai_base \
+  || { echo 'runtime-ul OpenCode/Qwen local nu corespunde bazei fixate' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 # Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
 # conducta după primul match, iar SIGPIPE-ul producătorului transformă o
 # capabilitate prezentă într-un fals eșec. Capturăm o singură ieșire bounded și
@@ -416,10 +521,19 @@ validate_root_owned_install_directory() {
   [ $((8#$path_mode & 0022)) -eq 0 ]
 }
 
+validate_root_owned_protected_directory() {
+  local path=$1 path_mode
+  [ -d "$path" ] && [ ! -L "$path" ] \
+    && [ "$(realpath -e -- "$path")" = "$path" ] \
+    && [ "$(stat -Lc '%u' "$path")" = 0 ] || return 1
+  path_mode=$(stat -Lc '%a' "$path") || return 1
+  [ $((8#$path_mode & 0022)) -eq 0 ]
+}
+
 ensure_root_owned_install_directory() {
   local path=$1 mode=$2 parent
   case "$path" in
-    /opt/kelion-codex|/opt/kelion-codex/profile-home|/opt/kelion-constructor|/opt/kelion-constructor/lib) ;;
+    /opt/kelion-codex|/opt/kelion-constructor|/opt/kelion-constructor/lib) ;;
     *) return 1 ;;
   esac
   parent=$(dirname -- "$path")
@@ -476,6 +590,153 @@ secure_handoff_spool() {
   sync -f "$spool"
 }
 
+validate_constructor_sudoers() {
+  local file=$1
+  [ -f "$file" ] && [ ! -L "$file" ] \
+    && [ "$(stat -Lc '%h' "$file")" = 1 ] \
+    && [ "$(wc -l < "$file")" -eq 1 ] \
+    && grep -qxF 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$file" \
+    && visudo -cf "$file" >/dev/null
+}
+
+validate_private_ai_web_full_access() {
+  local source=$repo_root/deploy/systemd/private-ai-web-full-access.conf
+  local target=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
+  local pid dropins
+  [ -f "$source" ] && [ ! -L "$source" ] || return 1
+  [ -f "$target" ] && [ ! -L "$target" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$target")" = '0:0:444:1' ] \
+    && cmp -s -- "$source" "$target" || return 1
+  dropins=$(systemctl show private-ai-web.service --property=DropInPaths --value) || return 1
+  [ "$dropins" = "$target" ] || return 1
+  systemctl is-enabled --quiet private-ai-web.service || return 1
+  systemctl is-active --quiet private-ai-web.service || return 1
+  [ "$(systemctl show private-ai-web.service --property=User --value)" = root ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=Group --value)" = root ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=NoNewPrivileges --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=PrivateIPC --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=PrivateDevices --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=PrivateTmp --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectHome --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectControlGroups --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectKernelLogs --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectKernelModules --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectKernelTunables --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=ProtectSystem --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=RestrictNamespaces --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=RestrictSUIDSGID --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=LockPersonality --value)" = no ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=CPUQuotaPerSecUSec --value)" = infinity ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=CPUWeight --value)" = 100 ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=MemoryHigh --value)" = infinity ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=MemoryMax --value)" = infinity ] || return 1
+  [ "$(systemctl show private-ai-web.service --property=TasksMax --value)" = infinity ] || return 1
+  pid=$(systemctl show private-ai-web.service --property=MainPID --value) || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$pid/status" ] \
+    && [ "$(awk '/^Uid:/ { print $2 }' "/proc/$pid/status")" = 0 ]
+}
+
+retire_legacy_codex_state() {
+  local auth_dir=/var/lib/kelion-codex-auth
+  local profile_dir=/opt/kelion-codex/profile-home
+  local canonical_codex=/opt/kelion-codex/bin/codex
+  local canonical_target='' canonical_is_compat=0 remaining parent retired
+  local -a retired_paths=(
+    /opt/kelion-codex/codex-sandbox-probe.mjs
+    /opt/kelion-codex/bin/codex-real
+    /opt/private-ai/bin/opencode-constructor-root
+    /etc/private-ai/local-codex-compat-key
+    /etc/sudoers.d/kelion-local-qwen-constructor
+    /etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
+    /etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
+  )
+
+  for parent in \
+    /opt/kelion-codex /opt/kelion-codex/bin /opt/private-ai /opt/private-ai/bin \
+    /etc/private-ai /etc/sudoers.d /etc/systemd/system \
+    /etc/systemd/system/kelion-codex-worker.service.d /var/lib; do
+    if [ -e "$parent" ] || [ -L "$parent" ]; then
+      validate_root_owned_protected_directory "$parent" || return 1
+    fi
+  done
+
+  # Un adaptor one-shot mai vechi putea înlocui calea Codex cu un wrapper
+  # local. Constructorul canonic nu mai execută acea cale; eliminăm numai
+  # variantele recunoscute, fără a atinge un CLI Codex oficial independent.
+  if [ -e "$canonical_codex" ] || [ -L "$canonical_codex" ]; then
+    if [ -L "$canonical_codex" ]; then
+      canonical_target=$(readlink -f -- "$canonical_codex" 2>/dev/null || true)
+      case "$canonical_target" in
+        /opt/kelion-codex/bin/codex-real|/opt/private-ai/bin/opencode-constructor-root)
+          canonical_is_compat=1
+          ;;
+        '') return 1 ;;
+        *)
+          [ -f "$canonical_target" ] && [ ! -L "$canonical_target" ] || return 1
+          if grep -aEq 'KELION_LOCAL_QWEN_WRAPPER|local-qwen-compat|opencode-constructor-root|codex-real' "$canonical_target"; then
+            canonical_is_compat=1
+          fi
+          ;;
+      esac
+    elif [ -f "$canonical_codex" ]; then
+      if grep -aEq 'KELION_LOCAL_QWEN_WRAPPER|local-qwen-compat|opencode-constructor-root|codex-real' "$canonical_codex"; then
+        canonical_is_compat=1
+      fi
+    else
+      return 1
+    fi
+  fi
+  if [ "$canonical_is_compat" = 1 ]; then rm -f -- "$canonical_codex"; fi
+
+  for retired in "${retired_paths[@]}"; do
+    if [ -e "$retired" ] || [ -L "$retired" ]; then
+      [ -f "$retired" ] || [ -L "$retired" ] || return 1
+      rm -f -- "$retired"
+    fi
+  done
+
+  if [ -e "$profile_dir" ] || [ -L "$profile_dir" ]; then
+    [ -d "$profile_dir" ] && [ ! -L "$profile_dir" ] \
+      && [ "$(realpath -e -- "$profile_dir")" = "$profile_dir" ] \
+      && [ "$(stat -Lc '%u:%g' "$profile_dir")" = '0:0' ] || return 1
+    retired=$profile_dir/kelion-worker.config.toml
+    if [ -e "$retired" ] || [ -L "$retired" ]; then
+      [ -f "$retired" ] || [ -L "$retired" ] || return 1
+      rm -f -- "$retired"
+    fi
+    remaining=$(find -P "$profile_dir" -mindepth 1 -maxdepth 1 -print -quit) || return 1
+    [ -z "$remaining" ] || return 1
+    rmdir -- "$profile_dir"
+  fi
+
+  if [ -e "$auth_dir" ] || [ -L "$auth_dir" ]; then
+    [ -d "$auth_dir" ] && [ ! -L "$auth_dir" ] \
+      && [ "$(realpath -e -- "$auth_dir")" = "$auth_dir" ] \
+      && [ "$(stat -Lc '%U:%G:%a' "$auth_dir")" = 'kelion-codex:kelion-codex:700' ] || return 1
+    # Directorul a fost dedicat exclusiv loginului Codex retras. `-P -xdev`
+    # nu urmează symlinkuri și nu traversează un mount injectat; un mount
+    # rămas face rmdir să eșueze fail-closed.
+    find -P "$auth_dir" -xdev -depth -mindepth 1 -delete || return 1
+    remaining=$(find -P "$auth_dir" -mindepth 1 -maxdepth 1 -print -quit) || return 1
+    [ -z "$remaining" ] || return 1
+    rmdir -- "$auth_dir"
+  fi
+
+  for retired in "${retired_paths[@]}" "$profile_dir" "$auth_dir"; do
+    [ ! -e "$retired" ] && [ ! -L "$retired" ] || return 1
+  done
+  if [ -e "$canonical_codex" ] || [ -L "$canonical_codex" ]; then
+    canonical_target=$(realpath -e -- "$canonical_codex") || return 1
+    [ -f "$canonical_target" ] || return 1
+    ! grep -aEq 'KELION_LOCAL_QWEN_WRAPPER|local-qwen-compat|opencode-constructor-root|codex-real' "$canonical_target" || return 1
+  fi
+  for parent in \
+    /opt/kelion-codex /opt/kelion-codex/bin /opt/private-ai/bin /etc/private-ai \
+    /etc/sudoers.d /etc/systemd/system/kelion-codex-worker.service.d /var/lib; do
+    if [ -d "$parent" ] && [ ! -L "$parent" ]; then sync -f "$parent" || return 1; fi
+  done
+}
+
 ensure_group kelion-handoff
 ensure_user kelion-codex /var/lib/kelion-codex
 ensure_user kelion-publisher /var/lib/kelion-publisher
@@ -485,14 +746,15 @@ usermod -a -G kelion-handoff kelion-publisher
 
 validate_root_owned_install_directory /
 validate_root_owned_install_directory /opt
+validate_root_owned_install_directory /etc
+validate_root_owned_install_directory /etc/sudoers.d
 ensure_root_owned_install_directory /opt/kelion-codex 0755
 ensure_root_owned_install_directory /opt/kelion-constructor 0755
 ensure_root_owned_install_directory /opt/kelion-constructor/lib 0755
-ensure_root_owned_install_directory /opt/kelion-codex/profile-home 0755
+ensure_root_owned_install_directory /etc/systemd/system/private-ai-web.service.d 0755
 secure_service_parent /var/lib/kelion-codex
 secure_service_parent /var/lib/kelion-publisher
 secure_service_parent /var/lib/kelion-release
-ensure_service_writable_dir /var/lib/kelion-codex-auth kelion-codex kelion-codex
 ensure_service_writable_dir /var/lib/kelion-codex/jobs kelion-codex kelion-codex
 ensure_service_writable_dir /var/lib/kelion-codex/.cache kelion-codex kelion-codex
 ensure_service_writable_dir /var/lib/kelion-codex/.config kelion-codex kelion-codex
@@ -516,8 +778,10 @@ constructor_services=(kelion-codex-worker.service kelion-constructor-publisher.s
 constructor_markers=(/etc/kelion/codex-worker.enabled /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled)
 install_logicals=(
   artifact.codex-worker
-  artifact.codex-sandbox-probe
-  artifact.codex-worker-profile
+  authorization.kelion-codex-full-access
+  configuration.opencode
+  instructions.opencode
+  systemd-dropin.private-ai-web-full-access
   artifact.constructor-publisher
   artifact.constructor-release
   artifact.github-askpass
@@ -537,8 +801,10 @@ install_logicals=(
 )
 install_sources=(
   "$repo_root/deploy/codex-worker.mjs"
-  "$repo_root/deploy/codex-sandbox-probe.mjs"
-  "$repo_root/deploy/codex-worker.profile.toml"
+  "$repo_root/deploy/sudoers/kelion-codex-full-access"
+  "$repo_root/deploy/opencode-constructor.json"
+  "$repo_root/deploy/opencode-constructor-instructions.md"
+  "$repo_root/deploy/systemd/private-ai-web-full-access.conf"
   "$repo_root/deploy/constructor-publisher.mjs"
   "$repo_root/deploy/constructor-release.mjs"
   "$repo_root/deploy/github-askpass.sh"
@@ -556,6 +822,7 @@ install_sources=(
   "$repo_root/deploy/systemd/kelion-constructor-publisher.service"
   "$repo_root/deploy/systemd/kelion-constructor-release.service"
 )
+[ "${#install_logicals[@]}" -eq "${#install_sources[@]}" ]
 
 map_install_logical() {
   local logical=$1
@@ -563,8 +830,10 @@ map_install_logical() {
   install_group=root
   case "$logical" in
     artifact.codex-worker) install_target=/opt/kelion-codex/codex-worker.mjs; install_mode=555 ;;
-    artifact.codex-sandbox-probe) install_target=/opt/kelion-codex/codex-sandbox-probe.mjs; install_mode=444 ;;
-    artifact.codex-worker-profile) install_target=/opt/kelion-codex/profile-home/kelion-worker.config.toml; install_mode=444 ;;
+    authorization.kelion-codex-full-access) install_target=/etc/sudoers.d/kelion-constructor-full-access; install_mode=440 ;;
+    configuration.opencode) install_target=/srv/private-ai/home/.config/opencode/opencode.json; install_group=privateai; install_mode=640 ;;
+    instructions.opencode) install_target=/srv/private-ai/home/.config/opencode/instructions.md; install_group=privateai; install_mode=640 ;;
+    systemd-dropin.private-ai-web-full-access) install_target=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf; install_mode=444 ;;
     artifact.constructor-publisher) install_target=/opt/kelion-constructor/constructor-publisher.mjs; install_mode=555 ;;
     artifact.constructor-release) install_target=/opt/kelion-constructor/constructor-release.mjs; install_mode=555 ;;
     artifact.github-askpass) install_target=/opt/kelion-constructor/github-askpass.sh; install_mode=555 ;;
@@ -817,7 +1086,7 @@ publish_install_candidate() {
   local logical=$1 candidate=$install_root/files/$1
   map_install_logical "$logical"
   install_atomic "$candidate" "$install_target" "$install_owner" "$install_group" "$install_mode"
-  [ "$(stat -c '%u:%g:%a' "$install_target")" = "0:0:$install_mode" ]
+  [ "$(stat -Lc '%U:%G:%a:%h' "$install_target")" = "$install_owner:$install_group:$install_mode:1" ]
   cmp -s -- "$candidate" "$install_target"
 }
 
@@ -825,7 +1094,7 @@ validate_published_candidate() {
   local logical=$1 candidate=$install_root/files/$1
   map_install_logical "$logical"
   [ -f "$install_target" ] && [ ! -L "$install_target" ] \
-    && [ "$(stat -c '%u:%g:%a' "$install_target")" = "0:0:$install_mode" ] \
+    && [ "$(stat -Lc '%U:%G:%a:%h' "$install_target")" = "$install_owner:$install_group:$install_mode:1" ] \
     && cmp -s -- "$candidate" "$install_target"
 }
 
@@ -850,7 +1119,7 @@ validate_source_systemd_text_files() {
         ;;
     esac
   done
-  [ "$count" -eq 8 ]
+  [ "$count" -eq 9 ]
 }
 
 verify_candidate_units() {
@@ -1176,6 +1445,8 @@ done
 
 validate_source_systemd_text_files \
   || { echo 'sursa unităților systemd încalcă contractul strict de bytes' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+validate_constructor_sudoers "$repo_root/deploy/sudoers/kelion-codex-full-access" \
+  || { echo 'regula sudoers Constructor este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
@@ -1219,9 +1490,10 @@ if [ "$resume_different_source" = 1 ]; then
     && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
     && [ "$(stat -c '%u:%g:%a' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600' ] \
     && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
-    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
+  && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
   for logical in \
-    artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
+    artifact.codex-worker authorization.kelion-codex-full-access \
+    configuration.opencode instructions.opencode systemd-dropin.private-ai-web-full-access \
     artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
     artifact.constructor-sync-worker artifact.constructor-service-client artifact.github-fixed-client \
     runtime-helper compose-production; do
@@ -1235,9 +1507,14 @@ if [ "$resume_different_source" = 1 ]; then
   resume_different_source=0
 fi
 
+set_constructor_install_phase legacy-retirement
+retire_legacy_codex_state \
+  || { echo 'starea legacy Codex nu poate fi retrasă sigur' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+
 set_constructor_install_phase artifact-publication
 for logical in \
-  artifact.codex-worker artifact.codex-sandbox-probe artifact.codex-worker-profile \
+  artifact.codex-worker authorization.kelion-codex-full-access \
+  configuration.opencode instructions.opencode systemd-dropin.private-ai-web-full-access \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
   artifact.constructor-sync-worker artifact.constructor-service-client artifact.github-fixed-client \
   runtime-helper compose-production; do
@@ -1278,6 +1555,9 @@ set_constructor_install_phase systemd-publication
 publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.service
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 systemctl daemon-reload
+systemctl restart private-ai-web.service
+validate_private_ai_web_full_access \
+  || { echo 'OpenCode web nu rulează cu acces complet la host' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 for unit in "${constructor_timers[@]}"; do
   stop_and_disable_constructor_timer "$unit"
 done
@@ -1298,6 +1578,10 @@ sync -f /etc/systemd/system
 
 set_constructor_install_phase published-validation
 for logical in "${install_logicals[@]}"; do validate_published_candidate "$logical"; done
+validate_constructor_sudoers /etc/sudoers.d/kelion-constructor-full-access
+validate_opencode_constructor_config /srv/private-ai/home/.config/opencode/opencode.json
+validate_private_ai_base
+validate_private_ai_web_full_access
 for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
 [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
 [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
@@ -1308,4 +1592,4 @@ wait_for_published_systemd_postconditions
 
 set_constructor_install_phase commit
 clear_install_transaction
-echo 'Constructor instalat dezactivat; configurarea și activarea sunt etape separate.'
+echo 'Constructor OpenCode/Qwen instalat dezactivat; configurarea și activarea sunt etape separate.'

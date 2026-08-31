@@ -35,7 +35,7 @@ describe('Constructor canonical work card', () => {
       canonicalLink: '#constructor-work-card-42',
       objective: 'Publica rezultatul verificat',
       owner: 'owner@example.test',
-      actor: 'codex-worker',
+      actor: 'OpenCode + Qwen local (llama.cpp)',
       currentStep: 'Executie',
       heartbeatAt: '2026-08-25T20:00:00.000Z',
       escalationCondition: 'Numai autoritate externa',

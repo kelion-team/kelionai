@@ -32,6 +32,10 @@ describe('rosterul agenților — sursă unică, curat', () => {
     expect(new Set(nume).size).toBe(nume.length)
   })
 
+  it('nu expune un agent AI paralel pentru Constructor', () => {
+    expect(ROSTER.some((agent) => agent.id === 'constructor')).toBe(false)
+  })
+
   it('agenții ceruți explicit de owner există', () => {
     for (const id of ['debug', 'senzorial', 'adevar', 'cautator', 'solutii', 'electronist', 'designer', 'scenograf', 'textier', 'regizor']) {
       expect(gasesteAgent(id), id).toBeTruthy()

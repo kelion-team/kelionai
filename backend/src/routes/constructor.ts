@@ -90,9 +90,10 @@ function internalJobIdentity(idRaw: string, body: Record<string, unknown>): { id
 // "Kelion must be able to create any software the admin asks for, any change,
 // any improvement") ──────────────────────────────────────────────────────────
 // The order enters here (from chat/voice through build_software or the admin
-// panel). Execution belongs to a separate Codex worker: the public web process
-// owns no worktree, shell, GitHub credential or ChatGPT authentication. It only
-// enqueues work and records signed lifecycle events.
+// panel). Execution belongs to the separate OpenCode + Qwen local (llama.cpp)
+// worker. The public web process owns no worktree, shell or
+// GitHub credential; it only writes build_jobs and records signed lifecycle
+// events. The `codex_*` route/task names below are compatibility identifiers.
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   const readChain = async (): Promise<ConstructorChainStatus> => {
     try {
@@ -182,9 +183,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  // Evaluarea unei cerințe ÎNAINTE de trimitere (owner, 13 aug: „ordinul X →
-  // cerința evaluată → se oferă AI-urile potrivite"). Întoarce poarta de calitate
-  // + AI-urile potrivite pe capacitate, cu creditul LIVE din becuri. Doar citire.
+  // Evaluarea unei cerințe ÎNAINTE de trimitere. Întoarce poarta de calitate și
+  // potrivirea pe capacitățile executorului local canonic. Doar citire.
   app.post<{ Body: { order?: string } }>('/api/admin/constructor/evalueaza', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
@@ -457,21 +457,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Contract fix, semnat, pentru workerul separat. Nu există un endpoint generic
   // de unelte/shell: workerul poate doar revendica un ordin și raporta etape.
-  app.post<{ Body: { status?: string; detail?: string; taskUrl?: string; internalCostUsdMicros?: number } }>('/api/internal/codex/status', async (req, reply) => {
+  app.post<{ Body: { status?: string; detail?: string } }>('/api/internal/codex/status', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
     const allowed: CodexWorkerState[] = ['offline', 'setup_required', 'ready', 'busy', 'degraded']
     const status = String(req.body?.status ?? '') as CodexWorkerState
-    const cost = req.body?.internalCostUsdMicros
-    if (
-      !allowed.includes(status)
-      || (cost !== undefined && (!Number.isSafeInteger(cost) || cost < 0))
-    ) return reply.code(400).send({ error: 'invalid_status' })
+    if (!allowed.includes(status)) return reply.code(400).send({ error: 'invalid_status' })
     try {
       await recordCodexWorkerStatus({
         status,
-        taskUrl: req.body.taskUrl,
         detail: req.body.detail,
-        internalCostUsdMicros: cost,
       })
     } catch {
       return reply.code(503).send({ error: 'heartbeat_not_persisted' })
@@ -559,7 +553,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Publisherul este singura identitate care poate transforma un handoff cu
   // porți verzi într-un branch/PR și apoi într-un merge. Nu primește credentiale
-  // Codex sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
+  // OpenCode + Qwen local (llama.cpp) sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
   app.post<{ Body: { state?: unknown; detail?: unknown } }>('/api/internal/constructor-publisher/heartbeat', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyPublisherRequest(req), reply)) return
     if (!exactKeys(req.body, ['state', 'detail']) || req.body.state !== 'degraded'

@@ -1,8 +1,8 @@
 # Inventarul canonic al capabilităților Admin Kelyon
 
-Versiune registru: `1.0`
+Versiune registru: `1.1`
 
-Actualizat: `2026-08-25T22:01:26Z`
+Actualizat: `2026-08-30`
 
 Acest document este sursa unică pentru inventarul suprafețelor Admin și pentru
 work item-urile lor operaționale. El nu înlocuiește starea runtime din baza de
@@ -37,7 +37,7 @@ iar rutele sunt în [`backend/src/routes/admin.ts`](../../backend/src/routes/adm
 
 | Prioritate | Work item | Motiv verificat |
 | --- | --- | --- |
-| P0 | [ADM-008 Constructor](#adm-008-constructor) | Workerul și timerele sunt inactive; două autorități externe lipsesc. |
+| P0 | [ADM-008 Constructor](#adm-008-constructor) | Traseul din cod trebuie închis prin dovadă live, de la ambele interfețe până la același worker și deploy. |
 | P0 | [ADM-018 Live Voice](#adm-018-live-voice) | Captarea funcționează, dar sesiunea provider/relay nu ajunge la răspuns bidirecțional. |
 | P0 | [ADM-015 Fișa canonică](#adm-015-fisa-canonica-si-intake) | Implementarea există numai nepublicată și incidentul curent nu are card vizibil verificat. |
 | P0 | [ADM-014 Monitor și provider health](#adm-014-monitor-si-provider-health) | `OpenAI 1/2` comprimă cauza și nu oferă incident/următor pas canonic. |
@@ -57,7 +57,7 @@ iar rutele sunt în [`backend/src/routes/admin.ts`](../../backend/src/routes/adm
 | [ADM-005](#adm-005-inbox) | Inbox | `/inbound`, `/mailbox-live`, `/mailbox-delete`, `/contact-messages` | Verificat în cod; stările gol/eșec/neconfigurat sunt separate; live necunoscut | Folderele mail și limitele de citire trebuie documentate ca politică | Fără work card per mesaj/acțiune | IMAP, DB, mail config; receipt de delete/reply |
 | [ADM-006](#adm-006-gesturi) | Gesturi | `/gestures`, manifestul și preview-ul avatarului | Verificat în cod; aplicarea runtime end-to-end nu este probată | Timerele preview sunt cosmetice; catalogul trebuie să aibă un singur owner | Preview vizual, fără confirmare durabilă | Avatar/control frames; confirmare aplicată și test live |
 | [ADM-007](#adm-007-tokenuri) | Tokenuri | `/keys`, `/token-checks`, `/env-check` | Verificat în cod; status live necunoscut; parțial | Aliasurile de env sunt configurare backend, nu date UI | Diagnostic Admin, fără incident automat | Secret store, provider APIs; zero valori sensibile și work item la lipsă |
-| [ADM-008](#adm-008-constructor) | Constructor | `build_jobs`, activity events, rutele admin/internal și pipeline worker/publisher/release | Parțial și blocat extern; serviciile inactive | Copy-ul „max. 2 minute”, plafonul terminal de încercări și retry-ul manual de rutină sunt interzise | Stage separă `local_gates` de CI GitHub și proiectează progresul persistent; fișa nouă nu este live și AdminPanel nu o proiectează complet | Token signing, Codex login, GitHub, CI, VPS, deploy |
+| [ADM-008](#adm-008-constructor) | Constructor | Chatul intern și aplicația desktop autentificată scriu joburi validate în aceeași coadă `build_jobs`; workerul separat execută direct OpenCode 1.18.25 cu Qwen3.6-35B-A3B local prin llama.cpp, apoi pipeline-ul publisher/release continuă aceeași cerere | Verificat în cod; dovada live integrală rămâne obligatorie | Copy-ul „max. 2 minute”, plafonul terminal de încercări și retry-ul manual de rutină sunt interzise | Stage separă `local_gates` de CI GitHub și proiectează progresul persistent; fișa nouă nu este live și AdminPanel nu o proiectează complet | Runtime local OpenCode/Qwen/llama.cpp, HMAC, token signing, GitHub, CI, VPS și deploy |
 | [ADM-009](#adm-009-recuperare) | Recuperare | `/backups` și `/backups/restore` | Verificat în cod; restore live netestat | Confirmarea umană este justificată pentru mutația cu impact; progresul nu trebuie simulat | Rezultat în tab, fără timeline durabil | Backup store, DB, deploy; dry-run, receipt și rollback |
 | [ADM-010](#adm-010-sistem) | Sistem | `/audit`, `/registru-audit`, `/demos`, `/models`, `/autoverificare` | Parțial; probele există, dar nu formează o singură stare operațională | Cadentele de polling sunt constante UI; rezultatele trebuie să rămână server-backed | Vizibil în tab, fără card automat pentru toate abaterile | Health, DB, config, jobs; creare/deduplicare work item |
 | [ADM-011](#adm-011-erori) | Erori | `/erori`, `client_errors`, probleme server/job | Parțial; colectare reală, handoff absent/neverificat | Polling 20 s este doar refresh; severitatea/cauza trebuie să vină din autoritate | Listă vizibilă, fără progres de remediere | Client telemetry, autodiagnostic, Constructor |
@@ -125,14 +125,25 @@ Owner: secret/config platform. Stare: `parțial`.
 
 - [ ] Diagnosticul arată numai nume logic, prezență, permisiune și cauză redactată.
 - [ ] Lipsa/scopul greșit creează incident deduplicat și o singură acțiune externă.
-- [ ] Browserul, workerul, logurile și artefactele nu primesc valoarea secretului.
+- [ ] Browserul, logurile și artefactele nu primesc valoarea secretului; workerul
+      nu o moștenește în mediul OpenCode și o poate folosi numai prin controlul
+      explicit al hostului pentru ordinul autorizat.
 
 ### ADM-008 Constructor
 
-Owner: Constructor pipeline. Stare: `blocat extern`.
+Owner: Constructor pipeline. Stare: `verificat în cod; dovadă live integrală
+necesară`.
 
 - [ ] Tokenul publisher are permisiunea minimă de signing și testul preflight trece.
-- [ ] Loginul Codex este valid; workerul raportează heartbeat/ready fără secret expus.
+- [ ] Preflightul dovedește exact OpenCode 1.18.25 și Qwen3.6-35B-A3B prin
+      llama.cpp local, fără login, cheie sau furnizor AI extern și fără consum
+      AI plătit.
+- [ ] Executorul are accesul complet cerut la host prin sudo — repo, VPS/runtime,
+      containere, secrete operaționale și producție — fără a publica secrete în
+      output, loguri sau artefacte.
+- [ ] Chatul intern Kelion și aplicația desktop autentificată creează joburi
+      validate în aceeași coadă `build_jobs`, iar același worker HMAC le
+      revendică și raportează heartbeat/progres.
 - [ ] O cerere reală parcurge toate etapele cu procente/evenimente persistente.
 - [ ] Retry-urile recuperabile au cauză clasificată, termen/backoff persistat și
       se reiau automat fără plafon terminal intern; contorul rămâne diagnostic.

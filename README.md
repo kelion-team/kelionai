@@ -15,10 +15,10 @@ canonică pentru aplicația web, API, clienții nativi și banda Constructor.
   native, Git, loguri sau joburi Constructor.
 - **Admin prin Google:** biometria, vocea și fața pot personaliza experiența,
   dar nu acordă privilegii administrative.
-- **Constructor izolat:** autentificarea Codex se face prin fluxul oficial
-  `codex login` în worker-ul de încredere. Aplicația publică doar pune joburi
-  în coadă și afișează dovezile lor.
-- **Fără publicare directă:** job → worktree dedicat → `codex exec` → porți
+- **Constructor local separat:** worker-ul de încredere execută direct OpenCode
+  1.18.25 cu Qwen3.6 local prin llama.cpp, fără login sau credentială OpenAI.
+  Chatul intern și aplicația desktop separată folosesc aceeași coadă server-side.
+- **Fără publicare directă:** job → worktree dedicat → OpenCode/Qwen → porți
   blocante → PR → master → deploy verificat.
 
 Regulile complete pentru orice agent sau contribuitor sunt în

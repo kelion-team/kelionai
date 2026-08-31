@@ -34,7 +34,7 @@ const TIPARE_RETRASE = [
 ]
 
 const EXTENSII = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.sh', '.toml'])
-const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/']
+const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/', 'constructor-desktop/']
 const EXCLUSE = new Set([
   'scripts/verifica-creier-unic.mjs',
   'scripts/verifica-creier-unic.test.mjs',
@@ -44,6 +44,8 @@ const EXCLUSE = new Set([
   'ios/package-lock.json',
   'desktop/package-lock.json',
   'desktop/src-tauri/Cargo.lock',
+  'constructor-desktop/package-lock.json',
+  'constructor-desktop/src-tauri/Cargo.lock',
 ])
 
 function snapshotGit() {

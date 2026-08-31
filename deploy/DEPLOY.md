@@ -97,29 +97,30 @@ browserul de sistem, media, workers, WebGL/wasm, modelele offline și embedurile
 allowlisted. Access logul Caddy rămâne oprit; raportarea CSP nu stochează IP sau
 payload personal brut.
 
-## Separarea OpenAI și Codex
+## Separarea OpenAI și Constructor
 
 Fișierul `openai-project-key` conține unica cheie project-scoped de inferență.
-Backendul o montează read-only pentru funcțiile OpenAI ale clienților, iar
-workerul Codex primește o copie izolată prin systemd `LoadCredential` numai cât
-să actualizeze cache-ul cu `codex login --with-api-key` pe stdin. Valoarea nu
-intră în environment, argv sau log. `OPENAI_ADMIN_KEY` este distinctă și poate
-fi montată numai în backendul Admin; nu aparține runtime-ului de inferență sau
-Constructorului.
+Backendul o montează read-only numai pentru funcțiile OpenAI ale clienților.
+`OPENAI_ADMIN_KEY` este distinctă și poate fi montată numai în backendul
+Admin. Niciuna nu ajunge în Constructor: workerul execută OpenCode 1.18.25 cu
+Qwen3.6-35B-A3B local prin endpointul loopback llama.cpp.
 
 Constructorul are trei servicii host-only separate. Web-ul deține coada și câte
-un verificator HMAC per domeniu; nu primește `CODEX_HOME`, `auth.json`, cheie
-OpenAI, token Git sau shell. Workerul folosește CLI-ul oficial cu cache API-key
-gestionat de Codex, profil fără rețea pentru comenzile generate și o imagine
-offline fixată pentru porți. Procesul `codex exec` primește doar environmentul
-allowlisted, nici cheia și nici directorul de credentiale. El produce numai un
-handoff `gates_passed`.
-Publisherul are credentiala GitHub minimă, dar nu are Codex/VPS; dispatcherul
+un verificator HMAC per domeniu; nu primește cheie AI, token Git sau shell.
+Supervisorul neprivilegiat revendică ordinul HMAC și îl scrie într-un worktree
+dedicat. Numai executorul OpenCode local este pornit explicit prin `sudo` root,
+cu config fixat la unicul provider `llama.cpp`; accesul complet la host este
+intenționat și verificat prin regula sudoers versionată. Lease-ul, timeoutul,
+porțile și handofful `gates_passed` rămân controlate de worker.
+Installerul permanent publică atomic configul și instrucțiunile din
+`deploy/opencode-constructor.json` și
+`deploy/opencode-constructor-instructions.md`; configure și upgrade le compară
+byte-identic și refuză orice provider extern, `apiKey` sau permisiune restrânsă.
+Publisherul are credentiala GitHub minimă, dar nu are OpenCode/root/VPS; dispatcherul
 are numai permisiune Actions pentru commituri deja merged, fără Git/VPS.
 Flagurile, markerii și timerele celor trei identități rămân implicit oprite.
 
-App Server nu este expus de Kelion și nu este necesar pentru coada actuală.
-Loginul este refăcut automat numai când fingerprintul cheii se schimbă sau
-statusul cache-ului eșuează; bridge-ul VPS este recuperarea manuală. Statusul
-public este numai `setup_required`, `ready`, `busy` sau `degraded`, fără cheie,
-fingerprint sau token de autentificare.
+Interfața OpenCode nu este intake-ul cozii. Chatul Kelion și clientul desktop
+Constructor creează aceleași joburi validate prin backend, iar workerul unic le
+revendică din aceeași coadă. Statusul public este numai `setup_required`,
+`ready`, `busy` sau `degraded`, fără secrete ori output brut al executorului.

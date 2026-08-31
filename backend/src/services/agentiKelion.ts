@@ -96,7 +96,8 @@ export const ROSTER: AgentKelion[] = [
   { id: 'conversii', nume: 'Agent Conversii Fisiere', rol: 'Prelucrari de documente: conversii PDF/Word/Markdown, OCR pe scanuri, extrageri de tabele si text.' },
   { id: 'traduceri', nume: 'Agent Traduceri', rol: 'Traduceri naturale RO/EN si alte limbi, cu tonul pastrat.' },
   // ── NIVEL 3 — DEZVOLTARE SI INTRETINEREA APLICATIEI (o tin in viata) ──
-  { id: 'constructor', nume: 'Agent Constructor', rol: 'Cod: ordin -> cloneaza, modifica, testeaza, PR. Bara 0-100%.' },
+  // Schimbările de produs nu sunt delegate unui agent conversațional: intră numai
+  // prin build_software în build_jobs pentru OpenCode + Qwen local (llama.cpp).
   { id: 'deploy', nume: 'Agent Deploy CI', rol: 'Build, teste, deploy, verificarea live==master.' },
   { id: 'monitor', nume: 'Agent Monitorizare', rol: 'Health-checks, loguri, alarme pe praguri masurate.' },
   { id: 'debug', nume: 'Depanator avansat', rol: 'Debugging: loguri, reproducere, modulul vinovat, fix minim.' },
@@ -191,7 +192,7 @@ export function gasesteAgent(id: string): AgentKelion | undefined {
 
 export async function rosterViu(): Promise<AgentKelion[]> {
   const custom = await listaAgentiCustom()
-  const idsCod = new Set(ROSTER.map((a) => a.id))
+  const idsCod = new Set([...ROSTER.map((a) => a.id), 'constructor'])
   return [...ROSTER, ...custom.filter((c) => !idsCod.has(c.id))]
 }
 
@@ -201,7 +202,7 @@ export async function gasesteAgentViu(id: string): Promise<AgentKelion | undefin
 
 // ── LOGICA UNICĂ A UNELTELOR DE AGENT (10 aug) — un singur loc pentru toate
 // cele trei guri: creierul scris (chat.ts), vocea + bucla de noapte
-// (autonomie.ts) și constructorul. „Nu multiplica duplicările; un singur
+// (autonomie.ts) și orchestrarea admin. „Nu multiplica duplicările; un singur
 // creier" — înainte, cheama_agent și agent_nou erau copiate în chat.ts ȘI
 // autonomie.ts (jscpd le prindea). Acum sunt aici, o dată. ─────────────────────
 
@@ -248,6 +249,7 @@ export async function executaAgentNou(nume: string, rol: string, doarAdmin: bool
   const id = n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
   if (!id) return JSON.stringify({ error: 'din nume nu iese un id valid' })
+  if (id === 'constructor') return JSON.stringify({ error: 'id rezervat: schimbările de produs intră numai prin build_software în build_jobs' })
   const err = await adaugaAgentCustom({ id, nume: n, rol: r, doarAdmin })
   if (err) return JSON.stringify({ error: err })
   return JSON.stringify({ ok: true, id, nume: n, mesaj: `Agent nou creat: ${n} (${id}). Îl poți chema imediat cu cheama_agent.` })

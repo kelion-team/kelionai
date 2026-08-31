@@ -1,5 +1,5 @@
 [Unit]
-Description=Poll Kelion Constructor queue with the isolated Codex executor
+Description=Poll build_jobs with Kelion Constructor OpenCode + Qwen local (llama.cpp)
 After=kelion-runtime-config-recovery.service
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
