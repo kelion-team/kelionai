@@ -86,7 +86,7 @@ test('activarea Constructorului este dublu fail-closed', () => {
   assert.match(workflow, /CODEX_WORKER_ENABLED:\s*\$\{\{ vars\.CODEX_WORKER_ENABLED \|\| '0' \}\}/)
   assert.match(service, /^ConditionPathExists=\/etc\/kelion\/codex-worker\.enabled$/m)
   assert.match(service, /^EnvironmentFile=\/root\/kelion\/config\/codex-worker\.env$/m)
-  if (service.includes('LoadCredential=codex-worker-secret:')) {
+  if (service.includes('Environment=OPENCODE_BIN=')) {
     assert.ok(service.includes('LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret'))
     assert.match(service, /^Requires=private-ai-llm\.service /m)
   } else {
