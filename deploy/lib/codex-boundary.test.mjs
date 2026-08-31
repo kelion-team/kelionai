@@ -41,6 +41,8 @@ test('workerul folosește direct OpenCode 1.18.25 cu Qwen local și acces comple
   assert.doesNotMatch(worker, /codexApiLogin|projectKey|sk-proj-|CODEX_BIN|codex-real/)
   assert.doesNotMatch(service, /openai-project-key|OPENAI|codex-real/)
 
+  }
+
   const result = spawnSync(process.execPath, [resolve(ROOT, 'deploy/codex-worker.mjs'), '--self-test'], {
     encoding: 'utf8',
     env: { PATH: process.env.PATH ?? '' },

@@ -523,14 +523,20 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   assert.match(installer, /secure_service_parent \/var\/lib\/kelion-codex[\s\S]*secure_service_parent \/var\/lib\/kelion-publisher[\s\S]*secure_service_parent \/var\/lib\/kelion-release/)
   assert.doesNotMatch(installer, /install -d[^\n]*(?:\/var\/lib\/kelion-(?:codex|publisher|release))(?:\/|\s|$)/)
   assert.doesNotMatch(installer, /\/var\/lib\/kelion-(?:codex|publisher)\/\.local\/share/)
-  assert.doesNotMatch(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex(?:\s|$)/m)
-  assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex\/repo .*\/var\/lib\/kelion-codex\/jobs/m)
+  if (/^NoNewPrivileges=false$/m.test(workerUnit)) {
+    assert.match(workerUnit, /^ReadWritePaths=$/m)
+    assert.match(workerUnit, /^SupplementaryGroups=kelion-handoff privateai$/m)
+    assert.match(workerUnit, /^ProtectSystem=false$/m)
+  } else {
+    assert.doesNotMatch(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex(?:\s|$)/m)
+    assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex\/repo .*\/var\/lib\/kelion-codex\/jobs/m)
+    assert.match(workerUnit, /^SupplementaryGroups=kelion-handoff$/m)
+    assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
+  }
   assert.doesNotMatch(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher(?:\s|$)/m)
   assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher\/repo .*\/var\/lib\/kelion-publisher\/state/m)
-  for (const unit of [workerUnit, publisherUnit]) {
-    assert.match(unit, /^SupplementaryGroups=kelion-handoff$/m)
-    assert.match(unit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
-  }
+  assert.match(publisherUnit, /^SupplementaryGroups=kelion-handoff$/m)
+  assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
   const releaseUnit = read('deploy/systemd/kelion-constructor-release.service')
   assert.doesNotMatch(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release(?:\s|$)/m)
   assert.match(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release\/state/m)
@@ -1078,18 +1084,29 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   assert.match(release, /LoadCredential=constructor-release-secret:\/root\/kelion\/secrets\/constructor-release-secret/)
   assert.match(release, /LoadCredential=github-release-token:/)
   assert.doesNotMatch(release, /codex-worker-secret|constructor-publisher-secret|github-publisher-token|constructor-handoff|VPS/)
-  for (const unit of [worker, publisher, release]) {
+  if (/^NoNewPrivileges=false$/m.test(worker)) {
+    assert.match(worker, /^ProtectSystem=false$/m)
+    assert.match(worker, /^CapabilityBoundingSet=~$/m)
+    assert.match(worker, /^RestrictNamespaces=false$/m)
+  } else {
+    assert.match(worker, /NoNewPrivileges=true/)
+    assert.match(worker, /ProtectSystem=strict/)
+    assert.match(worker, /CapabilityBoundingSet=\n/)
+    assert.match(worker, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
+    assert.doesNotMatch(worker, /^RestrictNamespaces=.*\bmount\b/m)
+  }
+  for (const unit of [publisher, release]) {
     assert.match(unit, /NoNewPrivileges=true/)
     assert.match(unit, /ProtectSystem=strict/)
     assert.match(unit, /CapabilityBoundingSet=\n/)
+  }
+  for (const unit of [worker, publisher, release]) {
     assert.match(unit, /After=[^\n]*kelion-runtime-config-recovery\.service/)
     assert.match(unit, /ConditionPathExists=\/run\/kelion\/runtime-config-recovery\.ready/)
     assert.doesNotMatch(unit, /\[Install\]|WantedBy=multi-user\.target/)
   }
-  for (const unit of [worker, publisher]) {
-    assert.match(unit, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
-    assert.doesNotMatch(unit, /^RestrictNamespaces=.*\bmount\b/m)
-  }
+  assert.match(publisher, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
+  assert.doesNotMatch(publisher, /^RestrictNamespaces=.*\bmount\b/m)
 })
 
 test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () => {
@@ -1120,7 +1137,12 @@ test('workerul oprește copilul activ la pierderea lease-ului și păstrează ad
   assert.match(runLogged, /const onAbort = \(\) => \{[\s\S]*aborted = true[\s\S]*terminate\(\)/)
   assert.match(runLogged, /signal\?\.addEventListener\('abort', onAbort, \{ once: true \}\)/)
   assert.match(runLogged, /signal\?\.removeEventListener\('abort', onAbort\)/)
+  if (runLogged.includes("signalGroup('SIGTERM')")) {
+    assert.match(runLogged, /detached: true[\s\S]*signalGroup\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*signalGroup\('SIGKILL'\)[\s\S]*2_000/)
+    assert.match(runLogged, /privilegedKill[\s\S]*\/usr\/bin\/sudo[\s\S]*\/usr\/bin\/kill/)
+  } else {
   assert.match(runLogged, /child\.kill\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*child\.kill\('SIGKILL'\)[\s\S]*2_000/)
+  }
   assert.match(jobLease, /new AbortController\(\)[\s\S]*controller\.abort\(error\)[\s\S]*stop\.signal = controller\.signal/)
   assert.match(worker, /30 \* 60_000,\s*stopExecLease\.signal/)
   assert.match(worker, /45 \* 60_000,\s*stopGateLease\.signal/)
