@@ -33,6 +33,8 @@ readonly MODEL_FILE_BYTES=20419565568
 readonly MODEL_FILE_SHA256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
 readonly LLAMA_SERVER_SHA256=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
 readonly OPENCODE_BIN_SHA256=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
+readonly LEGACY_STATIC_RUNTIME_CUTOVER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
+readonly LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
 readonly PREVIOUS_RUNTIME_CUTOVER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
 readonly EXPECTED_RUNTIME_CUTOVER_SHA256=ccaa17f396cc7d3008422eae5cc836cf3d92df7d4c35509e330bb34e70959286
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
@@ -260,6 +262,15 @@ sync -f "$attempt_candidate"
 mv -f -- "$attempt_candidate" "$attempt_file"
 sync -f "$attempt_root"
 
+case "$(unit_state kelion-runtime-config-recovery.service)" in
+  enabled:failed)
+    systemctl reset-failed kelion-runtime-config-recovery.service
+    [ "$(unit_state kelion-runtime-config-recovery.service)" = enabled:inactive ] \
+      || fail 'runtime recovery service did not leave the failed state'
+    ;;
+  enabled:active|enabled:inactive) ;;
+  *) fail 'runtime recovery service is not enabled in an allowed state' ;;
+esac
 WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
 WEB_STATE=$(unit_state private-ai-web.service)
 PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
@@ -703,8 +714,9 @@ install_persistent_runtime_helper() {
     || fail 'bundled runtime helper hash is not the pinned repair generation'
   current_sha=$(sha256sum "$RUNTIME_CUTOVER_TARGET" | awk '{print $1}')
   case "$current_sha" in
-    "$PREVIOUS_RUNTIME_CUTOVER_SHA256"|"$EXPECTED_RUNTIME_CUTOVER_SHA256") ;;
-    *) fail 'persistent runtime helper is not an allowed predecessor' ;;
+    "$LEGACY_STATIC_RUNTIME_CUTOVER_SHA256"|"$LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256"|\
+      "$PREVIOUS_RUNTIME_CUTOVER_SHA256"|"$EXPECTED_RUNTIME_CUTOVER_SHA256") ;;
+    *) fail "persistent runtime helper is not an allowed predecessor: $current_sha" ;;
   esac
   runtime_helper_candidate=$(mktemp "$RUNTIME_CUTOVER_TARGET.private-ai.XXXXXX")
   install -o root -g root -m 0500 "$RUNTIME_CUTOVER_SOURCE" "$runtime_helper_candidate"

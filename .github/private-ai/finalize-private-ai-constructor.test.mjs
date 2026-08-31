@@ -135,10 +135,22 @@ test('repair-ul rulează înaintea cutover-ului gate normal', () => {
 test('unitatea de recovery rămâne enabled pentru validatorul ambelor cutover-uri', () => {
   const repair = shellFunction('repair_stale_committed_gate_journal')
   const repairRecovery = repair.indexOf('--recover-only')
+  const recoveryReset = finalizer.indexOf('systemctl reset-failed kelion-runtime-config-recovery.service')
+  const recoverySnapshot = finalizer.indexOf(
+    'RECOVERY_SERVICE_STATE=$(unit_state kelion-runtime-config-recovery.service)',
+  )
   const normalCutover = finalizer.indexOf(
     '"$gate_cutover_stage" "$COMPOSE_SOURCE" --leave-constructor-quiesced',
   )
 
+  assert.ok(
+    recoveryReset >= 0 && recoverySnapshot > recoveryReset,
+    'starea failed trebuie normalizată înainte de snapshotul folosit la rollback',
+  )
+  assert.match(
+    finalizer.slice(Math.max(0, recoveryReset - 200), recoverySnapshot),
+    /enabled:failed[\s\S]*systemctl reset-failed[\s\S]*enabled:inactive/,
+  )
   assert.doesNotMatch(
     finalizer,
     /systemctl disable[^\n]*kelion-runtime-config-recovery[.]service/,
@@ -171,6 +183,13 @@ test('helperul persistent fail-closed este comis durabil înainte de repair', ()
   assert.ok(helperInstall >= 0 && repair > helperInstall)
   assert.match(finalizer, /snapshot_file runtime_cutover_helper "\$RUNTIME_CUTOVER_TARGET"/)
   assert.match(finalizer, /restore_file runtime_cutover_helper "\$RUNTIME_CUTOVER_TARGET"/)
+  for (const predecessor of [
+    'db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de',
+    'ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e',
+    '9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153',
+  ]) {
+    assert.match(finalizer, new RegExp(predecessor))
+  }
   ordered(installHelper, [
     ['validarea sursei', 'bash -n'],
     ['fsync candidat', 'sync -f "$runtime_helper_candidate"'],
