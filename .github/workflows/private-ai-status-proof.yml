@@ -202,6 +202,7 @@ jobs:
           printf '%s\n' '--- SAFE WORKER MODEL LINES ---'
           grep -nE 'OPENCODE_MODEL|OPENCODE_MODEL_ID' "$worker" 2>/dev/null || true
           grep -nE 'OPENCODE_MODEL|EnvironmentFile|ExecStart' "$worker_unit" 2>/dev/null || true
+          grep -n '^OPENCODE_MODEL=' /root/kelion/config/codex-worker.env 2>/dev/null || true
           systemctl show kelion-codex-worker.service -p Environment --value 2>/dev/null \
             | tr ' ' '\n' | grep '^OPENCODE_MODEL=' || true
           set +e
