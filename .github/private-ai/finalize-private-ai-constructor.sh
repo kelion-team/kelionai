@@ -394,6 +394,29 @@ require_regular "$WORKER_ENV" root:root:640
 require_regular "$PUBLISHER_ENV" root:root:640
 require_regular "$RELEASE_ENV" root:root:640
 
+refresh_public_master() {
+  local user=$1 home=$2 repo=$3 origin dangerous
+  [ -d "$repo/.git" ] && [ ! -L "$repo" ] \
+    || fail "canonical repository is missing for $user"
+  origin=$(runuser -u "$user" -- env -i HOME="$home" PATH=/usr/bin:/bin \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$repo" remote get-url origin)
+  [ "$origin" = https://github.com/kelion-team/kelionai.git ] \
+    || fail "canonical repository origin is invalid for $user"
+  dangerous=$(runuser -u "$user" -- env -i HOME="$home" PATH=/usr/bin:/bin \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$repo" config --local --get-regexp \
+      '^(credential\.|http\..*\.extraheader|filter\.|core\.hooksPath|core\.fsmonitor|include\.|includeIf\.)' \
+    || true)
+  [ -z "$dangerous" ] || fail "unsafe Git configuration for $user"
+  runuser -u "$user" -- env -i HOME="$home" PATH=/usr/bin:/bin \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    git -C "$repo" fetch --no-tags --prune origin \
+      +refs/heads/master:refs/remotes/origin/master
+}
+
+refresh_public_master kelion-codex /var/lib/kelion-codex /var/lib/kelion-codex/repo
+refresh_public_master kelion-publisher /var/lib/kelion-publisher /var/lib/kelion-publisher/repo
 worker_source_commit=$(runuser -u kelion-codex -- env -i \
   HOME=/var/lib/kelion-codex PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C /var/lib/kelion-codex/repo rev-parse 'origin/master^{commit}')
