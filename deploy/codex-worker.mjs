@@ -1641,7 +1641,16 @@ async function selfTest() {
     }
     let descendantAlive = true
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      try { process.kill(descendantPid, 0) } catch { descendantAlive = false; break }
+      try {
+        process.kill(descendantPid, 0)
+        const stat = readFileSync(`/proc/${descendantPid}/stat`, 'utf8')
+        const commandEnd = stat.lastIndexOf(')')
+        const state = commandEnd >= 0 ? stat.slice(commandEnd + 2, commandEnd + 3) : ''
+        if (state === 'Z' || state === 'X') { descendantAlive = false; break }
+      } catch {
+        descendantAlive = false
+        break
+      }
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
     }
     if (descendantAlive) fail('Descendentul executorului a rămas activ după abort')
