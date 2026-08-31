@@ -657,10 +657,6 @@ function assertEnabledLayout() {
 
   const version = exactOutput(OPENCODE_BIN, ['--version'], undefined, openCodeParentEnv())
   if (version !== OPENCODE_VERSION) fail(`Versiunea OpenCode trebuie să fie exact ${OPENCODE_VERSION}`)
-  const help = exactOutput(OPENCODE_BIN, ['--pure', 'run', '--help'], undefined, openCodeParentEnv())
-  for (const flag of ['--dir', '--model', '--auto']) {
-    if (!help?.includes(flag)) fail(`CLI-ul OpenCode nu confirmă flagul obligatoriu ${flag}`)
-  }
   const health = commandResult('/usr/bin/curl', [
     '--fail', '--silent', '--show-error', '--max-time', '10', `${OPENCODE_BASE_URL.replace(/\/v1$/, '')}/health`,
   ], undefined, openCodeParentEnv())
