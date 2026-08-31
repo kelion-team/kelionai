@@ -231,3 +231,26 @@ test('recovery-ul persistent refuză orice pereche worker/publisher mixtă', () 
   )
   assert.match(runtimeCutover, contract)
 })
+
+
+test('transportul HMAC eșuează rapid cu diagnostic înaintea executorului scump', () => {
+  const transport = finalizer.indexOf('transport_unit="kelion-opencode-transport-')
+  const executor = finalizer.indexOf('executor_smoke=$(')
+
+  assert.ok(transport >= 0 && executor > transport)
+  const block = finalizer.slice(transport, executor)
+  assert.match(block, /127[.]0[.]0[.]1:18079/)
+  assert.match(block, /WorkingDirectory=\/var\/lib\/kelion-codex/)
+  assert.match(block, /2>&1/)
+  assert.match(block, /PRIVATE_AI_TRANSPORT_SMOKE_FAILED/)
+  assert.match(block, /PRIVATE_AI_TRANSPORT_SMOKE_MARKER_MISMATCH/)
+})
+
+test('rollbackul identifică pasul eșuat și restaurează enabled-runtime exact', () => {
+  const rollback = shellFunction('rollback')
+  const restoreUnitState = shellFunction('restore_unit_state')
+
+  assert.match(rollback, /PRIVATE_AI_ROLLBACK_SNAPSHOT/)
+  assert.match(rollback, /PRIVATE_AI_ROLLBACK_STEP_FAILED=line-/)
+  assert.match(restoreUnitState, /enabled-runtime[\s\S]*enable --runtime/)
+})

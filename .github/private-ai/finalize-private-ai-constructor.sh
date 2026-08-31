@@ -88,7 +88,11 @@ restore_unit_state() {
   enabled=${state%%:*}
   active=${state#*:}
   case "$enabled" in
-    enabled|enabled-runtime) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+    enabled) systemctl enable "$unit" >/dev/null 2>&1 || failed=1 ;;
+    enabled-runtime)
+      systemctl disable "$unit" >/dev/null 2>&1 || failed=1
+      systemctl enable --runtime "$unit" >/dev/null 2>&1 || failed=1
+      ;;
     *) systemctl disable "$unit" >/dev/null 2>&1 || failed=1 ;;
   esac
   case "$active" in
@@ -395,6 +399,9 @@ rollback() {
   if [ "$rollback_running" -eq 1 ]; then builtin exit "$status"; fi
   rollback_running=1
   trap - ERR HUP INT TERM EXIT
+  printf 'PRIVATE_AI_ROLLBACK_SNAPSHOT worker_timer=%s web=%s publisher_timer=%s release_timer=%s recovery=%s\n' \
+    "$WORKER_TIMER_STATE" "$WEB_STATE" "$PUBLISHER_TIMER_STATE" \
+    "$RELEASE_TIMER_STATE" "$RECOVERY_SERVICE_STATE" >&2
   for temporary in \
     "$worker_candidate" "$unit_candidate" "$sudoers_candidate" \
     "$canonical_codex_candidate" "$config_candidate" "$auth_config" \
@@ -423,49 +430,49 @@ rollback() {
       kelion-constructor-release.timer \
       kelion-codex-worker.service \
       kelion-constructor-publisher.service \
-      kelion-constructor-release.service >/dev/null 2>&1 || rollback_failed=1
+      kelion-constructor-release.service >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     if [ "$web_cutover_started" -eq 1 ]; then
-      systemctl stop private-ai-web.service >/dev/null 2>&1 || rollback_failed=1
+      systemctl stop private-ai-web.service >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
-    restore_file worker "$WORKER_TARGET" || rollback_failed=1
-    restore_file worker_unit "$WORKER_UNIT_TARGET" || rollback_failed=1
-    restore_file config "$OPENCODE_CONFIG" || rollback_failed=1
-    restore_file instructions "$OPENCODE_INSTRUCTIONS" || rollback_failed=1
-    restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || rollback_failed=1
-    restore_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN" || rollback_failed=1
-    restore_file web_dropin "$WEB_DROPIN" || rollback_failed=1
-    restore_file sudoers "$SUDOERS" || rollback_failed=1
-    restore_file receipt "$FINAL_RECEIPT" || rollback_failed=1
+    restore_file worker "$WORKER_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file worker_unit "$WORKER_UNIT_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file config "$OPENCODE_CONFIG" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file instructions "$OPENCODE_INSTRUCTIONS" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file legacy_worker_dropin "$LEGACY_WORKER_DROPIN" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file web_dropin "$WEB_DROPIN" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file sudoers "$SUDOERS" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file receipt "$FINAL_RECEIPT" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     if [ "$preserve_runtime_helper" -eq 0 ]; then
-      restore_file runtime_cutover_helper "$RUNTIME_CUTOVER_TARGET" || rollback_failed=1
+      restore_file runtime_cutover_helper "$RUNTIME_CUTOVER_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
     if [ "$preserve_committed_gate_env" -eq 1 ]; then
       # După ce toate cele trei fișiere au fost reparate ca generație committed,
       # revenirea la snapshotul vechi ar recrea exact incidentul ownerless.  Cu
       # jurnalul încă prezent recovery-ul va continua roll-forward; cu jurnalul
       # consumat bytes-urile live sunt deja generația durabilă.
-      rm -f -- "$RUNTIME_READY_STAMP" >/dev/null 2>&1 || rollback_failed=1
-      sync -f "$RUNTIME_READY_ROOT" >/dev/null 2>&1 || rollback_failed=1
+      rm -f -- "$RUNTIME_READY_STAMP" >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+      sync -f "$RUNTIME_READY_ROOT" >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     else
-      restore_file runtime_ready_stamp "$RUNTIME_READY_STAMP" || rollback_failed=1
-      restore_file worker_env "$WORKER_ENV" || rollback_failed=1
-      restore_file publisher_env "$PUBLISHER_ENV" || rollback_failed=1
-      restore_file release_env "$RELEASE_ENV" || rollback_failed=1
+      restore_file runtime_ready_stamp "$RUNTIME_READY_STAMP" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+      restore_file worker_env "$WORKER_ENV" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+      restore_file publisher_env "$PUBLISHER_ENV" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+      restore_file release_env "$RELEASE_ENV" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
-    restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || rollback_failed=1
-    restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || rollback_failed=1
-    restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || rollback_failed=1
-    restore_legacy_path legacy_sudoers "$LEGACY_SUDOERS" || rollback_failed=1
+    restore_legacy_path legacy_codex_real "$LEGACY_CODEX_REAL" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_legacy_path legacy_opencode_wrapper "$LEGACY_OPENCODE_WRAPPER" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_legacy_path legacy_compat_key "$LEGACY_COMPAT_KEY" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_legacy_path legacy_sudoers "$LEGACY_SUDOERS" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     if [ "$canonical_codex_fake" -eq 1 ]; then
-      restore_legacy_path canonical_codex "$CANONICAL_CODEX" || rollback_failed=1
+      restore_legacy_path canonical_codex "$CANONICAL_CODEX" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
-    systemctl daemon-reload >/dev/null 2>&1 || rollback_failed=1
-    restore_unit_state private-ai-web.service "$WEB_STATE" || rollback_failed=1
-    restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE" || rollback_failed=1
-    restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE" || rollback_failed=1
-    restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE" || rollback_failed=1
+    systemctl daemon-reload >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_unit_state private-ai-web.service "$WEB_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_unit_state kelion-runtime-config-recovery.service "$RECOVERY_SERVICE_STATE" \
-      || rollback_failed=1
+      || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
   fi
   if [ "$rollback_failed" = 0 ]; then
     printf 'PRIVATE_AI_FINALIZE_ROLLED_BACK=yes EXIT=%s\n' "$status" >&2
@@ -1267,6 +1274,46 @@ grep -qx 'opencode-local-full-access: TRECE' <<<"$preflight_output"
 [ "$(runuser -u kelion-codex -- sudo -n /usr/bin/id -u)" = 0 ]
 printf 'FULL_HOST_SUDO_PROBE=uid0\n'
 
+mapfile -t codex_api_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:18079"')
+[ "${#codex_api_listeners[@]}" -eq 1 ] \
+  || fail 'Constructor API does not have exactly one canonical loopback listener'
+
+transport_unit="kelion-opencode-transport-${bundle_id:0:12}-$((attempt_count + 1)).service"
+transport_status=0
+transport_smoke=''
+if transport_smoke=$(systemd-run --wait --pipe --collect \
+  --unit="$transport_unit" \
+  --property=Type=oneshot \
+  --property=User=kelion-codex \
+  --property=Group=kelion-codex \
+  --property="SupplementaryGroups=kelion-handoff privateai" \
+  --property=WorkingDirectory=/var/lib/kelion-codex \
+  --property=LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret \
+  --setenv=PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  --setenv=HOME=/var/lib/kelion-codex \
+  --setenv=KELION_CODEX_API="$KELION_CODEX_API" \
+  --setenv=LANG=C.UTF-8 --setenv=LC_ALL=C.UTF-8 --setenv=CI=1 --setenv=NO_COLOR=1 \
+  /usr/bin/node "$WORKER_TARGET" --transport-smoke 2>&1); then
+  :
+else
+  transport_status=$?
+  transport_diagnostic=$(printf '%s\n' "$transport_smoke" \
+    | tail -c 8192 | LC_ALL=C tr -cd '\11\12\15\40-\176')
+  printf 'PRIVATE_AI_TRANSPORT_SMOKE_FAILED status=%s unit=%s diagnostic-begin\n%s\nPRIVATE_AI_TRANSPORT_SMOKE_DIAGNOSTIC_END=yes\n' \
+    "$transport_status" "$transport_unit" "$transport_diagnostic" >&2
+  systemctl show "$transport_unit" --no-pager \
+    -p Result -p ExecMainCode -p ExecMainStatus >&2 || true
+  fail "transport smoke failed with status $transport_status"
+fi
+if ! grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke"; then
+  transport_diagnostic=$(printf '%s\n' "$transport_smoke" \
+    | tail -c 8192 | LC_ALL=C tr -cd '\11\12\15\40-\176')
+  printf 'PRIVATE_AI_TRANSPORT_SMOKE_MARKER_MISMATCH diagnostic-begin\n%s\nPRIVATE_AI_TRANSPORT_SMOKE_DIAGNOSTIC_END=yes\n' \
+    "$transport_diagnostic" >&2
+  fail 'transport smoke returned without the exact proof marker'
+fi
+printf '%s\n' "$transport_smoke"
+printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
 # Executorul rulează din worktree și folosește numai flagurile noninteractive
 # documentate pentru OpenCode 1.18.25; self-testul workerului fixează argv-ul.
 executor_smoke=$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
@@ -1294,22 +1341,7 @@ grep -Eq '^OPENCODE_EXECUTOR_SMOKE_VERIFIED sha256=[0-9a-f]{64}$' <<<"$executor_
 printf '%s\n' "$executor_smoke"
 printf 'OPENCODE_EXECUTOR_E2E=passed\n'
 
-transport_unit="kelion-opencode-transport-smoke-$$.service"
-transport_smoke=$(systemd-run --quiet --wait --pipe --collect \
-  --unit="$transport_unit" \
-  --property=Type=oneshot \
-  --property=User=kelion-codex \
-  --property=Group=kelion-codex \
-  --property=SupplementaryGroups=privateai \
-  --property=LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret \
-  --setenv=PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  --setenv=HOME=/var/lib/kelion-codex \
-  --setenv=KELION_CODEX_API="$KELION_CODEX_API" \
-  --setenv=LANG=C.UTF-8 --setenv=LC_ALL=C.UTF-8 --setenv=CI=1 --setenv=NO_COLOR=1 \
-  /usr/bin/node "$WORKER_TARGET" --transport-smoke)
-grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke"
-printf '%s\n' "$transport_smoke"
-printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
+
 
 require_regular /etc/kelion/codex-worker.enabled root:root:444
 [ ! -e /run/kelion/constructor-activation.pending ] \
