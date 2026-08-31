@@ -609,6 +609,11 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 [ "$web_health_ready" -eq 1 ] || fail 'OpenCode web health did not become ready'
+systemctl is-active --quiet private-ai-web.service
+[ "$(systemctl show private-ai-web.service -p MainPID --value)" = "$web_pid" ]
+[ "$(readlink -f -- "/proc/$web_pid/exe")" = "$OPENCODE_BIN" ]
+mapfile -t web_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24096"')
+[ "${#web_listeners[@]}" -eq 1 ] && [[ "${web_listeners[0]}" == *"pid=$web_pid,"* ]]
 rm -f -- "$auth_config"
 auth_config=''
 unset OPENCODE_SERVER_PASSWORD
@@ -705,6 +710,13 @@ printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
   || fail 'publisher timer was not enabled and active before finalization'
 [ "$RELEASE_TIMER_STATE" = enabled:active ] \
   || fail 'release timer was not enabled and active before finalization'
+
+require_regular /etc/kelion/codex-worker.enabled root:root:444
+require_regular /run/kelion/runtime-config-recovery.ready root:root:444
+[ "$(tr -d '\n' < /run/kelion/runtime-config-recovery.ready)" = schema=1 ]
+[ ! -e /run/kelion/constructor-activation.pending ] \
+  && [ ! -L /run/kelion/constructor-activation.pending ] \
+  || fail 'Constructor activation barrier is pending'
 
 claim_cursor=$(journalctl --no-pager --lines=0 --show-cursor \
   | sed -n 's/^-- cursor: //p')

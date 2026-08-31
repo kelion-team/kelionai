@@ -639,7 +639,15 @@ function assertEnabledLayout() {
   const podmanPath = REQUIRED_LAYOUT.podman
   if (!existsSync(podmanPath) || realpathSync(podmanPath) !== REQUIRED_LAYOUT.podman) fail('podman trebuie să fie exact /usr/bin/podman')
   assertRootOwnedReadonly(podmanPath, 'podman')
-  if (!commandOk(podmanPath, ['--version'], undefined, podmanSupervisorEnv())) fail('podman rootless nu pornește')
+  const podmanProbe = commandResult(podmanPath, ['--version'], undefined, podmanSupervisorEnv())
+  if (podmanProbe.status !== 0) {
+    const diagnostic = String(podmanProbe.stderr ?? '')
+      .replace(/[^\x20-\x7e]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 240)
+    fail(`podman rootless nu pornește: status=${String(podmanProbe.status)} signal=${String(podmanProbe.signal)} stderr=${diagnostic || 'absent'}`)
+  }
 
   const configInfo = lstatSync(OPENCODE_CONFIG)
   if (!configInfo.isFile() || configInfo.isSymbolicLink() || configInfo.nlink !== 1) fail('Configurația OpenCode nu este un fișier regulat unic')
