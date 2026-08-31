@@ -108,7 +108,7 @@ jobs:
           else
             printf 'MODEL_READY=no\n'
           fi
-          for unit in private-ai-install-resume.service private-ai-llm.service private-ai-web.service; do
+          for unit in private-ai-install-resume.service private-ai-max-model-upgrade.service private-ai-constructor-finalize.service private-ai-llm.service private-ai-web.service; do
             printf '%s\n' "--- $unit ---"
             systemctl show "$unit" \
               -p ActiveState -p SubState -p Result -p ExecMainStatus -p MainPID \
@@ -156,6 +156,10 @@ jobs:
           else
             printf 'INSTALL_LOG=missing\n'
           fi
+          printf '%s\n' '--- MAX MODEL JOURNAL TAIL ---'
+          journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
+            --lines=40 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
           if [ -f /root/private-ai-install-resume.log ]; then
             printf '%s\n' '--- RESUME LOG TAIL ---'
             tail -n 160 /root/private-ai-install-resume.log \
