@@ -126,7 +126,12 @@ test('workflow-ul merge-policy păstrează allowlist-ul canonic fără excepții
   assert.match(workflow, /guard-source:[\s\S]*\[ "\$GITHUB_REPOSITORY" = kelion-team\/kelionai \][\s\S]*git rev-parse HEAD\)" = "\$GITHUB_SHA"/)
   assert.match(workflow, /merge-policy:\s*\n\s+needs: guard-source/)
   assert.equal(workflow.match(/\.head\.repo\.full_name/g)?.length, 2)
-  assert.equal(workflow.match(/\.head\.sha/g)?.length, 3)
+  assert.match(workflow, /EVENT_PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/)
+  assert.match(workflow, /EVENT_PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
+  assert.match(workflow, /git\/commits\/\$GITHUB_SHA[\s\S]*\.parents\[\]\.sha[\s\S]*parents\[0\][^\n]*EVENT_PR_BASE_SHA[\s\S]*parents\[1\][^\n]*EVENT_PR_HEAD_SHA/)
+  assert.match(workflow, /\[ "\$\(jq -r '\.head\.sha' <<<"\$pr"\)" = "\$GITHUB_SHA" \]/)
+  assert.match(workflow, /head_sha=\$\(jq -er '\.head\.sha' <<<"\$pr"\)/)
+  assert.match(workflow, /compare\/\$\(jq -r '\.base\.sha' <<<"\$pr"\)\.\.\.\$\(jq -r '\.head\.sha' <<<"\$pr"\)/)
   assert.equal(workflow.match(/\[ "\$GITHUB_REF" = "refs\/heads\/\$head_ref" \]/g)?.length, 2)
   assert.equal(workflow.match(/\[ "\$GITHUB_REF_NAME" = "\$head_ref" \]/g)?.length, 2)
   const encoded = /allowed='(\[[\s\S]*?\n          \])'\n          file_entries=/.exec(workflow)?.[1]

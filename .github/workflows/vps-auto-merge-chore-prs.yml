@@ -51,7 +51,8 @@ jobs:
               [ "$EVENT_PR_BASE_REF" = master ]
               [ "$GITHUB_REF" = "refs/pull/$EVENT_PR_NUMBER/merge" ]
               [ "$GITHUB_REF_NAME" = "$EVENT_PR_NUMBER/merge" ]
-              mapfile -t parents < <(git show -s --format='%P' HEAD | tr ' ' '\n')
+              merge_commit=$(gh api "/repos/${GITHUB_REPOSITORY}/git/commits/$GITHUB_SHA")
+              mapfile -t parents < <(jq -er '.parents[].sha' <<<"$merge_commit")
               [ "${#parents[@]}" -eq 2 ]
               [ "${parents[0]}" = "$EVENT_PR_BASE_SHA" ]
               [ "${parents[1]}" = "$EVENT_PR_HEAD_SHA" ]
