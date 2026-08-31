@@ -18,6 +18,9 @@ readonly WORKER_UNIT='/etc/systemd/system/kelion-codex-worker.service'
 readonly DROPIN_DIR='/etc/systemd/system/private-ai-llm.service.d'
 readonly DROPIN="$DROPIN_DIR/90-qwen35-122b-max.conf"
 readonly RECEIPT='/etc/private-ai/.max-model-complete'
+readonly RANGE_CHUNK_BYTES=$((512 * 1024 * 1024))
+readonly RANGE_WORKERS=4
+readonly RANGE_FREE_MARGIN_BYTES=$((5 * 1024 * 1024 * 1024))
 
 readonly -a SHARD_NAMES=(
   'Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf'
@@ -100,6 +103,199 @@ download_shard() {
     || fail "metadate invalide după publicarea shardului: $name"
 }
 
+download_shard_parallel_ranges() {
+  local index=$1 name bytes sha destination partial relative url partial_size
+  local range_dir range_start range_end range_bytes range_path
+  local free_bytes missing_bytes required_free actual_sha assembly assembly_q
+  local range_index batch_status range_pid
+  local -a range_starts=() range_ends=() range_paths=() batch_pids=()
+
+  [ "$index" = 1 ] || fail 'descărcarea HTTP Range este permisă numai pentru shardul 2'
+  name=${SHARD_NAMES[$index]}
+  bytes=${SHARD_BYTES[$index]}
+  sha=${SHARD_SHA256[$index]}
+  destination="$MODEL_ROOT/$name"
+  partial="$destination.part"
+  if [ -f "$destination" ] && verify_shard "$destination" "$bytes" "$sha"; then
+    chown root:privateai "$destination"
+    chmod 0440 "$destination"
+    log 'Shard 2/3 deja verificat.'
+    return 0
+  fi
+  [ ! -e "$destination" ] || fail "shard final existent dar invalid: $destination"
+
+  if [ -e "$partial" ] || [ -L "$partial" ]; then
+    require_regular "$partial"
+    [ "$(stat -Lc '%U:%G:%h' "$partial")" = 'privateai:privateai:1' ] \
+      || fail "metadate nesigure pentru descărcarea parțială: $name"
+  else
+    install -o privateai -g privateai -m 0600 /dev/null "$partial"
+    sync -f "$partial"
+  fi
+  partial_size=$(stat -Lc '%s' "$partial")
+  [[ "$partial_size" =~ ^[0-9]+$ ]] && [ "$partial_size" -le "$bytes" ] \
+    || fail "dimensiune parțială invalidă: $name"
+
+  relative="Q4_K_M/$name"
+  url="https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/${relative}?download=true"
+  range_dir="${partial}.ranges.${partial_size}.${sha}"
+
+  if [ "$partial_size" -lt "$bytes" ]; then
+    [ ! -L "$range_dir" ] || fail "director HTTP Range nesigur: $range_dir"
+    install -d -o privateai -g privateai -m 0700 "$range_dir"
+    [ -d "$range_dir" ] && [ ! -L "$range_dir" ] \
+      && [ "$(stat -Lc '%U:%G:%a' "$range_dir")" = 'privateai:privateai:700' ] \
+      || fail "metadate nesigure pentru directorul HTTP Range: $range_dir"
+
+    missing_bytes=0
+    for ((range_start = partial_size; range_start < bytes; range_start += RANGE_CHUNK_BYTES)); do
+      range_end=$((range_start + RANGE_CHUNK_BYTES - 1))
+      [ "$range_end" -lt "$bytes" ] || range_end=$((bytes - 1))
+      range_bytes=$((range_end - range_start + 1))
+      range_path="$range_dir/$range_start-$range_end.ok"
+      range_starts+=("$range_start")
+      range_ends+=("$range_end")
+      range_paths+=("$range_path")
+      if [ -e "$range_path" ] || [ -L "$range_path" ]; then
+        require_regular "$range_path"
+        [ "$(stat -Lc '%U:%G:%a:%s:%h' "$range_path")" \
+            = "privateai:privateai:600:${range_bytes}:1" ] \
+          || fail "chunk HTTP Range existent dar invalid: $range_path"
+      else
+        missing_bytes=$((missing_bytes + range_bytes))
+      fi
+    done
+
+    free_bytes=$(df -PB1 "$MODEL_ROOT" | awk 'NR == 2 {print $4}')
+    [[ "$free_bytes" =~ ^[0-9]+$ ]]
+    required_free=$((bytes + missing_bytes + RANGE_FREE_MARGIN_BYTES))
+    [ "$free_bytes" -ge "$required_free" ] \
+      || fail "spațiu insuficient pentru chunks și asamblarea sigură a shardului 2: necesar $required_free, liber $free_bytes"
+
+    download_range_chunk() {
+      local start=$1 end=$2 output=$3 expected_size tmp headers tmp_q headers_q
+      local http_code actual_content_range
+      expected_size=$((end - start + 1))
+      if [ -e "$output" ] || [ -L "$output" ]; then
+        require_regular "$output"
+        [ "$(stat -Lc '%U:%G:%a:%s:%h' "$output")" \
+            = "privateai:privateai:600:${expected_size}:1" ] \
+          || fail "chunk HTTP Range invalid: $output"
+        return 0
+      fi
+
+      tmp=$(runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+        mktemp "$range_dir/.range.$start.$end.XXXXXX")
+      headers="$tmp.headers"
+      printf -v tmp_q '%q' "$tmp"
+      printf -v headers_q '%q' "$headers"
+      trap "rm -f -- $tmp_q $headers_q" EXIT HUP INT TERM
+      if http_code=$(timeout --signal=TERM --kill-after=1m 3600 \
+        runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+        curl --fail --location --silent --show-error \
+          --retry 20 --retry-delay 5 --retry-all-errors \
+          --connect-timeout 30 --remove-on-error --max-filesize "$expected_size" \
+          --range "$start-$end" --dump-header "$headers" \
+          --output "$tmp" --write-out '%{http_code}' "$url"); then
+        :
+      else
+        return $?
+      fi
+      [ "$http_code" = 206 ] || fail "HTTP Range nu a răspuns cu 206: $start-$end ($http_code)"
+      actual_content_range=$(tr -d '\r' < "$headers" | awk \
+        'tolower($1) == "content-range:" {value=tolower($0)} END {print value}')
+      [ "$actual_content_range" = "content-range: bytes $start-$end/$bytes" ] \
+        || fail "Content-Range invalid: $start-$end"
+      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$tmp")" \
+          = "privateai:privateai:600:${expected_size}:1" ] \
+        || fail "dimensiune sau metadate invalide pentru chunk: $start-$end"
+      rm -f -- "$headers"
+      mv -T -- "$tmp" "$output"
+      sync -f "$output"
+      trap - EXIT HUP INT TERM
+    }
+
+    log "Accelerez shardul 2/3 de la $partial_size cu $RANGE_WORKERS conexiuni HTTP Range."
+    batch_status=0
+    for range_index in "${!range_paths[@]}"; do
+      if [ ! -e "${range_paths[$range_index]}" ]; then
+        download_range_chunk "${range_starts[$range_index]}" \
+          "${range_ends[$range_index]}" "${range_paths[$range_index]}" &
+        batch_pids+=("$!")
+      fi
+      if [ "${#batch_pids[@]}" -eq "$RANGE_WORKERS" ]; then
+        for range_pid in "${batch_pids[@]}"; do
+          wait "$range_pid" || batch_status=$?
+        done
+        [ "$batch_status" = 0 ] || fail 'descărcarea unui batch HTTP Range a eșuat; prefixul .part a fost păstrat'
+        batch_pids=()
+      fi
+    done
+    for range_pid in "${batch_pids[@]}"; do
+      wait "$range_pid" || batch_status=$?
+    done
+    [ "$batch_status" = 0 ] || fail 'descărcarea HTTP Range a eșuat; prefixul .part a fost păstrat'
+
+    for range_index in "${!range_paths[@]}"; do
+      range_bytes=$((${range_ends[$range_index]} - ${range_starts[$range_index]} + 1))
+      require_regular "${range_paths[$range_index]}"
+      [ "$(stat -Lc '%U:%G:%a:%s:%h' "${range_paths[$range_index]}")" \
+          = "privateai:privateai:600:${range_bytes}:1" ] \
+        || fail "chunk invalid înainte de asamblare: ${range_paths[$range_index]}"
+    done
+
+    [ "$(stat -Lc '%s' "$partial")" = "$partial_size" ] \
+      || fail 'prefixul .part s-a modificat în timpul descărcării HTTP Range'
+    assembly=$(mktemp "$MODEL_ROOT/.${name}.assembly.XXXXXX")
+    printf -v assembly_q '%q' "$assembly"
+    trap "rm -f -- $assembly_q" EXIT HUP INT TERM
+    cp --reflink=auto -- "$partial" "$assembly"
+    [ "$(stat -Lc '%s' "$assembly")" = "$partial_size" ] \
+      || fail 'copierea prefixului în assembly a eșuat'
+    for range_path in "${range_paths[@]}"; do
+      cat -- "$range_path" >> "$assembly"
+    done
+    [ "$(stat -Lc '%s' "$assembly")" = "$bytes" ] \
+      || fail 'dimensiunea assembly nu corespunde shardului 2'
+  else
+    log 'Shard 2/3 complet ca dimensiune; verific SHA-256 fără redescărcare.'
+    assembly=$partial
+    assembly_q=''
+  fi
+
+  actual_sha=$(sha256sum "$assembly" | awk '{print $1}')
+  if [ "$actual_sha" != "$sha" ]; then
+    # Never reuse size-only-validated chunks after a full-object SHA failure.
+    # Keep the trusted .part prefix, discard only range outputs, then let
+    # systemd retry download fresh bytes on the next invocation.
+    if [ -n "${range_dir:-}" ] && [ -d "$range_dir" ] && [ ! -L "$range_dir" ]; then
+      for range_path in "${range_paths[@]}"; do
+        rm -f -- "$range_path"
+      done
+      rmdir -- "$range_dir" 2>/dev/null || true
+    fi
+    fail 'SHA-256 invalid pentru shardul 2; prefixul .part a fost păstrat, chunkurile vor fi redescărcate'
+  fi
+  chown root:privateai "$assembly"
+  chmod 0440 "$assembly"
+  [ "$(stat -Lc '%U:%G:%a:%s:%h' "$assembly")" = "root:privateai:440:${bytes}:1" ] \
+    || fail 'metadate invalide pentru assembly shard 2'
+  mv -T -- "$assembly" "$destination"
+  sync -f "$destination"
+  [ "$(stat -Lc '%U:%G:%a:%s:%h' "$destination")" = "root:privateai:440:${bytes}:1" ] \
+    || fail 'metadate invalide după publicarea shardului 2'
+  trap - EXIT HUP INT TERM
+  if [ -e "$partial" ] && [ "$partial" != "$destination" ]; then
+    rm -f -- "$partial"
+  fi
+  if [ -n "${range_dir:-}" ] && [ -d "$range_dir" ] && [ ! -L "$range_dir" ]; then
+    for range_path in "${range_paths[@]}"; do
+      rm -f -- "$range_path"
+    done
+    rmdir -- "$range_dir" 2>/dev/null || true
+  fi
+}
+
 [ "$(id -u)" = 0 ] || fail 'root este obligatoriu'
 require_regular /etc/private-ai/.install-complete
 require_regular "$LLAMA_BIN"
@@ -119,10 +315,10 @@ install -d -o privateai -g privateai -m 0700 "$MODEL_ROOT"
   || fail 'metadate nesigure pentru directorul modelului'
 download_shard 0
 download_pids=()
-for index in 1 2; do
-  download_shard "$index" &
-  download_pids+=("$!")
-done
+download_shard_parallel_ranges 1 &
+download_pids+=("$!")
+download_shard 2 &
+download_pids+=("$!")
 download_status=0
 for download_pid in "${download_pids[@]}"; do
   wait "$download_pid" || download_status=$?
@@ -277,7 +473,7 @@ dropin_candidate=$(mktemp "$DROPIN_DIR/.90-qwen35-122b-max.XXXXXX")
 cat > "$dropin_candidate" <<EOF
 [Service]
 ExecStart=
-ExecStart=$LLAMA_BIN --model $MODEL_ROOT/$MODEL_FIRST --alias $MODEL_ALIAS --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+ExecStart=$LLAMA_BIN --model $MODEL_ROOT/$MODEL_FIRST --alias $MODEL_ALIAS --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --batch-size 2048 --ubatch-size 512 --load-mode mmap --cache-ram 0 --spec-type none --no-mmproj --jinja --chat-template-kwargs '{"enable_thinking":false}'
 TimeoutStartSec=3600
 CPUQuota=1600%
 MemoryHigh=84G

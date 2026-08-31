@@ -151,7 +151,7 @@ jobs:
           expected_dropin=$(cat <<'DROPIN'
           [Service]
           ExecStart=
-          ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+          ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --batch-size 2048 --ubatch-size 512 --load-mode mmap --cache-ram 0 --spec-type none --no-mmproj --jinja --chat-template-kwargs '{"enable_thinking":false}'
           TimeoutStartSec=3600
           CPUQuota=1600%
           MemoryHigh=84G
