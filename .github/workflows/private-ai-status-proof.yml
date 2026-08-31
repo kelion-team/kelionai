@@ -199,6 +199,11 @@ jobs:
           printf 'WORKER_NEW_ALIAS_COUNT=%s\n' "$(grep -Fc 'qwen3.5-122b-a10b-local' "$worker" || true)"
           printf 'WORKER_UNIT_OLD_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local$' "$worker_unit" || true)"
           printf 'WORKER_UNIT_NEW_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' "$worker_unit" || true)"
+          printf '%s\n' '--- SAFE WORKER MODEL LINES ---'
+          grep -nE 'OPENCODE_MODEL|OPENCODE_MODEL_ID' "$worker" 2>/dev/null || true
+          grep -nE 'OPENCODE_MODEL|EnvironmentFile|ExecStart' "$worker_unit" 2>/dev/null || true
+          systemctl show kelion-codex-worker.service -p Environment --value 2>/dev/null \
+            | tr ' ' '\n' | grep '^OPENCODE_MODEL=' || true
           set +e
           systemd-analyze verify private-ai-llm.service >/tmp/private-ai-llm-verify.out 2>&1
           llm_verify_rc=$?
