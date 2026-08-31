@@ -458,7 +458,10 @@ chown root:root "$gate_cutover_stage/manifest"
 chmod 0600 "$gate_cutover_stage/manifest"
 
 stage_gate_env() {
-  local source=$1 logical=$2 target=$gate_cutover_stage/files/$logical
+  local source logical target
+  source=$1
+  logical=$2
+  target=$gate_cutover_stage/files/$logical
   [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$source")" -eq 1 ] \
     || fail "gate image field is not exact in $source"
   awk -F= -v image="$EXPECTED_GATE_IMAGE" '
