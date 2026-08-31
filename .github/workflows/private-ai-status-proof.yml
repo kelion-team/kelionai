@@ -190,7 +190,15 @@ jobs:
           fi
           printf '%s\n' '--- MAX MODEL JOURNAL TAIL ---'
           journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
-            --lines=40 2>/dev/null \
+            --lines=120 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
+          printf '%s\n' '--- LLM ACTIVATION DIAGNOSTIC ---'
+          systemctl show private-ai-llm.service \
+            -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
+            -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak --no-pager 2>/dev/null || true
+          systemctl cat private-ai-llm.service --no-pager 2>/dev/null || true
+          journalctl --no-pager --output=cat --unit=private-ai-llm.service \
+            --since='-30 minutes' --lines=300 2>/dev/null \
             | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
           if [ -f /root/private-ai-install-resume.log ]; then
             printf '%s\n' '--- RESUME LOG TAIL ---'
