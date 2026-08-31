@@ -198,10 +198,9 @@ test('dovada permanentă leagă executorul, modelul și accesul complet de proce
   const upgrade = read('deploy/upgrade-constructor.sh')
 
   assert.match(proof, /\[ "\$\{#receipt_lines\[@\]\}" -eq 6 \][\s\S]*installer_id=/)
-  assert.match(proof, /final_receipt=\/etc\/private-ai\/\.constructor-finalized/)
-  assert.match(proof, /\[ "\$\{#final_lines\[@\]\}" -eq 28 \][\s\S]*\[ "\$\{final_lines\[0\]\}" = 'schema=3' \]/)
-  assert.doesNotMatch(login, /\.constructor-finalized|final_receipt|schema=3/)
   for (const workflow of [proof, login]) {
+    assert.match(workflow, /final_receipt=\/etc\/private-ai\/\.constructor-finalized/)
+    assert.match(workflow, /\[ "\$\{#final_lines\[@\]\}" -eq 28 \][\s\S]*\[ "\$\{final_lines\[0\]\}" = 'schema=3' \]/)
     assert.match(workflow, /bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0/)
     assert.match(workflow, /d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb/)
     assert.match(workflow, /runuser -u privateai[\s\S]*git -C "\$llama_source" rev-parse HEAD/)

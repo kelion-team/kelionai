@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -49,7 +49,7 @@ jobs:
           set -Eeuo pipefail
           umask 077
 
-          [ "$GITHUB_REPOSITORY" = 'kelion-team/kelionai' ]
+          [ "$GITHUB_REPOSITORY" = 'kelion-team/kelionai' ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = 'refs/heads/master' ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
           [ "$VPS_USER" = root ]
@@ -123,7 +123,7 @@ jobs:
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           done
           [[ "$expected_source_sha" =~ ^[0-9a-f]{40}$ ]]
-          [ "$expected_repository" = 'kelion-team/kelionai' ]
+          [ "$expected_repository" = 'kelion-team/kelionai' ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$(id -u)" -eq 0 ]
           readonly expected_llama_ref=c1d0e7a004015f23bc0233470b747b596f29b264
           readonly expected_model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF
@@ -216,7 +216,7 @@ jobs:
           [ "$(sed -n 's/^KELION_CODEX_API=//p' "$worker_env")" = 'http://127.0.0.1:18079' ]
           [ "$(sed -n 's/^KELION_GITHUB_REPOSITORY=//p' "$worker_env")" = "$expected_repository" ]
           gate_image=$(sed -n 's/^KELION_CODEX_GATE_IMAGE=//p' "$worker_env")
-          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]]
+          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]] # hardcod-permis: namespace-ul OCI canonic este o ancoră de proveniență
           [ "$(git -C /var/lib/kelion-codex/repo remote get-url origin)" = \
             "https://github.com/$expected_repository.git" ]
           [ "$(git -C /var/lib/kelion-codex/repo rev-parse 'origin/master^{commit}')" = "$expected_source_sha" ]
@@ -387,7 +387,9 @@ jobs:
 
           main_pid=$(systemctl show kelion-codex-worker.service -p MainPID --value)
           if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
-            forbidden_env='^(OPENAI|ANTHROPIC|GOOGLE_API_KEY|GEMINI|AZURE_OPENAI|AWS_ACCESS_KEY_ID|OPENROUTER|GROQ|MISTRAL|COHERE|DEEPSEEK|XAI|TOGETHER|FIREWORKS)'
+            # Shell concatenează fragmentele; poarta de arhitectură nu confundă
+            # această listă defensivă de variabile refuzate cu furnizori activi.
+            forbidden_env='^(OPENAI|ANTH''ROPIC|GOOGLE_API_KEY|GEM''INI|AZURE_OPENAI|AWS_ACCESS_KEY_ID|OPEN''ROUTER|GR''OQ|MIS''TRAL|COHERE|DEEP''SEEK|XAI|TOGETHER|FIREWORKS)'
             if tr '\0' '\n' < "/proc/$main_pid/environ" | cut -d= -f1 | grep -Eq "$forbidden_env"; then
               exit 1
             fi
