@@ -904,6 +904,8 @@ grep -qx 'opencode-local-full-access: TRECE' <<<"$preflight_output"
 [ "$(runuser -u kelion-codex -- sudo -n /usr/bin/id -u)" = 0 ]
 printf 'FULL_HOST_SUDO_PROBE=uid0\n'
 
+# Executorul rulează din worktree și folosește numai flagurile noninteractive
+# documentate pentru OpenCode 1.18.25; self-testul workerului fixează argv-ul.
 executor_smoke=$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
   PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   HOME=/var/lib/kelion-codex \
