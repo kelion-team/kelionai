@@ -42,7 +42,7 @@ jobs:
           MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
 
           case "$EVENT_NAME" in

@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]

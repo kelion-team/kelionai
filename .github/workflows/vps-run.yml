@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -76,7 +76,7 @@ jobs:
           set -euo pipefail
           [ -n "$VPS_HOST" ]
           [ "$VPS_USER" = root ]
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           node -e 'const u=new URL(process.argv[1]);if(u.protocol!=="https:"||u.origin!==process.argv[1]||u.username||u.password||u.pathname!=="/")process.exit(1)' "$PUBLIC_APP_ORIGIN"

@@ -118,7 +118,7 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
       && /\n    if: always\(\)\n/.test(guard)
       && /actions\/checkout@[0-9a-f]{40}/i.test(guard)
       && /persist-credentials\s*:\s*false/.test(guard)
-      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]')
+      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]') // hardcod-permis: ancora verifică repository-ul canonic privilegiat
       && guard.includes('[ "$GITHUB_REF" = refs/heads/master ]')
       && guard.includes('[ "$GITHUB_REF_NAME" = master ]')
       && guard.includes('[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]')
@@ -144,7 +144,7 @@ export function verificaWorkflow(text, numeFisier = '<memorie>') {
       && /\n    if: always\(\)\n/.test(guard)
       && /actions\/checkout@[0-9a-f]{40}/i.test(guard)
       && /persist-credentials\s*:\s*false/.test(guard)
-      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]')
+      && guard.includes('[ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]') // hardcod-permis: ancora verifică repository-ul canonic privilegiat
       && guard.includes('[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]')
       && policy.includes('needs: guard-source')
     if (!guardValid) {
@@ -289,7 +289,7 @@ jobs:
         with:
           persist-credentials: false
       - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
           [ "$GITHUB_REF" = refs/heads/master ]
   preflight:
     needs: guard-source
@@ -309,7 +309,7 @@ jobs:
         with:
           persist-credentials: false
       - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
           [ "$GITHUB_REF" = refs/heads/master ]
           [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -334,7 +334,7 @@ jobs:
         with:
           persist-credentials: false
       - run: |
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: fixture pentru repository-ul canonic privilegiat
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
   merge-policy:
     needs: guard-source
