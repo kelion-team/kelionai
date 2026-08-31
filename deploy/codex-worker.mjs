@@ -264,9 +264,9 @@ export function openCodeExecArgs(jobDir, orderPath) {
   return [
     '--pure',
     'run',
+    OPENCODE_PROMPT,
     '--model', OPENCODE_MODEL,
     '--file', order,
-    OPENCODE_PROMPT,
   ]
 }
 
@@ -1349,11 +1349,11 @@ async function selfTest() {
   if (
     args[0] !== '--pure'
     || args[1] !== 'run'
-    || args[2] !== '--model'
-    || args[3] !== 'llama.cpp/qwen3.6-35b-a3b-local'
-    || args[4] !== '--file'
-    || args[5] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
-    || args.at(-1) !== OPENCODE_PROMPT
+    || args[2] !== OPENCODE_PROMPT
+    || args[3] !== '--model'
+    || args[4] !== 'llama.cpp/qwen3.6-35b-a3b-local'
+    || args[5] !== '--file'
+    || args[6] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
     || args.some((value) => ['--attach', '--auto', '--dir', 'codex', 'login'].includes(value))
   ) fail('Argumentele OpenCode nu fixează execuția locală și ordinul privat')
   const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')

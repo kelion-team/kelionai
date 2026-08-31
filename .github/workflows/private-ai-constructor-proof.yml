@@ -656,9 +656,9 @@ jobs:
               mapfile -d '' -t opencode_argv < "/proc/$pid/cmdline"
               expected_opencode_argv=(
                 /opt/private-ai/bin/opencode --pure run
+                'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
                 --model llama.cpp/qwen3.6-35b-a3b-local
                 --file "$state_dir/order.md"
-                'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
               )
               [ "${#opencode_argv[@]}" -eq "${#expected_opencode_argv[@]}" ]
               for argv_index in "${!expected_opencode_argv[@]}"; do

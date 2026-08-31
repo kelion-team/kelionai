@@ -21,7 +21,7 @@ test('workerul folosește direct OpenCode 1.18.25 cu Qwen local și acces comple
   assert.match(worker, /enabled_providers[\s\S]{0,180}'llama\.cpp'/)
   assert.match(worker, /local\.options\?\.baseURL !== OPENCODE_BASE_URL/)
   assert.match(worker, /'OPENCODE_DISABLE_MODELS_FETCH=true'/)
-  assert.match(launcher, /return \[\s*'--pure',\s*'run',\s*'--model', OPENCODE_MODEL,\s*'--file', order/)
+  assert.match(launcher, /return \[\s*'--pure',\s*'run',\s*OPENCODE_PROMPT,\s*'--model', OPENCODE_MODEL,\s*'--file', order/)
   assert.doesNotMatch(launcher, /'--auto'|'--dir'/)
   assert.match(worker, /return \[\s*'-n', '-u', 'root', '--',\s*'\/usr\/bin\/env', '-i',[\s\S]*OPENCODE_BIN/)
   assert.match(execution, /runLogged\(\s*REQUIRED_LAYOUT\.sudo,\s*rootOpenCodeArgs\(openCodeExecArgs\(jobDir, orderPath\), jobDir\),\s*jobDir,\s*logPath,\s*openCodeParentEnv\(\),\s*null,[\s\S]*stopExecLease\.signal,\s*true/)
