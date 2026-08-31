@@ -85,6 +85,7 @@ jobs:
             max_model_downloaded=0
           fi
           printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$max_model_downloaded"
+          printf 'MAX_MODEL_TOTAL_BYTES=%s\n' "$max_model_total"
           awk -v bytes="$max_model_downloaded" -v total="$max_model_total" \
             'BEGIN {printf "MAX_MODEL_DOWNLOAD_PERCENT=%.2f\n", bytes * 100 / total}'
           printf 'MAX_MODEL_UPGRADE_STATE='
