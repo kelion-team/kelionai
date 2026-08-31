@@ -54,7 +54,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
           set -Eeuo pipefail
           umask 077
-          readonly expected_sha=d4888f7d0a829232353fe91cf708c9a0e54c408a
+          readonly expected_sha=ee01ca76d750495befac18d70fc9cfde1ceec6bb36103c9dc1a1376999c7e550
           readonly unit=/etc/systemd/system/private-ai-max-model-upgrade.service
           readonly script=/root/private-ai-max-model/$expected_sha/upgrade.sh
           readonly model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
