@@ -35,6 +35,9 @@ readonly LLAMA_SERVER_SHA256=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c
 readonly OPENCODE_BIN_SHA256=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
 readonly LEGACY_STATIC_RUNTIME_CUTOVER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
 readonly LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
+# Generația aadb559 a fost ultimul helper instalat înaintea reparației a2a5c9b;
+# hashul este autentificat de istoricul canonic al aceluiași fișier.
+readonly UPGRADE_RUNTIME_CUTOVER_SHA256=4730d9f189770fafd23b4dec1807e889a62bbe357fc8e8b3f153e216bf71eaad
 readonly PREVIOUS_RUNTIME_CUTOVER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
 readonly EXPECTED_RUNTIME_CUTOVER_SHA256=ccaa17f396cc7d3008422eae5cc836cf3d92df7d4c35509e330bb34e70959286
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
@@ -715,7 +718,8 @@ install_persistent_runtime_helper() {
   current_sha=$(sha256sum "$RUNTIME_CUTOVER_TARGET" | awk '{print $1}')
   case "$current_sha" in
     "$LEGACY_STATIC_RUNTIME_CUTOVER_SHA256"|"$LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256"|\
-      "$PREVIOUS_RUNTIME_CUTOVER_SHA256"|"$EXPECTED_RUNTIME_CUTOVER_SHA256") ;;
+      "$UPGRADE_RUNTIME_CUTOVER_SHA256"|"$PREVIOUS_RUNTIME_CUTOVER_SHA256"|\
+      "$EXPECTED_RUNTIME_CUTOVER_SHA256") ;;
     *) fail "persistent runtime helper is not an allowed predecessor: $current_sha" ;;
   esac
   runtime_helper_candidate=$(mktemp "$RUNTIME_CUTOVER_TARGET.private-ai.XXXXXX")
