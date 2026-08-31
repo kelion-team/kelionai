@@ -216,8 +216,8 @@ jobs:
           )
           remote_bundle="/root/private-ai-finalize.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
           scp "${ssh_opts[@]}" "$bundle" "$VPS_USER@$VPS_HOST:$remote_bundle"
-          expected_gate_commit=a2a5c9bcfdf68f28c7709ee31de2c006bef89b85
-          expected_gate_image=ghcr.io/kelion-team/kelionai/codex-gates@sha256:8487e0c8d3042e6af3c482a54bb0ddfa00e2ac4b7a3425f40203bc795cd92c80
+          expected_gate_commit=58f39cfef1ae38157a29d1a0810a334263926c0e
+          expected_gate_image=ghcr.io/kelion-team/kelionai/codex-gates@sha256:25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3
           [ "$(GH_TOKEN="$REGISTRY_TOKEN" gh api \
             "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')" = \
             "$expected_gate_commit" ]

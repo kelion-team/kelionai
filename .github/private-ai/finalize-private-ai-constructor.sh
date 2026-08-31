@@ -62,8 +62,8 @@ readonly PUBLICATION_LOCK=/root/kelion/publicare.lock
 readonly WORKER_ENV=/root/kelion/config/codex-worker.env
 readonly PUBLISHER_ENV=/root/kelion/config/constructor-publisher.env
 readonly RELEASE_ENV=/root/kelion/config/constructor-release.env
-readonly EXPECTED_GATE_COMMIT=a2a5c9bcfdf68f28c7709ee31de2c006bef89b85
-readonly EXPECTED_GATE_IMAGE=ghcr.io/kelion-team/kelionai/codex-gates@sha256:8487e0c8d3042e6af3c482a54bb0ddfa00e2ac4b7a3425f40203bc795cd92c80
+readonly EXPECTED_GATE_COMMIT=58f39cfef1ae38157a29d1a0810a334263926c0e
+readonly EXPECTED_GATE_IMAGE=ghcr.io/kelion-team/kelionai/codex-gates@sha256:25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3
 
 fail() {
   printf 'private-ai-finalize: ERROR: %s\n' "$*" >&2
