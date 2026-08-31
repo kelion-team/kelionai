@@ -99,7 +99,17 @@ require_regular "$WORKER_UNIT"
 install -d -o privateai -g privateai -m 0700 "$MODEL_ROOT"
 [ "$(stat -Lc '%U:%G:%a' "$MODEL_ROOT")" = 'privateai:privateai:700' ] \
   || fail 'metadate nesigure pentru directorul modelului'
-for index in 0 1 2; do download_shard "$index"; done
+download_shard 0
+download_pids=()
+for index in 1 2; do
+  download_shard "$index" &
+  download_pids+=("$!")
+done
+download_status=0
+for download_pid in "${download_pids[@]}"; do
+  wait "$download_pid" || download_status=$?
+done
+[ "$download_status" = 0 ] || fail 'descărcarea paralelă a shardurilor a eșuat'
 
 sum=0
 for index in 0 1 2; do

@@ -6,6 +6,7 @@ on:
       - ops/private-ai-install-20260830
     paths:
       - .github/workflows/private-ai-max-model-unblock.yml
+      - .github/private-ai/upgrade-private-ai-max-model.sh
   workflow_dispatch:
 
 permissions:
