@@ -1281,7 +1281,7 @@ mapfile -t codex_api_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:18079"')
 transport_unit="kelion-opencode-transport-${bundle_id:0:12}-$((attempt_count + 1)).service"
 transport_status=0
 transport_smoke=''
-if transport_smoke=$(systemd-run --wait --pipe --collect \
+if transport_smoke=$(systemd-run --quiet --wait --pipe \
   --unit="$transport_unit" \
   --property=Type=oneshot \
   --property=User=kelion-codex \
@@ -1303,6 +1303,7 @@ else
     "$transport_status" "$transport_unit" "$transport_diagnostic" >&2
   systemctl show "$transport_unit" --no-pager \
     -p Result -p ExecMainCode -p ExecMainStatus >&2 || true
+  systemctl reset-failed "$transport_unit" >/dev/null 2>&1 || true
   fail "transport smoke failed with status $transport_status"
 fi
 if ! grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke"; then
