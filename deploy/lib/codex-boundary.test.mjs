@@ -27,7 +27,7 @@ test('workerul folosește direct OpenCode 1.18.25 cu Qwen local și acces comple
   assert.match(worker, /'GIT_CONFIG_KEY_0=safe\.directory',[\s\S]*`GIT_CONFIG_VALUE_0=\$\{worktree\}`/)
   assert.match(worker, /repairSupervisorOwnership\(\)[\s\S]*const podmanPath/)
   assert.match(worker, /\[jobs, repoGit\],[\s\S]*supervisorOwner\(\)/)
-  assert.doesNotMatch(worker, /takeRootExecutorOwnership|chownAsRoot\([^)]*['"]0:0['"]/) 
+  assert.doesNotMatch(worker, /takeRootExecutorOwnership|chownAsRoot\([^)]*['"]0:0['"]/)
   assert.match(worker, /rootGitStatus\(smokeDir, smokeStateDir\)[\s\S]*OPENCODE_EXECUTOR_GIT_VERIFIED status=porcelain-v1/)
   assert.match(worker, /detached: true[\s\S]*signalGroup\('SIGTERM'\)[\s\S]*signalGroup\('SIGKILL'\)/)
   assert.doesNotMatch(execution, /CODEX_BIN|codexExecArgs|codex-real|wrapper/)
