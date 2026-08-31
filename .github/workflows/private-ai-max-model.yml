@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-ai-constructor-finalize
+  group: private-ai-max-model
   cancel-in-progress: false
 
 jobs:
