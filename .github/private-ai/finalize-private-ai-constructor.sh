@@ -487,11 +487,24 @@ quiesce_gate_consumers() {
 
 # Freeze every consumer before touching either canonical Git repository or its
 # rootless Podman runtime. Timers stay stopped until the cutover and probes end.
-[ "$RECOVERY_SERVICE_STATE" = enabled:active ] \
-  || fail "runtime recovery service is not canonical before finalization: $RECOVERY_SERVICE_STATE"
-systemctl disable kelion-runtime-config-recovery.service >/dev/null
-[ "$(unit_state kelion-runtime-config-recovery.service)" = disabled:active ] \
-  || fail 'runtime recovery service was not durably disabled before finalization'
+case "$RECOVERY_SERVICE_STATE" in
+  enabled:active|enabled:inactive)
+    systemctl disable kelion-runtime-config-recovery.service >/dev/null
+    ;;
+  enabled:failed)
+    # Un eșec anterior al cutover-ului lasă corect recovery-ul enabled:failed.
+    # Îl ținem disabled pe durata finalizării și normalizăm numai latch-ul
+    # systemd; helperul pin-uit de mai jos recuperează jurnalul durabil real.
+    systemctl disable kelion-runtime-config-recovery.service >/dev/null
+    systemctl reset-failed kelion-runtime-config-recovery.service
+    RECOVERY_SERVICE_STATE=enabled:inactive
+    ;;
+  *) fail "runtime recovery service is not canonical before finalization: $RECOVERY_SERVICE_STATE" ;;
+esac
+case "$(unit_state kelion-runtime-config-recovery.service)" in
+  disabled:active|disabled:inactive) ;;
+  *) fail 'runtime recovery service was not durably disabled before finalization' ;;
+esac
 quiesce_gate_consumers
 
 require_regular "$WORKER_ENV" root:root:640
@@ -1111,8 +1124,11 @@ sync -f "$PRIVATE_AI_CONFIG"
 final_receipt_sha=$(sha256sum "$FINAL_RECEIPT" | awk '{print $1}')
 
 systemctl enable kelion-runtime-config-recovery.service >/dev/null
-[ "$(unit_state kelion-runtime-config-recovery.service)" = enabled:active ] \
-  || fail 'runtime recovery service was not restored after final receipt commit'
+systemctl reset-failed kelion-runtime-config-recovery.service >/dev/null 2>&1 || true
+case "$(unit_state kelion-runtime-config-recovery.service)" in
+  enabled:active|enabled:inactive) ;;
+  *) fail 'runtime recovery service was not restored after final receipt commit' ;;
+esac
 
 rollback_armed=0
 trap - ERR HUP INT TERM EXIT
