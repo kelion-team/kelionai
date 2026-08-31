@@ -77,13 +77,28 @@ jobs:
           printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
           max_model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
           max_model_total=76536964608
+          max_model_committed=0
+          max_model_range=0
           if [ -d "$max_model_root" ]; then
-            max_model_downloaded=$(find "$max_model_root" -maxdepth 1 -type f \
+            max_model_committed=$(find "$max_model_root" -maxdepth 1 -type f \
               \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' \
               | awk '{sum += $1} END {printf "%.0f", sum + 0}')
-          else
-            max_model_downloaded=0
+            shard2_partial="$max_model_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf.part"
+            if [ -f "$shard2_partial" ] && [ ! -L "$shard2_partial" ]; then
+              shard2_partial_size=$(stat -Lc '%s' "$shard2_partial")
+              shard2_range_dir="$shard2_partial.ranges.$shard2_partial_size.90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7"
+              if [ -d "$shard2_range_dir" ] && [ ! -L "$shard2_range_dir" ]; then
+                max_model_range=$(find "$shard2_range_dir" -maxdepth 1 -type f \
+                  \( -name '*.ok' -o \( -name '.range.*' ! -name '*.headers' \) \) \
+                  -printf '%s\n' | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+              fi
+            fi
           fi
+          max_model_downloaded=$((max_model_committed + max_model_range))
+          [ "$max_model_downloaded" -le "$max_model_total" ] \
+            || max_model_downloaded=$max_model_total
+          printf 'MAX_MODEL_COMMITTED_BYTES=%s\n' "$max_model_committed"
+          printf 'MAX_MODEL_RANGE_BYTES=%s\n' "$max_model_range"
           printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$max_model_downloaded"
           printf 'MAX_MODEL_TOTAL_BYTES=%s\n' "$max_model_total"
           awk -v bytes="$max_model_downloaded" -v total="$max_model_total" \
