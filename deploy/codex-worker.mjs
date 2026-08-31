@@ -264,9 +264,7 @@ export function openCodeExecArgs(jobDir, orderPath) {
   return [
     '--pure',
     'run',
-    '--dir', worktree,
     '--model', OPENCODE_MODEL,
-    '--auto',
     '--file', order,
     OPENCODE_PROMPT,
   ]
@@ -1149,7 +1147,7 @@ async function runOnce() {
       result = await runLogged(
         REQUIRED_LAYOUT.sudo,
         rootOpenCodeArgs(openCodeExecArgs(jobDir, orderPath), jobDir),
-        jobStateDir,
+        jobDir,
         logPath,
         openCodeParentEnv(),
         null,
@@ -1282,7 +1280,7 @@ async function executorSmoke() {
       result = await runLogged(
         REQUIRED_LAYOUT.sudo,
         rootOpenCodeArgs(openCodeExecArgs(smokeDir, orderPath), smokeDir),
-        smokeStateDir,
+        smokeDir,
         logPath,
         openCodeParentEnv(),
         null,
@@ -1346,15 +1344,12 @@ async function selfTest() {
   if (
     args[0] !== '--pure'
     || args[1] !== 'run'
-    || args[2] !== '--dir'
-    || args[3] !== '/var/lib/kelion-codex/jobs/codex-test/worktree'
-    || args[4] !== '--model'
-    || args[5] !== 'llama.cpp/qwen3.6-35b-a3b-local'
-    || args[6] !== '--auto'
-    || args[7] !== '--file'
-    || args[8] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
+    || args[2] !== '--model'
+    || args[3] !== 'llama.cpp/qwen3.6-35b-a3b-local'
+    || args[4] !== '--file'
+    || args[5] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
     || args.at(-1) !== OPENCODE_PROMPT
-    || args.some((value) => ['--attach', 'codex', 'login'].includes(value))
+    || args.some((value) => ['--attach', '--auto', '--dir', 'codex', 'login'].includes(value))
   ) fail('Argumentele OpenCode nu fixează execuția locală și ordinul privat')
   const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')
   if (

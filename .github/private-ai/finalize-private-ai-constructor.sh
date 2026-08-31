@@ -225,10 +225,10 @@ chown root:root /proc/$$/fd/9
 chmod 0600 /proc/$$/fd/9
 flock -n 9 || fail 'constructor/release publication is active'
 
-readonly WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
-readonly WEB_STATE=$(unit_state private-ai-web.service)
-readonly PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
-readonly RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
+WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
+WEB_STATE=$(unit_state private-ai-web.service)
+PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
+RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
 rollback_root=$(mktemp -d "$RUNTIME_ROOT/private-ai-finalize.XXXXXX")
 chmod 0700 "$rollback_root"
 rollback_armed=0
@@ -312,9 +312,13 @@ rollback() {
       ;;
   esac
   if [ "$rollback_armed" -eq 1 ]; then
-    if [ "$worker_cutover_started" -eq 1 ]; then
-      systemctl stop kelion-codex-worker.service >/dev/null 2>&1 || true
-    fi
+    systemctl stop \
+      kelion-codex-worker.timer \
+      kelion-constructor-publisher.timer \
+      kelion-constructor-release.timer \
+      kelion-codex-worker.service \
+      kelion-constructor-publisher.service \
+      kelion-constructor-release.service >/dev/null 2>&1 || true
     if [ "$web_cutover_started" -eq 1 ]; then
       systemctl stop private-ai-web.service >/dev/null 2>&1 || true
     fi
@@ -392,6 +396,54 @@ fi
 sync -f "$rollback_root"
 rollback_armed=1
 
+quiesce_gate_consumers() {
+  local gate_unit gate_state mode=${1:-require-idle}
+  systemctl stop \
+    kelion-codex-worker.timer \
+    kelion-constructor-publisher.timer \
+    kelion-constructor-release.timer
+  if [ "$mode" = require-idle ]; then
+    for gate_unit in \
+      kelion-codex-worker.service \
+      kelion-constructor-publisher.service \
+      kelion-constructor-release.service; do
+      gate_state=$(systemctl is-active "$gate_unit" 2>/dev/null || true)
+      case "$gate_state" in
+        inactive|failed) ;;
+        *) fail "gate consumer is not quiescent: $gate_unit ($gate_state)" ;;
+      esac
+    done
+  elif [ "$mode" != force ]; then
+    fail "invalid gate quiesce mode: $mode"
+  fi
+  systemctl stop \
+    kelion-codex-worker.service \
+    kelion-constructor-publisher.service \
+    kelion-constructor-release.service
+  for gate_unit in \
+    kelion-codex-worker.service \
+    kelion-constructor-publisher.service \
+    kelion-constructor-release.service; do
+    gate_state=$(systemctl show --property=ActiveState --value "$gate_unit")
+    case "$gate_state" in
+      inactive|failed) ;;
+      *) fail "gate consumer did not quiesce: $gate_unit" ;;
+    esac
+    [ "$(systemctl show --property=MainPID --value "$gate_unit")" = 0 ] \
+      || fail "gate consumer still has a main process: $gate_unit"
+    [ "$(systemctl show --property=ControlPID --value "$gate_unit")" = 0 ] \
+      || fail "gate consumer still has a control process: $gate_unit"
+    if systemctl list-jobs --no-legend --no-pager \
+      | awk -v unit="$gate_unit" '$2 == unit { found=1 } END { exit(found ? 0 : 1) }'; then
+      fail "gate consumer still has a systemd job: $gate_unit"
+    fi
+  done
+}
+
+# Freeze every consumer before touching either canonical Git repository or its
+# rootless Podman runtime. Timers stay stopped until the cutover and probes end.
+quiesce_gate_consumers
+
 require_regular "$WORKER_ENV" root:root:640
 require_regular "$PUBLISHER_ENV" root:root:640
 require_regular "$RELEASE_ENV" root:root:640
@@ -456,15 +508,8 @@ validate_rootless_gate_image() {
     || fail "gate image revision mismatch for $user"
 }
 
-# A triggered publisher oneshot owns RuntimeDirectory=kelion-publisher and
-# removes it again when the oneshot exits.  Quiesce both publication timers
-# while inspecting their pinned rootless gate images, then restore the exact
-# preflight states.  The publication lock prevents an already-running job.
-systemctl stop kelion-constructor-publisher.timer kelion-constructor-release.timer
 validate_rootless_gate_image kelion-codex /var/lib/kelion-codex /run/kelion-codex
 validate_rootless_gate_image kelion-publisher /var/lib/kelion-publisher /run/kelion-publisher
-restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE"
-restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE"
 
 deploy_quiesce_journal=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
@@ -498,6 +543,13 @@ if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
   KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$deploy_commit" \
     bash "$RUNTIME_CUTOVER_SOURCE" --discard-unmutated-gate-prepared \
       "$deploy_request" "$deploy_commit" "$deploy_active" "$live_compose"
+  # Recovery consumed the old transaction.  Any later rollback must return to
+  # this reconciled state, never to the ownerless quiesced pre-recovery vector.
+  WORKER_TIMER_STATE=$(unit_state kelion-codex-worker.timer)
+  WEB_STATE=$(unit_state private-ai-web.service)
+  PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
+  RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
+  quiesce_gate_consumers force
   [ ! -e "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
     || fail 'recovered deploy journal was not consumed'
   printf 'STALE_DEPLOY_GATE_PREPARED_RECOVERED=yes\n'
@@ -544,6 +596,7 @@ sync -f "$gate_cutover_stage"
 KELION_CUTOVER_LOCK_HELD=1 bash "$RUNTIME_CUTOVER_SOURCE" \
   "$gate_cutover_stage" "$COMPOSE_SOURCE"
 gate_cutover_stage=''
+quiesce_gate_consumers force
 [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   || fail 'unit-only migration barrier remains after the strict cutover'
@@ -893,6 +946,9 @@ grep -qx 'OPENCODE_WORKER_TRANSPORT_VERIFIED no_claim=true' <<<"$transport_smoke
 printf '%s\n' "$transport_smoke"
 printf 'WORKER_HMAC_HEARTBEAT_E2E=passed\n'
 
+systemctl enable --now \
+  kelion-constructor-publisher.timer \
+  kelion-constructor-release.timer >/dev/null
 [ "$(unit_state kelion-constructor-publisher.timer)" = enabled:active ] \
   || fail 'publisher timer is not enabled and active after gate recovery'
 [ "$(unit_state kelion-constructor-release.timer)" = enabled:active ] \
