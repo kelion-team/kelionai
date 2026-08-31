@@ -365,7 +365,7 @@ snapshot_legacy_path() {
 }
 
 restore_legacy_path() {
-  local key=$1 target=$2 parent base candidate=''
+  local key=$1 target=$2 parent base candidate='' source link_target=''
   parent=$(dirname -- "$target")
   if [ -f "$rollback_root/$key.absent" ]; then
     if [ -e "$target" ] || [ -L "$target" ]; then
@@ -378,13 +378,30 @@ restore_legacy_path() {
   fi
 
   [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+  source=$rollback_root/$key
   base=${target##*/}
   candidate=$(mktemp "$parent/.$base.rollback.XXXXXX") || return 1
-  rm -f -- "$candidate" || return 1
-  if cp -a --no-dereference -- "$rollback_root/$key" "$candidate" \
-    && { [ -L "$candidate" ] || sync -f "$candidate"; } \
-    && mv -f -- "$candidate" "$target" \
-    && sync -f "$parent"; then
+  if [ -L "$source" ]; then
+    link_target=$(readlink -- "$source") || {
+      rm -f -- "$candidate"
+      return 1
+    }
+    rm -f -- "$candidate" || return 1
+    ln -s -- "$link_target" "$candidate" || {
+      rm -f -- "$candidate"
+      return 1
+    }
+  elif [ -f "$source" ]; then
+    if ! cp -a --no-dereference -T -- "$source" "$candidate" \
+      || ! sync -f "$candidate"; then
+      rm -f -- "$candidate"
+      return 1
+    fi
+  else
+    rm -f -- "$candidate"
+    return 1
+  fi
+  if mv -f -- "$candidate" "$target" && sync -f "$parent"; then
     return 0
   fi
   rm -f -- "$candidate"
@@ -1288,12 +1305,14 @@ if transport_smoke=$(systemd-run --quiet --wait --pipe \
   --property=Group=kelion-codex \
   --property="SupplementaryGroups=kelion-handoff privateai" \
   --property=WorkingDirectory=/var/lib/kelion-codex \
+  --property=RuntimeMaxSec=60s \
+  --property=TimeoutStopSec=10s \
   --property=LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret \
   --setenv=PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   --setenv=HOME=/var/lib/kelion-codex \
   --setenv=KELION_CODEX_API="$KELION_CODEX_API" \
   --setenv=LANG=C.UTF-8 --setenv=LC_ALL=C.UTF-8 --setenv=CI=1 --setenv=NO_COLOR=1 \
-  /usr/bin/node "$WORKER_TARGET" --transport-smoke 2>&1); then
+  /usr/bin/node "$WORKER_TARGET" --transport-smoke </dev/null 2>&1); then
   :
 else
   transport_status=$?

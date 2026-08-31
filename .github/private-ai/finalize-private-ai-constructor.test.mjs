@@ -10,6 +10,10 @@ const runtimeCutover = readFileSync(
   new URL('../../deploy/lib/runtime-config-cutover.sh', import.meta.url),
   'utf8',
 )
+const worker = readFileSync(
+  new URL('../../deploy/codex-worker.mjs', import.meta.url),
+  'utf8',
+)
 
 function shellFunction(name) {
   const match = new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(finalizer)
@@ -255,4 +259,13 @@ test('rollbackul identifică pasul eșuat și restaurează enabled-runtime exact
   assert.match(rollback, /PRIVATE_AI_ROLLBACK_SNAPSHOT/)
   assert.match(rollback, /PRIVATE_AI_ROLLBACK_STEP_FAILED=line-/)
   assert.match(restoreUnitState, /enabled-runtime[\s\S]*enable --runtime/)
+})
+
+
+test('credentiala systemd 0444 este acceptată numai din mountul privat și rămâne read-only', () => {
+  assert.match(worker, /startsWith\('\/run\/credentials\/'\)/)
+  assert.match(worker, /location[.]systemd[\s\S]*info[.]mode & 0o222/)
+  assert.match(worker, /CODEX_WORKER_SECRET_FILE[\s\S]*systemd: false/)
+  assert.match(worker, /systemd: false[\s\S]*info[.]mode & 0o077/)
+  assert.match(worker, /lstatSync\(location[.]path\)/)
 })

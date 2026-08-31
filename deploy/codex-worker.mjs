@@ -322,18 +322,39 @@ export function signedHeaders(secret, method, path, body, timestamp, nonce) {
   }
 }
 
-function secretPath() {
-  if (process.env.CODEX_WORKER_SECRET_FILE) return resolve(process.env.CODEX_WORKER_SECRET_FILE)
-  if (process.env.CREDENTIALS_DIRECTORY) return join(process.env.CREDENTIALS_DIRECTORY, 'codex-worker-secret')
+function secretLocation() {
+  if (process.env.CODEX_WORKER_SECRET_FILE) {
+    return { path: resolve(process.env.CODEX_WORKER_SECRET_FILE), systemd: false }
+  }
+  if (process.env.CREDENTIALS_DIRECTORY) {
+    const directory = resolve(process.env.CREDENTIALS_DIRECTORY)
+    if (!directory.startsWith('/run/credentials/')) {
+      fail('Directorul credentialei systemd nu este canonic')
+    }
+    const directoryEntry = lstatSync(directory)
+    if (!directoryEntry.isDirectory() || directoryEntry.isSymbolicLink()) {
+      fail('Directorul credentialei systemd este nesigur')
+    }
+    return { path: join(directory, 'codex-worker-secret'), systemd: true }
+  }
   fail('Lipsește credentiala systemd codex-worker-secret')
 }
 
 function loadSecret() {
-  const path = secretPath()
-  const info = statSync(path)
-  if (!info.isFile()) fail('Credentiala worker nu este fișier')
-  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) fail('Credentiala worker are permisiuni prea largi')
-  const secret = readFileSync(path, 'utf8').trim()
+  const location = secretLocation()
+  const entry = lstatSync(location.path)
+  if (!entry.isFile() || entry.isSymbolicLink()) fail('Credentiala worker nu este fișier regulat')
+  const info = statSync(location.path)
+  if (process.platform !== 'win32') {
+    if (location.systemd) {
+      // systemd poate expune credentialele 0444 într-un mount privat inaccesibil
+      // altor procese. Fișierul trebuie să rămână complet nemodificabil.
+      if ((info.mode & 0o222) !== 0) fail('Credentiala systemd este modificabilă')
+    } else if ((info.mode & 0o077) !== 0) {
+      fail('Credentiala worker explicită are permisiuni prea largi')
+    }
+  }
+  const secret = readFileSync(location.path, 'utf8').trim()
   if (secret.length < 32 || /[\r\n]/.test(secret)) fail('Credentiala worker trebuie să fie o singură valoare de minimum 32 caractere')
   return secret
 }
