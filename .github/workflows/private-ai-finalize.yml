@@ -241,6 +241,7 @@ jobs:
             install -d -o "$user" -g "$user" -m 0700 "$runtime"
             auth=$(mktemp "$runtime/.constructor-gate-auth.XXXXXX")
             authfiles+=("$auth")
+            printf '%s\n' '{}' > "$auth"
             chown "$user:$user" "$auth"
             chmod 0600 "$auth"
             printf '%s' "$(<"$token_file")" | (cd "$runtime" && runuser -u "$user" -- env -i \
