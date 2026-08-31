@@ -201,6 +201,9 @@ jobs:
           printf 'WORKER_UNIT_NEW_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' "$worker_unit" || true)"
           printf '%s\n' '--- SAFE WORKER MODEL LINES ---'
           grep -nE 'OPENCODE_MODEL|OPENCODE_MODEL_ID' "$worker" 2>/dev/null || true
+          printf '%s\n' '--- SAFE WORKER OPENCODE INVOCATION LINES ---'
+          grep -nE -- "OPENCODE|openCode|opencode|'--model'|\\\"--model\\\"" "$worker" 2>/dev/null \
+            | sed -n '1,120p' || true
           grep -nE 'OPENCODE_MODEL|EnvironmentFile|ExecStart' "$worker_unit" 2>/dev/null || true
           grep -n '^OPENCODE_MODEL=' /root/kelion/config/codex-worker.env 2>/dev/null || true
           systemctl show kelion-codex-worker.service -p Environment --value 2>/dev/null \
