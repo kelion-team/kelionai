@@ -431,7 +431,7 @@ publisher_source_commit=$(runuser -u kelion-publisher -- env -i \
 validate_rootless_gate_image() {
   local user=$1 home=$2 runtime=$3 digest revision
   [ -d "$runtime" ] && [ ! -L "$runtime" ] \
-    && [ "$(stat -Lc '%U:%G:%a' "$runtime")" = "$user:$user:700" ] \
+    && [ "$(stat -Lc '%U:%a' "$runtime")" = "$user:700" ] \
     || fail "unsafe rootless Podman runtime for $user"
   digest=$(cd "$runtime" && runuser -u "$user" -- env -i \
     HOME="$home" XDG_RUNTIME_DIR="$runtime" PATH=/usr/bin:/bin \
