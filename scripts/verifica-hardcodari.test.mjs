@@ -38,7 +38,7 @@ test('marcajul fără motiv nu devine portiță', () => {
 })
 
 test('poarta obligatorie recunoaște căile de autentificare personală și backend privat', () => {
-  const authPath = ['.', 'codex', 'auth.json'].join('/')
+  const authPath = ['.codex', 'auth.json'].join('/')
   const privateBackend = `https://${['chat', 'gpt.com'].join('')}/${['backend', 'api'].join('-')}/codex`
   const accountHeader = `${['Chat', 'GPT'].join('')}-${['Account', 'ID'].join('-')}`
   assert.equal(furnizoriRetrasiInLinie(`readFileSync('~/${authPath}')`).length, 1)
