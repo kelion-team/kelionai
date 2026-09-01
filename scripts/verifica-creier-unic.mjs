@@ -31,6 +31,18 @@ const TIPARE_RETRASE = [
     nume: 'coqui-server',
     re: /\bCOQUI_(?:URL|ENABLE|MODEL)|\bkelion-coqui\b|\bDockerfile\.coqui\b|\/api\/voce\/(?:coqui-status|sintetizeaza|sample)\b/i,
   },
+  {
+    nume: 'codex-personal-auth',
+    re: /\.codex\/auth\.json/i,
+  },
+  {
+    nume: 'chatgpt-private-backend',
+    re: /chatgpt\.com\/backend-api/i,
+  },
+  {
+    nume: 'chatgpt-account-header',
+    re: /ChatGPT-Account-ID/i,
+  },
 ]
 
 const EXTENSII = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.sh', '.toml'])
