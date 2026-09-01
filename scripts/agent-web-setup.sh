@@ -12,13 +12,15 @@ log() { printf '\033[36m[setup-web]\033[0m %s\n' "$*"; }
 # 1. Dependențe backend
 if [ -f backend/package.json ]; then
   log "instalez dependențe backend…"
-  (cd backend && npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund)
+  # fail-closed: `npm ci` iese cu eroare dacă lockfile-ul nu coincide; NU cădem
+  # pe `npm install` (ar rescrie lockfile-ul și ar murdări worktree-ul).
+  (cd backend && npm ci --no-audit --no-fund)
 fi
 
 # 2. Dependențe frontend
 if [ -f frontend/package.json ]; then
   log "instalez dependențe frontend…"
-  (cd frontend && npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund)
+  (cd frontend && npm ci --no-audit --no-fund)
 fi
 
 # 3. Verificare rapidă că proiectul compilează (nefatal — doar semnalează)
