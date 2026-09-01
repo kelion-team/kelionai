@@ -27,6 +27,7 @@ import {
   writeSync,
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const API = new URL(process.env.KELION_CODEX_API ?? 'http://127.0.0.1:8080/')
@@ -1657,7 +1658,7 @@ async function selfTest() {
   if (classifyWorkerFailure(null, 'gate', { timedOut: true }) !== 'execution_timeout') fail('Timeout worker neclasificat')
   const timedOutOutcome = classifyWorkerOutcome(null, 'gate', { timedOut: true })
   if (timedOutOutcome.event !== 'failed' || timedOutOutcome.code !== 'execution_timeout') fail('Timeout-ul gate nu rămâne tehnic')
-  const gateClassificationDir = mkdtempSync('/tmp/kelion-worker-gate-classification-')
+  const gateClassificationDir = mkdtempSync(join(tmpdir(), 'kelion-worker-gate-classification-'))
   try {
     const classifiedGate = (name, output, result, error = null) => {
       const path = join(gateClassificationDir, `${name}.log`)
@@ -1859,7 +1860,7 @@ async function selfTest() {
     fail('Contractul claim ambiguu legacy nu este refuzat fail-closed')
   }
 
-  const runLoggedDir = mkdtempSync('/tmp/kelion-worker-run-logged-self-test-')
+  const runLoggedDir = mkdtempSync(join(tmpdir(), 'kelion-worker-run-logged-self-test-'))
   const abortLog = join(runLoggedDir, 'abort.log')
   try {
     const tailLog = join(runLoggedDir, 'tail.log')
