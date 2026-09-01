@@ -184,10 +184,10 @@ early_recover_only_barrier() {
   for unit in \
     kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
     kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service \
-    kelion-constructor-sync.service; do
+    kelion-constructor-sync.service kelion-constructor-model-control.service; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     case "$unit" in
-      kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null 2>&1 || : ;;
+      kelion-constructor-sync.service|kelion-constructor-model-control.service) systemctl stop "$unit" >/dev/null 2>&1 || : ;;
       *.timer) stop_and_disable_constructor_timer "$unit" || failed=1 ;;
       *.service) stop_and_disable_constructor_service "$unit" || failed=1 ;;
       *) failed=1 ;;
@@ -197,12 +197,12 @@ early_recover_only_barrier() {
   for unit in \
     kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
     kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service \
-    kelion-constructor-sync.service; do
+    kelion-constructor-sync.service kelion-constructor-model-control.service; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) \
       || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
     case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
-    if [ "$unit" != kelion-constructor-sync.service ]; then
+    if [ "$unit" != kelion-constructor-sync.service ] && [ "$unit" != kelion-constructor-model-control.service ]; then
       validate_constructor_prepublication_unit_file_state "$unit" \
         || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; }
     fi
@@ -210,6 +210,8 @@ early_recover_only_barrier() {
       report_quiesce_postcondition_failure "$unit" pending-job; failed=1
     fi
   done
+  [ ! -e /run/kelion-constructor-model-control/control.sock ] \
+    && [ ! -L /run/kelion-constructor-model-control/control.sock ] || failed=1
   [ "$failed" = 0 ]
 }
 
@@ -224,7 +226,9 @@ ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
 GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
 DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
+REACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-reactivation.journal
 UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+MAX_MODEL_JOURNAL=$RUNTIME_ROOT/constructor-max-model.journal
 DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
@@ -259,6 +263,10 @@ fi
   && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'lock-ul de publicare s-a schimbat după flock'
+
+if [ -e "$MAX_MODEL_JOURNAL" ] || [ -L "$MAX_MODEL_JOURNAL" ]; then
+  die 'o tranzacție max-model este pending; cutover-ul runtime este refuzat'
+fi
 
 # Bariera rămâne înaintea validării compose/tooling, dar numai după
 # serializarea cu toți ceilalți mutatori ai publicației.
@@ -320,6 +328,61 @@ if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then
     && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
     && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
     || die 'bariera unit-only existentă este nesigură'
+fi
+
+validate_reactivation_journal() {
+  if [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ]; then return 0; fi
+  [ -f "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$REACTIVATION_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e '
+      .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+      (keys == ["kind","phase","schema"])
+    ' "$REACTIVATION_JOURNAL" >/dev/null
+}
+
+publish_reactivation_journal() {
+  local temporary
+  validate_reactivation_journal || return 1
+  if [ -f "$REACTIVATION_JOURNAL" ]; then return 0; fi
+  temporary=$(mktemp "$RUNTIME_ROOT/.constructor-reactivation.journal.XXXXXX") || return 1
+  if jq -nc '{schema:1,kind:"constructor-reactivation",phase:"pending"}' > "$temporary" \
+    && chown root:root "$temporary" && chmod 0600 "$temporary" \
+    && fsync_path "$temporary" \
+    && mv -f -- "$temporary" "$REACTIVATION_JOURNAL" \
+    && fsync_path "$RUNTIME_ROOT"; then
+    return 0
+  fi
+  rm -f -- "$temporary"
+  return 1
+}
+
+clear_reactivation_journal() {
+  validate_reactivation_journal || return 1
+  if [ -f "$REACTIVATION_JOURNAL" ]; then
+    rm -f -- "$REACTIVATION_JOURNAL" || return 1
+    fsync_path "$RUNTIME_ROOT" || return 1
+  fi
+}
+
+clear_reactivation_journal_or_defer() {
+  validate_reactivation_journal || return 1
+  if [ "$constructor_upgrade_owner" = 1 ] \
+    && [ "$upgrade_journal_phase" = committed ] \
+    && { [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; }; then
+    # Upgrade-ul exterior trebuie să poată șterge propriul jurnal înainte ca
+    # controllerul să pornească, dar markerul reactivării rămâne autoritatea
+    # crash-safe până când ownerul cheamă recover-only generic după acel clear.
+    [ -f "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ]
+    return
+  fi
+  clear_reactivation_journal
+}
+
+validate_reactivation_journal \
+  || die 'jurnalul persistent al reactivării Constructor este nesigur'
+if [ "$recover_only" = 0 ] && [ "$validate_only" = 0 ] && [ "$leave_constructor_quiesced" = 0 ] \
+  && { [ -e "$REACTIVATION_JOURNAL" ] || [ -L "$REACTIVATION_JOURNAL" ]; }; then
+  die 'o reactivare Constructor întreruptă trebuie reluată prin recover-only'
 fi
 
 fsync_path() {
@@ -684,12 +747,11 @@ fi
 clear_deploy_quiesce_journal() {
   [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] || return 1
   rm -f -- "$DEPLOY_QUIESCE_JOURNAL" || return 1
-  # După unlink, vectorul live a fost deja validat, ready publicat și timerele
-  # reconciliate. Un fsync eșuat trebuie raportat, dar cleanup-ul nu mai are
-  # voie să oprească un Constructor ownerless. La power-loss jurnalul fie
-  # rămâne absent, fie reapare integral și operația exactă poate fi reluată.
+  # După unlink păstrăm recovery_in_progress armat până când controllerul are
+  # socketul probat și abia apoi repornim timerele. Orice eșec de fsync/start
+  # retrage ready și lasă întreg vectorul quiesced, chiar dacă jurnalul nu mai
+  # poate fi restaurat; următorul recover-only reia starea ownerless sigură.
   deploy_quiesce_journal_unlinked=1
-  recovery_in_progress=0
   fsync_path "$RUNTIME_ROOT"
 }
 
@@ -766,6 +828,18 @@ write_journal_phase() {
   return 1
 }
 
+validate_owned_runtime_journal() {
+  [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg transactionRoot "$transaction_root" '
+      .schema == 1 and .transactionRoot == $transactionRoot and
+      (.phase == "prepared" or .phase == "files-committed" or
+       .phase == "backend-recreated" or .phase == "committed" or
+       .phase == "timers-restored") and
+      (keys | sort) == ["phase", "schema", "transactionRoot"]
+    ' "$JOURNAL" >/dev/null
+}
+
 clear_journal() {
   [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] || return 1
   rm -f -- "$JOURNAL" || return 1
@@ -793,6 +867,7 @@ constructor_services=(
 )
 constructor_auxiliary_services=(
   kelion-constructor-sync.service
+  kelion-constructor-model-control.service
 )
 constructor_markers=(
   /etc/kelion/codex-worker.enabled
@@ -832,6 +907,7 @@ transaction_root=''
 journal_owned=0
 journal_clear_durable=0
 activation_barrier_pending=0
+activation_outer_commit_pending=0
 gate_journal_clear_durable=0
 recovery_in_progress=0
 deploy_quiesce_journal_unlinked=0
@@ -855,7 +931,7 @@ map_logical() {
   case "$logical" in
     runtime.env)
       mapped_target=$CONFIG_ROOT/runtime.env; mapped_group=10050; mapped_mode=640; restart_required=1 ;;
-    app-secret.openai-project-key|app-secret.openai-admin-key|app-secret.database-url|app-secret.session-secret|app-secret.google-client-secret|app-secret.google-token-encryption-key|app-secret.codex-worker-secret|app-secret.constructor-publisher-secret|app-secret.constructor-release-secret|app-secret.browser-worker-secret|app-secret.converter-worker-secret|app-secret.revolut-merchant-secret-key|app-secret.revolut-webhook-signing-secret|app-secret.vapid-private-key|app-secret.github-release-oauth-token|app-secret.migration-backup-proof-key)
+    app-secret.openai-project-key|app-secret.openai-admin-key|app-secret.database-url|app-secret.session-secret|app-secret.google-client-secret|app-secret.google-token-encryption-key|app-secret.codex-worker-secret|app-secret.constructor-model-control-secret|app-secret.constructor-publisher-secret|app-secret.constructor-release-secret|app-secret.browser-worker-secret|app-secret.converter-worker-secret|app-secret.revolut-merchant-secret-key|app-secret.revolut-webhook-signing-secret|app-secret.vapid-private-key|app-secret.github-release-oauth-token|app-secret.migration-backup-proof-key)
       mapped_target=$SECRET_ROOT/$secret_name; mapped_group=10050; mapped_mode=440; restart_required=1 ;;
     gate-secret.github-ghcr-read-token)
       mapped_target=$ROOT/gate-secrets/github-ghcr-read-token; mapped_mode=400 ;;
@@ -899,7 +975,7 @@ validate_env_file() {
   validate_text_file_bytes "$file" || return 1
   case "$logical" in
     runtime.env)
-      allowed_names='NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_ADMIN_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_FUTURE_SKEW_SECONDS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_TURNS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE'
+      allowed_names='NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_ADMIN_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_MODEL_CONTROL_ENABLED CONSTRUCTOR_MODEL_CONTROL_SOCKET CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_FUTURE_SKEW_SECONDS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_TURNS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE'
       required_names=$allowed_names
       ;;
     constructor-config.codex-worker.env)
@@ -1013,6 +1089,9 @@ SESSION_SECRET_FILE	/run/secrets/session-secret
 GOOGLE_CLIENT_SECRET_FILE	/run/secrets/google-client-secret
 GOOGLE_TOKEN_ENCRYPTION_KEY_FILE	/run/secrets/google-token-encryption-key
 CODEX_WORKER_SECRET_FILE	/run/secrets/codex-worker-secret
+CONSTRUCTOR_MODEL_CONTROL_ENABLED	1
+CONSTRUCTOR_MODEL_CONTROL_SOCKET	/run/kelion-constructor-model-control/control.sock
+CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE	/run/secrets/constructor-model-control-secret
 CONSTRUCTOR_PUBLISHER_SECRET_FILE	/run/secrets/constructor-publisher-secret
 CONSTRUCTOR_RELEASE_SECRET_FILE	/run/secrets/constructor-release-secret
 GITHUB_RELEASE_OAUTH_TOKEN_FILE	/run/secrets/github-release-oauth-token
@@ -1069,27 +1148,31 @@ validate_constructor_timer_unit() {
 }
 
 validate_constructor_service_unit() {
-  local file logical service marker user executable
+  local file logical service marker user exec_start
   file=$1
   logical=$2
   service=${logical#systemd-service.}
   validate_text_file_bytes "$file" || return 1
   case "$service" in
     kelion-codex-worker.service)
-      marker=codex-worker; user=kelion-codex; executable=codex-worker.mjs ;;
+      marker=codex-worker; user=kelion-codex
+      exec_start='/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' ;;
     kelion-constructor-publisher.service)
-      marker=constructor-publisher; user=kelion-publisher; executable=constructor-publisher.mjs ;;
+      marker=constructor-publisher; user=kelion-publisher
+      exec_start='/usr/bin/node /opt/kelion-constructor/constructor-publisher.mjs --once' ;;
     kelion-constructor-release.service)
-      marker=constructor-release; user=kelion-release; executable=constructor-release.mjs ;;
+      marker=constructor-release; user=kelion-release
+      exec_start='/usr/bin/node /opt/kelion-constructor/constructor-release.mjs --once' ;;
     *) return 1 ;;
   esac
   [ "$(grep -c '^After=.*kelion-runtime-config-recovery.service' "$file")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=/run/kelion/runtime-config-recovery.ready$' "$file")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=!/run/kelion/constructor-activation.pending$' "$file")" -eq 1 ] \
+    && [ "$(grep -c '^ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal$' "$file")" -eq 1 ] \
     && [ "$(grep -c "^ConditionPathExists=/etc/kelion/$marker.enabled$" "$file")" -eq 1 ] \
     && [ "$(grep -c '^Type=oneshot$' "$file")" -eq 1 ] \
     && [ "$(grep -c "^User=$user$" "$file")" -eq 1 ] \
-    && [ "$(grep -c "^ExecStart=/usr/bin/node .*\/$executable --once$" "$file")" -eq 1 ] \
+    && [ "$(grep -Fxc "ExecStart=$exec_start" "$file")" -eq 1 ] \
     && [ "$(grep -c '^WantedBy=' "$file")" -eq 0 ] \
     && [ "$(grep -c '^\[Install\]$' "$file")" -eq 0 ]
 }
@@ -1100,7 +1183,7 @@ report_live_constructor_quiesce_failure() {
     runtime-ready-stamp|systemd|\
     kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
     kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service|\
-    kelion-constructor-sync.service|kelion-runtime-config-recovery.service) ;;
+    kelion-constructor-sync.service|kelion-constructor-model-control.service|kelion-runtime-config-recovery.service) ;;
     *) unit=unknown ;;
   esac
   case "$predicate" in
@@ -1143,6 +1226,7 @@ validate_live_runtime_recovery_unit() {
     && [ "$(grep -c '^Wants=docker.service$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^After=local-fs.target docker.service$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^Before=kelion-constructor-sync.service kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service$' "$path")" -eq 1 ] \
+    && [ "$(grep -c 'kelion-constructor-model-control.service' "$path")" -eq 0 ] \
     && [ "$(grep -c '^Type=oneshot$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^Environment=KELION_RECOVERY_BOOT=1$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ExecStart=/root/kelion/bin/runtime-config-cutover.sh --recover-only /root/kelion/config/compose.production.yml$' "$path")" -eq 1 ] \
@@ -1160,6 +1244,7 @@ validate_live_constructor_sync_unit() {
     && [ "$(grep -c '^After=.*kelion-runtime-config-recovery.service' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=/run/kelion/runtime-config-recovery.ready$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=!/run/kelion/constructor-activation.pending$' "$path")" -eq 1 ] \
+    && [ "$(grep -c '^ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^Type=oneshot$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^User=root$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ExecStart=/opt/kelion-constructor/constructor-sync-worker.sh$' "$path")" -eq 1 ] \
@@ -1572,6 +1657,56 @@ start_constructor_unit() {
   fi
 }
 
+restore_constructor_model_control() {
+  local unit=kelion-constructor-model-control.service socket=/run/kelion-constructor-model-control/control.sock attempt state
+  if ! systemctl cat "$unit" >/dev/null 2>&1; then
+    [ "$leave_constructor_quiesced" = 1 ] && return 0
+    return 1
+  fi
+  validate_effective_constructor_unit "$unit" || return 1
+  systemctl is-enabled --quiet "$unit" || return 1
+  if [ -e "$JOURNAL" ] || [ -L "$JOURNAL" ] \
+    || [ -e "$ACTIVATION_PENDING" ] || [ -L "$ACTIVATION_PENDING" ] \
+    || { [ "$constructor_upgrade_owner" = 1 ] && [ -n "$upgrade_journal_phase" ]; }; then
+    # Installerul și upgrade-ul exterior dețin aceeași barieră. Controllerul
+    # rămâne oprit chiar dacă fișierele/configul intermediar au fost comise;
+    # ownerul îl pornește numai după clear-ul durabil al jurnalului exterior.
+    validate_activation_pending || return 1
+    if [ -e "$JOURNAL" ] || [ -L "$JOURNAL" ]; then
+      validate_owned_runtime_journal || return 1
+    fi
+    if [ -e "$ACTIVATION_PENDING" ] || [ -L "$ACTIVATION_PENDING" ]; then
+      [ -f "$ACTIVATION_PENDING" ] || return 1
+    fi
+    systemctl stop "$unit" >/dev/null 2>&1 || :
+    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+    case "$state" in inactive|failed) ;; *) return 1 ;; esac
+    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] \
+      && [ ! -e "$socket" ] && [ ! -L "$socket" ]
+    return
+  fi
+  systemctl restart "$unit" || return 1
+  systemctl is-active --quiet "$unit" || return 1
+  for ((attempt = 1; attempt <= 40; attempt++)); do
+    if [ -S "$socket" ] && [ ! -L "$socket" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$socket")" = '0:10050:660' ]; then
+      return 0
+    fi
+    [ "$attempt" -lt 40 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
+restore_runtime_controller_or_quiesce() {
+  if restore_constructor_model_control; then return 0; fi
+  # Ready nu este adevărat fără controller active + UDS exact. Retragem imediat
+  # toate capabilitățile, înainte ca `die`/trap să raporteze eșecul.
+  force_quiesce_constructor_units 1 || true
+  clear_runtime_ready_stamp || true
+  return 1
+}
+
 restore_constructor_timers() {
   local index timer marker state unit_count=0 unit failed=0
   [ "$units_quiesced" = 1 ] || return 0
@@ -1740,7 +1875,8 @@ validate_candidate_secret_separation() {
     return 0
   fi
   assert_pairwise_distinct 'HMAC-urile Constructor' \
-    app-secret.codex-worker-secret app-secret.constructor-publisher-secret app-secret.constructor-release-secret \
+    app-secret.codex-worker-secret app-secret.constructor-model-control-secret \
+    app-secret.constructor-publisher-secret app-secret.constructor-release-secret \
     || return 1
   assert_pairwise_distinct 'credentialele OAuth Admin și GHCR' \
     app-secret.github-release-oauth-token gate-secret.github-ghcr-read-token \
@@ -2442,52 +2578,20 @@ recover_interrupted_activation() {
     recovery_in_progress=0
     return 0
   fi
-  publish_runtime_ready_stamp || failed=1
-  for index in "${!constructor_timers[@]}"; do
-    timer=${constructor_timers[$index]}
-    if [ "${timer_enabled[$index]}" = 1 ]; then systemctl enable "$timer" >/dev/null || failed=1; fi
-    if [ "${timer_active[$index]}" = 1 ]; then start_constructor_unit "$timer" || failed=1; fi
-    if [ "${timer_enabled[$index]}" = 1 ]; then systemctl is-enabled --quiet "$timer" || failed=1
-    else systemctl is-enabled --quiet "$timer" && failed=1; fi
-    if [ "$boot_recovery" = 0 ]; then
-      if [ "${timer_active[$index]}" = 1 ]; then systemctl is-active --quiet "$timer" || failed=1
-      else systemctl is-active --quiet "$timer" && failed=1; fi
-    fi
-  done
-  for index in "${!constructor_services[@]}"; do
-    if [ "${service_active[$index]}" = 1 ]; then start_constructor_unit "${constructor_services[$index]}" || failed=1; fi
-  done
-  if [ "$operation" = activate-worker-publisher ]; then start_constructor_unit kelion-codex-worker.service || failed=1; fi
-  validate_live_runtime_contract || failed=1
-  for index in "${!constructor_markers[@]}"; do
-    marker=${constructor_markers[$index]}
-    if [ "${marker_present[$index]}" = 1 ]; then
-      [ -f "$marker" ] && [ ! -L "$marker" ] && [ "$(stat -c '%u:%g:%a' "$marker")" = '0:0:444' ] || failed=1
-    elif [ -e "$marker" ] || [ -L "$marker" ]; then
-      failed=1
-    fi
-  done
-  [ -d "$wants_dir" ] && [ ! -L "$wants_dir" ] || failed=1
-  for index in "${!constructor_timers[@]}"; do
-    timer=${constructor_timers[$index]}
-    wants_link=$wants_dir/$timer
-    if [ "${timer_enabled[$index]}" = 1 ]; then
-      [ -L "$wants_link" ] \
-        && [ "$(readlink "$wants_link")" = "/etc/systemd/system/$timer" ] \
-        && [ "$(realpath -e -- "$wants_link")" = "/etc/systemd/system/$timer" ] || failed=1
-    elif [ -e "$wants_link" ] || [ -L "$wants_link" ]; then
-      failed=1
-    fi
-  done
-  fsync_path "$wants_dir" || failed=1
-  fsync_path /etc/systemd/system || failed=1
-  origin=$(sed -n 's/^KELION_CONSTRUCTOR_API=//p' "${constructor_configs[2]}")
-  [ "$origin" = 'http://127.0.0.1:18079' ] || failed=1
-  wait_for_activation_backend_ready "$origin" || failed=1
+  # Jurnalul exterior al operației este Condition= fail-closed pentru
+  # controller, iar markerul reactivării blochează serviciile cu side effects.
+  # Nu putem pretinde un start cât niciuna dintre condiții nu este satisfăcută.
+  # Returnăm ownerului faza `applied` quiesced; el șterge durabil jurnalul său,
+  # apoi cheamă recover-only generic, care adoptă markerul și îl retrage ultimul
+  # după dovada controller+UDS+timere.
+  validate_reactivation_journal || failed=1
+  [ -f "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] || failed=1
+  validate_constructor_quiesce_barrier || failed=1
   if [ "$failed" != 0 ]; then
     force_quiesce_constructor_units || true
-    die 'roll-forward-ul durabil al activării a eșuat; toate unitățile rămân oprite'
+    die 'handoff-ul durabil al activării nu a rămas quiesced sub intentul persistent'
   fi
+  activation_outer_commit_pending=1
   units_quiesced=0
   recovery_in_progress=0
   return 0
@@ -2640,7 +2744,7 @@ recover_interrupted_cutover() {
 }
 
 # Închiderea de urgență este deliberat mai îngustă decât recovery-ul generic:
-# acceptă numai tranzacția `prepared` cunoscută, ale cărei unsprezece ținte nu
+# acceptă numai tranzacția `prepared` cunoscută, ale cărei douăsprezece ținte nu
 # au fost mutate deloc. Release-ul candidat trebuie să fie deja complet și
 # izolat în slotul țintă, în timp ce markerul activ și toate bytes-urile config
 # rămân generația veche. Funcția nu restaurează și nu publică nimic; după toate
@@ -2656,6 +2760,7 @@ discard_unmutated_prepared_cutover() {
   local -A seen=()
   local -A allowed=(
     [app-secret.codex-worker-secret]=1
+    [app-secret.constructor-model-control-secret]=1
     [app-secret.constructor-publisher-secret]=1
     [app-secret.constructor-release-secret]=1
     [worker-secret.github-worker-token]=1
@@ -2790,8 +2895,8 @@ discard_unmutated_prepared_cutover() {
       && cmp -s -- "$mapped_target" "$backup" \
       || die "ținta live nu este byte-identică cu backupul prepared: $logical"
   done < "$rollback_manifest"
-  [ "$manifest_count" -eq 11 ] \
-    || die 'manifestul prepared nu conține exact cele unsprezece intrări'
+  [ "$manifest_count" -eq 12 ] \
+    || die 'manifestul prepared nu conține exact cele douăsprezece intrări'
   observed_manifest=$(printf '%s\n' "${manifest_logicals[@]}" | LC_ALL=C sort) \
     || die 'manifestul prepared nu poate fi ordonat'
   expected=$(printf '%s\n' "${!allowed[@]}" | LC_ALL=C sort) \
@@ -3229,8 +3334,32 @@ if [ "$discard_unmutated_gate_prepared" = 1 ]; then
   discard_unmutated_gate_prepared_refresh \
     "$discard_gate_request_id" "$discard_gate_commit" "$discard_gate_active_commit" "$compose_file"
 fi
+if [ "$leave_constructor_quiesced" = 0 ]; then
+  # Intentul persistent precede orice recovery/mutație care ar putea publica
+  # ready ori porni un timer. Serviciile cu side effects îl folosesc drept
+  # Condition fail-closed, iar controllerul îl acceptă numai la startup și
+  # refuză toate endpointurile până la clear-ul final.
+  recovery_in_progress=1
+  publish_reactivation_journal \
+    || die 'intentul persistent al reactivării nu a putut fi armat înainte de recovery/cutover'
+fi
 recover_interrupted_gate_refresh
 recover_interrupted_activation
+if [ "$activation_outer_commit_pending" = 1 ]; then
+  [ "$recover_only" = 1 ] && [ -n "$activation_resume_operation" ] \
+    || die 'handoff-ul activării applied nu are owner explicit'
+  validate_reactivation_journal \
+    && [ -f "$REACTIVATION_JOURNAL" ] \
+    && jq -e --arg operation "$activation_resume_operation" \
+      '.schema == 2 and .phase == "applied" and .operation == $operation' \
+      "$ACTIVATION_JOURNAL" >/dev/null \
+    && validate_constructor_quiesce_barrier \
+    || die 'handoff-ul activării applied nu are marker/jurnal/barieră exactă'
+  operation_succeeded=1
+  units_quiesced=0
+  recovery_in_progress=0
+  exit 0
+fi
 recover_interrupted_cutover
 garbage_collect_transactions || die 'tranzacțiile orfane nu au putut fi curățate sigur'
 garbage_collect_activations || die 'snapshoturile de activare orfane nu au putut fi curățate sigur'
@@ -3291,13 +3420,19 @@ if [ "$recover_only" = 1 ]; then
     # durabile. Astfel o cădere după commitul gate, dar înainte de enable/start,
     # nu lasă Constructor oprit permanent.
     quiesce_units_for_recovery || die 'unitățile Constructor nu pot fi reconciliate după recovery'
-    if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then recovery_in_progress=1; fi
+    recovery_in_progress=1
+    publish_reactivation_journal \
+      || die 'intentul persistent al reactivării nu a putut fi publicat după recovery'
     publish_runtime_ready_stamp || die 'stamp-ul runtime nu a putut fi publicat după validare'
-    restore_constructor_timers || die 'timer-ele Constructor nu au putut fi reconciliate după marker-e'
-    if [ "$recovery_in_progress" = 1 ]; then
+    if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
       clear_deploy_quiesce_journal || die 'jurnalul quiesce nu a putut fi șters după reactivare'
-      recovery_in_progress=0
     fi
+    restore_runtime_controller_or_quiesce \
+      || die 'controllerul manual nu este active+socket după recovery'
+    restore_constructor_timers || die 'timer-ele Constructor nu au putut fi reconciliate după marker-e'
+    clear_reactivation_journal_or_defer \
+      || die 'intentul persistent al reactivării nu a putut fi retras după probe'
+    recovery_in_progress=0
   fi
   operation_succeeded=1
   exit 0
@@ -3437,6 +3572,8 @@ fi
 config_consistent=1
 write_journal_phase files-committed || die 'faza files-committed nu a putut fi jurnalizată'
 
+restore_constructor_model_control \
+  || die 'controllerul manual de model nu a rămas protejat după publicarea configurației'
 if [ "$restart_required" = 1 ]; then
   backend_consistent=0
   recreate_active_release || die 'slotul backend activ nu a putut fi recreat cu noua generație'
@@ -3461,17 +3598,24 @@ if [ "$leave_constructor_quiesced" = 1 ]; then
     clear_unit_migration_pending \
       || die 'bariera unit-only nu a putut fi consumată după cutover-ul strict'
   fi
-  operation_succeeded=1
   clear_journal || die 'jurnalul cutover-ului config-only nu a putut fi șters durabil'
   units_quiesced=0
+  operation_succeeded=1
 else
   clear_unit_migration_pending \
     || die 'bariera unit-only nu a putut fi consumată după cutover-ul strict'
+  recovery_in_progress=1
+  publish_reactivation_journal \
+    || die 'intentul persistent al reactivării nu a putut fi publicat înainte de clear-ul runtime'
   publish_runtime_ready_stamp || die 'stamp-ul runtime nu a putut fi publicat după commit'
-  restore_constructor_timers || die 'timer-ele Constructor nu au putut fi reactivate coerent'
-  write_journal_phase timers-restored || die 'faza timers-restored nu a putut fi jurnalizată'
-  operation_succeeded=1
   clear_journal || die 'jurnalul cutover-ului finalizat nu a putut fi șters durabil'
+  restore_runtime_controller_or_quiesce \
+    || die 'controllerul manual de model nu a revenit după clear-ul durabil al jurnalului runtime'
+  restore_constructor_timers || die 'timer-ele Constructor nu au putut fi reactivate coerent'
+  clear_reactivation_journal_or_defer \
+    || die 'intentul persistent al reactivării nu a putut fi retras după probe'
+  recovery_in_progress=0
+  operation_succeeded=1
 fi
 if ! remove_transaction_after_durable_journal_clear "$transaction_root"; then
   printf 'runtime-cutover: avertisment: tranzacția finalizată a rămas root-only\n' >&2

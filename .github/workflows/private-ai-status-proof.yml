@@ -1,11 +1,6 @@
 name: private-ai-status-proof
 
 on:
-  push:
-    branches:
-      - ops/private-ai-install-20260830
-    paths:
-      - .github/workflows/private-ai-status-proof.yml
   workflow_dispatch:
 
 permissions:
@@ -19,16 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Refuză orice sursă diferită de ramura operațională canonică
+      - name: Refuză orice sursă diferită de masterul canonic
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
 
   measured-status:
     needs: guard-source
@@ -38,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Citește starea măsurată a instalării
@@ -49,12 +49,16 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "${#VPS_HOST}" -le 253 ]
+          [[ "$VPS_HOST" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$VPS_HOST" != *..* ]]
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ "$current_host_key" = "$VPS_HOST_KEY" ]
           umask 077

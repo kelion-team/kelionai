@@ -34,6 +34,7 @@ const OPENCODE_BIN = resolve(process.env.OPENCODE_BIN ?? '/opt/private-ai/bin/op
 const OPENCODE_CONFIG_HOME = resolve(process.env.OPENCODE_CONFIG_HOME ?? '/srv/private-ai/home/.config')
 const OPENCODE_CONFIG = resolve(process.env.OPENCODE_CONFIG ?? '/srv/private-ai/home/.config/opencode/opencode.json')
 const OPENCODE_MODEL = process.env.OPENCODE_MODEL ?? 'llama.cpp/qwen3.6-35b-a3b-local'
+const FAST_OPENCODE_MODEL = 'llama.cpp/qwen3.6-35b-a3b-local'
 const OPENCODE_BASE_URL = process.env.OPENCODE_BASE_URL ?? 'http://127.0.0.1:24080/v1'
 const REPO = resolve(process.env.CODEX_WORKER_REPO ?? '/var/lib/kelion-codex/repo')
 const JOBS = resolve(process.env.CODEX_WORKER_JOBS ?? '/var/lib/kelion-codex/jobs')
@@ -61,6 +62,8 @@ const EXEC_ENABLED = process.env.CODEX_WORKER_EXEC_ENABLED === '1'
 const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const OPENCODE_VERSION = '1.18.25'
 const OPENCODE_MODEL_ID = 'qwen3.6-35b-a3b-local'
+const POWERFUL_OPENCODE_MODEL = 'llama.cpp/qwen3.5-122b-a10b-local'
+const POWERFUL_OPENCODE_MODEL_ID = 'qwen3.5-122b-a10b-local'
 const OPENCODE_PROMPT = 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
 const WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
@@ -74,6 +77,10 @@ const REQUIRED_LAYOUT = Object.freeze({
   sudo: '/usr/bin/sudo',
   podman: '/usr/bin/podman',
 })
+const CONSTRUCTOR_MODEL_PROFILES = Object.freeze({
+  fast: Object.freeze({ tier: 'fast', model: FAST_OPENCODE_MODEL, modelId: OPENCODE_MODEL_ID, label: 'FAST 35B' }),
+  powerful: Object.freeze({ tier: 'powerful', model: POWERFUL_OPENCODE_MODEL, modelId: POWERFUL_OPENCODE_MODEL_ID, label: 'POWERFUL 122B' }),
+})
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RECOVERY_GUIDANCE = Object.freeze({
   stale_base: 'Reexecută ordinul peste vârful master curent; nu reutiliza patch-ul sau baza anterioară.',
@@ -82,16 +89,11 @@ const RECOVERY_GUIDANCE = Object.freeze({
   pr_closed: 'PR-ul anterior a fost închis fără merge. Reexecută ordinul curat și produce un handoff nou, fără a reutiliza branch-ul anterior.',
 })
 const WORKER_FAILURE_CODES = new Set([
-  'provider_auth',
-  'provider_credit',
   'execution_timeout',
-  'test_failure',
-  'quality_gate_failure',
-  'no_changes',
   'brain_unavailable',
-  'codex_exec_failed',
   'worker_internal_failure',
 ])
+const WORKER_UNRESOLVED_REASONS = new Set(['no_changes', 'test_failure', 'quality_gate_failure'])
 
 function fail(message) {
   throw new Error(message)
@@ -132,27 +134,68 @@ export function tailText(logPath, maxBytes = 128 * 1024) {
   }
 }
 
+const GATE_INFRASTRUCTURE_FAILURE = /(?:\bENOENT\b|\bEACCES\b|\bENOSPC\b|\bENOMEM\b|no space left on device|permission denied|read-only file system|out of memory|oom[- ]kill|killed process|cannot execute|command not found|executable file not found|container runtime|podman(?:\s+runtime)?\s+error|input\/output error|i\/o error|broken pipe)/i
+const GATE_TEST_FAILURE = /(?:\b(?:vitest|jest|pytest)\b[^\n]{0,160}\b(?:failed|failure|error)|\bAssertionError\b|\bFAIL\b[^\n]{0,180}(?:\.test\.|\.spec\.|test)|\bfailed tests?\b|\bTests?\s+\d+\s+failed\b)/i
+// Numai diagnostice bounded ale porților de cod pot demonstra un rezultat
+// nepublicabil. Un exit 1/2 cu receipt, dar cu text necunoscut (de exemplu o
+// dependență lipsă în imagine), rămâne eșec tehnic și nu recomandă alt model.
+const GATE_QUALITY_FAILURE = /(?:\berror TS\d{3,5}\b|\b(?:eslint|oxlint|lint)\b[^\n]{0,160}\b(?:failed|failure|errors?)\b|\b(?:vite|webpack|rollup|build)\b[^\n]{0,160}\b(?:build failed|failed to build|error during build)\b|SEMNE GREȘIT PUSE|APELURI FĂRĂ RUTĂ|RUTE FĂRĂ CONSUMATOR|RUTE DUBLATE|DDL ÎN CODUL RUNTIME|NUME MIGRĂRI INVALIDE|MIGRĂRI FĂRĂ EXACT|TABELE CREATE ÎN MAI MULTE|Workflow-uri nesigure|Creier unic:|Hardcodări operaționale\/comerciale|FIȘIERE DE PRODUCȚIE INACCESIBILE|EXPORTURI PUBLICE NECONSUMATE|Fișiere neclasificate|Active binare duplicate|(?:jscpd|duplicate code|duplication)[^\n]{0,160}(?:threshold|failed|detected))/i
+
+function measuredGateVerdict(source, result) {
+  if (!Number.isInteger(result?.code) || ![1, 2].includes(result.code)) return false
+  const markers = [...source.matchAll(/^codex-gates: VERDICT schema=1 exit=(\d+)$/gm)]
+  return Number(markers.at(-1)?.[1] ?? -1) === result.code
+}
+
 /** Clasifică local jurnalul privat și transmite serverului numai un cod dintr-un
  * catalog fix. Niciun fragment de output (care poate conține secrete) nu iese
- * din contul workerului. */
+ * din contul workerului. Un verdict `unresolved` este permis numai când scriptul
+ * gate fixat a emis receiptul său final și podman a propagat exact exit 1/2. */
 function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
-  const source = `${tailText(logPath)}\n${error instanceof Error ? error.message : ''}`
-  if (/credit balance is too low|requires more credits|insufficient.{0,30}credit|insufficient_quota|credit_balance_exhausted|project_spend_limit_exceeded|organization_spend_limit_exceeded|payment required|\b402\b/i.test(source)) return 'provider_credit'
-  if (/invalid x-api-key|authentication_error|api key not valid|not logged in|unauthorized|\b(?:401|403)\b.{0,80}(?:key|token|auth)/i.test(source)) return 'provider_auth'
+  const privateLog = tailText(logPath)
+  const errorText = error instanceof Error ? `${error.name}: ${error.message}` : ''
+  const source = `${privateLog}\n${errorText}`
   if (result.timedOut || /timed out|timeout|timp.{0,20}depăș/i.test(source)) return 'execution_timeout'
-  if (/no changes|working tree clean|fără nicio modificare|nu ai scris nimic/i.test(source)) return 'no_changes'
-  if (/model.{0,80}(?:unavailable|invalid|refused)|provider.{0,80}(?:unavailable|error)|brain unavailable|răspuns gol/i.test(source)) return 'brain_unavailable'
-  if (phase === 'gate' && /(?:test|vitest|jest|pytest|assert).{0,120}(?:failed|failure|error|picat)/i.test(source)) return 'test_failure'
-  if (phase === 'gate') return 'quality_gate_failure'
-  // Codul DB rămâne stabil pentru compatibilitatea cozii existente, chiar dacă
-  // executorul real este acum OpenCode/Qwen local.
-  if (phase === 'opencode') return 'codex_exec_failed'
+  if (
+    phase === 'opencode'
+    && /(?:llama\.cpp|qwen3?\b|127\.0\.0\.1:24080|ECONNREFUSED|ECONNRESET|connection refused|failed to connect|fetch failed|model.{0,80}(?:unavailable|invalid|refused|not found)|brain unavailable|răspuns gol)/i.test(source)
+  ) return 'brain_unavailable'
+  if (phase === 'gate') {
+    if (
+      error instanceof Error
+      || result.aborted === true
+      || result.outputExceeded === true
+      || result.signal != null
+      || [125, 126, 127, 137].includes(result.code)
+      || GATE_INFRASTRUCTURE_FAILURE.test(source)
+      || !measuredGateVerdict(privateLog, result)
+    ) return 'worker_internal_failure'
+    if (GATE_TEST_FAILURE.test(privateLog)) return 'test_failure'
+    if (GATE_QUALITY_FAILURE.test(privateLog)) return 'quality_gate_failure'
+    return 'worker_internal_failure'
+  }
+  // Constructorul local nu emite coduri de autentificare/credit ale unui
+  // furnizor cloud. Un eșec OpenCode fără o dovadă locală mai precisă
+  // rămâne intern până la citirea jurnalului privat.
+  if (phase === 'opencode') return 'worker_internal_failure'
   return 'worker_internal_failure'
 }
 
 function assertWorkerFailureCode(code) {
   if (!WORKER_FAILURE_CODES.has(code)) fail('Cod de eroare worker necanonic')
   return code
+}
+
+function assertWorkerUnresolvedReason(reason) {
+  if (!WORKER_UNRESOLVED_REASONS.has(reason)) fail('Motiv unresolved worker necanonic')
+  return reason
+}
+
+function classifyWorkerOutcome(logPath, phase, result = {}, error = null) {
+  const code = classifyWorkerFailure(logPath, phase, result, error)
+  return WORKER_UNRESOLVED_REASONS.has(code)
+    ? { event: 'unresolved', reason: assertWorkerUnresolvedReason(code) }
+    : { event: 'failed', code: assertWorkerFailureCode(code) }
 }
 
 function assertLoopbackApi() {
@@ -256,16 +299,18 @@ function gitSupervisorEnv() {
   }
 }
 
-export function openCodeExecArgs(jobDir, orderPath) {
+export function openCodeExecArgs(jobDir, orderPath, model = OPENCODE_MODEL) {
   const worktree = resolve(jobDir)
   const order = resolve(orderPath)
   assertDescendant(JOBS, worktree, 'Worktree OpenCode')
   assertDescendant(JOBS, order, 'Ordin OpenCode')
+  if (![FAST_OPENCODE_MODEL, POWERFUL_OPENCODE_MODEL].includes(model)) fail('Modelul OpenCode solicitat nu aparține politicii Constructor')
+  const modelArgs = ['--model', model]
   return [
     '--pure',
     'run',
     OPENCODE_PROMPT,
-    '--model', OPENCODE_MODEL,
+    ...modelArgs,
     '--file', order,
   ]
 }
@@ -606,11 +651,52 @@ function exactOutput(command, args, cwd, env) {
   return String(result.stdout ?? '').trim()
 }
 
+function activeLocalModelId() {
+  const health = commandResult('/usr/bin/curl', [
+    '--fail', '--silent', '--show-error', '--max-time', '10', `${OPENCODE_BASE_URL.replace(/\/v1$/, '')}/health`,
+  ], undefined, openCodeParentEnv())
+  if (health.status !== 0) fail('Endpointul llama.cpp local nu este sănătos')
+  const models = commandResult('/usr/bin/curl', [
+    '--fail', '--silent', '--show-error', '--max-time', '30', `${OPENCODE_BASE_URL}/models`,
+  ], undefined, openCodeParentEnv())
+  if (models.status !== 0) fail('Endpointul llama.cpp local nu publică modelul activ')
+  let modelPayload
+  try {
+    modelPayload = JSON.parse(String(models.stdout ?? ''))
+  } catch {
+    fail('Răspunsul /v1/models al llama.cpp nu este JSON valid')
+  }
+  const modelIds = Array.isArray(modelPayload?.data)
+    ? modelPayload.data.map((item) => item?.id).filter((value) => typeof value === 'string')
+    : []
+  if (modelIds.length !== 1 || ![OPENCODE_MODEL_ID, POWERFUL_OPENCODE_MODEL_ID].includes(modelIds[0])) {
+    fail('Endpointul unic llama.cpp nu publică exact un model Constructor permis')
+  }
+  return modelIds[0]
+}
+
+function assertActiveLocalModel(expectedModelId) {
+  if (![OPENCODE_MODEL_ID, POWERFUL_OPENCODE_MODEL_ID].includes(expectedModelId)) {
+    fail('Modelul activ solicitat pentru verificare este invalid')
+  }
+  if (activeLocalModelId() !== expectedModelId) {
+    fail(`Endpointul unic llama.cpp nu are activ exclusiv modelul ${expectedModelId}`)
+  }
+  return true
+}
+
+function activeConstructorProfile() {
+  const modelId = activeLocalModelId()
+  return modelId === POWERFUL_OPENCODE_MODEL_ID
+    ? CONSTRUCTOR_MODEL_PROFILES.powerful
+    : CONSTRUCTOR_MODEL_PROFILES.fast
+}
+
 export function validateOpenCodeConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) fail('Configurația OpenCode este invalidă')
   if (config.autoupdate !== false || config.share !== 'disabled') fail('OpenCode trebuie să aibă update-ul și partajarea dezactivate')
-  if (config.model !== OPENCODE_MODEL || (config.small_model ?? config.model) !== OPENCODE_MODEL) {
-    fail('OpenCode nu folosește exclusiv modelul Qwen local fixat')
+  if (config.model !== FAST_OPENCODE_MODEL || (config.small_model ?? config.model) !== FAST_OPENCODE_MODEL) {
+    fail('OpenCode nu are modelul FAST local drept implicit unic')
   }
   if (!Array.isArray(config.enabled_providers) || config.enabled_providers.length !== 1 || config.enabled_providers[0] !== 'llama.cpp') {
     fail('OpenCode trebuie să aibă exclusiv providerul llama.cpp activ')
@@ -620,13 +706,14 @@ export function validateOpenCodeConfig(config) {
     fail('Configurația OpenCode conține provideri neautorizați')
   }
   const local = providers['llama.cpp']
+  const configuredModels = Object.keys(local?.models ?? {}).sort()
   if (
     !local
     || local.npm !== '@ai-sdk/openai-compatible'
     || local.options?.baseURL !== OPENCODE_BASE_URL
     || Object.hasOwn(local.options ?? {}, 'apiKey')
-    || !Object.hasOwn(local.models ?? {}, OPENCODE_MODEL_ID)
-  ) fail('Providerul OpenCode local nu corespunde endpointului llama.cpp fixat')
+    || configuredModels.join(',') !== [POWERFUL_OPENCODE_MODEL_ID, OPENCODE_MODEL_ID].sort().join(',')
+  ) fail('Providerul OpenCode nu are exact configurația duală FAST/POWERFUL pe endpointul llama.cpp unic')
   const permissions = config.permission
   for (const capability of ['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory']) {
     if (permissions?.[capability] !== 'allow') fail(`OpenCode nu are accesul complet cerut pentru ${capability}`)
@@ -634,9 +721,11 @@ export function validateOpenCodeConfig(config) {
   return true
 }
 
-function assertEnabledLayout() {
+function assertEnabledLayout(expectedModelId) {
   if (process.platform !== 'linux') fail('Execuția OpenCode este permisă numai pe Linux')
   if (process.getuid?.() === 0) fail('Supervisorul rulează necanonic ca root; OpenCode trebuie să escaladeze explicit prin sudo')
+  if (OPENCODE_MODEL !== FAST_OPENCODE_MODEL) fail('Modelul implicit al workerului trebuie să fie treapta FAST de 35B')
+  if (OPENCODE_BASE_URL !== 'http://127.0.0.1:24080/v1') fail('llama.cpp trebuie să rămână pe endpointul loopback unic fixat')
   const actual = {
     openCodeBin: OPENCODE_BIN,
     openCodeConfigHome: OPENCODE_CONFIG_HOME,
@@ -682,23 +771,7 @@ function assertEnabledLayout() {
 
   const version = exactOutput(OPENCODE_BIN, ['--version'], undefined, openCodeParentEnv())
   if (version !== OPENCODE_VERSION) fail(`Versiunea OpenCode trebuie să fie exact ${OPENCODE_VERSION}`)
-  const health = commandResult('/usr/bin/curl', [
-    '--fail', '--silent', '--show-error', '--max-time', '10', `${OPENCODE_BASE_URL.replace(/\/v1$/, '')}/health`,
-  ], undefined, openCodeParentEnv())
-  if (health.status !== 0) fail('Endpointul llama.cpp local nu este sănătos')
-  const models = commandResult('/usr/bin/curl', [
-    '--fail', '--silent', '--show-error', '--max-time', '30', `${OPENCODE_BASE_URL}/models`,
-  ], undefined, openCodeParentEnv())
-  if (models.status !== 0) fail('Endpointul llama.cpp local nu publică modelele')
-  let modelPayload
-  try {
-    modelPayload = JSON.parse(String(models.stdout ?? ''))
-  } catch {
-    fail('Răspunsul /v1/models al llama.cpp nu este JSON valid')
-  }
-  if (!Array.isArray(modelPayload?.data) || !modelPayload.data.some((item) => item?.id === OPENCODE_MODEL_ID)) {
-    fail('Modelul Qwen local fixat nu este încărcat în llama.cpp')
-  }
+  assertActiveLocalModel(expectedModelId)
 
   if (!existsSync(REPO) || !commandOk('/usr/bin/git', ['rev-parse', '--verify', 'origin/master^{commit}'], REPO, gitSupervisorEnv())) {
     fail('Clona dedicată nu are ref-ul origin/master verificabil')
@@ -730,13 +803,17 @@ function assertEnabledLayout() {
 }
 
 async function preflight() {
-  if (!EXEC_ENABLED) return 'Execuția locală este dezactivată explicit'
+  if (!EXEC_ENABLED) return { problem: 'Execuția locală este dezactivată explicit', profile: null }
   try {
-    assertEnabledLayout()
+    const profile = activeConstructorProfile()
+    assertEnabledLayout(profile.modelId)
+    return { problem: null, profile }
   } catch (error) {
-    return error instanceof Error ? error.message : 'Preflightul OpenCode a eșuat'
+    return {
+      problem: error instanceof Error ? error.message : 'Preflightul OpenCode a eșuat',
+      profile: null,
+    }
   }
-  return null
 }
 
 export function runSucceeded(result) {
@@ -1037,7 +1114,11 @@ function emitClaimProof(state) {
 async function prepareWorkerClaim(secret, dependencies = {}) {
   const cleanup = dependencies.cleanup ?? cleanupRetiredHandoffs
   const reconcile = dependencies.reconcile ?? reconcilePendingHandoffs
-  const claim = dependencies.claim ?? ((value) => post(value, '/api/internal/codex/jobs/claim', {}))
+  const claim = dependencies.claim ?? ((value) => {
+    const profile = dependencies.profile
+    if (profile !== 'fast' && profile !== 'powerful') fail('Profilul claimului Constructor nu este valid')
+    return post(value, '/api/internal/codex/jobs/claim', { profile })
+  })
   const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
   try {
     cleanup()
@@ -1060,7 +1141,7 @@ async function prepareWorkerClaim(secret, dependencies = {}) {
       return null
     }
     const job = response.job
-    await reportHeartbeat(secret, 'busy', 'Workerul a revendicat un ordin și îl pregătește în worktree-ul izolat')
+    await reportHeartbeat(secret, 'busy', 'Workerul a revendicat un ordin și îl pregătește în worktree-ul dedicat')
     emitClaimProof('claimed')
     return job
   } catch (error) {
@@ -1077,11 +1158,11 @@ async function acceptWorkerClaim(secret, job, dependencies = {}) {
   const report = dependencies.report ?? reportEvent
   const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
   try {
-    await report(secret, job.jobId, { taskId: job.taskId, event: 'accepted', progress: 'Ordin acceptat în worktree-ul izolat' })
+    await report(secret, job.jobId, { taskId: job.taskId, event: 'accepted', progress: 'Ordin acceptat în worktree-ul dedicat' })
   } catch (error) {
     await degradedWithoutMasking(
       secret,
-      'Ordinul a fost revendicat, dar evenimentul accepted nu a putut fi persistat; watchdogul va reconcilia jobul',
+      'Ordinul a fost revendicat, dar evenimentul accepted nu a putut fi persistat; watchdogul îl va închide tehnic fără retry',
       reportHeartbeat,
     )
     throw error
@@ -1120,17 +1201,110 @@ function startJobLease(secret, jobId, taskId, progress) {
   return stop
 }
 
+function worktreeHasChanges(jobDir) {
+  const status = gitResult(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--'], jobDir, WORKER_LOG_MAX_BYTES)
+  if (status.status !== 0 || status.signal !== null || status.error) fail('Nu am putut verifica modificările worktree-ului')
+  return Buffer.byteLength(String(status.stdout ?? ''), 'utf8') > 0
+}
+
+async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, ownershipScope, turn) {
+  const logPrefix = `model-${turn.tier}`
+  const executorLogPath = join(jobStateDir, `${logPrefix}-opencode.log`)
+  const gateLogPath = join(jobStateDir, `${logPrefix}-gates.log`)
+  const stopExecLease = startJobLease(
+    secret,
+    jobId,
+    taskId,
+    `Model selectat manual ${turn.label}: OpenCode execută ordinul`,
+  )
+  let executorAttempted = false
+  let executorResult = null
+  let executorError = null
+  try {
+    executorAttempted = true
+    try {
+      executorResult = await runLogged(
+        REQUIRED_LAYOUT.sudo,
+        rootOpenCodeArgs(openCodeExecArgs(jobDir, orderPath, turn.model), jobDir),
+        jobDir,
+        executorLogPath,
+        openCodeParentEnv(),
+        null,
+        30 * 60_000,
+        stopExecLease.signal,
+        true,
+      )
+    } catch (error) {
+      executorError = error
+    }
+  } finally {
+    try {
+      await stopExecLease()
+    } finally {
+      if (executorAttempted && existsSync(jobStateDir)) restoreJobOwnership(jobStateDir, ownershipScope)
+    }
+  }
+  if (executorError || !runSucceeded(executorResult)) {
+    return {
+      ok: false,
+      phase: 'opencode',
+      ...classifyWorkerOutcome(executorLogPath, 'opencode', executorResult ?? {}, executorError),
+      logPath: executorLogPath,
+    }
+  }
+  if (!worktreeHasChanges(jobDir)) {
+    return { ok: false, event: 'unresolved', phase: 'opencode', reason: 'no_changes', logPath: executorLogPath }
+  }
+
+  const stopGateLease = startJobLease(
+    secret,
+    jobId,
+    taskId,
+    `Model selectat manual ${turn.label}: verific porțile locale în imaginea fixată`,
+  )
+  let gateResult = null
+  let gateError = null
+  try {
+    try {
+      gateResult = await runLogged(
+        REQUIRED_LAYOUT.podman,
+        gateContainerArgs(jobDir),
+        jobDir,
+        gateLogPath,
+        podmanSupervisorEnv(),
+        null,
+        45 * 60_000,
+        stopGateLease.signal,
+      )
+    } catch (error) {
+      gateError = error
+    }
+  } finally {
+    await stopGateLease()
+  }
+  if (gateError || !runSucceeded(gateResult)) {
+    return {
+      ok: false,
+      phase: 'gate',
+      ...classifyWorkerOutcome(gateLogPath, 'gate', gateResult ?? {}, gateError),
+      logPath: gateLogPath,
+    }
+  }
+  return { ok: true, phase: 'gate', code: null, logPath: gateLogPath }
+}
+
 async function runOnce() {
   assertLoopbackApi()
   const secret = loadSecret()
-  const problem = await preflight()
+  const { problem, profile } = await preflight()
   if (problem) {
     await heartbeat(secret, 'setup_required', problem)
     if (!EXEC_ENABLED) return
     fail(problem)
   }
+  if (!profile) fail('Preflightul nu a furnizat modelul selectat manual')
 
-  const claimed = await prepareWorkerClaim(secret)
+  const claimed = await prepareWorkerClaim(secret, { profile: profile.tier })
   if (!claimed) return
   const { jobId, taskId, order, recoveryCode } = claimed
   const effectiveOrder = recoveryCode
@@ -1160,64 +1334,42 @@ async function runOnce() {
     const baseCommit = exactOutput('/usr/bin/git', ['rev-parse', 'HEAD'], jobDir, gitSupervisorEnv())
     const expectedCommit = exactOutput('/usr/bin/git', ['rev-parse', 'origin/master^{commit}'], REPO, gitSupervisorEnv())
     if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== expectedCommit) fail('Worktree-ul nu corespunde exact origin/master')
-    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-local-qwen', createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
-    logPath = join(jobStateDir, 'worker.log')
+    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-local-qwen', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
     const orderPath = join(jobStateDir, 'order.md')
     writeFileSync(orderPath, `${effectiveOrder}\n`, { flag: 'wx', mode: 0o600 })
 
     const ownershipScope = rootExecutorOwnershipScope(jobDir)
-    const stopExecLease = startJobLease(secret, jobId, taskId, 'OpenCode/Qwen local execută ordinul cu acces complet la host')
-    let executorAttempted = false
-    let result
-    try {
-      executorAttempted = true
-      result = await runLogged(
-        REQUIRED_LAYOUT.sudo,
-        rootOpenCodeArgs(openCodeExecArgs(jobDir, orderPath), jobDir),
-        jobDir,
-        logPath,
-        openCodeParentEnv(),
-        null,
-        30 * 60_000,
-        stopExecLease.signal,
-        true,
-      )
-    } finally {
-      try {
-        await stopExecLease()
-      } finally {
-        if (executorAttempted && existsSync(jobStateDir)) restoreJobOwnership(jobStateDir, ownershipScope)
+    const finalOutcome = await runConstructorTurn(
+      secret,
+      jobId,
+      taskId,
+      jobStateDir,
+      jobDir,
+      orderPath,
+      ownershipScope,
+      profile,
+    )
+    logPath = finalOutcome.logPath
+    if (!finalOutcome.ok) {
+      if (finalOutcome.event === 'unresolved') {
+        await reportEvent(secret, jobId, {
+          taskId,
+          event: 'unresolved',
+          reason: assertWorkerUnresolvedReason(finalOutcome.reason),
+          profile: profile.tier,
+        })
+      } else {
+        const code = assertWorkerFailureCode(finalOutcome.code)
+        await reportEvent(secret, jobId, { taskId, event: 'failed', code, profile: profile.tier })
       }
-    }
-    if (!runSucceeded(result)) {
-      const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'opencode', result))
-      await reportEvent(secret, jobId, { taskId, event: 'failed', code })
       failureReported = true
-      await heartbeat(secret, 'degraded', 'OpenCode/Qwen local a eșuat; consultă jurnalul privat al worktree-ului')
-      return
-    }
-
-    const stopGateLease = startJobLease(secret, jobId, taskId, 'Rulez porțile în imaginea offline fixată prin digest')
-    let gate
-    try {
-      gate = await runLogged(
-        REQUIRED_LAYOUT.podman,
-        gateContainerArgs(jobDir),
-        jobDir,
-        logPath,
-        podmanSupervisorEnv(),
-        null,
-        45 * 60_000,
-        stopGateLease.signal,
+      await heartbeat(
+        secret,
+        'degraded',
+        finalOutcome.event === 'unresolved'
+          ? `${profile.label} nu a produs un rezultat publicabil; ordinul rămâne nerezolvat, fără comutare sau retry automat`
+          : `Execuția cu ${profile.label} s-a oprit tehnic; cauza nu este clasificată drept insuficiență de model`,
       )
-    } finally {
-      await stopGateLease()
-    }
-    if (!runSucceeded(gate)) {
-      const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'gate', gate))
-      await reportEvent(secret, jobId, { taskId, event: 'failed', code })
-      failureReported = true
-      await heartbeat(secret, 'degraded', 'Imaginea offline de porți a eșuat; consultă jurnalul privat')
       return
     }
     const handoff = publishHandoff(jobDir, { jobId, taskId, baseCommit })
@@ -1237,7 +1389,7 @@ async function runOnce() {
     if (error instanceof HandoffDurabilityUncertainError) handoffMaterialized = true
     if (!failureReported && !handoffMaterialized) {
       const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'internal', {}, error))
-      await reportEvent(secret, jobId, { taskId, event: 'failed', code }).catch(() => undefined)
+      await reportEvent(secret, jobId, { taskId, event: 'failed', code, profile: profile.tier }).catch(() => undefined)
     }
     throw error
   } finally {
@@ -1252,8 +1404,9 @@ async function runOnce() {
 }
 
 async function executorSmoke() {
-  const problem = await preflight()
+  const { problem, profile } = await preflight()
   if (problem) fail(problem)
+  if (!profile) fail('Preflightul smoke nu a furnizat modelul selectat manual')
   mkdirSync(JOBS, { recursive: true, mode: 0o700 })
   const smokeStateDir = mkdtempSync(join(JOBS, '.opencode-smoke-'))
   const smokeDir = join(smokeStateDir, 'worktree')
@@ -1306,7 +1459,7 @@ async function executorSmoke() {
       }
       result = await runLogged(
         REQUIRED_LAYOUT.sudo,
-        rootOpenCodeArgs(openCodeExecArgs(smokeDir, orderPath), smokeDir),
+        rootOpenCodeArgs(openCodeExecArgs(smokeDir, orderPath, profile.model), smokeDir),
         smokeDir,
         logPath,
         openCodeParentEnv(),
@@ -1355,6 +1508,13 @@ async function transportSmoke() {
 }
 
 async function selfTest() {
+  if (OPENCODE_MODEL !== FAST_OPENCODE_MODEL) fail('Self-testul cere modelul FAST drept implicit')
+  if (
+    CONSTRUCTOR_MODEL_PROFILES.fast.model !== FAST_OPENCODE_MODEL
+    || CONSTRUCTOR_MODEL_PROFILES.fast.modelId !== OPENCODE_MODEL_ID
+    || CONSTRUCTOR_MODEL_PROFILES.powerful.model !== POWERFUL_OPENCODE_MODEL
+    || CONSTRUCTOR_MODEL_PROFILES.powerful.modelId !== POWERFUL_OPENCODE_MODEL_ID
+  ) fail('Catalogul modelelor selectabile manual diferă de politica Constructor')
   const body = { z: 1, a: { y: true, x: null }, b: [2, 'q'] }
   const canonical = canonicalJson(body)
   if (canonical !== '{"a":{"x":null,"y":true},"b":[2,"q"],"z":1}') fail('canonicalJson diferă de contract')
@@ -1383,6 +1543,12 @@ async function selfTest() {
     || args[6] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
     || args.some((value) => ['--attach', '--auto', '--dir', 'codex', 'login'].includes(value))
   ) fail('Argumentele OpenCode nu fixează execuția locală și ordinul privat')
+  const powerfulArgs = openCodeExecArgs(
+    '/var/lib/kelion-codex/jobs/codex-test/worktree',
+    '/var/lib/kelion-codex/jobs/codex-test/order.md',
+    POWERFUL_OPENCODE_MODEL,
+  )
+  if (powerfulArgs[4] !== 'llama.cpp/qwen3.5-122b-a10b-local') fail('Selecția manuală POWERFUL nu fixează modelul local 122B')
   const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')
   if (
     rootArgs.slice(0, 6).join(' ') !== '-n -u root -- /usr/bin/env -i'
@@ -1404,7 +1570,10 @@ async function selfTest() {
       'llama.cpp': {
         npm: '@ai-sdk/openai-compatible',
         options: { baseURL: 'http://127.0.0.1:24080/v1' },
-        models: { 'qwen3.6-35b-a3b-local': {} },
+        models: {
+          'qwen3.6-35b-a3b-local': {},
+          'qwen3.5-122b-a10b-local': {},
+        },
       },
     },
     permission: Object.fromEntries(['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory'].map((key) => [key, 'allow'])),
@@ -1417,6 +1586,21 @@ async function selfTest() {
     externalProviderRejected = true
   }
   if (!externalProviderRejected) fail('Configurația OpenCode acceptă un provider extern')
+  let incompleteDualConfigRejected = false
+  try {
+    validateOpenCodeConfig({
+      ...validOpenCodeConfig,
+      provider: {
+        'llama.cpp': {
+          ...validOpenCodeConfig.provider['llama.cpp'],
+          models: { 'qwen3.6-35b-a3b-local': {} },
+        },
+      },
+    })
+  } catch {
+    incompleteDualConfigRejected = true
+  }
+  if (!incompleteDualConfigRejected) fail('Configurația OpenCode acceptă lipsa treptei POWERFUL')
   const gateArgs = gateContainerArgs(
     '/var/lib/kelion-codex/jobs/codex-test/worktree',
     'ghcr.io/example/repository/codex-gates@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -1448,6 +1632,18 @@ async function selfTest() {
   for (const code of WORKER_FAILURE_CODES) {
     if (assertWorkerFailureCode(code) !== code) fail('Catalog worker failure inconsistent')
   }
+  for (const reason of WORKER_UNRESOLVED_REASONS) {
+    if (assertWorkerUnresolvedReason(reason) !== reason) fail('Catalog worker unresolved inconsistent')
+  }
+  for (const retiredCode of ['provider_auth', 'provider_credit', 'codex_exec_failed', 'no_changes', 'test_failure', 'quality_gate_failure']) {
+    let rejected = false
+    try {
+      assertWorkerFailureCode(retiredCode)
+    } catch {
+      rejected = true
+    }
+    if (!rejected) fail(`Catalogul activ acceptă încă un cod retras: ${retiredCode}`)
+  }
   const successfulRun = { code: 0, signal: null, timedOut: false, aborted: false, outputExceeded: false }
   if (!runSucceeded(successfulRun)) fail('Rezultatul canonic reușit este refuzat')
   for (const rejectedRun of [
@@ -1459,14 +1655,76 @@ async function selfTest() {
     if (runSucceeded(rejectedRun)) fail('Rezultatul ambiguu al unei execuții este acceptat ca succes')
   }
   if (classifyWorkerFailure(null, 'gate', { timedOut: true }) !== 'execution_timeout') fail('Timeout worker neclasificat')
-  for (const providerCode of [
-    'insufficient_quota',
-    'credit_balance_exhausted',
-    'project_spend_limit_exceeded',
-    'organization_spend_limit_exceeded',
+  const timedOutOutcome = classifyWorkerOutcome(null, 'gate', { timedOut: true })
+  if (timedOutOutcome.event !== 'failed' || timedOutOutcome.code !== 'execution_timeout') fail('Timeout-ul gate nu rămâne tehnic')
+  const gateClassificationDir = mkdtempSync('/tmp/kelion-worker-gate-classification-')
+  try {
+    const classifiedGate = (name, output, result, error = null) => {
+      const path = join(gateClassificationDir, `${name}.log`)
+      writeFileSync(path, output, { mode: 0o600 })
+      return classifyWorkerOutcome(path, 'gate', result, error)
+    }
+    const cleanResult = (code) => ({ code, signal: null, timedOut: false, aborted: false, outputExceeded: false })
+    const testOutcome = classifiedGate(
+      'test-failure',
+      'codex-gates: START schema=1\nFAIL src/example.test.ts: AssertionError\ncodex-gates: VERDICT schema=1 exit=1\n',
+      cleanResult(1),
+    )
+    if (testOutcome.event !== 'unresolved' || testOutcome.reason !== 'test_failure') fail('Gate-ul de teste măsurat nu devine unresolved bounded')
+    const qualityOutcome = classifiedGate(
+      'quality-failure',
+      'codex-gates: START schema=1\nerror TS2322: Type mismatch\ncodex-gates: VERDICT schema=1 exit=2\n',
+      cleanResult(2),
+    )
+    if (qualityOutcome.event !== 'unresolved' || qualityOutcome.reason !== 'quality_gate_failure') fail('Gate-ul de calitate măsurat nu devine unresolved bounded')
+    const staticQualityOutcome = classifiedGate(
+      'static-quality-failure',
+      'codex-gates: START schema=1\nRUTE DUBLATE (1):\n  GET /api/x\ncodex-gates: VERDICT schema=1 exit=1\n',
+      cleanResult(1),
+    )
+    if (staticQualityOutcome.event !== 'unresolved' || staticQualityOutcome.reason !== 'quality_gate_failure') fail('Poarta statică bounded nu devine unresolved')
+
+    const infrastructureFailures = [
+      ['spawn-enoent', '', cleanResult(1), Object.assign(new Error('spawn /usr/bin/podman ENOENT'), { code: 'ENOENT' })],
+      ['spawn-eacces', '', cleanResult(1), Object.assign(new Error('spawn /usr/bin/podman EACCES'), { code: 'EACCES' })],
+      ['podman-125', 'Error: container runtime unavailable\n', cleanResult(125), null],
+      ['sigkill', 'codex-gates: START schema=1\n', { ...cleanResult(1), signal: 'SIGKILL' }, null],
+      ['oom-exit', 'codex-gates: START schema=1\nKilled process: out of memory\n', cleanResult(137), null],
+      ['permission', 'codex-gates: START schema=1\npermission denied\ncodex-gates: VERDICT schema=1 exit=1\n', cleanResult(1), null],
+      ['disk-full', 'codex-gates: START schema=1\nENOSPC: no space left on device\ncodex-gates: VERDICT schema=1 exit=1\n', cleanResult(1), null],
+      ['missing-verdict', 'vitest failed: AssertionError\n', cleanResult(1), null],
+      ['module-not-found', 'codex-gates: START schema=1\nError: MODULE_NOT_FOUND @ gate dependency\ncodex-gates: VERDICT schema=1 exit=1\n', cleanResult(1), null],
+      ['unknown-receipt', 'codex-gates: START schema=1\nrunner stopped for an unclassified reason\ncodex-gates: VERDICT schema=1 exit=2\n', cleanResult(2), null],
+      ['aborted', 'codex-gates: START schema=1\n', { ...cleanResult(1), aborted: true }, null],
+      ['output-overflow', 'codex-gates: START schema=1\n', { ...cleanResult(1), outputExceeded: true }, null],
+    ]
+    for (const [name, output, result, error] of infrastructureFailures) {
+      const outcome = classifiedGate(name, output, result, error)
+      if (outcome.event !== 'failed' || outcome.code !== 'worker_internal_failure') {
+        fail(`Eșecul de infrastructură gate este recomandat fals ca model insuficient: ${name}`)
+      }
+    }
+  } finally {
+    rmSync(gateClassificationDir, { recursive: true, force: true })
+  }
+  if (classifyWorkerOutcome(null, 'opencode', { code: 1 }, new Error('no changes')).code !== 'worker_internal_failure') {
+    fail('Textul unui exit OpenCode eșuat este confundat cu verdictul măsurat unresolved')
+  }
+  for (const localFailure of [
+    'connect ECONNREFUSED 127.0.0.1:24080',
+    'llama.cpp model qwen3.6-35b-a3b-local unavailable',
+    'fetch failed while contacting Qwen3',
   ]) {
-    if (classifyWorkerFailure(null, 'opencode', {}, new Error(providerCode)) !== 'provider_credit') {
-      fail(`Codul live ${providerCode} nu este clasificat provider_credit`)
+    if (classifyWorkerFailure(null, 'opencode', {}, new Error(localFailure)) !== 'brain_unavailable') {
+      fail(`Indisponibilitatea locală nu este clasificată brain_unavailable: ${localFailure}`)
+    }
+  }
+  for (const obsoleteCloudFailure of [
+    'invalid x-api-key authentication_error',
+    'credit_balance_exhausted',
+  ]) {
+    if (classifyWorkerFailure(null, 'opencode', {}, new Error(obsoleteCloudFailure)) !== 'worker_internal_failure') {
+      fail('Executorul local emite încă o taxonomie cloud')
     }
   }
 
@@ -1693,9 +1951,10 @@ async function selfTest() {
 }
 
 async function preflightOnly() {
-  const problem = await preflight()
+  const { problem, profile } = await preflight()
   if (problem) fail(problem)
-  process.stdout.write(`opencode ${OPENCODE_VERSION}\nopencode-local-full-access: TRECE\n`)
+  if (!profile) fail('Preflightul nu a furnizat modelul selectat manual')
+  process.stdout.write(`opencode ${OPENCODE_VERSION}\nmodel=${profile.modelId}\nopencode-local-full-access: TRECE\n`)
 }
 
 const mode = process.argv[2] ?? '--once'

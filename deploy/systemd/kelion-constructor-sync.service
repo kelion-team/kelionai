@@ -1,9 +1,10 @@
 [Unit]
-Description=Synchronize the private Constructor source before Codex execution
+Description=Synchronize the private Constructor source before local OpenCode execution
 After=network-online.target kelion-runtime-config-recovery.service
 Wants=network-online.target
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
 
 [Service]
 Type=oneshot

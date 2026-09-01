@@ -15,13 +15,13 @@ const continuity = {
   retry: { mode: 'manual', attempts: 1 },
   finalProof: { complete: false, commit: null, liveVersion: null },
   progress: { percent: null, completed: 1, total: 7, currentStage: 'Failed', resolved: false, source: 'constructor_activity_events' },
-  activity: [], eventCount: 1,
+  activity: [], eventCount: 1, modelOutcome: null,
 }
 
 const job = {
   id: 7, status: 'failed', constructorStage: 'failed', deletable: true, retryable: true,
   orderText: 'Fix the complete Constructor flow', nume: 'Fix flow', branch: null, prUrl: null,
-  tokens: 0, brain: 'codex-worker', updatedAt: '2026-08-26T12:00:00.000Z', progress: 'failed',
+  tokens: 0, brain: 'OpenCode + Qwen local (llama.cpp)', updatedAt: '2026-08-26T12:00:00.000Z', progress: 'failed',
   pct: null, continuity, workCard: null,
 }
 
@@ -39,6 +39,28 @@ describe('Admin Constructor contracts fail closed', () => {
     expect(parseAdminConstructorSnapshot({ ...readyChain, acceptingWork: false, jobs: [] })).toBeNull()
     expect(parseAdminConstructorIntake({ ...readyChain, ok: true, id: 9, deduplicated: false })?.id).toBe(9)
     expect(parseAdminConstructorIntake({ ...readyChain, id: 9, deduplicated: false })).toBeNull()
+  })
+
+  it('acceptă recomandarea manuală explicită numai pe un job failed', () => {
+    const modelOutcome = {
+      profile: 'fast',
+      result: 'unresolved',
+      reasonCode: 'no_changes',
+      reason: 'Profilul rapid nu a produs o schimbare publicabilă.',
+      manualRecommendation: {
+        profile: 'powerful',
+        reasonCode: 'fast_result_not_publishable',
+        reason: 'Profilul puternic poate fi ales manual pentru o încercare separată.',
+      },
+    }
+    expect(parseAdminConstructorSnapshot({
+      ...readyChain,
+      jobs: [{ ...job, continuity: { ...continuity, modelOutcome } }],
+    })?.jobs[0].continuity?.modelOutcome).toEqual(modelOutcome)
+    expect(parseAdminConstructorSnapshot({
+      ...readyChain,
+      jobs: [{ ...job, status: 'done', continuity: { ...continuity, modelOutcome } }],
+    })).toBeNull()
   })
 
   it('rejects malformed diagnostics, archives and release snapshots', () => {

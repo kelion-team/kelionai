@@ -63,6 +63,10 @@ jobs:
       - name: Teste pentru porțile statice
         run: |
           node --test \
+            .github/private-ai/benchmark-active-model.test.mjs \
+            .github/private-ai/finalize-private-ai-constructor.test.mjs \
+            .github/private-ai/install-private-ai.test.mjs \
+            .github/private-ai/upgrade-private-ai-max-model.test.mjs \
             scripts/verifica-butoane.test.mjs \
             scripts/verifica-exporturi.test.mjs \
             scripts/verifica-hardcodari.test.mjs \
@@ -71,9 +75,12 @@ jobs:
             scripts/verifica-contract-deploy.test.mjs \
             scripts/release-train-preflight.test.mjs \
             scripts/release-train-workflow.test.mjs \
+            scripts/vps-recovery-workflow.test.mjs \
             scripts/vps-pr-remediator.test.mjs \
             scripts/vps-release-verifier.test.mjs \
             ios/appstore-build.test.mjs \
+            deploy/constructor-model-control.test.mjs \
+            deploy/constructor-model-switch.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
             deploy/lib/backup-schedule.test.mjs \
             deploy/lib/restore-verified-backup.test.mjs \
@@ -196,7 +203,7 @@ jobs:
           sudo install -d -o 999 -g 999 -m 0700 /tmp/kelion-ci-postgres/data
           sudo install -d -o 999 -g 999 -m 0775 /tmp/kelion-ci-postgres/socket
           umask 077
-          for name in session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret migration-backup-proof-key; do
+          for name in session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-model-control-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret migration-backup-proof-key; do
             openssl rand -hex 32 > "/tmp/kelion-ci-secrets/$name"
           done
           for name in revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
@@ -235,6 +242,9 @@ jobs:
           GOOGLE_REDIRECT_URI=https://ci.invalid/auth/google/callback
           CODEX_WORKER_ENABLED=0
           CODEX_WORKER_SECRET_FILE=/run/secrets/codex-worker-secret
+          CONSTRUCTOR_MODEL_CONTROL_ENABLED=1
+          CONSTRUCTOR_MODEL_CONTROL_SOCKET=/run/kelion-constructor-model-control/control.sock
+          CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE=/run/secrets/constructor-model-control-secret
           CONSTRUCTOR_PUBLISHER_ENABLED=0
           CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret
           CONSTRUCTOR_RELEASE_ENABLED=0

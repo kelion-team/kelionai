@@ -1,20 +1,14 @@
 name: private-ai-install-repair
 
 on:
-  push:
-    branches:
-      - ops/private-ai-install-20260830
-    paths:
-      - .github/private-ai/install-private-ai.sh
-      - .github/workflows/private-ai-repair.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: private-ai-install-repair
-  cancel-in-progress: true
+  group: production-release
+  cancel-in-progress: false
 
 jobs:
   guard-source:
@@ -23,15 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validează sursa canonică fără secrete
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
 
   resume-install:
     needs: guard-source
@@ -46,17 +44,24 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Reia instalarea într-un serviciu detașat
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "${#VPS_HOST}" -le 253 ]
+          [[ "$VPS_HOST" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$VPS_HOST" != *..* ]]
           installer=.github/private-ai/install-private-ai.sh
           bash -n "$installer"
 
@@ -86,17 +91,44 @@ jobs:
           remote_upload="/root/private-ai-installer.upload.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
           scp "${ssh_opts[@]}" "$installer" "$VPS_USER@$VPS_HOST:$remote_upload"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
-            "$remote_upload" "$installer_sha" <<'REMOTE'
+            "$remote_upload" "$installer_sha" "$VPS_HOST" <<'REMOTE'
           set -Eeuo pipefail
           upload=$1
           expected=$2
+          access_host=$3
           [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          [ "${#access_host}" -le 253 ]
+          [[ "$access_host" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$access_host" != *..* ]]
           [ "$(sha256sum "$upload" | awk '{print $1}')" = "$expected" ]
+
+          # Acest repair este exclusiv bootstrap-ului Private-AI. După apariția
+          # oricărui artefact Constructor, restartul direct al LLM/web ar ocoli
+          # publication/model locks și contractul de selecție manuală.
+          constructor_artifacts=(
+            /etc/systemd/system/kelion-constructor-model-control.service
+            /opt/kelion-constructor/constructor-model-control.mjs
+            /opt/kelion-codex/codex-worker.mjs
+            /root/kelion/config/codex-worker.env
+            /root/kelion/runtime/constructor-deploy-quiesce.journal
+            /root/kelion/runtime/constructor-upgrade.journal
+            /root/kelion/runtime/constructor-max-model.journal
+            /root/kelion/runtime/constructor-reactivation.journal
+            /run/kelion/constructor-activation.pending
+          )
+          for constructor_artifact in "${constructor_artifacts[@]}"; do
+            [ ! -e "$constructor_artifact" ] && [ ! -L "$constructor_artifact" ] \
+              || { echo "CONSTRUCTOR_INSTALLED_REPAIR_REFUSED artifact=$constructor_artifact" >&2; exit 79; }
+          done
+          if systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1; then
+            echo 'CONSTRUCTOR_INSTALLED_REPAIR_REFUSED unit=kelion-constructor-model-control.service' >&2
+            exit 79
+          fi
 
           state=$(systemctl show private-ai-install-resume.service -p ActiveState --value 2>/dev/null || true)
           if [ "$state" = activating ] || [ "$state" = active ]; then
             current_exec=$(systemctl show private-ai-install-resume.service -p ExecStart --value 2>/dev/null || true)
-            if [[ "$current_exec" == *"/opt/private-ai/installer/${expected}.sh --resume-model"* ]]; then
+            if [[ "$current_exec" == *"/opt/private-ai/installer/${expected}.sh --resume-model ${access_host}"* ]]; then
               rm -f -- "$upload"
               printf 'DETACHED_INSTALL_ALREADY_RUNNING=yes STATE=%s SHA256=%s\n' "$state" "$expected"
               exit 0
@@ -210,7 +242,7 @@ jobs:
           [Service]
           Type=oneshot
           UMask=0077
-          ExecStart=/usr/bin/flock --nonblock /run/lock/private-ai-install-resume.lock $release --resume-model
+          ExecStart=/usr/bin/flock --nonblock /run/lock/private-ai-install-resume.lock $release --resume-model $access_host
           Restart=on-failure
           RestartSec=60
           TimeoutStartSec=12h

@@ -9,6 +9,41 @@ import test from 'node:test'
 const require = createRequire(import.meta.url)
 const ts = require('../backend/node_modules/typescript')
 
+const STATIC_GATE_TESTS = [
+  '.github/private-ai/benchmark-active-model.test.mjs',
+  '.github/private-ai/finalize-private-ai-constructor.test.mjs',
+  '.github/private-ai/install-private-ai.test.mjs',
+  '.github/private-ai/upgrade-private-ai-max-model.test.mjs',
+  'scripts/verifica-butoane.test.mjs',
+  'scripts/verifica-exporturi.test.mjs',
+  'scripts/verifica-hardcodari.test.mjs',
+  'scripts/verifica-migrari.test.mjs',
+  'scripts/inventar-audit.test.mjs',
+  'scripts/verifica-contract-deploy.test.mjs',
+  'scripts/release-train-preflight.test.mjs',
+  'scripts/release-train-workflow.test.mjs',
+  'scripts/vps-recovery-workflow.test.mjs',
+  'scripts/vps-pr-remediator.test.mjs',
+  'scripts/vps-release-verifier.test.mjs',
+  'ios/appstore-build.test.mjs',
+  'deploy/constructor-model-control.test.mjs',
+  'deploy/constructor-model-switch.test.mjs',
+  'deploy/lib/create-migration-proof.test.mjs',
+  'deploy/lib/backup-schedule.test.mjs',
+  'deploy/lib/restore-verified-backup.test.mjs',
+  'deploy/lib/caddy-security.test.mjs',
+  'deploy/lib/codex-boundary.test.mjs',
+  'deploy/lib/constructor-publication.test.mjs',
+  'deploy/lib/network-config.test.mjs',
+  'deploy/lib/compose-security.test.mjs',
+  'deploy/lib/release-rollback.test.mjs',
+  'deploy/lib/security-policy.test.mjs',
+]
+
+function staticGateTests(source) {
+  return [...source.matchAll(/[.A-Za-z0-9_/-]+[.]test[.]mjs/g)].map((match) => match[0])
+}
+
 const CRITICAL_APP_SUITES = [
   {
     id: 'release-proof',
@@ -268,6 +303,17 @@ test('every static gate invokes both release-train regression suites', async () 
     const source = await readFile(new URL(path, import.meta.url), 'utf8')
     assert.match(source, /scripts\/release-train-preflight\.test\.mjs/, path)
     assert.match(source, /scripts\/release-train-workflow\.test\.mjs/, path)
+  }
+})
+
+test('canonical CI and both local mirrors execute the exact same static test manifest', async () => {
+  for (const path of [
+    '../.github/workflows/pr-verify.yml',
+    '../deploy/gates/run-gates.sh',
+    '../deploy/porti-pr.sh',
+  ]) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8')
+    assert.deepEqual(staticGateTests(source), STATIC_GATE_TESTS, path)
   }
 })
 

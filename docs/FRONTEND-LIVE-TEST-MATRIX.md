@@ -16,6 +16,7 @@ Acest document este contractul curent de verificare, nu un istoric de decizii. T
 | --- | --- |
 | `main.tsx` | bootstrap web/native și înregistrare PWA permisă de runtime |
 | `App.tsx` | sesiune, mod offline, actualizare SW și rutare lazy |
+| `ConstructorDesktopApp.tsx` | shell desktop dedicat Constructorului, cu autentificare Google Admin și coada canonică partajată |
 | `index.css` | sistem vizual și layout responsive |
 | `assets/background-image.png` | fundal static |
 | `offline-kit.manifest.json` | inventarul pinuit al kitului offline |
@@ -37,7 +38,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
 | `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
 | `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
-| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, Codex, modele OpenAI) |
+| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, OpenCode/Qwen local, modele OpenAI ale produsului) |
 | `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |
@@ -180,11 +181,11 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | A07 | Gesturi | preview/enable/save | preview vizibil; stare revert la save failure |
 | A08 | Tokenuri/env | refresh | numai prezență/status, niciun secret în DOM/log |
 | A09 | Recovery | list/save/restore | eroare body afișată; mutații doar în staging |
-| A10 | Constructor | evaluate/send/cancel/retry/clean | worker Codex, status și progres reale; idempotency și autoritate server |
+| A10 | Constructor | evaluate/send/cancel/retry/clean | worker OpenCode/Qwen local, status și progres reale; idempotency și autoritate server |
 | A11 | Agent specializat | create | numai formular React → POST JSON `/api/enterprise/agent-nou`; fără consolă HTML paralelă |
 | A12 | Creier | afișare | OpenAI read-only; trepte din GET, fără selector/POST/KV mutabil |
-| A13 | Codex | heartbeat/setup/task | workerul reînnoiește cache-ul numai din `openai-project-key`, prin `codex login --with-api-key` pe stdin; cheia/fingerprintul/cache-ul nu intră în Kelion DOM/DB/log, task URL oficial noopener |
-| A14 | Codex | cost/capabilități | aceeași cheie project-scoped deservește backendul și Constructorul prin boundary-uri separate; Realtime/TTS/image/video rămân exclusiv server-side, cost intern separat și debit Kelion admin zero din `/balance` |
+| A13 | OpenCode local | heartbeat/setup/model | workerul dovedește OpenCode `1.18.25`, endpointul llama.cpp loopback și Qwen3.6-35B-A3B fixat; nu există cheie OpenAI, login/cache Codex, task URL extern sau secret AI în DOM/DB/log |
+| A14 | Separare AI | capabilități | Constructorul folosește numai Qwen local fără cheie ori cost cloud afișat; Realtime/TTS/image/video ale produsului rămân exclusiv server-side și debitul Kelion admin rămâne zero din `/balance` |
 | A15 | VPS/diagnostic | citire/autoverificare | status real, eșec explicit; fără restart/deploy VPS direct din browser |
 
 ## Matrice live — native și securitate
@@ -205,4 +206,4 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 
 Porțile obligatorii sunt: `npm test`, `npm run lint`, `npm run build`, `npm audit --omit=dev`, contractul butoane-rute, exporturi, hardcodări, creier unic, inventar/hash și scanare secrete. Testele unitare acoperă politicile offline, transport, native auth, XSS/iframe/playground, billing, idempotency, senzori și PWA.
 
-Aceste porți nu înlocuiesc probele live pentru cameră, microfon, OpenAI Realtime, WebGPU, instalarea reală a kitului de ~904 MB, browserul de sistem native, taskul privat Codex și fault-injection PostgreSQL pentru O12–O15. Pentru ele sunt necesare un browser/dispozitiv compatibil, backend de staging, conturi public/client/admin izolate și permisiuni explicite. Local este dovedită siguranța anti-dublare și redarea terminalului; un crash după marcajul efectului, dar înaintea rezultatului durabil, rămâne intenționat nedeterminat și cere verificare umană, nu reexecuție.
+Aceste porți nu înlocuiesc probele live pentru cameră, microfon, OpenAI Realtime, WebGPU, instalarea reală a kitului de ~904 MB, browserul de sistem native, execuția Constructorului OpenCode/Qwen pe Contabo și fault-injection PostgreSQL pentru O12–O15. Pentru ele sunt necesare un browser/dispozitiv compatibil, backend de staging, conturi public/client/admin izolate și permisiuni explicite. Local este dovedită siguranța anti-dublare și redarea terminalului; un crash după marcajul efectului, dar înaintea rezultatului durabil, rămâne intenționat nedeterminat și cere verificare umană, nu reexecuție.

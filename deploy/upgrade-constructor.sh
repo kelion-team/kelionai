@@ -11,6 +11,7 @@ constructor_upgrade_source_commit=${KELION_CONSTRUCTOR_SOURCE_COMMIT:-unknown}
 constructor_upgrade_recovery=${KELION_CONSTRUCTOR_RECOVERY:-invalid}
 cutover_stage=''
 activation_restore_started=0
+controller_commit_start_started=0
 
 set_constructor_upgrade_phase() {
   constructor_upgrade_phase=$1
@@ -35,9 +36,19 @@ cleanup_unpublished_stage() {
 }
 
 report_constructor_upgrade_failure() {
-  local status=$? cleanup_status=0
+  local status=$? cleanup_status=0 must_block_controller=0
   trap - ERR EXIT
   if [ "$status" = 0 ]; then return 0; fi
+  if [ -n "${UPGRADE_JOURNAL:-}" ] \
+    && { [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; }; then
+    must_block_controller=1
+  fi
+  [ "${controller_commit_start_started:-0}" = 0 ] || must_block_controller=1
+  if [ "$must_block_controller" = 1 ] \
+    && declare -F publish_upgrade_activation_pending >/dev/null 2>&1; then
+    publish_upgrade_activation_pending || cleanup_status=1
+    systemctl stop kelion-constructor-model-control.service >/dev/null 2>&1 || :
+  fi
   if [ "$activation_restore_started" = 1 ] \
     && [ -x /root/kelion/bin/runtime-config-cutover.sh ] \
     && [ -f /root/kelion/config/compose.production.yml ]; then
@@ -46,6 +57,11 @@ report_constructor_upgrade_failure() {
       /root/kelion/bin/runtime-config-cutover.sh \
       --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced \
       >/dev/null || cleanup_status=1
+  fi
+  if [ "$must_block_controller" = 1 ] \
+    && declare -F publish_upgrade_activation_pending >/dev/null 2>&1; then
+    publish_upgrade_activation_pending || cleanup_status=1
+    validate_model_controller_quiesced || cleanup_status=1
   fi
   cleanup_unpublished_stage || cleanup_status=1
   if [ "$cleanup_status" != 0 ]; then status=1; fi
@@ -77,11 +93,15 @@ for source in \
   "$repo_root/AGENTS.md" \
   "$repo_root/deploy/instaleaza-constructor.sh" \
   "$repo_root/deploy/codex-worker.mjs" \
+  "$repo_root/deploy/constructor-model-control.mjs" \
+  "$repo_root/deploy/constructor-model-switch.sh" \
+  "$repo_root/deploy/lib/service-auth.mjs" \
   "$repo_root/deploy/opencode-constructor.json" \
   "$repo_root/deploy/opencode-constructor-instructions.md" \
   "$repo_root/deploy/systemd/private-ai-web-full-access.conf" \
   "$repo_root/deploy/sudoers/kelion-codex-full-access" \
   "$repo_root/deploy/systemd/kelion-codex-worker.service" \
+  "$repo_root/deploy/systemd/kelion-constructor-model-control.service" \
   "$repo_root/deploy/lib/runtime-config-cutover.sh" \
   "$repo_root/deploy/compose.production.yml"; do
   [ -f "$source" ] && [ ! -L "$source" ] \
@@ -97,14 +117,17 @@ RUNTIME_ROOT=$ROOT/runtime
 CONFIG_ROOT=$ROOT/config
 PUBLICATION_LOCK=$ROOT/publicare.lock
 UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+MAX_MODEL_JOURNAL=$RUNTIME_ROOT/constructor-max-model.journal
 INSTALL_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
 RUNTIME_JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
 ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
 GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
 UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
+REACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-reactivation.journal
 DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 READY_ROOT=/run/kelion
 READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
+ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
 
 constructor_markers=(
   /etc/kelion/codex-worker.enabled
@@ -151,6 +174,92 @@ finally:
 PY
 }
 
+validate_upgrade_activation_pending() {
+  [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
+    && [ "$(realpath -e -- "$READY_ROOT")" = "$READY_ROOT" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$READY_ROOT")" = '0:0:755' ] \
+    && [ -f "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ACTIVATION_PENDING")" = '0:0:444:1' ] \
+    && [ "$(wc -l < "$ACTIVATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$ACTIVATION_PENDING"
+}
+
+publish_upgrade_activation_pending() {
+  local temporary
+  if [ -e "$READY_ROOT" ] || [ -L "$READY_ROOT" ]; then
+    [ -d "$READY_ROOT" ] && [ ! -L "$READY_ROOT" ] \
+      && [ "$(realpath -e -- "$READY_ROOT")" = "$READY_ROOT" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$READY_ROOT")" = '0:0:755' ] || return 1
+  else
+    install -d -o root -g root -m 0755 "$READY_ROOT" || return 1
+    fsync_path /run || return 1
+  fi
+  if [ -e "$READY_STAMP" ] || [ -L "$READY_STAMP" ]; then
+    [ -f "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$READY_STAMP")" = '0:0:444:1' ] || return 1
+    rm -f -- "$READY_STAMP" || return 1
+    fsync_path "$READY_ROOT" || return 1
+  fi
+  if [ -e "$ACTIVATION_PENDING" ] || [ -L "$ACTIVATION_PENDING" ]; then
+    validate_upgrade_activation_pending
+    return
+  fi
+  temporary=$(mktemp "$READY_ROOT/.constructor-activation.pending.XXXXXX") || return 1
+  if printf 'schema=1\n' > "$temporary" \
+    && chown root:root "$temporary" && chmod 0444 "$temporary" \
+    && fsync_path "$temporary" \
+    && mv -f -- "$temporary" "$ACTIVATION_PENDING" \
+    && fsync_path "$READY_ROOT" \
+    && validate_upgrade_activation_pending; then
+    return 0
+  fi
+  rm -f -- "$temporary"
+  return 1
+}
+
+clear_upgrade_activation_pending() {
+  validate_upgrade_activation_pending || return 1
+  rm -f -- "$ACTIVATION_PENDING" || return 1
+  fsync_path "$READY_ROOT"
+}
+
+validate_model_controller_quiesced() {
+  local unit=kelion-constructor-model-control.service state
+  systemctl cat "$unit" >/dev/null 2>&1 || return 1
+  state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+  case "$state" in inactive|failed) ;; *) return 1 ;; esac
+  [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] \
+    && [ ! -e /run/kelion-constructor-model-control/control.sock ] \
+    && [ ! -L /run/kelion-constructor-model-control/control.sock ]
+}
+
+start_model_controller_after_upgrade_commit() {
+  local helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ] \
+    && [ ! -e "$INSTALL_JOURNAL" ] && [ ! -L "$INSTALL_JOURNAL" ] \
+    && [ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+    && [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] || return 1
+  validate_reactivation_journal || return 1
+  [ -f "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] || return 1
+  [ -f "$helper" ] && [ ! -L "$helper" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ] || return 1
+  [ -f "$compose" ] && [ ! -L "$compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ] || return 1
+  # După unlink-ul outer, helperul generic adoptă markerul persistent, reface
+  # sincron controllerul+socketul și timerele, apoi îl șterge/fsync ultimul.
+  KELION_CUTOVER_LOCK_HELD=1 "$helper" --recover-only "$compose" || return 1
+  [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ]
+}
+
+validate_reactivation_journal() {
+  [ -f "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$REACTIVATION_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e '
+      .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+      (keys == ["kind","phase","schema"])
+    ' "$REACTIVATION_JOURNAL" >/dev/null
+}
+
 validate_marker_root() {
   [ -d /etc/kelion ] && [ ! -L /etc/kelion ] \
     && [ "$(realpath -e -- /etc/kelion)" = /etc/kelion ] \
@@ -164,6 +273,46 @@ validate_ready_stamp() {
     && [ "$(stat -Lc '%u:%g:%a:%h' "$READY_STAMP")" = '0:0:444:1' ] \
     && [ "$(wc -l < "$READY_STAMP")" -eq 1 ] \
     && grep -qx 'schema=1' "$READY_STAMP"
+}
+
+validate_reactivation_postcondition() {
+  local index marker timer socket=/run/kelion-constructor-model-control/control.sock
+  [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
+    && validate_ready_stamp \
+    && systemctl is-active --quiet kelion-constructor-model-control.service \
+    && [ -S "$socket" ] && [ ! -L "$socket" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$socket")" = '0:10050:660' ] || return 1
+  for index in "${!constructor_markers[@]}"; do
+    marker=${constructor_markers[$index]}; timer=${constructor_timers[$index]}
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+      [ -f "$marker" ] && [ ! -L "$marker" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ] \
+        && systemctl is-enabled --quiet "$timer" \
+        && systemctl is-active --quiet "$timer" || return 1
+    elif systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then
+      return 1
+    fi
+  done
+}
+
+recover_orphaned_reactivation_before_upgrade() {
+  local helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  validate_reactivation_journal || return 1
+  [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ] \
+    && [ ! -e "$INSTALL_JOURNAL" ] && [ ! -L "$INSTALL_JOURNAL" ] \
+    && [ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+    && [ ! -e "$RUNTIME_JOURNAL" ] && [ ! -L "$RUNTIME_JOURNAL" ] \
+    && [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ] \
+    && [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+    && [ ! -e "$DESTRUCTIVE_RECOVERY_JOURNAL" ] && [ ! -L "$DESTRUCTIVE_RECOVERY_JOURNAL" ] \
+    || return 1
+  [ -f "$helper" ] && [ ! -L "$helper" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ] \
+    && cmp -s -- "$repo_root/deploy/lib/runtime-config-cutover.sh" "$helper" \
+    && [ -f "$compose" ] && [ ! -L "$compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ] || return 1
+  KELION_CUTOVER_LOCK_HELD=1 "$helper" --recover-only "$compose" || return 1
+  validate_reactivation_postcondition
 }
 
 validate_unit_pending() {
@@ -403,15 +552,64 @@ restore_snapshot_markers() {
   fsync_path /etc/kelion
 }
 
+validate_max_model_complete_receipt() {
+  local receipt=/etc/private-ai/.max-model-complete
+  local expected_fast_path=$1
+  local -a lines=()
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
+  mapfile -t lines < "$receipt"
+  [ "${#lines[@]}" -eq 20 ] || return 1
+  [ "${lines[0]}" = 'schema=2' ] || return 1
+  [ "${lines[1]}" = 'default_model=llama.cpp/qwen3.6-35b-a3b-local' ] || return 1
+  [ "${lines[2]}" = 'powerful_model=llama.cpp/qwen3.5-122b-a10b-local' ] || return 1
+  [ "${lines[3]}" = 'active_profile=fast' ] || return 1
+  [ "${lines[4]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] || return 1
+  [ "${lines[5]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] || return 1
+  [ "${lines[6]}" = 'model_quant=Q4_K_M' ] || return 1
+  [ "${lines[7]}" = 'model_total_bytes=76536964608' ] || return 1
+  [ "${lines[8]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] || return 1
+  [ "${lines[9]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] || return 1
+  [ "${lines[10]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] || return 1
+  [ "${lines[11]}" = 'fast_model_bytes=20419565568' ] || return 1
+  [ "${lines[12]}" = 'fast_model_sha256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7' ] || return 1
+  [[ "$expected_fast_path" == /srv/private-ai/models/* ]] \
+    && [ "$(realpath -e -- "$expected_fast_path")" = "$expected_fast_path" ] \
+    && [ "${lines[13]}" = "fast_model_path=$expected_fast_path" ] || return 1
+  [[ "${lines[14]}" =~ ^installer_sha256=[0-9a-f]{64}$ ]] || return 1
+  [[ "${lines[15]}" =~ ^worker_source_sha256=[0-9a-f]{64}$ ]] || return 1
+  [[ "${lines[16]}" =~ ^config_source_sha256=[0-9a-f]{64}$ ]] || return 1
+  [[ "${lines[17]}" =~ ^worker_unit_source_sha256=[0-9a-f]{64}$ ]] || return 1
+  [[ "${lines[18]}" =~ ^switch_source_sha256=[0-9a-f]{64}$ ]] || return 1
+  [[ "${lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+}
+
+expected_powerful_runtime_dropin() {
+  cat <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+Restart=no
+TimeoutStartSec=3600
+CPUQuota=1600%
+MemoryHigh=84G
+MemoryMax=88G
+EOF
+}
+
 validate_private_ai_executor() {
+  local expected_controller_state=${1:-active}
   local receipt=/etc/private-ai/.install-complete
   local config=/srv/private-ai/home/.config/opencode/opencode.json
   local instructions=/srv/private-ai/home/.config/opencode/instructions.md
   local llama_server=/opt/private-ai/bin/llama-server llama_source=/opt/private-ai/src/llama.cpp
   local llama_state=/var/lib/private-ai/llama-cpp.commit model_cache=/srv/private-ai/models
-  local unit_text self_test_output web_dropin web_pid web_dropins model_file_path llm_pid
+  local unit_text self_test_output web_dropin web_pid web_dropins model_file_path fast_model_file_path llm_pid active_alias powerful_root
+  local legacy_model_dropin=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
+  local runtime_model_dropin=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf model_dropins
   local -a receipt_lines=()
   local -a model_candidates=()
+  case "$expected_controller_state" in active|quiesced) ;; *) return 1 ;; esac
   [ -f "$receipt" ] && [ ! -L "$receipt" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
   mapfile -t receipt_lines < "$receipt"
@@ -441,22 +639,51 @@ validate_private_ai_executor() {
     find "$model_cache" -xdev -type f -size 20419565568c -print0
   )
   [ "${#model_candidates[@]}" -eq 1 ] || return 1
-  model_file_path=${model_candidates[0]}
-  [ -f "$model_file_path" ] && [ ! -L "$model_file_path" ] \
-    && [ "$(stat -Lc '%U:%G:%s:%h' "$model_file_path")" = \
+  fast_model_file_path=${model_candidates[0]}
+  [ -f "$fast_model_file_path" ] && [ ! -L "$fast_model_file_path" ] \
+    && [ "$(stat -Lc '%U:%G:%s:%h' "$fast_model_file_path")" = \
       'privateai:privateai:20419565568:1' ] || return 1
-  [ "$(sha256sum "$model_file_path" | awk '{print $1}')" = \
+  [ "$(sha256sum "$fast_model_file_path" | awk '{print $1}')" = \
     671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7 ] || return 1
   systemctl is-active --quiet private-ai-llm.service || return 1
-  systemctl is-active --quiet private-ai-web.service || return 1
+  active_alias=$(curl --fail --silent --show-error --max-time 30 \
+    http://127.0.0.1:24080/v1/models \
+    | jq -er '.data | select(type == "array" and length == 1) | .[0].id') || return 1
+  [ ! -e "$legacy_model_dropin" ] && [ ! -L "$legacy_model_dropin" ] || return 1
+  model_dropins=$(systemctl show private-ai-llm.service --property=DropInPaths --value) || return 1
+  [[ " $model_dropins " != *" $legacy_model_dropin "* ]] || return 1
+  case "$active_alias" in
+    qwen3.6-35b-a3b-local)
+      model_file_path=$fast_model_file_path
+      [ ! -e "$runtime_model_dropin" ] && [ ! -L "$runtime_model_dropin" ] || return 1
+      [[ " $model_dropins " != *" $runtime_model_dropin "* ]] || return 1
+      systemctl is-active --quiet private-ai-web.service || return 1
+      ;;
+    qwen3.5-122b-a10b-local)
+      powerful_root=$model_cache/qwen3.5-122b-a10b-q4_k_m
+      [ -f /etc/private-ai/.max-model-sealed ] && [ ! -L /etc/private-ai/.max-model-sealed ] || return 1
+      validate_max_model_complete_receipt "$fast_model_file_path" || return 1
+      [ -f "$runtime_model_dropin" ] && [ ! -L "$runtime_model_dropin" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$runtime_model_dropin")" = '0:0:644:1' ] \
+        && [ "$(<"$runtime_model_dropin")" = "$(expected_powerful_runtime_dropin)" ] \
+        && [[ " $model_dropins " == *" $runtime_model_dropin "* ]] || return 1
+      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf")" = 'root:privateai:440:10943552:1' ] || return 1
+      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf")" = 'root:privateai:440:49968146912:1' ] || return 1
+      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf")" = 'root:privateai:440:26557874144:1' ] || return 1
+      model_file_path=$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
+      ! systemctl is-active --quiet private-ai-web.service || return 1
+      ;;
+    *) return 1 ;;
+  esac
   llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
   [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || return 1
   [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ] || return 1
   awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
     "/proc/$llm_pid/maps" || return 1
   curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null || return 1
-  curl --fail --silent --show-error --max-time 30 http://127.0.0.1:24080/v1/models \
-    | jq -e '.data | type == "array" and length == 1 and .[0].id == "qwen3.6-35b-a3b-local"' >/dev/null || return 1
+  [ "$active_alias" = "$(curl --fail --silent --show-error --max-time 30 \
+    http://127.0.0.1:24080/v1/models \
+    | jq -er '.data | select(type == "array" and length == 1) | .[0].id')" ] || return 1
   cmp -s -- "$repo_root/deploy/opencode-constructor.json" "$config" || return 1
   cmp -s -- "$repo_root/deploy/opencode-constructor-instructions.md" "$instructions" || return 1
   [ "$(stat -Lc '%U:%G:%a:%h' "$config")" = 'root:privateai:640:1' ] || return 1
@@ -472,22 +699,42 @@ validate_private_ai_executor() {
     $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
     ($config.provider["llama.cpp"].options | has("apiKey") | not) and
     ($config.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local")) and
+    ($config.provider["llama.cpp"].models | has("qwen3.5-122b-a10b-local")) and
     (["*","read","glob","grep","edit","bash","task","skill","webfetch","websearch","external_directory"]
       | all(.[]; $config.permission[.] == "allow"))
   ' "$config" >/dev/null || return 1
   cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
+  cmp -s -- "$repo_root/deploy/constructor-model-control.mjs" /opt/kelion-constructor/constructor-model-control.mjs || return 1
+  cmp -s -- "$repo_root/deploy/constructor-model-switch.sh" /opt/private-ai/bin/constructor-model-switch || return 1
+  cmp -s -- "$repo_root/deploy/lib/service-auth.mjs" /opt/kelion-constructor/lib/service-auth.mjs || return 1
   cmp -s -- "$repo_root/deploy/systemd/kelion-codex-worker.service" /etc/systemd/system/kelion-codex-worker.service || return 1
+  cmp -s -- "$repo_root/deploy/systemd/kelion-constructor-model-control.service" /etc/systemd/system/kelion-constructor-model-control.service || return 1
   cmp -s -- "$repo_root/deploy/sudoers/kelion-codex-full-access" /etc/sudoers.d/kelion-constructor-full-access || return 1
   web_dropin=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
   cmp -s -- "$repo_root/deploy/systemd/private-ai-web-full-access.conf" "$web_dropin" || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-codex/codex-worker.mjs)" = '0:0:555:1' ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-constructor/constructor-model-control.mjs)" = '0:0:555:1' ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' /opt/private-ai/bin/constructor-model-switch)" = '0:0:755:1' ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-constructor/lib/service-auth.mjs)" = '0:0:444:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /etc/systemd/system/kelion-codex-worker.service)" = '0:0:444:1' ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' /etc/systemd/system/kelion-constructor-model-control.service)" = '0:0:444:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /etc/sudoers.d/kelion-constructor-full-access)" = '0:0:440:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' "$web_dropin")" = '0:0:444:1' ] || return 1
   [ "$(wc -l < /etc/sudoers.d/kelion-constructor-full-access)" -eq 1 ] || return 1
   grep -qxF 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' /etc/sudoers.d/kelion-constructor-full-access || return 1
   visudo -cf /etc/sudoers.d/kelion-constructor-full-access >/dev/null || return 1
   [ "$(systemctl show kelion-codex-worker.service --property=FragmentPath --value)" = /etc/systemd/system/kelion-codex-worker.service ] || return 1
+  [ "$(systemctl show kelion-constructor-model-control.service --property=FragmentPath --value)" = /etc/systemd/system/kelion-constructor-model-control.service ] || return 1
+  [ -z "$(systemctl show kelion-constructor-model-control.service --property=DropInPaths --value)" ] || return 1
+  systemctl is-enabled --quiet kelion-constructor-model-control.service || return 1
+  if [ "$expected_controller_state" = active ]; then
+    systemctl is-active --quiet kelion-constructor-model-control.service || return 1
+    [ -S /run/kelion-constructor-model-control/control.sock ] \
+      && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
+      && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ] || return 1
+  else
+    validate_model_controller_quiesced || return 1
+  fi
   [ -z "$(systemctl show kelion-codex-worker.service --property=DropInPaths --value)" ] || return 1
   unit_text=$(systemctl cat kelion-codex-worker.service) || return 1
   grep -Fqx 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' <<<"$unit_text" || return 1
@@ -514,9 +761,11 @@ validate_private_ai_executor() {
   [ "$(systemctl show private-ai-web.service --property=MemoryHigh --value)" = infinity ] || return 1
   [ "$(systemctl show private-ai-web.service --property=MemoryMax --value)" = infinity ] || return 1
   [ "$(systemctl show private-ai-web.service --property=TasksMax --value)" = infinity ] || return 1
-  web_pid=$(systemctl show private-ai-web.service --property=MainPID --value) || return 1
-  [[ "$web_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$web_pid/status" ] \
-    && [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ] || return 1
+  if [ "$active_alias" = qwen3.6-35b-a3b-local ]; then
+    web_pid=$(systemctl show private-ai-web.service --property=MainPID --value) || return 1
+    [[ "$web_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$web_pid/status" ] \
+      && [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ] || return 1
+  fi
   for retired in \
     /var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex-real \
     /opt/private-ai/bin/opencode-constructor-root /etc/private-ai/local-codex-compat-key \
@@ -538,8 +787,9 @@ validate_installed_generation_quiesced() {
   [ ! -e "$RUNTIME_JOURNAL" ] && [ ! -L "$RUNTIME_JOURNAL" ] || return 1
   validate_unit_pending || return 1
   [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  validate_upgrade_activation_pending || return 1
   cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
-  validate_private_ai_executor || return 1
+  validate_private_ai_executor quiesced || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-codex/codex-worker.mjs)" = '0:0:555:1' ] || return 1
   for marker in "${constructor_markers[@]}"; do
     [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
@@ -593,8 +843,9 @@ validate_committed_activation_vector_quiesced() {
   [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] || return 1
   [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] || return 1
   [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  validate_upgrade_activation_pending || return 1
   cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
-  validate_private_ai_executor || return 1
+  validate_private_ai_executor quiesced || return 1
   for index in "${!constructor_markers[@]}"; do
     marker=${constructor_markers[$index]}
     timer=${constructor_timers[$index]}
@@ -640,9 +891,11 @@ validate_restored_activation_vector() {
   [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ] || return 1
   [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] || return 1
   [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] || return 1
+  [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] || return 1
+  validate_reactivation_journal || return 1
   validate_ready_stamp || return 1
   cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
-  validate_private_ai_executor || return 1
+  validate_private_ai_executor quiesced || return 1
   for index in "${!constructor_markers[@]}"; do
     marker=${constructor_markers[$index]}
     timer=${constructor_timers[$index]}
@@ -676,6 +929,7 @@ clear_upgrade_transaction() {
   local index root=$snapshot_root cleanup_failed=0
   load_upgrade_journal || return 1
   [ "$upgrade_phase" = committed ] || return 1
+  validate_reactivation_journal || return 1
   rm -f -- "$UPGRADE_JOURNAL" || return 1
   fsync_path "$RUNTIME_ROOT" || return 1
   for index in "${!constructor_markers[@]}"; do rm -f -- "$root/marker.$index" || cleanup_failed=1; done
@@ -710,13 +964,20 @@ flock -n 9 || { echo 'altă operație de publicare este activă' >&2; exit 1; }
   && [ "$(stat -Lc '%d:%i' /proc/$$/fd/9)" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || { echo 'lock-ul de publicare s-a schimbat după flock' >&2; exit 1; }
 
+if { [ -e "$REACTIVATION_JOURNAL" ] || [ -L "$REACTIVATION_JOURNAL" ]; } \
+  && { [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]; }; then
+  set_constructor_upgrade_phase reactivation-recovery
+  recover_orphaned_reactivation_before_upgrade \
+    || { echo 'reactivarea orphaned din tail-ul upgrade-ului nu poate fi adoptată sigur' >&2; exit 1; }
+fi
+
 if [ "$constructor_upgrade_recovery" = 0 ]; then
   [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ] \
     || { echo 'un jurnal existent cere selectarea recovery pin-uită' >&2; exit 1; }
   set_constructor_upgrade_phase snapshot
   for conflict in \
     "$INSTALL_JOURNAL" "$RUNTIME_JOURNAL" "$ACTIVATION_JOURNAL" "$GATE_JOURNAL" \
-    "$UNIT_MIGRATION_PENDING" "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
+    "$UNIT_MIGRATION_PENDING" "$REACTIVATION_JOURNAL" "$MAX_MODEL_JOURNAL" "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
     [ ! -e "$conflict" ] && [ ! -L "$conflict" ] \
       || { echo 'alt recovery Constructor este activ; upgrade-ul este refuzat' >&2; exit 1; }
   done
@@ -724,11 +985,15 @@ if [ "$constructor_upgrade_recovery" = 0 ]; then
 else
   [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ] \
     || { echo 'recovery pin-uit cere jurnalul exterior existent' >&2; exit 1; }
+  [ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+    || { echo 'tranzacția max-model blochează recovery-ul upgrade-ului' >&2; exit 1; }
 fi
 
 load_upgrade_journal || { echo 'jurnalul upgrade-ului Constructor este invalid sau aparține altui commit' >&2; exit 1; }
 [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]
 [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ]
+publish_upgrade_activation_pending \
+  || { echo 'sentinelul exterior al controllerului nu poate fi publicat durabil' >&2; exit 1; }
 
 if [ "$upgrade_phase" = armed ]; then
   set_constructor_upgrade_phase quiesce
@@ -770,6 +1035,10 @@ validate_committed_activation_vector_quiesced \
 # primul start să urmeze întotdeauna unui committed durabil în execuția curentă.
 write_upgrade_journal committed
 load_upgrade_journal
+# Jurnalul exterior committed continuă să țină controllerul oprit în helper.
+# Retragem sentinelul numai pentru ca ready/timerele să poată fi restaurate;
+# controllerul va fi pornit explicit abia după clear-ul jurnalului exterior.
+clear_upgrade_activation_pending
 finalize_committed_activation
 validate_restored_activation_vector \
   || { echo 'starea markerelor și timerelor nu a fost restaurată exact' >&2; exit 1; }
@@ -779,7 +1048,9 @@ worker_sha256=$(sha256sum /opt/kelion-codex/codex-worker.mjs | awk '{print $1}')
 # Committed este republicat durabil, iar vectorul activ și workerul sunt dovedite
 # exact. Orice eșec al clear-ului trebuie să păstreze această stare: outer prezent
 # reia committed, iar outer absent permite unui fresh upgrade s-o captureze.
-activation_restore_started=0
 clear_upgrade_transaction
+start_model_controller_after_upgrade_commit \
+  || { echo 'controllerul manual nu a pornit după clear-ul upgrade-ului' >&2; exit 1; }
+activation_restore_started=0
 printf '{"ok":true,"event":"constructor_upgrade_complete","source_commit":"%s","worker_sha256":"%s"}\n' \
   "$constructor_upgrade_source_commit" "$worker_sha256"

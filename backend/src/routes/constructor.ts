@@ -29,6 +29,7 @@ import {
 } from '../services/constructorPipeline.js'
 import { verifyPublisherRequest, verifyReleaseRequest, type ConstructorServiceAuthResult } from '../services/constructorServiceAuth.js'
 import { constructorContinuity } from '../services/constructorContinuity.js'
+import { readConstructorModelSnapshot } from '../services/constructorModelControl.js'
 import { constructorObservabilityForJobs } from '../services/constructorObservability.js'
 import { constructorWorkCardsForJobs } from '../services/constructorWorkCard.js'
 import { approveRelease, readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
@@ -90,9 +91,10 @@ function internalJobIdentity(idRaw: string, body: Record<string, unknown>): { id
 // "Kelion must be able to create any software the admin asks for, any change,
 // any improvement") ──────────────────────────────────────────────────────────
 // The order enters here (from chat/voice through build_software or the admin
-// panel). Execution belongs to a separate Codex worker: the public web process
-// owns no worktree, shell, GitHub credential or ChatGPT authentication. It only
-// enqueues work and records signed lifecycle events.
+// panel). Execution belongs to the separate OpenCode + Qwen local (llama.cpp)
+// worker. The public web process owns no worktree, shell or GitHub credential;
+// it only writes build_jobs and records signed lifecycle events. The `codex_*`
+// route/task names below are compatibility identifiers.
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   const readChain = async (): Promise<ConstructorChainStatus> => {
     try {
@@ -182,9 +184,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  // Evaluarea unei cerințe ÎNAINTE de trimitere (owner, 13 aug: „ordinul X →
-  // cerința evaluată → se oferă AI-urile potrivite"). Întoarce poarta de calitate
-  // + AI-urile potrivite pe capacitate, cu creditul LIVE din becuri. Doar citire.
+  // Evaluarea unei cerințe ÎNAINTE de trimitere. Întoarce poarta de calitate și
+  // potrivirea pe capacitățile executorului local canonic. Doar citire.
   app.post<{ Body: { order?: string } }>('/api/admin/constructor/evalueaza', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
@@ -457,21 +458,16 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Contract fix, semnat, pentru workerul separat. Nu există un endpoint generic
   // de unelte/shell: workerul poate doar revendica un ordin și raporta etape.
-  app.post<{ Body: { status?: string; detail?: string; taskUrl?: string; internalCostUsdMicros?: number } }>('/api/internal/codex/status', async (req, reply) => {
+  app.post<{ Body: { status?: string; detail?: string } }>('/api/internal/codex/status', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
+    if (!exactKeys(req.body, ['status', 'detail'])) return reply.code(400).send({ error: 'invalid_status' })
     const allowed: CodexWorkerState[] = ['offline', 'setup_required', 'ready', 'busy', 'degraded']
     const status = String(req.body?.status ?? '') as CodexWorkerState
-    const cost = req.body?.internalCostUsdMicros
-    if (
-      !allowed.includes(status)
-      || (cost !== undefined && (!Number.isSafeInteger(cost) || cost < 0))
-    ) return reply.code(400).send({ error: 'invalid_status' })
+    if (!allowed.includes(status)) return reply.code(400).send({ error: 'invalid_status' })
     try {
       await recordCodexWorkerStatus({
         status,
-        taskUrl: req.body.taskUrl,
         detail: req.body.detail,
-        internalCostUsdMicros: cost,
       })
     } catch {
       return reply.code(503).send({ error: 'heartbeat_not_persisted' })
@@ -479,13 +475,32 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  app.post<{ Body: Record<string, never> }>('/api/internal/codex/jobs/claim', async (req, reply) => {
+  app.post<{ Body: Record<string, unknown> }>('/api/internal/codex/jobs/claim', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
-    if (Object.keys(req.body ?? {}).length !== 0) return reply.code(400).send({ error: 'invalid_body' })
+    if (!exactKeys(req.body, ['profile'])) return reply.code(400).send({ error: 'invalid_body' })
+    const profile = req.body?.profile
+    if (profile !== 'fast' && profile !== 'powerful') {
+      return reply.code(400).send({ error: 'invalid_constructor_model_profile' })
+    }
+    let measuredProfile: 'fast' | 'powerful'
+    try {
+      const model = await readConstructorModelSnapshot()
+      if (model.state !== 'ready' || (model.activeProfile !== 'fast' && model.activeProfile !== 'powerful')) {
+        return reply.code(503).send({ error: 'constructor_model_not_ready' })
+      }
+      if (model.activeProfile !== profile) {
+        return reply.code(409).send({ error: 'constructor_model_profile_mismatch' })
+      }
+      measuredProfile = model.activeProfile
+    } catch {
+      return reply.code(503).send({ error: 'constructor_model_control_unavailable' })
+    }
     const taskId = newCodexTaskId()
     let claim: Awaited<ReturnType<typeof claimNextBuildJob>>
     try {
-      claim = await claimNextBuildJob(taskId)
+      // Persistăm exclusiv profilul activ măsurat de controller, niciodată
+      // afirmația workerului luată ca autoritate.
+      claim = await claimNextBuildJob(taskId, measuredProfile)
     } catch {
       return reply.code(503).send({ error: 'constructor_queue_unreadable' })
     }
@@ -494,7 +509,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     }
     const job = claim.job
     const recoveryCodes = new Set(['stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed'])
-    const recoveryCode = job.log && recoveryCodes.has(job.log) ? job.log : null
+    const persistedFailureCode = job.log?.split('\n', 1)[0] ?? null
+    const recoveryCode = persistedFailureCode && recoveryCodes.has(persistedFailureCode)
+      ? persistedFailureCode
+      : null
     return reply.send({
       state: 'claimed',
       job: {
@@ -541,11 +559,25 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       // may quarantine that local receipt without poisoning every later claim.
       if (!handoff.ok) return reply.code(409).send({ error: 'stale_handoff', reason: handoff.reason })
       return reply.send({ ok: true, ...handoff.event })
+    } else if (event === 'unresolved') {
+      if (!exactKeys(req.body, ['taskId', 'event', 'reason', 'profile', 'progress'])) return reply.code(400).send({ error: 'invalid_body' })
+      const profile = req.body?.profile
+      const reason = req.body?.reason
+      if (
+        (reason !== 'no_changes' && reason !== 'test_failure' && reason !== 'quality_gate_failure')
+        || (profile !== 'fast' && profile !== 'powerful')
+      ) {
+        return reply.code(400).send({ error: 'invalid_unresolved' })
+      }
+      payload = { event, reason, profile, progress }
     } else if (event === 'failed') {
-      if (!exactKeys(req.body, ['taskId', 'event', 'code', 'progress'])) return reply.code(400).send({ error: 'invalid_body' })
+      if (!exactKeys(req.body, ['taskId', 'event', 'code', 'profile', 'progress'])) return reply.code(400).send({ error: 'invalid_body' })
       const code = String(req.body?.code ?? '')
-      if (!isCodexWorkerFailureCode(code)) return reply.code(400).send({ error: 'invalid_failure' })
-      payload = { event, code, progress }
+      const profile = req.body?.profile
+      if (!isCodexWorkerFailureCode(code) || (profile !== 'fast' && profile !== 'powerful')) {
+        return reply.code(400).send({ error: 'invalid_failure' })
+      }
+      payload = { event, code, profile, progress }
     } else return reply.code(400).send({ error: 'invalid_event' })
     let job: Awaited<ReturnType<typeof advanceCodexBuildJob>>
     try {
@@ -559,7 +591,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Publisherul este singura identitate care poate transforma un handoff cu
   // porți verzi într-un branch/PR și apoi într-un merge. Nu primește credentiale
-  // Codex sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
+  // OpenCode/Qwen sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
   app.post<{ Body: { state?: unknown; detail?: unknown } }>('/api/internal/constructor-publisher/heartbeat', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyPublisherRequest(req), reply)) return
     if (!exactKeys(req.body, ['state', 'detail']) || req.body.state !== 'degraded'
@@ -581,8 +613,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ error: 'constructor_pipeline_unreadable' })
     }
     const heartbeatPersisted = await serviceHeartbeat('publisher', job ? 'busy' : 'ready', job ? 'Publisherul execută un handoff' : 'Publisherul a verificat coada')
-    if (!job && !heartbeatPersisted) return reply.code(503).send({ error: 'publisher_heartbeat_not_persisted' })
-    return job ? reply.send({ job, heartbeatPersisted }) : reply.code(204).send()
+    if (!heartbeatPersisted) return reply.code(503).send({ error: 'publisher_heartbeat_not_persisted' })
+    return job ? reply.send({ job, heartbeatPersisted: true }) : reply.code(204).send()
   })
 
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/internal/constructor-publisher/jobs/:id/lease', async (req, reply) => {
@@ -592,9 +624,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!identity) return reply.code(400).send({ error: 'invalid_job' })
     const renewed = await pipelineMutation(() => renewPublisherLease(identity.id, identity.taskId, identity.leaseId))
     if (!renewed.readable) return reply.code(503).send({ error: 'constructor_pipeline_unreadable' })
-    const ok = renewed.value
-    const heartbeatPersisted = ok ? await serviceHeartbeat('publisher', 'busy', 'Publisher lease activ') : false
-    return ok ? reply.send({ ok: true, heartbeatPersisted }) : reply.code(409).send({ error: 'lease_lost' })
+    if (!renewed.value) return reply.code(409).send({ error: 'lease_lost' })
+    const heartbeatPersisted = await serviceHeartbeat('publisher', 'busy', 'Publisher lease activ')
+    if (!heartbeatPersisted) return reply.code(503).send({ error: 'publisher_heartbeat_not_persisted' })
+    return reply.send({ ok: true, heartbeatPersisted: true })
   })
 
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/internal/constructor-publisher/jobs/:id/event', async (req, reply) => {
@@ -690,8 +723,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ error: 'constructor_pipeline_unreadable' })
     }
     const heartbeatPersisted = await serviceHeartbeat('release', job ? 'busy' : 'ready', job ? 'Releaserul verifică un commit merged' : 'Releaserul a verificat coada')
-    if (!job && !heartbeatPersisted) return reply.code(503).send({ error: 'release_heartbeat_not_persisted' })
-    return job ? reply.send({ job, heartbeatPersisted }) : reply.code(204).send()
+    if (!heartbeatPersisted) return reply.code(503).send({ error: 'release_heartbeat_not_persisted' })
+    return job ? reply.send({ job, heartbeatPersisted: true }) : reply.code(204).send()
   })
 
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/internal/constructor-release/jobs/:id/lease', async (req, reply) => {
@@ -701,9 +734,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!identity) return reply.code(400).send({ error: 'invalid_job' })
     const renewed = await pipelineMutation(() => renewReleaseLease(identity.id, identity.taskId, identity.leaseId))
     if (!renewed.readable) return reply.code(503).send({ error: 'constructor_pipeline_unreadable' })
-    const ok = renewed.value
-    const heartbeatPersisted = ok ? await serviceHeartbeat('release', 'busy', 'Release lease activ') : false
-    return ok ? reply.send({ ok: true, heartbeatPersisted }) : reply.code(409).send({ error: 'lease_lost' })
+    if (!renewed.value) return reply.code(409).send({ error: 'lease_lost' })
+    const heartbeatPersisted = await serviceHeartbeat('release', 'busy', 'Release lease activ')
+    if (!heartbeatPersisted) return reply.code(503).send({ error: 'release_heartbeat_not_persisted' })
+    return reply.send({ ok: true, heartbeatPersisted: true })
   })
 
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/internal/constructor-release/jobs/:id/event', async (req, reply) => {

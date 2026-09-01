@@ -5,6 +5,7 @@ Wants=network-online.target
 ConditionPathExists=/etc/kelion/constructor-release.enabled
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
 
 [Service]
 Type=oneshot

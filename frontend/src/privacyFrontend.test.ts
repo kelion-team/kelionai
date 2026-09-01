@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fetchCodexAdmin } from './lib/admin'
+import { fetchConstructorWorkerAdmin } from './lib/admin'
 import { submissionSessionId } from './lib/submissionSession'
 import { deleteMyAccount } from './lib/prefs'
 
@@ -42,46 +42,49 @@ describe('privacy frontend', () => {
     expect(chat).toMatch(/useState\(false\).*camera|const \[cameraOn, setCameraOn\] = useState\(false\)/s)
   })
 
-  it('Codex acceptă numai HTTPS și nu propagă câmpuri secrete din răspuns', async () => {
+  it('starea Constructorului păstrează numai executorul local și nu propagă metadata cloud sau secrete', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       worker: { state: 'ready', lastHeartbeat: '2026-08-24T10:00:00.000Z' },
-      setupInstructions: 'Rulează codex login în worker.',
+      setupInstructions: null,
       taskUrl: 'https://chatgpt.com/codex/tasks/private',
       status: 'gata',
       internalCostUsd: 0.0123,
+      executor: 'OpenCode + Qwen local (llama.cpp)',
+      queue: 'build_jobs',
       token: 'nu-trebuie-să-ajungă',
     }), { status: 200, headers: { 'content-type': 'application/json' } })))
-    const codex = await fetchCodexAdmin()
-    expect(codex).toEqual({
+    const constructor = await fetchConstructorWorkerAdmin()
+    expect(constructor).toEqual({
       worker: { state: 'ready', lastHeartbeat: '2026-08-24T10:00:00.000Z' },
-      setupInstructions: 'Rulează codex login în worker.',
-      taskUrl: 'https://chatgpt.com/codex/tasks/private',
+      setupInstructions: null,
       status: 'gata',
-      internalCostUsd: 0.0123,
+      executor: 'OpenCode + Qwen local (llama.cpp)',
+      queue: 'build_jobs',
     })
-    expect(JSON.stringify(codex)).not.toContain('nu-trebuie-să-ajungă')
+    expect(JSON.stringify(constructor)).not.toMatch(/nu-trebuie-să-ajungă|chatgpt\.com|internalCostUsd|taskUrl/)
   })
 
-  it('nu transformă metadata Codex absentă într-un cost zero inventat', async () => {
+  it('nu inventează metadata executorului local când serverul nu o confirmă', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       worker: { state: 'unknown', lastHeartbeat: 'not-a-date' },
       setupInstructions: null,
-      taskUrl: null,
       status: null,
-      internalCostUsd: null,
+      executor: 'alt executor',
+      queue: 'alt_queue',
     }), { status: 200, headers: { 'content-type': 'application/json' } })))
 
-    await expect(fetchCodexAdmin()).resolves.toMatchObject({
+    await expect(fetchConstructorWorkerAdmin()).resolves.toMatchObject({
       worker: { state: 'unknown', lastHeartbeat: null },
-      internalCostUsd: null,
+      executor: null,
+      queue: null,
     })
   })
 
-  it('nu afișează OAuth Codex inventat și păstrează numai profilul spectral user-scoped', () => {
+  it('nu afișează conectare cloud pentru Constructor și păstrează numai profilul spectral user-scoped', () => {
     const admin = sursa('components/admin/AdminProductie.tsx')
     const settings = sursa('components/CustomerSettings.tsx')
     const adminText = sursa('lib/adminText.ts')
-    expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
+    expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth|chatgpt\.com\/codex/i)
     expect(adminText).not.toMatch(/voiceprintKept|never deleted|nu se șterge/i)
     expect(settings).not.toContain('/api/faceprint/me')
     expect(settings).toContain("apiFetch('/api/voiceprint/me', { method: 'DELETE' })")

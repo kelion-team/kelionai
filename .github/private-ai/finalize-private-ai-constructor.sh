@@ -4,10 +4,23 @@ set -Eeuo pipefail
 umask 077
 
 readonly BUNDLE_ROOT=${1:?bundle root required}
+readonly EXPECTED_GATE_COMMIT=${2:?gate commit required}
+readonly EXPECTED_GATE_IMAGE=${3:?gate image required}
+readonly GATE_MANIFEST_SOURCE="$BUNDLE_ROOT/.github/private-ai/codex-gates.json"
 readonly WORKER_SOURCE="$BUNDLE_ROOT/deploy/codex-worker.mjs"
 readonly WORKER_TARGET=/opt/kelion-codex/codex-worker.mjs
 readonly WORKER_UNIT_SOURCE="$BUNDLE_ROOT/deploy/systemd/kelion-codex-worker.service"
 readonly WORKER_UNIT_TARGET=/etc/systemd/system/kelion-codex-worker.service
+readonly MODEL_CONTROL_SOURCE="$BUNDLE_ROOT/deploy/constructor-model-control.mjs"
+readonly MODEL_CONTROL_TARGET=/opt/kelion-constructor/constructor-model-control.mjs
+readonly MODEL_SWITCH_SOURCE="$BUNDLE_ROOT/deploy/constructor-model-switch.sh"
+readonly MODEL_SWITCH_TARGET=/opt/private-ai/bin/constructor-model-switch
+readonly SERVICE_AUTH_SOURCE="$BUNDLE_ROOT/deploy/lib/service-auth.mjs"
+readonly SERVICE_AUTH_TARGET=/opt/kelion-constructor/lib/service-auth.mjs
+readonly MODEL_CONTROL_UNIT_SOURCE="$BUNDLE_ROOT/deploy/systemd/kelion-constructor-model-control.service"
+readonly MODEL_CONTROL_UNIT_TARGET=/etc/systemd/system/kelion-constructor-model-control.service
+readonly MODEL_CONTROL_SECRET=/root/kelion/secrets/constructor-model-control-secret
+readonly MODEL_CONTROL_SOCKET=/run/kelion-constructor-model-control/control.sock
 readonly SYNC_WORKER_SOURCE="$BUNDLE_ROOT/deploy/constructor-sync-worker.sh"
 readonly SYNC_WORKER_TARGET=/opt/kelion-constructor/constructor-sync-worker.sh
 readonly SYNC_UNIT_SOURCE="$BUNDLE_ROOT/deploy/systemd/kelion-constructor-sync.service"
@@ -43,7 +56,7 @@ readonly LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256=ce136f70aa3c9672f1491605564
 # hashul este autentificat de istoricul canonic al aceluiași fișier.
 readonly UPGRADE_RUNTIME_CUTOVER_SHA256=4730d9f189770fafd23b4dec1807e889a62bbe357fc8e8b3f153e216bf71eaad
 readonly PREVIOUS_RUNTIME_CUTOVER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
-readonly EXPECTED_RUNTIME_CUTOVER_SHA256=ccaa17f396cc7d3008422eae5cc836cf3d92df7d4c35509e330bb34e70959286
+readonly EXPECTED_RUNTIME_CUTOVER_SHA256=bb852ba09260b628c1fa27b3f00556ea9ebbdf8047b0e9764d3729eca7cff2b7
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
 readonly LEGACY_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
 readonly LEGACY_CODEX_REAL=/opt/kelion-codex/bin/codex-real
@@ -60,13 +73,13 @@ readonly RUNTIME_ROOT=/root/kelion/runtime
 readonly RUNTIME_READY_ROOT=/run/kelion
 readonly RUNTIME_READY_STAMP=$RUNTIME_READY_ROOT/runtime-config-recovery.ready
 readonly RUNTIME_CUTOVER_JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
+readonly MAX_MODEL_JOURNAL=$RUNTIME_ROOT/constructor-max-model.journal
+readonly REACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-reactivation.journal
+readonly FINALIZER_REACTIVATION_OWNER=$RUNTIME_ROOT/private-ai-finalize-reactivation.owner
 readonly PUBLICATION_LOCK=/root/kelion/publicare.lock
 readonly WORKER_ENV=/root/kelion/config/codex-worker.env
 readonly PUBLISHER_ENV=/root/kelion/config/constructor-publisher.env
 readonly RELEASE_ENV=/root/kelion/config/constructor-release.env
-readonly EXPECTED_GATE_COMMIT=58f39cfef1ae38157a29d1a0810a334263926c0e
-readonly EXPECTED_GATE_IMAGE=ghcr.io/kelion-team/kelionai/codex-gates@sha256:25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3
-
 fail() {
   printf 'private-ai-finalize: ERROR: %s\n' "$*" >&2
   return 1
@@ -132,12 +145,95 @@ publish_finalizer_runtime_ready_stamp() {
 
 [ "$(id -u)" -eq 0 ] || fail 'root is required'
 [ -d "$BUNDLE_ROOT" ] && [ ! -L "$BUNDLE_ROOT" ] || fail 'invalid bundle root'
+[[ "$EXPECTED_GATE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail 'gate commit is invalid'
+[[ "$EXPECTED_GATE_IMAGE" =~ ^ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+/codex-gates@sha256:[0-9a-f]{64}$ ]] \
+  || fail 'gate image is invalid'
+[ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+  || fail 'a persistent max-model transaction blocks finalization'
+validate_finalizer_reactivation_marker() {
+  require_regular "$REACTIVATION_JOURNAL" root:root:600
+  jq -e '
+    .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+    (keys == ["kind","phase","schema"])
+  ' "$REACTIVATION_JOURNAL" >/dev/null
+}
+require_regular "$GATE_MANIFEST_SOURCE" root:root:600
+jq -e --arg commit "$EXPECTED_GATE_COMMIT" --arg image "$EXPECTED_GATE_IMAGE" '
+  type == "object" and
+  (keys == ["commit", "image", "schema", "sourceRunId"]) and
+  .schema == 1 and
+  .commit == $commit and
+  .image == $image and
+  (.sourceRunId | type == "number" and . > 0 and floor == .)
+' "$GATE_MANIFEST_SOURCE" >/dev/null || fail 'gate manifest does not match the service arguments'
 bundle_id=${BUNDLE_ROOT##*/}
 [[ "$bundle_id" =~ ^[0-9a-f]{64}$ ]] || fail 'bundle id is invalid'
 attempt_root=/var/lib/private-ai/finalizer-attempts
 attempt_file=$attempt_root/$bundle_id
+
+validate_finalizer_reactivation_owner() {
+  require_regular "$FINALIZER_REACTIVATION_OWNER" root:root:600
+  [ "$(<"$FINALIZER_REACTIVATION_OWNER")" = "bundle_id=$bundle_id" ]
+}
+
+validate_finalizer_reactivation_state() {
+  local marker_present=0 owner_present=0
+  if [ -e "$REACTIVATION_JOURNAL" ] || [ -L "$REACTIVATION_JOURNAL" ]; then
+    validate_finalizer_reactivation_marker || return 1
+    marker_present=1
+  fi
+  if [ -e "$FINALIZER_REACTIVATION_OWNER" ] || [ -L "$FINALIZER_REACTIVATION_OWNER" ]; then
+    validate_finalizer_reactivation_owner || return 1
+    owner_present=1
+  fi
+  [ "$marker_present" = 0 ] || [ "$owner_present" = 1 ]
+}
+
+publish_finalizer_reactivation_intent() {
+  local candidate
+  validate_finalizer_reactivation_state || return 1
+  if [ -f "$REACTIVATION_JOURNAL" ]; then return 0; fi
+  candidate=$(mktemp "$RUNTIME_ROOT/.private-ai-finalize-reactivation.owner.XXXXXX") || return 1
+  if printf 'bundle_id=%s\n' "$bundle_id" > "$candidate" \
+    && chown root:root "$candidate" && chmod 0600 "$candidate" \
+    && sync -f "$candidate" \
+    && mv -f -- "$candidate" "$FINALIZER_REACTIVATION_OWNER" \
+    && sync -f "$RUNTIME_ROOT"; then
+    :
+  else
+    rm -f -- "$candidate"
+    return 1
+  fi
+  candidate=$(mktemp "$RUNTIME_ROOT/.constructor-reactivation.journal.XXXXXX") || return 1
+  if jq -nc '{schema:1,kind:"constructor-reactivation",phase:"pending"}' > "$candidate" \
+    && chown root:root "$candidate" && chmod 0600 "$candidate" \
+    && sync -f "$candidate" \
+    && mv -f -- "$candidate" "$REACTIVATION_JOURNAL" \
+    && sync -f "$RUNTIME_ROOT" \
+    && validate_finalizer_reactivation_state; then
+    return 0
+  fi
+  rm -f -- "$candidate"
+  return 1
+}
+
+clear_finalizer_reactivation_intent() {
+  validate_finalizer_reactivation_state || return 1
+  rm -f -- "$REACTIVATION_JOURNAL" || return 1
+  sync -f "$RUNTIME_ROOT" || return 1
+  rm -f -- "$FINALIZER_REACTIVATION_OWNER" || return 1
+  sync -f "$RUNTIME_ROOT"
+}
+
+validate_finalizer_reactivation_state \
+  || fail 'an interrupted Constructor reactivation is not owned by this exact finalizer bundle'
 [ -f "$WORKER_SOURCE" ] && [ ! -L "$WORKER_SOURCE" ] || fail 'worker source missing'
 [ -f "$WORKER_UNIT_SOURCE" ] && [ ! -L "$WORKER_UNIT_SOURCE" ] || fail 'worker unit source missing'
+[ -f "$MODEL_CONTROL_SOURCE" ] && [ ! -L "$MODEL_CONTROL_SOURCE" ] || fail 'model controller source missing'
+[ -f "$MODEL_SWITCH_SOURCE" ] && [ ! -L "$MODEL_SWITCH_SOURCE" ] || fail 'model switch source missing'
+[ -f "$SERVICE_AUTH_SOURCE" ] && [ ! -L "$SERVICE_AUTH_SOURCE" ] || fail 'service auth source missing'
+[ -f "$MODEL_CONTROL_UNIT_SOURCE" ] && [ ! -L "$MODEL_CONTROL_UNIT_SOURCE" ] \
+  || fail 'model controller unit source missing'
 [ -f "$SYNC_WORKER_SOURCE" ] && [ ! -L "$SYNC_WORKER_SOURCE" ] || fail 'sync worker source missing'
 [ -f "$SYNC_UNIT_SOURCE" ] && [ ! -L "$SYNC_UNIT_SOURCE" ] || fail 'sync unit source missing'
 [ -f "$SUDOERS_SOURCE" ] && [ ! -L "$SUDOERS_SOURCE" ] || fail 'worker sudoers source missing'
@@ -152,7 +248,9 @@ attempt_file=$attempt_root/$bundle_id
 [ -f "$COMPOSE_SOURCE" ] && [ ! -L "$COMPOSE_SOURCE" ] \
   || fail 'canonical production compose source missing'
 node --check "$WORKER_SOURCE"
+node --check "$MODEL_CONTROL_SOURCE"
 bash -n "$SYNC_WORKER_SOURCE"
+bash -n "$MODEL_SWITCH_SOURCE"
 bash -n "$RUNTIME_CUTOVER_SOURCE"
 ! grep -Fq -- '! -w "$askpass"' "$SYNC_WORKER_SOURCE" \
   || fail 'sync worker uses the root-incorrect writable predicate'
@@ -172,7 +270,7 @@ grep -q 'OPENCODE_BIN' "$WORKER_SOURCE" || fail 'worker has no direct OpenCode e
 ! grep -q 'KELION_LOCAL_QWEN_WRAPPER' "$WORKER_SOURCE" || fail 'fake Codex wrapper found in worker source'
 grep -qx 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$SUDOERS_SOURCE"
 [ "$(wc -l < "$SUDOERS_SOURCE")" -eq 1 ] || fail 'sudoers source is not exact'
-grep -Fqx 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$WORKER_UNIT_SOURCE"
+grep -Fqx 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$WORKER_UNIT_SOURCE"
 grep -Fqx 'LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret' "$WORKER_UNIT_SOURCE"
 ! grep -Eq 'CODEX_BIN=|CODEX_HOME=|openai-project-key|codex-real|opencode-constructor-root' \
   "$WORKER_UNIT_SOURCE" || fail 'worker unit source still references the retired Codex adapter'
@@ -241,13 +339,7 @@ opencode_bin_sha=$(sha256sum "$OPENCODE_BIN" | awk '{print $1}')
 [ "$opencode_bin_sha" = "$OPENCODE_BIN_SHA256" ] \
   || fail 'OpenCode binary does not match the pinned official release payload'
 systemctl is-active --quiet private-ai-llm.service
-# Un retry după HUP/reboot poate găsi web-ul oprit exact între quiesce și
-# restart. Fișierele sunt publicate numai prin rename; pornirea aici oferă o
-# bază coerentă pentru roll-forward fără a declara încă succesul.
-if ! systemctl is-active --quiet private-ai-web.service; then
-  systemctl start private-ai-web.service
-fi
-systemctl is-active --quiet private-ai-web.service
+systemctl cat private-ai-web.service >/dev/null
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null
 [ "$($OPENCODE_BIN --version)" = 1.18.25 ] || fail 'unexpected OpenCode version'
 jq -e '
@@ -257,7 +349,9 @@ jq -e '
 ' "$OPENCODE_CONFIG" >/dev/null
 printf 'PRIVATE_AI_BASE_VERIFIED=yes\n'
 
-install -d -o root -g root -m 0700 "$RUNTIME_ROOT"
+[ -d "$RUNTIME_ROOT" ] && [ ! -L "$RUNTIME_ROOT" ] \
+  && [ "$(realpath -e -- "$RUNTIME_ROOT")" = "$RUNTIME_ROOT" ] \
+  || fail 'Kelion runtime root is missing or unsafe'
 if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
   [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
     || fail 'unsafe publication lock'
@@ -266,6 +360,12 @@ exec 9<>"$PUBLICATION_LOCK"
 chown root:root /proc/$$/fd/9
 chmod 0600 /proc/$$/fd/9
 flock -n 9 || fail 'constructor/release publication is active'
+[ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+  || fail 'a persistent max-model transaction blocks finalization under publication lock'
+validate_finalizer_reactivation_state \
+  || fail 'an interrupted Constructor reactivation changed under publication lock'
+publish_finalizer_reactivation_intent \
+  || fail 'the finalizer reactivation intent could not be published durably'
 
 # Numai o încercare care deține lock-ul global poate consuma bugetul durabil.
 # Contenția cu un deploy/publicator activ nu poate epuiza retry-urile.
@@ -304,6 +404,12 @@ WEB_STATE=$(unit_state private-ai-web.service)
 PUBLISHER_TIMER_STATE=$(unit_state kelion-constructor-publisher.timer)
 RELEASE_TIMER_STATE=$(unit_state kelion-constructor-release.timer)
 RECOVERY_SERVICE_STATE=$(unit_state kelion-runtime-config-recovery.service)
+MODEL_CONTROL_PRESENT=0
+MODEL_CONTROL_STATE=''
+if systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1; then
+  MODEL_CONTROL_PRESENT=1
+  MODEL_CONTROL_STATE=$(unit_state kelion-constructor-model-control.service)
+fi
 rollback_root=$(mktemp -d "$RUNTIME_ROOT/private-ai-finalize.XXXXXX")
 chmod 0700 "$rollback_root"
 rollback_armed=0
@@ -316,6 +422,11 @@ worker_candidate=''
 unit_candidate=''
 sync_worker_candidate=''
 sync_unit_candidate=''
+model_control_candidate=''
+model_switch_candidate=''
+service_auth_candidate=''
+model_control_unit_candidate=''
+model_control_secret_candidate=''
 sudoers_candidate=''
 canonical_codex_candidate=''
 config_candidate=''
@@ -489,6 +600,8 @@ rollback() {
     "$RELEASE_TIMER_STATE" "$RECOVERY_SERVICE_STATE" >&2
   for temporary in \
     "$worker_candidate" "$unit_candidate" "$sync_worker_candidate" "$sync_unit_candidate" "$sudoers_candidate" \
+    "$model_control_candidate" "$model_switch_candidate" "$service_auth_candidate" \
+    "$model_control_unit_candidate" "$model_control_secret_candidate" \
     "$canonical_codex_candidate" "$config_candidate" "$auth_config" \
     "$web_dropin_candidate" "$instructions_candidate" \
     "$receipt_candidate" "$runtime_helper_candidate"; do
@@ -509,6 +622,8 @@ rollback() {
       ;;
   esac
   if [ "$rollback_armed" -eq 1 ]; then
+    publish_finalizer_reactivation_intent \
+      || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     systemctl stop \
       kelion-codex-worker.timer \
       kelion-constructor-publisher.timer \
@@ -517,6 +632,7 @@ rollback() {
       kelion-constructor-sync.service \
       kelion-constructor-publisher.service \
       kelion-constructor-release.service >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    systemctl stop kelion-constructor-model-control.service >/dev/null 2>&1 || :
     if [ "$web_cutover_started" -eq 1 ]; then
       systemctl stop private-ai-web.service >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
@@ -524,6 +640,11 @@ rollback() {
     restore_file worker_unit "$WORKER_UNIT_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file sync_worker "$SYNC_WORKER_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file sync_unit "$SYNC_UNIT_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file model_control "$MODEL_CONTROL_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file model_switch "$MODEL_SWITCH_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file service_auth "$SERVICE_AUTH_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file model_control_unit "$MODEL_CONTROL_UNIT_TARGET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    restore_file model_control_secret "$MODEL_CONTROL_SECRET" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file config "$OPENCODE_CONFIG" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file instructions "$OPENCODE_INSTRUCTIONS" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_file retired_worker_dropin "$RETIRED_WORKER_DROPIN" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
@@ -555,11 +676,22 @@ rollback() {
       restore_legacy_path canonical_codex "$CANONICAL_CODEX" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     fi
     systemctl daemon-reload >/dev/null 2>&1 || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    if [ "$MODEL_CONTROL_PRESENT" = 1 ]; then
+      restore_unit_state kelion-constructor-model-control.service "$MODEL_CONTROL_STATE" \
+        || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+    elif systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1; then
+      rollback_failed=1
+      printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2
+    fi
     restore_unit_state private-ai-web.service "$WEB_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_unit_state kelion-codex-worker.timer "$WORKER_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_unit_state kelion-constructor-publisher.timer "$PUBLISHER_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_unit_state kelion-constructor-release.timer "$RELEASE_TIMER_STATE" || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
     restore_unit_state kelion-runtime-config-recovery.service "$RECOVERY_SERVICE_STATE" \
+      || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
+  fi
+  if [ "$rollback_failed" = 0 ]; then
+    clear_finalizer_reactivation_intent \
       || { rollback_failed=1; printf 'PRIVATE_AI_ROLLBACK_STEP_FAILED=line-%s\n' "$LINENO" >&2; }
   fi
   if [ "$rollback_failed" = 0 ]; then
@@ -583,6 +715,11 @@ snapshot_file worker "$WORKER_TARGET"
 snapshot_file worker_unit "$WORKER_UNIT_TARGET"
 snapshot_file sync_worker "$SYNC_WORKER_TARGET"
 snapshot_file sync_unit "$SYNC_UNIT_TARGET"
+snapshot_file model_control "$MODEL_CONTROL_TARGET"
+snapshot_file model_switch "$MODEL_SWITCH_TARGET"
+snapshot_file service_auth "$SERVICE_AUTH_TARGET"
+snapshot_file model_control_unit "$MODEL_CONTROL_UNIT_TARGET"
+snapshot_file model_control_secret "$MODEL_CONTROL_SECRET"
 snapshot_file config "$OPENCODE_CONFIG"
 snapshot_file instructions "$OPENCODE_INSTRUCTIONS"
 snapshot_file retired_worker_dropin "$RETIRED_WORKER_DROPIN"
@@ -623,6 +760,14 @@ if [ "$canonical_codex_fake" -eq 1 ]; then
 fi
 sync -f "$rollback_root"
 rollback_armed=1
+
+# Un retry după HUP/reboot poate găsi web-ul oprit exact între quiesce și
+# restart. Îl pornim numai după publication lock, intentul persistent și
+# snapshotul rollback, niciodată în preflightul read-only.
+if ! systemctl is-active --quiet private-ai-web.service; then
+  systemctl start private-ai-web.service
+fi
+systemctl is-active --quiet private-ai-web.service
 
 quiesce_gate_consumers() {
   local gate_unit gate_state mode=${1:-require-idle}
@@ -1085,6 +1230,72 @@ if ! command -v sudo >/dev/null 2>&1 || ! command -v visudo >/dev/null 2>&1; the
   apt-get install -y --no-install-recommends sudo >/dev/null
 fi
 
+# Publicăm control-plane-ul manual complet înaintea workerului care îl declară
+# Requires=. Toate rename-urile sunt sub intentul persistent al finalizerului;
+# serviciul este pornit abia după ready, iar endpointurile rămân blocate până
+# la clear-ul final al markerului.
+install -d -o root -g root -m 0755 /opt/kelion-constructor
+install -d -o root -g root -m 0755 /opt/kelion-constructor/lib
+install -d -o root -g root -m 0755 /opt/private-ai/bin
+install -d -o root -g 10050 -m 0750 /root/kelion/secrets
+getent group 10050 >/dev/null
+
+model_control_candidate=$(mktemp "$MODEL_CONTROL_TARGET.candidate.XXXXXX")
+install -o root -g root -m 0555 "$MODEL_CONTROL_SOURCE" "$model_control_candidate"
+node --input-type=module --check < "$model_control_candidate"
+mv -f -- "$model_control_candidate" "$MODEL_CONTROL_TARGET"
+model_control_candidate=''
+sync -f "$MODEL_CONTROL_TARGET"
+sync -f "$(dirname -- "$MODEL_CONTROL_TARGET")"
+
+model_switch_candidate=$(mktemp "$MODEL_SWITCH_TARGET.candidate.XXXXXX")
+install -o root -g root -m 0555 "$MODEL_SWITCH_SOURCE" "$model_switch_candidate"
+bash -n "$model_switch_candidate"
+mv -f -- "$model_switch_candidate" "$MODEL_SWITCH_TARGET"
+model_switch_candidate=''
+sync -f "$MODEL_SWITCH_TARGET"
+sync -f "$(dirname -- "$MODEL_SWITCH_TARGET")"
+
+service_auth_candidate=$(mktemp "$SERVICE_AUTH_TARGET.candidate.XXXXXX")
+install -o root -g root -m 0444 "$SERVICE_AUTH_SOURCE" "$service_auth_candidate"
+mv -f -- "$service_auth_candidate" "$SERVICE_AUTH_TARGET"
+service_auth_candidate=''
+sync -f "$SERVICE_AUTH_TARGET"
+sync -f "$(dirname -- "$SERVICE_AUTH_TARGET")"
+
+model_control_unit_candidate=$(mktemp "$MODEL_CONTROL_UNIT_TARGET.candidate.XXXXXX")
+install -o root -g root -m 0444 "$MODEL_CONTROL_UNIT_SOURCE" "$model_control_unit_candidate"
+mv -f -- "$model_control_unit_candidate" "$MODEL_CONTROL_UNIT_TARGET"
+model_control_unit_candidate=''
+sync -f "$MODEL_CONTROL_UNIT_TARGET"
+sync -f "$(dirname -- "$MODEL_CONTROL_UNIT_TARGET")"
+
+if [ -e "$MODEL_CONTROL_SECRET" ] || [ -L "$MODEL_CONTROL_SECRET" ]; then
+  [ -f "$MODEL_CONTROL_SECRET" ] && [ ! -L "$MODEL_CONTROL_SECRET" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$MODEL_CONTROL_SECRET")" = '0:10050:440:1' ] \
+    && [ "$(wc -l < "$MODEL_CONTROL_SECRET")" -eq 1 ] \
+    && grep -Eq '^[0-9a-f]{64}$' "$MODEL_CONTROL_SECRET" \
+    || fail 'existing model-control secret is unsafe'
+else
+  model_control_secret_candidate=$(mktemp /root/kelion/secrets/.constructor-model-control-secret.XXXXXX)
+  openssl rand -hex 32 > "$model_control_secret_candidate"
+  chown root:10050 "$model_control_secret_candidate"
+  chmod 0440 "$model_control_secret_candidate"
+  [ "$(wc -l < "$model_control_secret_candidate")" -eq 1 ]
+  grep -Eq '^[0-9a-f]{64}$' "$model_control_secret_candidate"
+  sync -f "$model_control_secret_candidate"
+  mv -f -- "$model_control_secret_candidate" "$MODEL_CONTROL_SECRET"
+  model_control_secret_candidate=''
+  sync -f /root/kelion/secrets
+fi
+[ "$(stat -Lc '%u:%g:%a:%h' "$MODEL_CONTROL_SECRET")" = '0:10050:440:1' ]
+cmp -s -- "$MODEL_CONTROL_SOURCE" "$MODEL_CONTROL_TARGET"
+cmp -s -- "$MODEL_SWITCH_SOURCE" "$MODEL_SWITCH_TARGET"
+cmp -s -- "$SERVICE_AUTH_SOURCE" "$SERVICE_AUTH_TARGET"
+cmp -s -- "$MODEL_CONTROL_UNIT_SOURCE" "$MODEL_CONTROL_UNIT_TARGET"
+"$MODEL_SWITCH_TARGET" --prepare-lock
+/usr/bin/node "$MODEL_CONTROL_TARGET" --self-test
+
 worker_candidate=$(mktemp "$WORKER_TARGET.candidate.XXXXXX")
 install -o root -g root -m 0555 "$WORKER_SOURCE" "$worker_candidate"
 node --input-type=module --check < "$worker_candidate"
@@ -1223,12 +1434,17 @@ jq -e '
 ' "$OPENCODE_CONFIG" >/dev/null
 
 systemctl daemon-reload
-systemd-analyze verify private-ai-web.service kelion-codex-worker.service kelion-constructor-sync.service >/dev/null
+systemd-analyze verify private-ai-web.service kelion-codex-worker.service \
+  kelion-constructor-sync.service kelion-constructor-model-control.service >/dev/null
+systemctl enable kelion-constructor-model-control.service >/dev/null
+[ "$(systemctl show kelion-constructor-model-control.service -p FragmentPath --value)" = \
+  "$MODEL_CONTROL_UNIT_TARGET" ]
+[ -z "$(systemctl show kelion-constructor-model-control.service -p DropInPaths --value)" ]
 [ "$(systemctl show kelion-codex-worker.service -p FragmentPath --value)" = \
   "$WORKER_UNIT_TARGET" ]
 [ -z "$(systemctl show kelion-codex-worker.service -p DropInPaths --value)" ]
 systemctl cat kelion-codex-worker.service > "$rollback_root/effective-worker.unit"
-grep -Fq 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
+grep -Fq 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
   "$rollback_root/effective-worker.unit"
 grep -Fq 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' \
   "$rollback_root/effective-worker.unit"
@@ -1473,15 +1689,38 @@ printf 'CONSTRUCTOR_RUNTIME_READY_PUBLISHED=yes\n'
 require_regular "$RUNTIME_READY_STAMP" root:root:444
 [ "$(tr -d '\n' < "$RUNTIME_READY_STAMP")" = schema=1 ]
 
+systemctl reset-failed kelion-constructor-model-control.service >/dev/null 2>&1 || true
+systemctl restart kelion-constructor-model-control.service
+systemctl is-active --quiet kelion-constructor-model-control.service
+for _ in $(seq 1 40); do
+  if [ -S "$MODEL_CONTROL_SOCKET" ] && [ ! -L "$MODEL_CONTROL_SOCKET" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$MODEL_CONTROL_SOCKET")" = '0:10050:660' ]; then
+    break
+  fi
+  sleep 0.25
+done
+[ -S "$MODEL_CONTROL_SOCKET" ] && [ ! -L "$MODEL_CONTROL_SOCKET" ] \
+  && [ "$(stat -Lc '%u:%g:%a' "$MODEL_CONTROL_SOCKET")" = '0:10050:660' ] \
+  || fail 'manual model controller socket did not become ready'
+printf 'MODEL_CONTROL_E2E=passed\n'
+
 systemctl enable --now \
+  kelion-codex-worker.timer \
   kelion-constructor-publisher.timer \
   kelion-constructor-release.timer >/dev/null
+[ "$(unit_state kelion-codex-worker.timer)" = enabled:active ] \
+  || fail 'worker timer is not enabled and active under the reactivation intent'
 [ "$(unit_state kelion-constructor-publisher.timer)" = enabled:active ] \
   || fail 'publisher timer is not enabled and active after gate recovery'
 [ "$(unit_state kelion-constructor-release.timer)" = enabled:active ] \
   || fail 'release timer is not enabled and active after gate recovery'
 
-systemctl disable --now kelion-codex-worker.timer >/dev/null
+# Controllerul și toate timerele sunt acum dovedite, iar serviciile cu side
+# effects au rămas Condition-skipped cât markerul a existat. Clear-ul durabil
+# este ultimul commit operațional; timerul worker oferă retry chiar dacă hostul
+# cade înaintea probei one-shot de mai jos.
+clear_finalizer_reactivation_intent \
+  || fail 'finalizer reactivation intent could not be cleared after control-plane proof'
 old_claim_invocation=$(systemctl show kelion-codex-worker.service -p InvocationID --value 2>/dev/null || true)
 [ -z "$old_claim_invocation" ] || [[ "$old_claim_invocation" =~ ^[0-9a-f]{32}$ ]] \
   || fail 'worker exposed an invalid previous invocation id'
@@ -1576,6 +1815,10 @@ sync_worker_sha=$(sha256sum "$SYNC_WORKER_TARGET" | awk '{print $1}')
 sync_unit_sha=$(sha256sum "$SYNC_UNIT_TARGET" | awk '{print $1}')
 [ "$sync_unit_sha" = "$(sha256sum "$SYNC_UNIT_SOURCE" | awk '{print $1}')" ]
 worker_unit_sha=$(sha256sum "$WORKER_UNIT_TARGET" | awk '{print $1}')
+model_control_sha=$(sha256sum "$MODEL_CONTROL_TARGET" | awk '{print $1}')
+model_switch_sha=$(sha256sum "$MODEL_SWITCH_TARGET" | awk '{print $1}')
+service_auth_sha=$(sha256sum "$SERVICE_AUTH_TARGET" | awk '{print $1}')
+model_control_unit_sha=$(sha256sum "$MODEL_CONTROL_UNIT_TARGET" | awk '{print $1}')
 sudoers_sha=$(sha256sum "$SUDOERS" | awk '{print $1}')
 config_sha=$(sha256sum "$OPENCODE_CONFIG" | awk '{print $1}')
 instructions_sha=$(sha256sum "$OPENCODE_INSTRUCTIONS" | awk '{print $1}')
@@ -1639,6 +1882,10 @@ printf 'WORKER_INSTALLED_SHA256=%s\n' "$worker_sha"
 printf 'SYNC_WORKER_INSTALLED_SHA256=%s\n' "$sync_worker_sha"
 printf 'SYNC_UNIT_INSTALLED_SHA256=%s\n' "$sync_unit_sha"
 printf 'WORKER_UNIT_INSTALLED_SHA256=%s\n' "$worker_unit_sha"
+printf 'MODEL_CONTROL_INSTALLED_SHA256=%s\n' "$model_control_sha"
+printf 'MODEL_SWITCH_INSTALLED_SHA256=%s\n' "$model_switch_sha"
+printf 'SERVICE_AUTH_INSTALLED_SHA256=%s\n' "$service_auth_sha"
+printf 'MODEL_CONTROL_UNIT_INSTALLED_SHA256=%s\n' "$model_control_unit_sha"
 printf 'WORKER_SUDOERS_INSTALLED_SHA256=%s\n' "$sudoers_sha"
 printf 'OPENCODE_CONFIG_SHA256=%s\n' "$config_sha"
 printf 'OPENCODE_INSTRUCTIONS_SHA256=%s\n' "$instructions_sha"

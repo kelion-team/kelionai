@@ -26,6 +26,14 @@ const workflow = readFileSync(
   new URL('../workflows/private-ai-finalize.yml', import.meta.url),
   'utf8',
 )
+const loginWorkflow = readFileSync(
+  new URL('../workflows/vps-codex-login.yml', import.meta.url),
+  'utf8',
+)
+const proofWorkflow = readFileSync(
+  new URL('../workflows/private-ai-constructor-proof.yml', import.meta.url),
+  'utf8',
+)
 
 function shellFunction(name) {
   const match = new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm').exec(finalizer)
@@ -42,6 +50,175 @@ function ordered(source, entries) {
     previous = index
   }
 }
+
+test('finalizerul refuză jurnalul max-model înainte și sub publication lock', () => {
+  assert.match(finalizer, /readonly MAX_MODEL_JOURNAL=\$RUNTIME_ROOT\/constructor-max-model[.]journal/)
+  const preflight = finalizer.indexOf('a persistent max-model transaction blocks finalization')
+  const lock = finalizer.indexOf('flock -n 9')
+  const lockedGuard = finalizer.indexOf('a persistent max-model transaction blocks finalization under publication lock', lock)
+  const attemptMutation = finalizer.indexOf('install -d -o root -g root -m 0700 "$attempt_root"', lockedGuard)
+  assert.ok(preflight >= 0 && lock > preflight && lockedGuard > lock && attemptMutation > lockedGuard)
+})
+
+test('compilarea Windows este o poartă înaintea oricărei mutații de finalizare pe VPS', () => {
+  const validate = workflow.indexOf('\n  validate-source:')
+  const windows = workflow.indexOf('\n  verify-windows-client:')
+  const finalize = workflow.indexOf('\n  finalize-vps:')
+  assert.ok(validate >= 0 && windows > validate && finalize > windows)
+  const windowsJob = workflow.slice(windows, finalize)
+  const finalizeJob = workflow.slice(finalize)
+  assert.match(windowsJob, /needs: validate-source/)
+  assert.match(windowsJob, /runs-on: windows-latest/)
+  assert.match(windowsJob, /npm --prefix constructor-desktop run build -- --no-bundle/)
+  assert.match(finalizeJob, /needs:\n\s+- validate-source\n\s+- verify-windows-client/)
+  assert.ok(workflow.indexOf('environment: production', finalize) > finalize)
+})
+
+test('finalizarea consumă fail-closed manifestul gate al buildului reușit pentru commitul exact', () => {
+  const lookup = workflow.indexOf('Leagă gate-ul de buildul reușit al commitului canonic exact')
+  const firstScp = workflow.indexOf('scp "${ssh_opts[@]}" "$bundle"', lookup)
+  assert.ok(lookup >= 0 && firstScp > lookup)
+  assert.match(workflow, /permissions:\n\s+actions: read/)
+  assert.match(workflow, /actions\/workflows\/build-images\.yml\/runs/)
+  assert.match(workflow, /build_images_run_inventory_incomplete/)
+  assert.match(workflow, /build_images_run_missing_or_ambiguous/)
+  assert.match(workflow, /release-images-\$\{GITHUB_SHA\}/)
+  assert.match(workflow, /select\(\.total_count == 1\)/)
+  assert.match(workflow, /release_artifact_missing_or_ambiguous/)
+  assert.match(workflow, /actions\/artifacts\/\$\{artifact_id\}\/zip/)
+  assert.match(workflow, /keys == \["commit", "image", "schema", "sourceRunId"\]/)
+  assert.match(workflow, /actions\/runs\/\$\{source_run_id\}/)
+  assert.match(workflow, /\.path == "\.github\/workflows\/pr-verify\.yml"/)
+  assert.match(workflow, /\.github\/private-ai\/codex-gates\.json[\s\S]*SHA256SUMS/)
+  assert.match(workflow, /ExecStart=\/usr\/bin\/bash .* \$expected_gate_commit \$expected_gate_image/)
+  const latestMaster = workflow.lastIndexOf('latest_master=$(GH_TOKEN="$REGISTRY_TOKEN" gh api', firstScp)
+  assert.ok(latestMaster > lookup && latestMaster < firstScp)
+  assert.match(workflow.slice(latestMaster, firstScp), /\[ "\$latest_master" = "\$expected_gate_commit" \]/)
+  assert.doesNotMatch(workflow, /58f39cfef1ae38157a29d1a0810a334263926c0e|25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3/)
+  assert.match(finalizer, /EXPECTED_GATE_COMMIT=\$\{2:\?gate commit required\}/)
+  assert.match(finalizer, /EXPECTED_GATE_IMAGE=\$\{3:\?gate image required\}/)
+  assert.match(finalizer, /GATE_MANIFEST_SOURCE=.*codex-gates\.json/)
+  assert.doesNotMatch(finalizer, /58f39cfef1ae38157a29d1a0810a334263926c0e|25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3/)
+})
+
+test('probele operaționale cer același lock global înaintea workerului', () => {
+  const execStart = 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once'
+  assert.ok(loginWorkflow.includes(execStart))
+  assert.ok(proofWorkflow.includes(execStart))
+  assert.doesNotMatch(loginWorkflow, /ExecStart=\/usr\/bin\/node \/opt\/kelion-codex\/codex-worker\.mjs --once/)
+  assert.doesNotMatch(proofWorkflow, /ExecStart=\/usr\/bin\/node \/opt\/kelion-codex\/codex-worker\.mjs --once/)
+})
+
+test('proba live identifică exact flock, workerul Node copil și descendentul OpenCode', () => {
+  const processProof = proofWorkflow.slice(
+    proofWorkflow.indexOf('[ -r "/proc/$main_pid/cmdline" ]'),
+    proofWorkflow.indexOf('queue_receipt_sha='),
+  )
+  assert.match(processProof, /readlink -f -- "\/proc\/\$main_pid\/exe"\)" = \/usr\/bin\/flock/)
+  ordered(processProof, [
+    ['argv flock', 'expected_flock_argv=('],
+    ['lock canonic', 'model_switch_lock=/run/lock/private-ai-model-switch.lock'],
+    ['inode lock', "model_switch_lock_identity=$(stat -Lc '%d:%i'"],
+    ['fd flock', 'main_lock_fds=$((main_lock_fds + 1))'],
+    ['probă lock ocupat', '/usr/bin/flock --exclusive --nonblock "$model_switch_lock" /usr/bin/true'],
+    ['cgroup', 'control_group=$(systemctl show kelion-codex-worker.service -p ControlGroup --value)'],
+    ['worker Node', 'worker_node_processes=0'],
+    ['descendență', 'is_descendant_of() {'],
+    ['OpenCode', 'opencode_process=0'],
+  ])
+  assert.match(processProof, /expected_flock_argv=\([\s\S]*\/usr\/bin\/flock --exclusive --wait 9000[\s\S]*\/run\/lock\/private-ai-model-switch[.]lock[\s\S]*\/usr\/bin\/node \/opt\/kelion-codex\/codex-worker[.]mjs --once/)
+  assert.match(processProof, /stat -Lc '%U:%G:%a:%h'[\s\S]*root:privateai:660:1/)
+  assert.match(processProof, /worker_node_argv\[0\].*\/usr\/bin\/node/)
+  assert.match(processProof, /worker_node_argv\[1\].*\/opt\/kelion-codex\/codex-worker[.]mjs/)
+  assert.match(processProof, /worker_node_argv\[2\].*--once/)
+  assert.match(processProof, /PPid:[\s\S]*"\$main_pid"/)
+  assert.match(processProof, /\[ "\$worker_node_processes" -eq 1 \]/)
+  assert.match(processProof, /is_descendant_of "\$pid" "\$worker_node_pid"[\s\S]*\/opt\/private-ai\/bin\/opencode/)
+  assert.match(processProof, /\[ "\$opencode_process" -eq 1 \]/)
+})
+
+test('proba pilot leagă fail-closed profilul DB, receiptul jobului și argv-ul OpenCode', () => {
+  assert.match(proofWorkflow, /b[.]execution_profile AS profile/)
+  assert.match(proofWorkflow, /b[.]progress,/)
+  assert.match(proofWorkflow, /row[.]profile !== 'fast' && row[.]profile !== 'powerful'/)
+  assert.match(proofWorkflow, /fast: 'Model selectat manual FAST 35B: OpenCode execută ordinul'/)
+  assert.match(proofWorkflow, /powerful: 'Model selectat manual POWERFUL 122B: OpenCode execută ordinul'/)
+  assert.match(
+    proofWorkflow,
+    /if \(row[.]progress !== expectedProgressByProfile\[row[.]profile\]\) process[.]exit\(8\)/,
+  )
+  assert.match(
+    proofWorkflow,
+    /heartbeat[.]detail !== expectedProgressByProfile\[row[.]profile\]/,
+  )
+  assert.doesNotMatch(
+    proofWorkflow,
+    /OpenCode\/Qwen local execută ordinul cu acces complet la host/,
+  )
+  assert.match(worker, /label: 'FAST 35B'/)
+  assert.match(worker, /label: 'POWERFUL 122B'/)
+  assert.match(worker, /Model selectat manual \$\{turn[.]label\}: OpenCode execută ordinul/)
+  assert.match(
+    proofWorkflow,
+    /\["baseCommit", "createdAt", "executor", "jobId", "profile", "taskId"\]/,
+  )
+  assert.match(proofWorkflow, /length == 1/)
+  assert.match(proofWorkflow, /[.]\[0\][.]profile == "fast" or [.]\[0\][.]profile == "powerful"/)
+  assert.match(proofWorkflow, /\[ "\$job_profile" = "\$queue_profile" \]/)
+  assert.match(proofWorkflow, /\[ "\$job_profile" = "\$active_profile" \]/)
+  assert.match(proofWorkflow, /fast\) expected_job_model="llama[.]cpp\/\$expected_model_alias" ;;/)
+  assert.match(proofWorkflow, /powerful\) expected_job_model="llama[.]cpp\/\$expected_powerful_model_alias" ;;/)
+  assert.match(proofWorkflow, /\[ "\$expected_job_model" = "\$expected_active_model" \]/)
+
+  const argvProof = proofWorkflow.slice(
+    proofWorkflow.indexOf('opencode_process=0'),
+    proofWorkflow.indexOf('queue_receipt_sha=', proofWorkflow.indexOf('opencode_process=0')),
+  )
+  assert.match(argvProof, /--model "\$expected_job_model"/)
+  assert.doesNotMatch(argvProof, /--model llama[.]cpp\/(?:qwen3[.]6|qwen3[.]5)/)
+})
+
+test('proba pilot mapează exact runtime-ul și fișierele FAST/POWERFUL fără comutare sau retry', () => {
+  for (const literal of [
+    'qwen3.6-35b-a3b-local',
+    'qwen3.5-122b-a10b-local',
+    'Qwen3.6-35B-A3B-Q4_K_M.gguf',
+    '671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7',
+    'Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf',
+    'Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf',
+    'Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf',
+    '467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3',
+    '90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7',
+    'e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97',
+  ]) {
+    assert.ok(proofWorkflow.includes(literal), `contractul proof nu fixează ${literal}`)
+  }
+
+  const runtimeMap = proofWorkflow.slice(
+    proofWorkflow.indexOf('case "$active_model_alias" in'),
+    proofWorkflow.indexOf('active_model_state=', proofWorkflow.indexOf('case "$active_model_alias" in')),
+  )
+  const fast = runtimeMap.slice(
+    runtimeMap.indexOf('"$expected_model_alias")'),
+    runtimeMap.indexOf('"$expected_powerful_model_alias")'),
+  )
+  const powerful = runtimeMap.slice(runtimeMap.indexOf('"$expected_powerful_model_alias")'))
+  assert.match(fast, /active_profile=fast/)
+  assert.match(fast, /expected_active_model="llama[.]cpp\/\$expected_model_alias"/)
+  assert.match(fast, /-hf "\$\{expected_model_repo\}:\$\{expected_model_quant\}" --offline/)
+  assert.match(fast, /--ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1/)
+  assert.match(fast, /systemctl is-active --quiet private-ai-web[.]service/)
+  assert.match(powerful, /active_profile=powerful/)
+  assert.match(powerful, /expected_active_model="llama[.]cpp\/\$expected_powerful_model_alias"/)
+  assert.match(powerful, /stat -Lc '%U:%G:%a:%s:%h'/)
+  assert.match(powerful, /sha256sum "\$powerful_model_path"/)
+  assert.match(powerful, /"\$llama_server" --model "\$active_model_file_path"/)
+  assert.match(powerful, /--ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1/)
+  assert.match(powerful, /ActiveState --value\)" = inactive/)
+  assert.match(proofWorkflow, /\[ "\$queue_profile" = "\$active_profile" \]/)
+  assert.doesNotMatch(proofWorkflow, /constructor-model-switch(?:[.]sh)?[[:space:]]+(?:fast|powerful)/)
+  assert.doesNotMatch(proofWorkflow, /systemctl (?:start|restart) private-ai-llm[.]service/)
+})
 
 test('repair-ul acceptă numai incidentul runtime committed cu exact cele trei gate-uri', () => {
   const repair = shellFunction('repair_stale_committed_gate_journal')
@@ -321,4 +498,79 @@ test('sync-ul neprivilegiat validează metadata askpass și claimul aparține in
   const marker = finalizer.indexOf("printf 'WORKER_CLAIM_E2E=passed\\n'")
   const timer = finalizer.indexOf('systemctl enable --now kelion-codex-worker.timer', marker)
   assert.ok(marker >= 0 && timer > marker, 'timerul worker trebuie activat numai după dovada exactă')
+})
+
+test('bundle-ul finalizerului conține control-plane-ul manual complet și îl dovedește byte-exact', () => {
+  const artifacts = [
+    ['deploy/constructor-model-control.mjs', 'MODEL_CONTROL_INSTALLED_SHA256'],
+    ['deploy/constructor-model-switch.sh', 'MODEL_SWITCH_INSTALLED_SHA256'],
+    ['deploy/lib/service-auth.mjs', 'SERVICE_AUTH_INSTALLED_SHA256'],
+    ['deploy/systemd/kelion-constructor-model-control.service', 'MODEL_CONTROL_UNIT_INSTALLED_SHA256'],
+  ]
+  for (const [artifact, proof] of artifacts) {
+    const escaped = artifact.replaceAll('.', '[.]').replaceAll('/', '\\/')
+    assert.match(workflow, new RegExp(`install -m 0600 ${escaped}`), `${artifact} nu este copiat în bundle`)
+    assert.match(workflow, new RegExp(`sha256sum[\\s\\S]*${escaped}`), `${artifact} lipsește din SHA256SUMS`)
+    assert.match(workflow, new RegExp(`tar --sort=name[\\s\\S]*${escaped}`), `${artifact} lipsește din arhiva canonică`)
+    assert.match(workflow, new RegExp(`grep -qx "${proof}=\\$expected_`), `${proof} nu este verificat extern`)
+  }
+  assert.match(workflow,
+    /constructor-model-control-secret[\s\S]*0:10050:440:1[\s\S]*constructor-reactivation\.journal[\s\S]*private-ai-finalize-reactivation\.owner[\s\S]*is-enabled --quiet kelion-constructor-model-control\.service[\s\S]*is-active --quiet kelion-constructor-model-control\.service[\s\S]*control\.sock/)
+
+  const tarStart = workflow.indexOf('tar --sort=name --owner=0 --group=0 --numeric-owner')
+  const tarEnd = workflow.indexOf('\n          bundle_sha=', tarStart)
+  const tarEntries = [...workflow.slice(tarStart, tarEnd).matchAll(/^\s+([.A-Za-z0-9_/-]+)(?: \\)?$/gm)]
+    .map((match) => match[1])
+  const inventoryStart = workflow.indexOf("diff -u - \"$extract/entries\" <<'ENTRIES'")
+  const inventoryBody = workflow.indexOf('\n', inventoryStart) + 1
+  const inventoryEnd = workflow.indexOf('\n          ENTRIES', inventoryBody)
+  const remoteInventory = workflow.slice(inventoryBody, inventoryEnd)
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  assert.ok(tarStart >= 0 && tarEnd > tarStart && inventoryStart >= 0 && inventoryEnd > inventoryBody)
+  assert.deepEqual(remoteInventory, tarEntries,
+    'inventarul remote trebuie să fie identic și în aceeași ordine cu membrii arhivei')
+})
+
+test('finalizerul armează intentul înainte de snapshot și publică workerul numai după control-plane', () => {
+  const lock = finalizer.indexOf('flock -n 9')
+  const marker = finalizer.indexOf('\npublish_finalizer_reactivation_intent \\', lock)
+  const snapshot = finalizer.indexOf('\nsnapshot_file worker ', marker)
+  const rollbackArmed = finalizer.indexOf('\nrollback_armed=1', snapshot)
+  const modelControlInstall = finalizer.indexOf('mv -f -- "$model_control_candidate" "$MODEL_CONTROL_TARGET"', rollbackArmed)
+  const switchInstall = finalizer.indexOf('mv -f -- "$model_switch_candidate" "$MODEL_SWITCH_TARGET"', modelControlInstall)
+  const authInstall = finalizer.indexOf('mv -f -- "$service_auth_candidate" "$SERVICE_AUTH_TARGET"', switchInstall)
+  const controlUnitInstall = finalizer.indexOf('mv -f -- "$model_control_unit_candidate" "$MODEL_CONTROL_UNIT_TARGET"', authInstall)
+  const workerInstall = finalizer.indexOf('mv -f -- "$worker_candidate" "$WORKER_TARGET"', controlUnitInstall)
+  const ready = finalizer.indexOf('\npublish_finalizer_runtime_ready_stamp', workerInstall)
+  const controller = finalizer.indexOf('systemctl restart kelion-constructor-model-control.service', ready)
+  const socket = finalizer.indexOf("printf 'MODEL_CONTROL_E2E=passed", controller)
+  const timers = finalizer.indexOf('systemctl enable --now \\', socket)
+  const clear = finalizer.indexOf('\nclear_finalizer_reactivation_intent \\', timers)
+  const claim = finalizer.indexOf('systemctl start --no-block kelion-codex-worker.service', clear)
+  assert.ok(lock >= 0 && marker > lock && snapshot > marker && rollbackArmed > snapshot
+    && modelControlInstall > rollbackArmed && switchInstall > modelControlInstall
+    && authInstall > switchInstall && controlUnitInstall > authInstall && workerInstall > controlUnitInstall
+    && ready > workerInstall && controller > ready && socket > controller && timers > socket
+    && clear > timers && claim > clear,
+  'intentul durabil trebuie să încadreze publicația completă și dovada control-plane înainte de claim')
+  assert.match(finalizer.slice(modelControlInstall, workerInstall),
+    /constructor-model-control-secret[\s\S]*0:10050:440:1[\s\S]*--prepare-lock[\s\S]*--self-test/)
+})
+
+test('rollbackul finalizerului rearmează markerul și îl retrage numai după restaurarea completă', () => {
+  const rollback = shellFunction('rollback')
+  const rearm = rollback.indexOf('publish_finalizer_reactivation_intent')
+  const controllerStop = rollback.indexOf('systemctl stop kelion-constructor-model-control.service', rearm)
+  const restoreController = rollback.indexOf('restore_file model_control "$MODEL_CONTROL_TARGET"', controllerStop)
+  const restoreSwitch = rollback.indexOf('restore_file model_switch "$MODEL_SWITCH_TARGET"', restoreController)
+  const restoreAuth = rollback.indexOf('restore_file service_auth "$SERVICE_AUTH_TARGET"', restoreSwitch)
+  const restoreUnit = rollback.indexOf('restore_file model_control_unit "$MODEL_CONTROL_UNIT_TARGET"', restoreAuth)
+  const restoreSecret = rollback.indexOf('restore_file model_control_secret "$MODEL_CONTROL_SECRET"', restoreUnit)
+  const restoreStates = rollback.indexOf('restore_unit_state kelion-runtime-config-recovery.service', restoreSecret)
+  const clear = rollback.indexOf('clear_finalizer_reactivation_intent', restoreStates)
+  assert.ok(rearm >= 0 && controllerStop > rearm && restoreController > controllerStop
+    && restoreSwitch > restoreController && restoreAuth > restoreSwitch && restoreUnit > restoreAuth
+    && restoreSecret > restoreUnit && restoreStates > restoreSecret && clear > restoreStates,
+  'rollbackul nu poate retrage intentul înainte de restaurarea tuturor bytes/unităților')
+  assert.match(rollback.slice(Math.max(0, clear - 120), clear), /rollback_failed" = 0/)
 })

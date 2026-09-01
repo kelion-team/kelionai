@@ -7,6 +7,36 @@ const workflow = readFileSync(
   new URL('../workflows/private-ai-active-model-benchmark.yml', import.meta.url),
   'utf8',
 )
+const productionWorkflows = [
+  'private-ai-active-model-benchmark.yml',
+  'private-ai-finalize.yml',
+  'private-ai-repair.yml',
+  'private-ai-status-proof.yml',
+].map((name) => [name, readFileSync(new URL(`../workflows/${name}`, import.meta.url), 'utf8')])
+const mutatingWorkflows = [
+  'private-ai-finalize.yml',
+  'private-ai-repair.yml',
+  'private-ai-max-model-unblock.yml',
+].map((name) => [name, readFileSync(new URL(`../workflows/${name}`, import.meta.url), 'utf8')])
+
+test('workflow-urile private AI cu acces la producție acceptă numai dispatch manual de pe masterul canonic', () => {
+  for (const [name, source] of productionWorkflows) {
+    assert.match(source, /^on:\n\s+workflow_dispatch:\s*$/m, `${name}: dispatch manual`)
+    assert.doesNotMatch(source, /^\s+push:\s*$/m, `${name}: push interzis`)
+    assert.doesNotMatch(source, /ops\/private-ai-install-20260830/, `${name}: ramură operațională retrasă`)
+    assert.match(source, /^\s+ref: refs\/heads\/master$/m, `${name}: checkout master`)
+    assert.match(source, /\[ "\$GITHUB_REF" = refs\/heads\/master \]/, `${name}: guard ref`)
+    assert.match(source, /\[ "\$GITHUB_REF_NAME" = master \]/, `${name}: guard ref_name`)
+    assert.match(source, /git rev-parse origin\/master/, `${name}: commit canonic`)
+  }
+})
+
+test('toate workflow-urile private AI care mută Contabo folosesc aceeași coadă de producție', () => {
+  for (const [name, source] of mutatingWorkflows) {
+    assert.match(source, /^concurrency:\n\s+group: production-release\n\s+cancel-in-progress: false$/m, name)
+    assert.doesNotMatch(source, /group: private-ai-(?:constructor-finalize|install-repair)/, name)
+  }
+})
 
 test('benchmarkul măsoară modelul activ fără mutații de serviciu sau fișiere', () => {
   assert.match(script, /API_HOST = "127\.0\.0\.1"/)

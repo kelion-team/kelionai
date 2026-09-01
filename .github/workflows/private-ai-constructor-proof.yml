@@ -105,6 +105,7 @@ jobs:
           readonly expected_model_file=Qwen3.6-35B-A3B-Q4_K_M.gguf
           readonly expected_model_bytes=20419565568
           readonly expected_model_sha=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
+          readonly expected_powerful_model_alias=qwen3.5-122b-a10b-local
           readonly expected_llama_server_sha=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
           readonly expected_opencode_bin_sha=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
           [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
@@ -117,14 +118,18 @@ jobs:
           [[ "$expected_model_file" =~ ^[A-Za-z0-9_.-]+\.gguf$ ]]
           [[ "$expected_model_bytes" =~ ^[1-9][0-9]+$ ]]
           [[ "$expected_model_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_powerful_model_alias" =~ ^[A-Za-z0-9_.-]+$ ]]
           grep -Fq "'installer_id=${expected_installer}'" "$permanent_installer"
           grep -Fq "'llama_cpp_ref=${expected_llama_ref}'" "$permanent_installer"
           grep -Fq "'opencode_version=${expected_opencode_version}'" "$permanent_installer"
           grep -Fq "'model_repo=${expected_model_repo}'" "$permanent_installer"
           grep -Fq "'model_quant=${expected_model_quant}'" "$permanent_installer"
-          jq -e --arg model "llama.cpp/$expected_model_alias" '
-            .model == $model and (.small_model // .model) == $model and
-            (.provider["llama.cpp"].models | has($model | sub("^llama\\.cpp/"; "")))
+          jq -e \
+            --arg fast "llama.cpp/$expected_model_alias" \
+            --arg powerful "llama.cpp/$expected_powerful_model_alias" '
+            .model == $fast and (.small_model // .model) == $fast and
+            (.provider["llama.cpp"].models | keys | sort) ==
+              ([$fast, $powerful] | map(sub("^llama\\.cpp/"; "")) | sort)
           ' "$opencode_contract" >/dev/null
 
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
@@ -194,6 +199,25 @@ jobs:
           expected_model_sha=${19}
           expected_llama_server_sha=${20}
           expected_opencode_bin_sha=${21}
+          readonly expected_powerful_model_repo=unsloth/Qwen3.5-122B-A10B-GGUF
+          readonly expected_powerful_model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e
+          readonly expected_powerful_model_quant=Q4_K_M
+          readonly expected_powerful_model_alias=qwen3.5-122b-a10b-local
+          readonly expected_powerful_model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
+          readonly expected_powerful_model_total_bytes=76536964608
+          readonly powerful_runtime_dropin=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf
+          readonly powerful_legacy_dropin=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
+          readonly -a expected_powerful_model_files=(
+            Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
+            Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf
+            Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf
+          )
+          readonly -a expected_powerful_model_bytes=(10943552 49968146912 26557874144)
+          readonly -a expected_powerful_model_shas=(
+            467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3
+            90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7
+            e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97
+          )
           [[ "$expected_worker_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$expected_installer" =~ ^[a-z0-9-]+$ ]]
           [[ "$expected_llama_ref" =~ ^[0-9a-f]{40}$ ]]
@@ -215,6 +239,21 @@ jobs:
           [[ "$expected_model_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$expected_llama_server_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$expected_opencode_bin_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_powerful_model_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_powerful_model_revision" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_powerful_model_quant" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$expected_powerful_model_alias" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [ "${#expected_powerful_model_files[@]}" -eq 3 ]
+          [ "${#expected_powerful_model_bytes[@]}" -eq 3 ]
+          [ "${#expected_powerful_model_shas[@]}" -eq 3 ]
+          powerful_bytes_sum=0
+          for powerful_index in 0 1 2; do
+            [[ "${expected_powerful_model_files[$powerful_index]}" =~ ^[A-Za-z0-9_.-]+\.gguf$ ]]
+            [[ "${expected_powerful_model_bytes[$powerful_index]}" =~ ^[1-9][0-9]+$ ]]
+            [[ "${expected_powerful_model_shas[$powerful_index]}" =~ ^[0-9a-f]{64}$ ]]
+            powerful_bytes_sum=$((powerful_bytes_sum + expected_powerful_model_bytes[powerful_index]))
+          done
+          [ "$powerful_bytes_sum" -eq "$expected_powerful_model_total_bytes" ]
 
           proof_tmp=$(mktemp -d /run/kelion-constructor-proof.XXXXXX)
           cleanup_remote() { rm -rf -- "$proof_tmp"; }
@@ -258,48 +297,135 @@ jobs:
             find "$model_cache" -xdev -type f -size "${expected_model_bytes}c" -print0
           )
           [ "${#model_candidates[@]}" -eq 1 ]
-          model_file_path=${model_candidates[0]}
-          [ -f "$model_file_path" ] && [ ! -L "$model_file_path" ]
-          [ "$(stat -Lc '%U:%G:%s:%h' "$model_file_path")" = \
+          fast_model_file_path=${model_candidates[0]}
+          [ -f "$fast_model_file_path" ] && [ ! -L "$fast_model_file_path" ]
+          [ "$(stat -Lc '%U:%G:%s:%h' "$fast_model_file_path")" = \
             "privateai:privateai:${expected_model_bytes}:1" ]
-          model_file_sha=$(sha256sum "$model_file_path" | awk '{print $1}')
-          [ "$model_file_sha" = "$expected_model_sha" ]
+          fast_model_file_sha=$(sha256sum "$fast_model_file_path" | awk '{print $1}')
+          [ "$fast_model_file_sha" = "$expected_model_sha" ]
           llama_server_sha=$(sha256sum "$llama_server" | awk '{print $1}')
           opencode_bin_sha=$(sha256sum "$opencode_bin" | awk '{print $1}')
           [ "$llama_server_sha" = "$expected_llama_server_sha" ]
           [ "$opencode_bin_sha" = "$expected_opencode_bin_sha" ]
 
           systemctl is-active --quiet private-ai-llm.service
-          systemctl is-active --quiet private-ai-web.service
           [ "$(systemctl show private-ai-llm.service -p FragmentPath --value)" = \
             /etc/systemd/system/private-ai-llm.service ]
-          [ -z "$(systemctl show private-ai-llm.service -p DropInPaths --value)" ]
           test -f /var/lib/private-ai/model.ready
           ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
-          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
           ! ss -ltnH | awk '{print $4}' | grep -Eq '(0\.0\.0\.0|\[::\]):(24080|24096)$'
           curl --fail --silent --show-error --max-time 10 \
             http://127.0.0.1:24080/health >/dev/null
-          curl --fail --silent --show-error --max-time 30 \
+          active_model_alias=$(curl --fail --silent --show-error --max-time 30 \
             http://127.0.0.1:24080/v1/models \
-            | jq -e --arg model "$expected_model_alias" \
-                '.data | type == "array" and any(.id == $model)' >/dev/null
+            | jq -er '.data | select(type == "array" and length == 1) | .[0].id')
+
+          runtime_dropins=$(systemctl show private-ai-llm.service -p DropInPaths --value)
+          case "$active_model_alias" in
+            "$expected_model_alias")
+              active_profile=fast
+              expected_active_model="llama.cpp/$expected_model_alias"
+              expected_active_model_repo=$expected_model_repo
+              expected_active_model_revision=$expected_model_revision
+              expected_active_model_quant=$expected_model_quant
+              expected_active_model_total_bytes=$expected_model_bytes
+              expected_active_model_files=$fast_model_file_path
+              expected_active_model_shas=$expected_model_sha
+              active_model_file_path=$fast_model_file_path
+              [ ! -e "$powerful_runtime_dropin" ] && [ ! -L "$powerful_runtime_dropin" ]
+              [ ! -e "$powerful_legacy_dropin" ] && [ ! -L "$powerful_legacy_dropin" ]
+              [ -z "$runtime_dropins" ]
+              systemctl is-active --quiet private-ai-web.service
+              ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+              expected_llm_argv=(
+                "$llama_server" -hf "${expected_model_repo}:${expected_model_quant}" --offline
+                --alias "$expected_model_alias" --host 127.0.0.1 --port 24080
+                --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja
+                --chat-template-kwargs '{"enable_thinking":false}'
+              )
+              ;;
+            "$expected_powerful_model_alias")
+              active_profile=powerful
+              expected_active_model="llama.cpp/$expected_powerful_model_alias"
+              expected_active_model_repo=$expected_powerful_model_repo
+              expected_active_model_revision=$expected_powerful_model_revision
+              expected_active_model_quant=$expected_powerful_model_quant
+              expected_active_model_total_bytes=$expected_powerful_model_total_bytes
+              active_model_file_path="$expected_powerful_model_root/${expected_powerful_model_files[0]}"
+              expected_active_model_files=''
+              expected_active_model_shas=''
+              [ -d "$expected_powerful_model_root" ] && [ ! -L "$expected_powerful_model_root" ]
+              [ "$(realpath -e -- "$expected_powerful_model_root")" = "$expected_powerful_model_root" ]
+              [ "$(stat -Lc '%U:%G:%a' "$expected_powerful_model_root")" = 'root:privateai:750' ]
+              for powerful_index in 0 1 2; do
+                powerful_model_path="$expected_powerful_model_root/${expected_powerful_model_files[$powerful_index]}"
+                [ -f "$powerful_model_path" ] && [ ! -L "$powerful_model_path" ]
+                [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_model_path")" = \
+                  "root:privateai:440:${expected_powerful_model_bytes[$powerful_index]}:1" ]
+                [ "$(sha256sum "$powerful_model_path" | awk '{print $1}')" = \
+                  "${expected_powerful_model_shas[$powerful_index]}" ]
+                if [ "$powerful_index" -gt 0 ]; then
+                  expected_active_model_files+=,
+                  expected_active_model_shas+=,
+                fi
+                expected_active_model_files+=$powerful_model_path
+                expected_active_model_shas+=${expected_powerful_model_shas[$powerful_index]}
+              done
+              [ -f "$powerful_runtime_dropin" ] && [ ! -L "$powerful_runtime_dropin" ]
+              [ "$(stat -Lc '%u:%g:%a:%h' "$powerful_runtime_dropin")" = '0:0:644:1' ]
+              [ ! -e "$powerful_legacy_dropin" ] && [ ! -L "$powerful_legacy_dropin" ]
+              [ "$runtime_dropins" = "$powerful_runtime_dropin" ]
+              expected_powerful_dropin=$(cat <<EOF
+          [Service]
+          ExecStart=
+          ExecStart=$llama_server --model $active_model_file_path --alias $expected_powerful_model_alias --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+          Restart=no
+          TimeoutStartSec=3600
+          CPUQuota=1600%
+          MemoryHigh=84G
+          MemoryMax=88G
+          EOF
+              )
+              [ "$(<"$powerful_runtime_dropin")" = "$expected_powerful_dropin" ]
+              [ "$(systemctl show private-ai-web.service -p ActiveState --value)" = inactive ]
+              [ "$(systemctl show private-ai-web.service -p SubState --value)" = dead ]
+              ! ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+              expected_llm_argv=(
+                "$llama_server" --model "$active_model_file_path"
+                --alias "$expected_powerful_model_alias" --host 127.0.0.1 --port 24080
+                --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja
+                --chat-template-kwargs '{"enable_thinking":false}'
+              )
+              ;;
+            *)
+              printf '%s\n' 'Aliasul activ nu aparține profilurilor Constructor permise.' >&2
+              exit 1
+              ;;
+          esac
+
+          active_model_state=/run/private-ai/active-model
+          [ -f "$active_model_state" ] && [ ! -L "$active_model_state" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$active_model_state")" = '0:0:644:1' ]
+          mapfile -t active_model_lines < "$active_model_state"
+          [ "${#active_model_lines[@]}" -eq 4 ]
+          [ "${active_model_lines[0]}" = 'schema=1' ]
+          [ "${active_model_lines[1]}" = "profile=$active_profile" ]
+          [ "${active_model_lines[2]}" = "alias=$active_model_alias" ]
+          [[ "${active_model_lines[3]}" =~ ^verified_at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)$ ]]
+          active_model_verified_at=${BASH_REMATCH[1]}
+          [ "$(date -u -d "$active_model_verified_at" +%FT%TZ)" = "$active_model_verified_at" ]
+          [ "$(date -u -d "$active_model_verified_at" +%s)" -le "$(( $(date -u +%s) + 60 ))" ]
+
           llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
           [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]]
           [ "$(awk '/^Uid:/ { print $2 }' "/proc/$llm_pid/status")" = "$(id -u privateai)" ]
           [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ]
           mapfile -d '' -t llm_argv < "/proc/$llm_pid/cmdline"
-          expected_llm_argv=(
-            "$llama_server" -hf "${expected_model_repo}:${expected_model_quant}" --offline
-            --alias "$expected_model_alias" --host 127.0.0.1 --port 24080
-            --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja
-            --chat-template-kwargs '{"enable_thinking":false}'
-          )
           [ "${#llm_argv[@]}" -eq "${#expected_llm_argv[@]}" ]
           for argv_index in "${!expected_llm_argv[@]}"; do
             [ "${llm_argv[$argv_index]}" = "${expected_llm_argv[$argv_index]}" ]
           done
-          awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
+          awk -v target="$active_model_file_path" '$NF == target { found=1 } END { exit !found }' \
             "/proc/$llm_pid/maps"
 
           # Executorul instalat este workerul OpenCode direct. Un CLI Codex
@@ -356,7 +482,7 @@ jobs:
           [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]
           [[ "$worker_invocation_id" =~ ^[0-9a-f]{32}$ ]]
           systemctl cat kelion-codex-worker.service > "$proof_tmp/worker.unit"
-          grep -Fq 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
+          grep -Fq 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' \
             "$proof_tmp/worker.unit"
           grep -Fq 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' \
             "$proof_tmp/worker.unit"
@@ -389,15 +515,19 @@ jobs:
           [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
           [ "$(stat -Lc '%U:%G:%a:%h' "$opencode_config")" = 'root:privateai:640:1' ]
           [ "$(sha256sum "$opencode_config" | awk '{print $1}')" = "$expected_config_sha" ]
-          jq -e --arg model "llama.cpp/$expected_model_alias" '
+          jq -e \
+            --arg fast "llama.cpp/$expected_model_alias" \
+            --arg powerful "llama.cpp/$expected_powerful_model_alias" '
             . as $config |
             $config.autoupdate == false and $config.share == "disabled" and
-            $config.model == $model and ($config.small_model // $config.model) == $model and
+            $config.model == $fast and ($config.small_model // $config.model) == $fast and
             $config.enabled_providers == ["llama.cpp"] and
             ($config.provider | keys) == ["llama.cpp"] and
             $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
             $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
             ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+            ($config.provider["llama.cpp"].models | keys | sort) ==
+              ([$fast, $powerful] | map(sub("^llama\\.cpp/"; "")) | sort) and
             (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
               "webfetch", "websearch", "external_directory"]
              | all(.[]; $config.permission[.] == "allow"))
@@ -423,20 +553,24 @@ jobs:
           [ "$(systemctl show private-ai-web.service -p ProtectHome --value)" = no ]
           [ "$(systemctl show private-ai-web.service -p ProtectSystem --value)" = no ]
           [ "$(systemctl show private-ai-web.service -p RestrictNamespaces --value)" = no ]
-          web_pid=$(systemctl show private-ai-web.service -p MainPID --value)
-          [[ "$web_pid" =~ ^[1-9][0-9]*$ ]]
-          [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ]
-          [ "$(readlink -f -- "/proc/$web_pid/exe")" = "$opencode_bin" ]
-          mapfile -d '' -t web_argv < "/proc/$web_pid/cmdline"
-          expected_web_argv=("$opencode_bin" web --hostname 127.0.0.1 --port 24096)
-          [ "${#web_argv[@]}" -eq "${#expected_web_argv[@]}" ]
-          for argv_index in "${!expected_web_argv[@]}"; do
-            [ "${web_argv[$argv_index]}" = "${expected_web_argv[$argv_index]}" ]
-          done
           mapfile -t llm_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24080"')
-          mapfile -t web_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24096"')
           [ "${#llm_listeners[@]}" -eq 1 ] && [[ "${llm_listeners[0]}" == *"pid=$llm_pid,"* ]]
-          [ "${#web_listeners[@]}" -eq 1 ] && [[ "${web_listeners[0]}" == *"pid=$web_pid,"* ]]
+          if [ "$active_profile" = fast ]; then
+            web_pid=$(systemctl show private-ai-web.service -p MainPID --value)
+            [[ "$web_pid" =~ ^[1-9][0-9]*$ ]]
+            [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ]
+            [ "$(readlink -f -- "/proc/$web_pid/exe")" = "$opencode_bin" ]
+            mapfile -d '' -t web_argv < "/proc/$web_pid/cmdline"
+            expected_web_argv=("$opencode_bin" web --hostname 127.0.0.1 --port 24096)
+            [ "${#web_argv[@]}" -eq "${#expected_web_argv[@]}" ]
+            for argv_index in "${!expected_web_argv[@]}"; do
+              [ "${web_argv[$argv_index]}" = "${expected_web_argv[$argv_index]}" ]
+            done
+            mapfile -t web_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24096"')
+            [ "${#web_listeners[@]}" -eq 1 ] && [[ "${web_listeners[0]}" == *"pid=$web_pid,"* ]]
+          else
+            [ "$(systemctl show private-ai-web.service -p MainPID --value)" = 0 ]
+          fi
 
           final_receipt=/etc/private-ai/.constructor-finalized
           [ -f "$final_receipt" ] && [ ! -L "$final_receipt" ]
@@ -494,10 +628,72 @@ jobs:
           [ "$(systemctl show kelion-codex-worker.service -p MainPID --value)" = "$main_pid" ]
           [ "$(systemctl show kelion-codex-worker.service -p InvocationID --value)" = "$worker_invocation_id" ]
           [ -r "/proc/$main_pid/cmdline" ]
-          mapfile -d '' -t worker_argv < "/proc/$main_pid/cmdline"
-          [ "${worker_argv[0]}" = /usr/bin/node ]
-          [ "${worker_argv[1]}" = /opt/kelion-codex/codex-worker.mjs ]
-          [ "${worker_argv[2]}" = --once ]
+          [ "$(readlink -f -- "/proc/$main_pid/exe")" = /usr/bin/flock ]
+          mapfile -d '' -t flock_argv < "/proc/$main_pid/cmdline"
+          expected_flock_argv=(
+            /usr/bin/flock --exclusive --wait 9000
+            /run/lock/private-ai-model-switch.lock
+            /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+          )
+          [ "${#flock_argv[@]}" -eq "${#expected_flock_argv[@]}" ]
+          for argv_index in "${!expected_flock_argv[@]}"; do
+            [ "${flock_argv[$argv_index]}" = "${expected_flock_argv[$argv_index]}" ]
+          done
+
+          model_switch_lock=/run/lock/private-ai-model-switch.lock
+          [ -f "$model_switch_lock" ] && [ ! -L "$model_switch_lock" ]
+          [ "$(stat -Lc '%U:%G:%a:%h' "$model_switch_lock")" = 'root:privateai:660:1' ]
+          model_switch_lock_identity=$(stat -Lc '%d:%i' "$model_switch_lock")
+          main_lock_fds=0
+          for fd_path in "/proc/$main_pid/fd/"*; do
+            [ -e "$fd_path" ] || continue
+            if [ "$(stat -Lc '%d:%i' "$fd_path" 2>/dev/null || true)" = \
+              "$model_switch_lock_identity" ]; then
+              main_lock_fds=$((main_lock_fds + 1))
+            fi
+          done
+          [ "$main_lock_fds" -eq 1 ]
+          if /usr/bin/flock --exclusive --nonblock "$model_switch_lock" /usr/bin/true; then
+            printf '%s\n' 'Lockul modelului nu este deținut de invocarea workerului.' >&2
+            exit 1
+          fi
+
+          control_group=$(systemctl show kelion-codex-worker.service -p ControlGroup --value)
+          [[ "$control_group" == /system.slice/* ]]
+          [ -r "/sys/fs/cgroup${control_group}/cgroup.procs" ]
+          grep -qx "$main_pid" "/sys/fs/cgroup${control_group}/cgroup.procs"
+          worker_node_processes=0
+          worker_node_pid=''
+          while IFS= read -r pid; do
+            [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+            if [ "$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)" = /usr/bin/node ]; then
+              mapfile -d '' -t worker_node_argv < "/proc/$pid/cmdline"
+              [ "${#worker_node_argv[@]}" -eq 3 ]
+              [ "${worker_node_argv[0]}" = /usr/bin/node ]
+              [ "${worker_node_argv[1]}" = /opt/kelion-codex/codex-worker.mjs ]
+              [ "${worker_node_argv[2]}" = --once ]
+              [ "$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status")" = "$main_pid" ]
+              worker_node_pid=$pid
+              worker_node_processes=$((worker_node_processes + 1))
+            fi
+          done < "/sys/fs/cgroup${control_group}/cgroup.procs"
+          [ "$worker_node_processes" -eq 1 ]
+          [[ "$worker_node_pid" =~ ^[1-9][0-9]*$ ]]
+
+          is_descendant_of() {
+            local descendant=$1 ancestor=$2 parent hops=0
+            [[ "$descendant" =~ ^[1-9][0-9]*$ && "$ancestor" =~ ^[1-9][0-9]*$ ]]
+            [ "$descendant" != "$ancestor" ]
+            while [ "$descendant" != 1 ] && [ "$hops" -lt 64 ]; do
+              parent=$(awk '/^PPid:/ { print $2 }' "/proc/$descendant/status" 2>/dev/null) \
+                || return 1
+              [[ "$parent" =~ ^[1-9][0-9]*$ ]] || return 1
+              [ "$parent" = "$ancestor" ] && return 0
+              descendant=$parent
+              hops=$((hops + 1))
+            done
+            return 1
+          }
 
           upstream=/root/kelion/proxy/upstream/kelion-upstream.caddy
           [ -f "$upstream" ] && [ ! -L "$upstream" ]
@@ -544,11 +740,11 @@ jobs:
               SELECT b.id::text AS "jobId", b.status,
                      b.constructor_stage AS stage,
                      b.codex_task_id AS "taskId",
+                     b.execution_profile AS profile,
                      b.attempts::integer,
                      b.execution_cycle::integer AS "executionCycle",
                      b.updated_at AS "updatedAt",
-                     b.progress = 'OpenCode/Qwen local execută ordinul cu acces complet la host'
-                       AS "openCodePhase",
+                     b.progress,
                      b.branch, b.pr_url AS "prUrl", b.commit_sha AS commit,
                      b.live_version AS "liveVersion",
                      (SELECT count(*)::integer
@@ -573,30 +769,38 @@ jobs:
             if (!row || !heartbeatRow) process.exit(4)
             if (row.status !== 'running' || !['accepted', 'working'].includes(row.stage)) process.exit(5)
             if (!/^codex-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(row.taskId ?? '')) process.exit(6)
+            if (row.profile !== 'fast' && row.profile !== 'powerful') process.exit(7)
+            const expectedProgressByProfile = Object.freeze({
+              fast: 'Model selectat manual FAST 35B: OpenCode execută ordinul',
+              powerful: 'Model selectat manual POWERFUL 122B: OpenCode execută ordinul',
+            })
+            if (row.progress !== expectedProgressByProfile[row.profile]) process.exit(8)
             if (!Number.isInteger(row.attempts) || row.attempts < 1
               || !Number.isInteger(row.executionCycle) || row.executionCycle < 0
               || !Number.isInteger(row.claimedEvents) || row.claimedEvents < 1
-              || row.runningJobs !== 1) process.exit(7)
-            if (row.openCodePhase !== true || row.pipelineExists !== false) process.exit(8)
-            if ([row.branch, row.prUrl, row.commit, row.liveVersion].some((value) => value !== null)) process.exit(9)
+              || row.runningJobs !== 1) process.exit(9)
+            if (row.pipelineExists !== false) process.exit(10)
+            if ([row.branch, row.prUrl, row.commit, row.liveVersion].some((value) => value !== null)) process.exit(11)
 
             let heartbeat
-            try { heartbeat = JSON.parse(heartbeatRow.value) } catch { process.exit(10) }
-            if (!heartbeat || typeof heartbeat !== 'object' || Array.isArray(heartbeat)) process.exit(11)
+            try { heartbeat = JSON.parse(heartbeatRow.value) } catch { process.exit(12) }
+            if (!heartbeat || typeof heartbeat !== 'object' || Array.isArray(heartbeat)) process.exit(13)
             const allowedHeartbeatKeys = new Set(['status', 'at', 'detail'])
-            if (Object.keys(heartbeat).some((key) => !allowedHeartbeatKeys.has(key)) || heartbeat.status !== 'busy') process.exit(12)
-            if ('taskUrl' in heartbeat || 'internalCostUsdMicros' in heartbeat) process.exit(12)
+            if (Object.keys(heartbeat).some((key) => !allowedHeartbeatKeys.has(key))
+              || heartbeat.status !== 'busy'
+              || heartbeat.detail !== expectedProgressByProfile[row.profile]) process.exit(14)
+            if ('taskUrl' in heartbeat || 'internalCostUsdMicros' in heartbeat) process.exit(14)
             const heartbeatAt = Date.parse(heartbeat.at)
             const dbNow = new Date(heartbeatRow.dbNow).getTime()
             const jobUpdatedAt = new Date(row.updatedAt).getTime()
             const storedAt = new Date(heartbeatRow.storedAt).getTime()
             if (!Number.isFinite(heartbeatAt) || new Date(heartbeatAt).toISOString() !== heartbeat.at
-              || !Number.isFinite(dbNow) || !Number.isFinite(jobUpdatedAt) || !Number.isFinite(storedAt)) process.exit(13)
+              || !Number.isFinite(dbNow) || !Number.isFinite(jobUpdatedAt) || !Number.isFinite(storedAt)) process.exit(15)
             const heartbeatAgeMs = dbNow - heartbeatAt
             const jobAgeMs = dbNow - jobUpdatedAt
             if (heartbeatAgeMs < -30_000 || heartbeatAgeMs > 180_000
               || jobAgeMs < -30_000 || jobAgeMs > 180_000
-              || Math.abs(storedAt - heartbeatAt) > 10_000) process.exit(14)
+              || Math.abs(storedAt - heartbeatAt) > 10_000) process.exit(16)
 
             process.stdout.write(JSON.stringify({
               schema: 1,
@@ -605,6 +809,7 @@ jobs:
               queue: 'build_jobs',
               jobId: row.jobId,
               taskId: row.taskId,
+              profile: row.profile,
               executionCycle: row.executionCycle,
               stage: row.stage,
               claimedEvents: row.claimedEvents,
@@ -624,40 +829,59 @@ jobs:
           printf '%s' "$queue_evidence" | jq -e \
             --arg job "$proof_job_id" \
             '.schema == 1 and .queue == "build_jobs" and .jobId == $job and
+             (.profile == "fast" or .profile == "powerful") and
              .executor == "opencode-local-qwen" and .publicationSideEffects == false' \
             >/dev/null
 
           task_id=$(printf '%s' "$queue_evidence" | jq -er '.taskId')
+          queue_profile=$(printf '%s' "$queue_evidence" | jq -er '.profile')
+          [ "$queue_profile" = "$active_profile" ]
           state_dir="/var/lib/kelion-codex/jobs/${task_id}-${proof_job_id}"
           [ -d "$state_dir" ] && [ ! -L "$state_dir" ]
           job_receipt="$state_dir/job.json"
           [ -f "$job_receipt" ] && [ ! -L "$job_receipt" ]
           [ "$(stat -Lc '%U:%G:%a:%h' "$job_receipt")" = 'kelion-codex:kelion-codex:600:1' ]
-          jq -e --arg job "$proof_job_id" --arg task "$task_id" --arg base "$expected_source_sha" '
-            (keys | sort) == ["baseCommit", "createdAt", "executor", "jobId", "taskId"] and
-            .jobId == $job and .taskId == $task and
-            .executor == "opencode-local-qwen" and
-            .baseCommit == $base and
-            (.createdAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
-          ' "$job_receipt" >/dev/null
+          job_profile=$(jq -ser \
+            --arg job "$proof_job_id" \
+            --arg task "$task_id" \
+            --arg base "$expected_source_sha" '
+            if length == 1 and
+               ((.[0] | keys | sort) ==
+                 ["baseCommit", "createdAt", "executor", "jobId", "profile", "taskId"]) and
+               .[0].jobId == $job and .[0].taskId == $task and
+               .[0].executor == "opencode-local-qwen" and
+               .[0].baseCommit == $base and
+               (.[0].profile == "fast" or .[0].profile == "powerful") and
+               (.[0].createdAt |
+                 test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+            then .[0].profile
+            else error("receiptul jobului nu respectă schema canonică")
+            end
+          ' "$job_receipt")
+          [ "$job_profile" = "$queue_profile" ]
+          [ "$job_profile" = "$active_profile" ]
+          case "$job_profile" in
+            fast) expected_job_model="llama.cpp/$expected_model_alias" ;;
+            powerful) expected_job_model="llama.cpp/$expected_powerful_model_alias" ;;
+            *) printf '%s\n' 'Profilul jobului nu este permis.' >&2; exit 1 ;;
+          esac
+          [ "$expected_job_model" = "$expected_active_model" ]
 
           [ "$(systemctl show kelion-codex-worker.service -p ActiveState --value)" = activating ]
           [ "$(systemctl show kelion-codex-worker.service -p SubState --value)" = start ]
           [ "$(systemctl show kelion-codex-worker.service -p MainPID --value)" = "$main_pid" ]
           [ "$(systemctl show kelion-codex-worker.service -p InvocationID --value)" = "$worker_invocation_id" ]
-          control_group=$(systemctl show kelion-codex-worker.service -p ControlGroup --value)
-          [[ "$control_group" == /system.slice/* ]]
-          [ -r "/sys/fs/cgroup${control_group}/cgroup.procs" ]
           opencode_process=0
           while IFS= read -r pid; do
             [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
             if [ "$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)" = /opt/private-ai/bin/opencode ]; then
+              is_descendant_of "$pid" "$worker_node_pid"
               [ "$(awk '/^Uid:/ { print $2 }' "/proc/$pid/status")" = 0 ]
               mapfile -d '' -t opencode_argv < "/proc/$pid/cmdline"
               expected_opencode_argv=(
                 /opt/private-ai/bin/opencode --pure run
                 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
-                --model llama.cpp/qwen3.6-35b-a3b-local
+                --model "$expected_job_model"
                 --file "$state_dir/order.md"
               )
               [ "${#opencode_argv[@]}" -eq "${#expected_opencode_argv[@]}" ]
@@ -684,10 +908,14 @@ jobs:
           printf 'LLAMA_CPP_REF=%s\n' "$expected_llama_ref"
           printf 'LLAMA_SERVER_SHA256=%s\n' "$llama_server_sha"
           printf 'OPENCODE_BIN_SHA256=%s\n' "$opencode_bin_sha"
-          printf 'MODEL_REVISION=%s\n' "$expected_model_revision"
-          printf 'MODEL_FILE=%s\n' "$expected_model_file"
-          printf 'MODEL_FILE_BYTES=%s\n' "$expected_model_bytes"
-          printf 'MODEL_FILE_SHA256=%s\n' "$expected_model_sha"
+          printf 'PROFILE=%s\n' "$active_profile"
+          printf 'MODEL=%s\n' "$expected_active_model"
+          printf 'MODEL_REPO=%s\n' "$expected_active_model_repo"
+          printf 'MODEL_REVISION=%s\n' "$expected_active_model_revision"
+          printf 'MODEL_QUANT=%s\n' "$expected_active_model_quant"
+          printf 'MODEL_TOTAL_BYTES=%s\n' "$expected_active_model_total_bytes"
+          printf 'MODEL_FILES=%s\n' "$expected_active_model_files"
+          printf 'MODEL_FILES_SHA256=%s\n' "$expected_active_model_shas"
           printf 'SOURCE_SHA=%s\n' "$expected_source_sha"
           printf 'QUEUE_RECEIPT_SHA256=%s\n' "$queue_receipt_sha"
           printf 'JOB_ID=%s\n' "$proof_job_id"

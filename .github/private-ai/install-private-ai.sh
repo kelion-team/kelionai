@@ -15,6 +15,8 @@ readonly PRIVATE_AI_BIN="/opt/private-ai/bin"
 readonly PRIVATE_AI_SOURCE="/opt/private-ai/src/llama.cpp"
 readonly PRIVATE_AI_MARKER="${PRIVATE_AI_CONFIG}/.installer-id"
 readonly PRIVATE_AI_COMPLETE="${PRIVATE_AI_CONFIG}/.install-complete"
+readonly KELION_ROOT="/root/kelion"
+readonly PUBLICATION_LOCK="${KELION_ROOT}/publicare.lock"
 readonly INSTALLER_ID="private-ai-contabo-v1"
 readonly LLAMA_PORT="24080"
 readonly OPENCODE_PORT="24096"
@@ -25,6 +27,8 @@ readonly LLAMA_CPP_REF="c1d0e7a004015f23bc0233470b747b596f29b264"
 readonly OPENCODE_VERSION="1.18.25"
 readonly OPENCODE_X64_SHA256="58a3729a6f3432dd6d2917fcc4a949788891a035818646ad480e12c947f56e78"
 readonly OPENCODE_BASELINE_SHA256="ccd10586611b598b1eaed7c05cfbcbc68e3ec09e736b360da09b1d615d922968"
+private_ai_access_host=${PRIVATE_AI_ACCESS_HOST:-}
+publication_lock_held=0
 
 log() {
   printf '[private-ai] %s\n' "$*"
@@ -33,6 +37,15 @@ log() {
 fail() {
   printf '[private-ai] ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+validate_access_host() {
+  [ -n "$private_ai_access_host" ] || fail 'PRIVATE_AI_ACCESS_HOST is required.'
+  [ "${#private_ai_access_host}" -le 253 ] || fail 'PRIVATE_AI_ACCESS_HOST is too long.'
+  [[ "$private_ai_access_host" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]] \
+    || fail 'PRIVATE_AI_ACCESS_HOST must be a hostname or IPv4 address without a port.'
+  [[ "$private_ai_access_host" != *..* ]] \
+    || fail 'PRIVATE_AI_ACCESS_HOST contains an empty DNS label.'
 }
 
 on_error() {
@@ -44,6 +57,103 @@ trap 'on_error "$LINENO" "$?"' ERR
 
 require_root() {
   [ "$(id -u)" -eq 0 ] || fail "Run this installer as root."
+}
+
+validate_publication_root() {
+  local root_mode
+  [ -d "$KELION_ROOT" ] && [ ! -L "$KELION_ROOT" ] \
+    && [ "$(realpath -e -- "$KELION_ROOT")" = "$KELION_ROOT" ] \
+    && [ "$(stat -Lc '%u:%g' "$KELION_ROOT")" = '0:0' ] \
+    || return 1
+  root_mode=$(stat -Lc '%a' "$KELION_ROOT") || return 1
+  [[ "$root_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  [ $((8#$root_mode & 8#22)) -eq 0 ]
+}
+
+verify_publication_lock_fd() {
+  local fd_identity fd_path
+  validate_publication_root || return 1
+  [ -e /proc/$$/fd/9 ] || return 1
+  fd_path=$(readlink "/proc/$$/fd/9") || return 1
+  [ "$fd_path" = "$PUBLICATION_LOCK" ] || return 1
+  [ -f /proc/$$/fd/9 ] && [ ! -L "$PUBLICATION_LOCK" ] || return 1
+  [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] || return 1
+  fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9) || return 1
+  [ "$fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ]
+}
+
+acquire_publication_lock() {
+  local fd_identity fd_path inherited root_identity
+  inherited=${KELION_CUTOVER_LOCK_HELD:-0}
+  case "$inherited" in 0|1) ;; *) fail 'The inherited publication-lock flag is invalid.' ;; esac
+
+  if [ "$inherited" = 1 ]; then
+    verify_publication_lock_fd \
+      || fail 'The inherited publication lock on FD 9 is unsafe.'
+  else
+    if [ ! -e "$KELION_ROOT" ] && [ ! -L "$KELION_ROOT" ]; then
+      mkdir -m 0755 -- "$KELION_ROOT" 2>/dev/null || true
+    fi
+    validate_publication_root \
+      || fail 'The canonical publication-lock directory is unsafe.'
+    root_identity=$(stat -Lc '%d:%i' "$KELION_ROOT")
+
+    if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
+      [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
+        || fail 'The canonical publication lock is not a regular file.'
+    fi
+    exec 9<>"$PUBLICATION_LOCK"
+    fd_path=$(readlink "/proc/$$/fd/9") \
+      || fail 'The publication-lock FD cannot be resolved.'
+    [ "$fd_path" = "$PUBLICATION_LOCK" ] && [ -f /proc/$$/fd/9 ] \
+      || fail 'The publication-lock FD does not reference the canonical file.'
+    [ "$(stat -Lc '%h' /proc/$$/fd/9)" = 1 ] \
+      || fail 'The canonical publication lock has unexpected hard links.'
+    fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+    [ "$fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+      || fail 'The publication-lock path changed while it was opened.'
+    [ "$root_identity" = "$(stat -Lc '%d:%i' "$KELION_ROOT")" ] \
+      || fail 'The publication-lock directory changed while the lock was opened.'
+    chown root:root /proc/$$/fd/9
+    chmod 0600 /proc/$$/fd/9
+    verify_publication_lock_fd \
+      || fail 'The canonical publication lock metadata is unsafe.'
+  fi
+
+  flock -n 9 || fail 'Another Constructor publication operation is active.'
+  verify_publication_lock_fd \
+    || fail 'The canonical publication lock changed after flock.'
+  publication_lock_held=1
+}
+
+guard_constructor_absent_under_publication_lock() {
+  local constructor_artifact
+  local -a constructor_artifacts=(
+    /etc/systemd/system/kelion-constructor-model-control.service
+    /opt/kelion-constructor/constructor-model-control.mjs
+    /opt/kelion-codex/codex-worker.mjs
+    /root/kelion/config/codex-worker.env
+    /root/kelion/runtime/constructor-deploy-quiesce.journal
+    /root/kelion/runtime/constructor-upgrade.journal
+    /root/kelion/runtime/constructor-max-model.journal
+    /root/kelion/runtime/constructor-reactivation.journal
+    /run/kelion/constructor-activation.pending
+  )
+
+  [ "$publication_lock_held" = 1 ] && verify_publication_lock_fd \
+    || fail 'The Constructor exclusion guard requires the canonical publication lock.'
+  for constructor_artifact in "${constructor_artifacts[@]}"; do
+    if [ -e "$constructor_artifact" ] || [ -L "$constructor_artifact" ]; then
+      printf '[private-ai] ERROR: CONSTRUCTOR_INSTALLED_REPAIR_REFUSED artifact=%s\n' \
+        "$constructor_artifact" >&2
+      exit 79
+    fi
+  done
+  if systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1; then
+    printf '%s\n' \
+      '[private-ai] ERROR: CONSTRUCTOR_INSTALLED_REPAIR_REFUSED unit=kelion-constructor-model-control.service' >&2
+    exit 79
+  fi
 }
 
 check_preflight() {
@@ -617,7 +727,7 @@ Web password:
 ${OPENCODE_SERVER_PASSWORD}
 
 SSH tunnel from Windows PowerShell:
-ssh -N -L 127.0.0.1:${OPENCODE_PORT}:127.0.0.1:${OPENCODE_PORT} root@164.68.120.87
+ssh -N -L 127.0.0.1:${OPENCODE_PORT}:127.0.0.1:${OPENCODE_PORT} root@${private_ai_access_host}
 EOF
   chmod 0600 /root/private-ai-access.txt
 
@@ -682,6 +792,9 @@ publish_install_receipt() {
 }
 
 resume_model_install() {
+  require_root
+  acquire_publication_lock
+  guard_constructor_absent_under_publication_lock
   check_resume_preflight
   if [ -e "$PRIVATE_AI_COMPLETE" ]; then
     [ -f "$PRIVATE_AI_COMPLETE" ] && [ ! -L "$PRIVATE_AI_COMPLETE" ] \
@@ -704,6 +817,8 @@ resume_model_install() {
 
 main() {
   require_root
+  acquire_publication_lock
+  guard_constructor_absent_under_publication_lock
   log "Running read-only preflight checks."
   check_preflight
   log "Installing required Ubuntu packages."
@@ -729,7 +844,16 @@ main() {
 }
 
 case "${1:-}" in
-  '') main ;;
-  --resume-model) resume_model_install ;;
+  '')
+    [ "$#" -eq 0 ] || fail 'Unexpected installer arguments.'
+    validate_access_host
+    main
+    ;;
+  --resume-model)
+    [ "$#" -eq 2 ] || fail 'Usage: install-private-ai.sh --resume-model ACCESS_HOST'
+    private_ai_access_host=$2
+    validate_access_host
+    resume_model_install
+    ;;
   *) fail "Unsupported installer argument: $1" ;;
 esac

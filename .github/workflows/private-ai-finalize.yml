@@ -1,32 +1,15 @@
 name: private-ai-constructor-finalize
 
 on:
-  push:
-    branches:
-      - ops/private-ai-install-20260830
-    paths:
-      - deploy/codex-worker.mjs
-      - deploy/constructor-sync-worker.sh
-      - deploy/systemd/kelion-constructor-sync.service
-      - deploy/systemd/kelion-codex-worker.service
-      - deploy/sudoers/kelion-codex-full-access
-      - deploy/opencode-constructor.json
-      - deploy/opencode-constructor-instructions.md
-      - deploy/systemd/private-ai-web-full-access.conf
-      - deploy/lib/runtime-config-cutover.sh
-      - constructor-desktop/**
-      - .github/private-ai/finalize-private-ai-constructor.sh
-      - .github/private-ai/finalize-private-ai-constructor.test.mjs
-      - .github/workflows/vps-codex-login.yml
-      - .github/workflows/private-ai-finalize.yml
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: read
 
 concurrency:
-  group: private-ai-constructor-finalize
+  group: production-release
   cancel-in-progress: false
 
 jobs:
@@ -37,16 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validează sursa canonică fără secrete
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
 
   validate-source:
     needs: guard-source
@@ -55,15 +41,18 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validează executorul și finalizerul fără secrete
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
           node --test .github/private-ai/finalize-private-ai-constructor.test.mjs
           bash -n deploy/lib/runtime-config-cutover.sh
@@ -98,15 +87,160 @@ jobs:
           test -s deploy/systemd/private-ai-web-full-access.conf
           node scripts/verifica-clienti-nativi.mjs
 
-  finalize-vps:
+  verify-windows-client:
     needs: validate-source
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Compilează clientul Windows înainte de orice mutație pe VPS
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:GITHUB_REF -ne 'refs/heads/master') { throw 'Workflow-ul nu rulează de pe master.' }
+          if ($env:GITHUB_REF_NAME -ne 'master') { throw 'Workflow-ul nu rulează de pe master.' }
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Checkout-ul nu corespunde commitului dispatch.' }
+          if ((git rev-parse HEAD) -ne (git rev-parse origin/master)) { throw 'Checkout-ul nu este master canonic.' }
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          node scripts/verifica-clienti-nativi.mjs
+          npm --prefix frontend ci --no-audit --no-fund
+          npm --prefix constructor-desktop ci --no-audit --no-fund
+          npm --prefix constructor-desktop run build -- --no-bundle
+          $Executables = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release' -Filter '*.exe' -File)
+          if ($Executables.Count -ne 1) { throw "Expected exactly one application executable; found $($Executables.Count)." }
+          $Hash = (Get-FileHash -Algorithm SHA256 $Executables[0].FullName).Hash.ToLowerInvariant()
+          if ($Hash -notmatch '^[0-9a-f]{64}$') { throw 'Application hash is invalid.' }
+          "WINDOWS_APPLICATION_BUILD_SHA256=$Hash"
+
+  finalize-vps:
+    needs:
+      - validate-source
+      - verify-windows-client
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Leagă gate-ul de buildul reușit al commitului canonic exact
+        id: gate-manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+          remote_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          [ "$remote_master" = "$GITHUB_SHA" ]
+
+          runs=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
+            -f event=workflow_run -f status=completed -f head_sha="$GITHUB_SHA" -f per_page=100)
+          build_run_id=$(jq -er --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            if ((.total_count | type) != "number" or .total_count > 100) then
+              error("build_images_run_inventory_incomplete")
+            else
+              [.workflow_runs[] | select(
+                .head_sha == $sha and
+                .head_branch == "master" and
+                .event == "workflow_run" and
+                .status == "completed" and
+                .conclusion == "success" and
+                .head_repository.full_name == $repo and
+                (.path == ".github/workflows/build-images.yml" or
+                  ((.path // "") | startswith(".github/workflows/build-images.yml@")))
+              )]
+              | if length == 1 then .[0].id else error("build_images_run_missing_or_ambiguous") end
+            end
+          ' <<<"$runs")
+          [[ "$build_run_id" =~ ^[1-9][0-9]*$ ]]
+          build_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run_id}")
+          jq -e --argjson id "$build_run_id" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .id == $id and
+            .head_sha == $sha and
+            .head_branch == "master" and
+            .event == "workflow_run" and
+            .status == "completed" and
+            .conclusion == "success" and
+            .head_repository.full_name == $repo and
+            (.path == ".github/workflows/build-images.yml" or
+              ((.path // "") | startswith(".github/workflows/build-images.yml@")))
+          ' <<<"$build_run" >/dev/null
+
+          artifact_name="release-images-${GITHUB_SHA}"
+          artifacts=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run_id}/artifacts" \
+            -f name="$artifact_name" -f per_page=100)
+          artifact_id=$(jq -er --arg name "$artifact_name" '
+            select(.total_count == 1)
+            | [.artifacts[] | select(.name == $name and .expired == false)]
+            | if length == 1 then .[0].id else error("release_artifact_missing_or_ambiguous") end
+          ' <<<"$artifacts")
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+
+          gate_root="$RUNNER_TEMP/private-ai-finalize-gate"
+          [ ! -e "$gate_root" ] && [ ! -L "$gate_root" ]
+          install -d -m 0700 "$gate_root"
+          download_root=$(mktemp -d "$RUNNER_TEMP/private-ai-finalize-download.XXXXXX")
+          cleanup_gate_download() { rm -rf -- "$download_root"; }
+          trap cleanup_gate_download EXIT
+          artifact_zip="$download_root/release-images.zip"
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$artifact_zip"
+          [ -s "$artifact_zip" ] && [ ! -L "$artifact_zip" ]
+          entries=$(unzip -Z1 "$artifact_zip" | LC_ALL=C sort)
+          [ "$entries" = $'codex-gates.json\nimages.json' ]
+          manifest_candidate="$download_root/codex-gates.json"
+          unzip -p "$artifact_zip" codex-gates.json > "$manifest_candidate"
+          [ -s "$manifest_candidate" ] && [ ! -L "$manifest_candidate" ]
+          [ "$(stat -Lc '%s' "$manifest_candidate")" -le 4096 ]
+          jq -e --arg commit "$GITHUB_SHA" '
+            type == "object" and
+            (keys == ["commit", "image", "schema", "sourceRunId"]) and
+            .schema == 1 and
+            .commit == $commit and
+            (.sourceRunId | type == "number" and . > 0 and floor == .) and
+            (.image | type == "string")
+          ' "$manifest_candidate" >/dev/null
+          source_run_id=$(jq -er '.sourceRunId' "$manifest_candidate")
+          [[ "$source_run_id" =~ ^[1-9][0-9]*$ ]]
+          source_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${source_run_id}")
+          jq -e --argjson id "$source_run_id" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .id == $id and
+            .head_sha == $sha and
+            .head_branch == "master" and
+            .event == "push" and
+            .status == "completed" and
+            .conclusion == "success" and
+            .repository.full_name == $repo and
+            (.path == ".github/workflows/pr-verify.yml" or
+              ((.path // "") | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$source_run" >/dev/null
+          gate_image=$(jq -er '.image' "$manifest_candidate")
+          gate_prefix="ghcr.io/${GITHUB_REPOSITORY,,}/codex-gates@sha256:"
+          [[ "$gate_image" == "$gate_prefix"* ]]
+          [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
+          install -m 0600 "$manifest_candidate" "$gate_root/codex-gates.json"
+          printf 'build_run_id=%s\nartifact_id=%s\n' "$build_run_id" "$artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Instalează și probează același worker OpenCode
         shell: bash
@@ -118,20 +252,46 @@ jobs:
           REGISTRY_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          umask 077
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ] \
             && [ -n "$REGISTRY_TOKEN" ]
+          [ "${#VPS_HOST}" -le 253 ]
+          [[ "$VPS_HOST" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$VPS_HOST" != *..* ]]
 
           bash -n .github/private-ai/finalize-private-ai-constructor.sh
           node --check deploy/codex-worker.mjs
+          gate_manifest="$RUNNER_TEMP/private-ai-finalize-gate/codex-gates.json"
+          [ -f "$gate_manifest" ] && [ ! -L "$gate_manifest" ]
+          [ "$(stat -Lc '%a:%h' "$gate_manifest")" = '600:1' ]
+          jq -e --arg commit "$GITHUB_SHA" '
+            type == "object" and
+            (keys == ["commit", "image", "schema", "sourceRunId"]) and
+            .schema == 1 and
+            .commit == $commit and
+            (.sourceRunId | type == "number" and . > 0 and floor == .) and
+            (.image | type == "string")
+          ' "$gate_manifest" >/dev/null
+          expected_gate_commit=$(jq -er '.commit' "$gate_manifest")
+          expected_gate_image=$(jq -er '.image' "$gate_manifest")
+          [ "$expected_gate_commit" = "$GITHUB_SHA" ]
+          expected_gate_prefix="ghcr.io/${GITHUB_REPOSITORY,,}/codex-gates@sha256:"
+          [[ "$expected_gate_image" == "$expected_gate_prefix"* ]]
+          [[ "${expected_gate_image#"$expected_gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
           expected_worker_sha=$(sha256sum deploy/codex-worker.mjs | awk '{print $1}')
           expected_sync_worker_sha=$(sha256sum deploy/constructor-sync-worker.sh | awk '{print $1}')
           expected_sync_unit_sha=$(sha256sum deploy/systemd/kelion-constructor-sync.service | awk '{print $1}')
           expected_worker_unit_sha=$(sha256sum deploy/systemd/kelion-codex-worker.service | awk '{print $1}')
+          expected_model_control_sha=$(sha256sum deploy/constructor-model-control.mjs | awk '{print $1}')
+          expected_model_switch_sha=$(sha256sum deploy/constructor-model-switch.sh | awk '{print $1}')
+          expected_service_auth_sha=$(sha256sum deploy/lib/service-auth.mjs | awk '{print $1}')
+          expected_model_control_unit_sha=$(sha256sum deploy/systemd/kelion-constructor-model-control.service | awk '{print $1}')
           expected_sudoers_sha=$(sha256sum deploy/sudoers/kelion-codex-full-access | awk '{print $1}')
           expected_config_sha=$(sha256sum deploy/opencode-constructor.json | awk '{print $1}')
           expected_instructions_sha=$(sha256sum deploy/opencode-constructor-instructions.md | awk '{print $1}')
@@ -156,7 +316,13 @@ jobs:
             "$bundle_root/deploy/sudoers"
           install -m 0700 .github/private-ai/finalize-private-ai-constructor.sh \
             "$bundle_root/.github/private-ai/finalize-private-ai-constructor.sh"
+          install -m 0600 "$gate_manifest" \
+            "$bundle_root/.github/private-ai/codex-gates.json"
           install -m 0600 deploy/codex-worker.mjs "$bundle_root/deploy/codex-worker.mjs"
+          install -m 0600 deploy/constructor-model-control.mjs \
+            "$bundle_root/deploy/constructor-model-control.mjs"
+          install -m 0600 deploy/constructor-model-switch.sh \
+            "$bundle_root/deploy/constructor-model-switch.sh"
           install -m 0600 deploy/constructor-sync-worker.sh \
             "$bundle_root/deploy/constructor-sync-worker.sh"
           install -m 0600 deploy/opencode-constructor.json \
@@ -167,6 +333,10 @@ jobs:
             "$bundle_root/deploy/systemd/kelion-codex-worker.service"
           install -m 0600 deploy/systemd/kelion-constructor-sync.service \
             "$bundle_root/deploy/systemd/kelion-constructor-sync.service"
+          install -m 0600 deploy/systemd/kelion-constructor-model-control.service \
+            "$bundle_root/deploy/systemd/kelion-constructor-model-control.service"
+          install -m 0600 deploy/lib/service-auth.mjs \
+            "$bundle_root/deploy/lib/service-auth.mjs"
           install -m 0600 deploy/systemd/private-ai-web-full-access.conf \
             "$bundle_root/deploy/systemd/private-ai-web-full-access.conf"
           install -m 0600 deploy/sudoers/kelion-codex-full-access \
@@ -178,32 +348,42 @@ jobs:
           (
             cd "$bundle_root"
             sha256sum \
+              .github/private-ai/codex-gates.json \
               .github/private-ai/finalize-private-ai-constructor.sh \
               deploy/codex-worker.mjs \
               deploy/compose.production.yml \
+              deploy/constructor-model-control.mjs \
+              deploy/constructor-model-switch.sh \
               deploy/constructor-sync-worker.sh \
               deploy/lib/runtime-config-cutover.sh \
+              deploy/lib/service-auth.mjs \
               deploy/opencode-constructor-instructions.md \
               deploy/opencode-constructor.json \
               deploy/sudoers/kelion-codex-full-access \
               deploy/systemd/private-ai-web-full-access.conf \
               deploy/systemd/kelion-constructor-sync.service \
+              deploy/systemd/kelion-constructor-model-control.service \
               deploy/systemd/kelion-codex-worker.service \
               > SHA256SUMS
           )
           bundle=$(mktemp)
           tar --sort=name --owner=0 --group=0 --numeric-owner \
             -C "$bundle_root" -czf "$bundle" \
+            .github/private-ai/codex-gates.json \
             .github/private-ai/finalize-private-ai-constructor.sh \
             deploy/codex-worker.mjs \
             deploy/compose.production.yml \
+            deploy/constructor-model-control.mjs \
+            deploy/constructor-model-switch.sh \
             deploy/constructor-sync-worker.sh \
             deploy/lib/runtime-config-cutover.sh \
+            deploy/lib/service-auth.mjs \
             deploy/opencode-constructor-instructions.md \
             deploy/opencode-constructor.json \
             deploy/sudoers/kelion-codex-full-access \
             deploy/systemd/private-ai-web-full-access.conf \
             deploy/systemd/kelion-constructor-sync.service \
+            deploy/systemd/kelion-constructor-model-control.service \
             deploy/systemd/kelion-codex-worker.service \
             SHA256SUMS
           bundle_sha=$(sha256sum "$bundle" | awk '{print $1}')
@@ -227,12 +407,10 @@ jobs:
             -o ServerAliveCountMax=8
           )
           remote_bundle="/root/private-ai-finalize.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.tar.gz"
+          latest_master=$(GH_TOKEN="$REGISTRY_TOKEN" gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          [ "$latest_master" = "$expected_gate_commit" ]
           scp "${ssh_opts[@]}" "$bundle" "$VPS_USER@$VPS_HOST:$remote_bundle"
-          expected_gate_commit=58f39cfef1ae38157a29d1a0810a334263926c0e
-          expected_gate_image=ghcr.io/kelion-team/kelionai/codex-gates@sha256:25b0b08c093ab2ae31036183e8f6028c8997794ea559b318080339b640ce9ea3
-          [ "$(GH_TOKEN="$REGISTRY_TOKEN" gh api \
-            "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')" = \
-            "$expected_gate_commit" ]
           registry_token_file=$(mktemp)
           printf '%s' "$REGISTRY_TOKEN" > "$registry_token_file"
           chmod 0600 "$registry_token_file"
@@ -253,7 +431,7 @@ jobs:
           trap cleanup_gate_pull EXIT
           [ -f "$token_file" ] && [ ! -L "$token_file" ]
           [ "$(stat -Lc '%u:%g:%a:%h' "$token_file")" = '0:0:600:1' ]
-          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]]
+          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]] # hardcod-permis: namespace-ul OCI canonic este o ancoră de proveniență
           [[ "$gate_commit" =~ ^[0-9a-f]{40}$ ]]
           authfiles=()
           for identity in \
@@ -320,16 +498,21 @@ jobs:
           trap cleanup_remote EXIT
           tar -tzf "$archive" > "$extract/entries"
           diff -u - "$extract/entries" <<'ENTRIES'
+          .github/private-ai/codex-gates.json
           .github/private-ai/finalize-private-ai-constructor.sh
           deploy/codex-worker.mjs
           deploy/compose.production.yml
+          deploy/constructor-model-control.mjs
+          deploy/constructor-model-switch.sh
           deploy/constructor-sync-worker.sh
           deploy/lib/runtime-config-cutover.sh
+          deploy/lib/service-auth.mjs
           deploy/opencode-constructor-instructions.md
           deploy/opencode-constructor.json
           deploy/sudoers/kelion-codex-full-access
           deploy/systemd/private-ai-web-full-access.conf
           deploy/systemd/kelion-constructor-sync.service
+          deploy/systemd/kelion-constructor-model-control.service
           deploy/systemd/kelion-codex-worker.service
           SHA256SUMS
           ENTRIES
@@ -340,6 +523,19 @@ jobs:
           find "$extract" -type d -exec chmod 0700 {} +
           find "$extract" -type f -exec chmod 0600 {} +
           chmod 0700 "$extract/.github/private-ai/finalize-private-ai-constructor.sh"
+          gate_manifest="$extract/.github/private-ai/codex-gates.json"
+          [ -f "$gate_manifest" ] && [ ! -L "$gate_manifest" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$gate_manifest")" = '0:0:600:1' ]
+          jq -e '
+            type == "object" and
+            (keys == ["commit", "image", "schema", "sourceRunId"]) and
+            .schema == 1 and
+            (.commit | strings | test("^[0-9a-f]{40}$")) and
+            (.sourceRunId | type == "number" and . > 0 and floor == .) and
+            (.image | strings | test("^ghcr[.]io/[a-z0-9_.-]+/[a-z0-9_.-]+/codex-gates@sha256:[0-9a-f]{64}$"))
+          ' "$gate_manifest" >/dev/null
+          expected_gate_commit=$(jq -er '.commit' "$gate_manifest")
+          expected_gate_image=$(jq -er '.image' "$gate_manifest")
           sync -f "$extract/SHA256SUMS"
           sync -f "$extract"
 
@@ -356,7 +552,7 @@ jobs:
           [Service]
           Type=oneshot
           WorkingDirectory=$durable_root
-          ExecStart=/usr/bin/bash $durable_root/.github/private-ai/finalize-private-ai-constructor.sh $durable_root
+          ExecStart=/usr/bin/bash $durable_root/.github/private-ai/finalize-private-ai-constructor.sh $durable_root $expected_gate_commit $expected_gate_image
           ExecStartPost=/usr/bin/systemctl disable private-ai-constructor-finalize.service
           Restart=on-failure
           RestartPreventExitStatus=75
@@ -444,6 +640,24 @@ jobs:
             "$(sha256sum "$durable_root/deploy/systemd/kelion-constructor-sync.service" | awk '{print $1}')" ]
           [ "$(sha256sum /etc/systemd/system/kelion-codex-worker.service | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/systemd/kelion-codex-worker.service" | awk '{print $1}')" ]
+          [ "$(sha256sum /opt/kelion-constructor/constructor-model-control.mjs | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/constructor-model-control.mjs" | awk '{print $1}')" ]
+          [ "$(sha256sum /opt/private-ai/bin/constructor-model-switch | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/constructor-model-switch.sh" | awk '{print $1}')" ]
+          [ "$(sha256sum /opt/kelion-constructor/lib/service-auth.mjs | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/lib/service-auth.mjs" | awk '{print $1}')" ]
+          [ "$(sha256sum /etc/systemd/system/kelion-constructor-model-control.service | awk '{print $1}')" = \
+            "$(sha256sum "$durable_root/deploy/systemd/kelion-constructor-model-control.service" | awk '{print $1}')" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/secrets/constructor-model-control-secret)" = '0:10050:440:1' ]
+          [ ! -e /root/kelion/runtime/constructor-reactivation.journal ] \
+            && [ ! -L /root/kelion/runtime/constructor-reactivation.journal ]
+          [ ! -e /root/kelion/runtime/private-ai-finalize-reactivation.owner ] \
+            && [ ! -L /root/kelion/runtime/private-ai-finalize-reactivation.owner ]
+          systemctl is-enabled --quiet kelion-constructor-model-control.service
+          systemctl is-active --quiet kelion-constructor-model-control.service
+          [ -S /run/kelion-constructor-model-control/control.sock ] \
+            && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
+            && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ]
           [ "$(sha256sum /etc/sudoers.d/kelion-constructor-full-access | awk '{print $1}')" = \
             "$(sha256sum "$durable_root/deploy/sudoers/kelion-codex-full-access" | awk '{print $1}')" ]
           [ "$(sha256sum /srv/private-ai/home/.config/opencode/opencode.json | awk '{print $1}')" = \
@@ -467,6 +681,10 @@ jobs:
           grep -qx "SYNC_WORKER_INSTALLED_SHA256=$expected_sync_worker_sha" <<<"$proof"
           grep -qx "SYNC_UNIT_INSTALLED_SHA256=$expected_sync_unit_sha" <<<"$proof"
           grep -qx "WORKER_UNIT_INSTALLED_SHA256=$expected_worker_unit_sha" <<<"$proof"
+          grep -qx "MODEL_CONTROL_INSTALLED_SHA256=$expected_model_control_sha" <<<"$proof"
+          grep -qx "MODEL_SWITCH_INSTALLED_SHA256=$expected_model_switch_sha" <<<"$proof"
+          grep -qx "SERVICE_AUTH_INSTALLED_SHA256=$expected_service_auth_sha" <<<"$proof"
+          grep -qx "MODEL_CONTROL_UNIT_INSTALLED_SHA256=$expected_model_control_unit_sha" <<<"$proof"
           grep -qx "WORKER_SUDOERS_INSTALLED_SHA256=$expected_sudoers_sha" <<<"$proof"
           grep -qx "OPENCODE_CONFIG_SHA256=$expected_config_sha" <<<"$proof"
           grep -qx "OPENCODE_INSTRUCTIONS_SHA256=$expected_instructions_sha" <<<"$proof"
@@ -501,33 +719,3 @@ jobs:
             printf '%s\n' "$proof"
             printf '%s\n' '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  verify-windows-client:
-    needs: finalize-vps
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-
-      - name: Compilează clientul Windows separat fără distribuție nesemnată
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          rustup toolchain install 1.89.0 --profile minimal
-          rustup default 1.89.0
-          node scripts/verifica-clienti-nativi.mjs
-          npm --prefix frontend ci --no-audit --no-fund
-          npm --prefix constructor-desktop ci --no-audit --no-fund
-          npm --prefix constructor-desktop run build -- --no-bundle
-          $Executables = @(Get-ChildItem 'constructor-desktop/src-tauri/target/release' -Filter '*.exe' -File)
-          if ($Executables.Count -ne 1) { throw "Expected exactly one application executable; found $($Executables.Count)." }
-          $Hash = (Get-FileHash -Algorithm SHA256 $Executables[0].FullName).Hash.ToLowerInvariant()
-          if ($Hash -notmatch '^[0-9a-f]{64}$') { throw 'Application hash is invalid.' }
-          "WINDOWS_APPLICATION_BUILD_SHA256=$Hash"

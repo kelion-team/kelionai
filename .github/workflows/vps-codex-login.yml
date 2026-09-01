@@ -285,7 +285,7 @@ jobs:
           grep -Fq 'User=kelion-codex' "$unit_snapshot"
           grep -Fq 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' "$unit_snapshot"
           grep -Fq 'Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local' "$unit_snapshot"
-          grep -Fq 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$unit_snapshot"
+          grep -Fq 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$unit_snapshot"
           grep -Fq 'NoNewPrivileges=false' "$unit_snapshot"
           grep -Fq 'ProtectSystem=false' "$unit_snapshot"
           ! grep -Eqi 'CODEX_HOME=|CODEX_BIN=|login[[:space:]]+--with-api-key|openai-project-key|codex-real|opencode-constructor-root' "$unit_snapshot"

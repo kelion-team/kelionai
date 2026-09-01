@@ -16,11 +16,16 @@ describe('Kelion Constructor desktop contract', () => {
     expect(constructorRoute).toContain("app.post<{ Body: { order?: string } }>('/api/admin/constructor'")
     expect(constructorRoute).toContain('createBuildJob(user.email, orderCuPlan)')
     expect(constructorRoute).toContain("'/api/internal/codex/jobs/claim'")
-    expect(constructorRoute).toContain('claimNextBuildJob(taskId)')
-    expect(constructorDb).toContain('INSERT INTO build_jobs (ordered_by, order_text)')
+    expect(constructorRoute).toContain("exactKeys(req.body, ['profile'])")
+    expect(constructorRoute).toContain('claimNextBuildJob(taskId, measuredProfile)')
+    expect(constructorRoute).not.toContain('claimNextBuildJob(taskId, profile)')
+    expect(constructorDb).toContain('INSERT INTO build_jobs (ordered_by, order_text, brain)')
+    expect(constructorDb).toContain('[accountKey, orderText, CONSTRUCTOR_LOCAL_ACTOR]')
     expect(constructorDb).toContain("UPDATE build_jobs SET status='running'")
     expect(constructorPanel).toContain('Worker privat: OpenCode + Qwen local (llama.cpp)')
     expect(constructorPanel).toContain('coada canonică <b>build_jobs</b>')
+    expect(constructorPanel).toContain('A.constructorModelManualHint')
+    expect(constructorPanel).toContain('selectConstructorModel(profile.id)')
   })
 
   it('does not create an SSH, VPS or separate OpenCode-web path', () => {

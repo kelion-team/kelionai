@@ -1,13 +1,6 @@
 name: private-ai-active-model-benchmark
 
 on:
-  push:
-    branches:
-      - ops/private-ai-install-20260830
-    paths:
-      - .github/private-ai/benchmark-active-model.py
-      - .github/private-ai/benchmark-active-model.test.mjs
-      - .github/workflows/private-ai-active-model-benchmark.yml
   workflow_dispatch:
 
 permissions:
@@ -21,16 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validează sursa și contractul read-only
         shell: bash
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           python3 -m py_compile .github/private-ai/benchmark-active-model.py
           node --test .github/private-ai/benchmark-active-model.test.mjs
 
@@ -42,6 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: refs/heads/master
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Măsoară modelul llama.cpp activ, fără restart sau switch
@@ -53,12 +51,16 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -Eeuo pipefail
-          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ]
-          [ "$GITHUB_REF" = refs/heads/ops/private-ai-install-20260830 ]
-          [ "$GITHUB_REF_NAME" = ops/private-ai-install-20260830 ]
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
           [ "$VPS_USER" = root ]
           [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "${#VPS_HOST}" -le 253 ]
+          [[ "$VPS_HOST" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$VPS_HOST" != *..* ]]
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ "$current_host_key" = "$VPS_HOST_KEY" ]
 

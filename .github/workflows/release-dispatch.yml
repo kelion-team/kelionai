@@ -23,16 +23,22 @@ jobs:
     permissions:
       contents: read
       actions: write
+      pull-requests: read
     env:
       BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
       CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
       - name: Verifică buildul și lansează release-ul pentru vârful master
         run: |
           set -euo pipefail
           [[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$CANDIDATE_SHA" ]
 
           current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
           [[ "$current_master" =~ ^[0-9a-f]{40}$ ]]
@@ -41,33 +47,67 @@ jobs:
             exit 0
           fi
 
-          build=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN_ID}")
-          jq -e --arg sha "$CANDIDATE_SHA" '
-            .id == env.BUILD_RUN_ID
-            or true
-          ' <<<"$build" >/dev/null
-          jq -e --arg sha "$CANDIDATE_SHA" '
-            .head_sha == $sha
-            and .event == "workflow_run"
-            and .conclusion == "success"
-            and (.path == ".github/workflows/build-images.yml" or (.path | startswith(".github/workflows/build-images.yml@")))
-          ' <<<"$build" >/dev/null
-
           work=$(mktemp -d)
           trap 'rm -rf -- "$work"' EXIT
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN_ID}" \
+            > "$work/build.json"
+          ci_run_id=$(node scripts/release-dispatch-owner.mjs build-ci \
+            "$work/build.json" "$CANDIDATE_SHA" "$BUILD_RUN_ID")
+          [[ "$ci_run_id" =~ ^[1-9][0-9]*$ ]]
+
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs?event=workflow_run&status=completed&per_page=100" \
+            > "$work/build-runs-pages.json"
+          canonical_build_run_id=$(node scripts/release-dispatch-owner.mjs canonical-build \
+            "$work/build-runs-pages.json" "$CANDIDATE_SHA" "$ci_run_id" "$BUILD_RUN_ID")
+          [ "$canonical_build_run_id" = "$BUILD_RUN_ID" ]
+
+          artifact_name="release-images-$CANDIDATE_SHA"
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN_ID}/artifacts?per_page=100" \
+            > "$work/artifact-pages.json"
+          artifact_id=$(node scripts/release-dispatch-owner.mjs canonical-artifact \
+            "$work/artifact-pages.json" "$artifact_name" "$BUILD_RUN_ID" "$CANDIDATE_SHA")
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+
+          gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}/pulls?per_page=100" \
+            > "$work/associated-pulls-pages.json"
+          associated_pr_number=$(node scripts/release-dispatch-owner.mjs \
+            associated-pr "$work/associated-pulls-pages.json")
+          [[ "$associated_pr_number" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${associated_pr_number}" \
+            > "$work/associated-pull.json"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE_SHA}" \
+            > "$work/commit.json"
+          release_owner=$(node scripts/release-dispatch-owner.mjs owner \
+            "$work/associated-pulls-pages.json" "$work/associated-pull.json" "$work/commit.json" \
+            "$GITHUB_REPOSITORY" "$CANDIDATE_SHA")
+          case "$release_owner" in
+            constructor)
+              echo "::notice::Commitul $CANDIDATE_SHA aparține release-ului Constructor; dispatcherul generic nu emite un UUID străin."
+              exit 0
+              ;;
+            generic) ;;
+            *) echo '::error::Ownerul release-ului nu este canonic.' >&2; exit 1 ;;
+          esac
+
           gh run download "$BUILD_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
-            --name "release-images-$CANDIDATE_SHA" \
+            --name "$artifact_name" \
             --dir "$work"
 
           manifest="$work/images.json"
           [ -f "$manifest" ] && [ ! -L "$manifest" ]
-          ci_run_id=$(jq -er --arg sha "$CANDIDATE_SHA" '
+          manifest_ci_run_id=$(jq -er --arg sha "$CANDIDATE_SHA" '
             select(.schema == 1 and .commit == $sha)
             | .sourceRunId
             | select(type == "number" and . > 0 and floor == .)
           ' "$manifest")
-          [[ "$ci_run_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$manifest_ci_run_id" =~ ^[1-9][0-9]*$ ]]
+          [ "$manifest_ci_run_id" = "$ci_run_id" ]
 
           ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run_id}")
           jq -e --arg sha "$CANDIDATE_SHA" '
@@ -77,7 +117,8 @@ jobs:
             and (.path == ".github/workflows/pr-verify.yml" or (.path | startswith(".github/workflows/pr-verify.yml@")))
           ' <<<"$ci" >/dev/null
 
-          release_request_id=$(cat /proc/sys/kernel/random/uuid)
+          release_request_id=$(node scripts/release-dispatch-owner.mjs request-id \
+            "$GITHUB_REPOSITORY" "$CANDIDATE_SHA" "$ci_run_id")
           [[ "$release_request_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
 
           gh workflow run deploy.yml \
