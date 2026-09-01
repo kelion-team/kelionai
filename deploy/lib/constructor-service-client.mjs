@@ -81,6 +81,12 @@ export async function postInternal({ api, secret, prefix, path, body, timeoutMs 
   if (response.status === 204) return null
   const payload = await response.json().catch(() => null)
   if (!response.ok) fail(`API intern ${path}: HTTP ${response.status}`)
+  if (
+    payload !== null
+    && typeof payload === 'object'
+    && Object.prototype.hasOwnProperty.call(payload, 'heartbeatPersisted')
+    && payload.heartbeatPersisted !== true
+  ) fail(`API intern ${path}: heartbeat nepersistat`)
   return payload
 }
 

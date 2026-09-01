@@ -1,0 +1,62 @@
+[Unit]
+Description=Kelion Constructor manual local-model controller
+After=local-fs.target private-ai-llm.service
+Wants=private-ai-llm.service
+ConditionPathExists=/run/kelion/runtime-config-recovery.ready
+ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-deploy-quiesce.journal
+ConditionPathExists=!/root/kelion/runtime/constructor-upgrade.journal
+ConditionPathExists=!/root/kelion/runtime/constructor-max-model.journal
+ConditionPathExists=!/root/kelion/runtime/runtime-config-cutover.journal
+ConditionPathExists=!/root/kelion/runtime/constructor-activation.journal
+ConditionPathExists=!/root/kelion/runtime/constructor-gate-refresh.journal
+ConditionPathExists=!/root/kelion/runtime/destructive-cutover-recovery.json
+ConditionPathExists=!/root/kelion/runtime/constructor-unit-migration.pending
+
+[Service]
+Type=simple
+User=root
+Group=10050
+UMask=0007
+WorkingDirectory=/
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LoadCredential=constructor-model-control-secret:/root/kelion/secrets/constructor-model-control-secret
+ExecStartPre=/opt/private-ai/bin/constructor-model-switch --prepare-lock
+ExecStartPre=/usr/bin/node /opt/kelion-constructor/constructor-model-control.mjs --self-test
+ExecStart=/usr/bin/node /opt/kelion-constructor/constructor-model-control.mjs
+Restart=on-failure
+RestartSec=3s
+RuntimeDirectory=kelion-constructor-model-control
+RuntimeDirectoryMode=0750
+BindReadOnlyPaths=/root/kelion/runtime:/run/kelion-constructor-model-control/deploy-journals
+BindReadOnlyPaths=/root/kelion/publicare.lock:/run/kelion-constructor-model-control/publicare.lock
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateIPC=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=default
+ProcSubset=all
+ProtectSystem=strict
+ReadWritePaths=/etc/private-ai -/etc/systemd/system/private-ai-llm.service.d -/etc/systemd/system/timers.target.wants /run/private-ai /run/systemd/system/private-ai-llm.service.d /run/lock
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+TasksMax=96
+MemoryMax=256M
+TimeoutStopSec=180min
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

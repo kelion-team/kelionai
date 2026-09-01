@@ -1,0 +1,249 @@
+name: private-ai-status-proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard-source:
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refuză orice sursă diferită de masterul canonic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+
+  measured-status:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Citește starea măsurată a instalării
+        shell: bash
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "${#VPS_HOST}" -le 253 ]
+          [[ "$VPS_HOST" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9])$ ]]
+          [[ "$VPS_HOST" != *..* ]]
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          printf 'MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
+          max_model_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
+          max_model_total=76536964608
+          max_model_committed=0
+          max_model_range=0
+          if [ -d "$max_model_root" ]; then
+            max_model_committed=$(find "$max_model_root" -maxdepth 1 -type f \
+              \( -name '*.gguf' -o -name '*.part' \) -printf '%s\n' \
+              | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+            shard2_partial="$max_model_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf.part"
+            if [ -f "$shard2_partial" ] && [ ! -L "$shard2_partial" ]; then
+              shard2_partial_size=$(stat -Lc '%s' "$shard2_partial")
+              shard2_range_dir="$shard2_partial.ranges.$shard2_partial_size.90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7"
+              if [ -d "$shard2_range_dir" ] && [ ! -L "$shard2_range_dir" ]; then
+                max_model_range=$(find "$shard2_range_dir" -maxdepth 1 -type f \
+                  \( -name '*.ok' -o \( -name '.range.*' ! -name '*.headers' \) \) \
+                  -printf '%s\n' | awk '{sum += $1} END {printf "%.0f", sum + 0}')
+              fi
+            fi
+          fi
+          max_model_downloaded=$((max_model_committed + max_model_range))
+          [ "$max_model_downloaded" -le "$max_model_total" ] \
+            || max_model_downloaded=$max_model_total
+          printf 'MAX_MODEL_COMMITTED_BYTES=%s\n' "$max_model_committed"
+          printf 'MAX_MODEL_RANGE_BYTES=%s\n' "$max_model_range"
+          printf 'MAX_MODEL_DOWNLOADED_BYTES=%s\n' "$max_model_downloaded"
+          printf 'MAX_MODEL_TOTAL_BYTES=%s\n' "$max_model_total"
+          awk -v bytes="$max_model_downloaded" -v total="$max_model_total" \
+            'BEGIN {printf "MAX_MODEL_DOWNLOAD_PERCENT=%.2f\n", bytes * 100 / total}'
+          printf 'MAX_MODEL_UPGRADE_STATE='
+          systemctl is-active private-ai-max-model-upgrade.service 2>/dev/null || true
+          if pgrep -af '/root/private-ai-installer\.' >/dev/null; then
+            printf 'INSTALLER_PROCESS=running\n'
+          else
+            printf 'INSTALLER_PROCESS=not_running\n'
+          fi
+          for unit in private-ai-llm.service private-ai-web.service; do
+            printf '%s=' "$unit"
+            systemctl is-active "$unit" 2>/dev/null || true
+          done
+          if [ -d /srv/private-ai/models ]; then
+            printf 'MODEL_STORAGE='; du -sh /srv/private-ai/models | awk '{print $1}'
+          else
+            printf 'MODEL_STORAGE=missing\n'
+          fi
+          if [ -f /var/lib/private-ai/model.ready ]; then
+            printf 'MODEL_READY=yes\n'
+          else
+            printf 'MODEL_READY=no\n'
+          fi
+          for unit in private-ai-install-resume.service private-ai-max-model-upgrade.service private-ai-constructor-finalize.service private-ai-llm.service private-ai-web.service; do
+            printf '%s\n' "--- $unit ---"
+            systemctl show "$unit" \
+              -p ActiveState -p SubState -p Result -p ExecMainStatus -p MainPID \
+              -p ControlGroup -p NRestarts --no-pager 2>/dev/null || true
+          done
+          printf 'MODEL_FS='
+          df -PB1 /srv/private-ai | awk 'NR == 2 {printf "total=%s used=%s free=%s percent=%s\\n", $2, $3, $4, $5}'
+          max_group=$(systemctl show private-ai-max-model-upgrade.service -p ControlGroup --value 2>/dev/null || true)
+          if [ -n "$max_group" ] && [ -d "/sys/fs/cgroup$max_group" ]; then
+            printf '%s\n' '--- MAX MODEL CGROUP PROCESSES ---'
+            while IFS= read -r pid; do
+              [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+              ps -o pid,ppid,etime,time,%cpu,%mem,rss,vsz,stat,wchan:24,comm,args \
+                -p "$pid" --no-headers || true
+              if [ -r "/proc/$pid/io" ]; then
+                printf 'MAX_PROC_IO_PID=%s ' "$pid"
+                tr '\n' ' ' < "/proc/$pid/io" || true
+                printf '\n'
+              fi
+            done < "/sys/fs/cgroup$max_group/cgroup.procs"
+          fi
+          printf 'LLAMA_SERVER_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/llama-server | awk '{print $1}')"
+          printf 'OPENCODE_BIN_SHA256=%s\n' "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')"
+          printf 'LLAMA_CPP_CHECKOUT=%s\n' "$(runuser -u privateai -- env -i \
+            HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+            git -C /opt/private-ai/src/llama.cpp rev-parse HEAD)"
+          llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
+          [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]]
+          printf 'LLAMA_PROCESS_EXE=%s\n' "$(readlink -f "/proc/$llm_pid/exe")"
+          printf '%s\n' '--- LLAMA MODEL MAPS ---'
+          awk '$NF ~ /^\/srv\/private-ai\/models\// { print $NF }' "/proc/$llm_pid/maps" \
+            | sort -u
+          resume_group=$(systemctl show private-ai-install-resume.service -p ControlGroup --value 2>/dev/null || true)
+          if [ -n "$resume_group" ] && [ -d "/sys/fs/cgroup$resume_group" ]; then
+            printf '%s\n' '--- RESUME CGROUP PROCESSES ---'
+            while IFS= read -r pid; do
+              [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+              ps -o pid,ppid,etime,time,%cpu,%mem,rss,vsz,stat,wchan:24,args -p "$pid" --no-headers || true
+              if [ -r "/proc/$pid/io" ]; then
+                printf 'PROC_IO_PID=%s ' "$pid"
+                tr '\n' ' ' < "/proc/$pid/io" || true
+                printf '\n'
+                printf 'PROC_STDOUT_PID=%s ' "$pid"
+                readlink "/proc/$pid/fd/1" || true
+              fi
+            done < "/sys/fs/cgroup$resume_group/cgroup.procs"
+            printf 'CGROUP_MEMORY_CURRENT='; cat "/sys/fs/cgroup$resume_group/memory.current" 2>/dev/null || true
+            printf 'CGROUP_CPU_STAT='; tr '\n' ' ' < "/sys/fs/cgroup$resume_group/cpu.stat" 2>/dev/null || true; printf '\n'
+          fi
+          printf '%s\n' '--- MODEL CACHE FILES ---'
+          find /srv/private-ai/models -type f -printf '%s %TY-%Tm-%TdT%TH:%TM:%TS %p\n' 2>/dev/null \
+            | sort -nr | head -n 20 || true
+          if [ -f /var/lib/private-ai/model-smoke.txt ]; then
+            printf 'MODEL_SMOKE_BYTES='; stat -Lc '%s' /var/lib/private-ai/model-smoke.txt
+            printf 'MODEL_SMOKE_TAIL_BASE64='; tail -c 256 /var/lib/private-ai/model-smoke.txt | base64 -w0; printf '\n'
+          fi
+          if [ -f /root/private-ai-install.log ]; then
+            printf '%s\n' '--- INSTALL LOG TAIL ---'
+            tail -n 80 /root/private-ai-install.log \
+              | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig'
+          else
+            printf 'INSTALL_LOG=missing\n'
+          fi
+          printf '%s\n' '--- MAX MODEL JOURNAL TAIL ---'
+          journalctl --no-pager --output=cat --unit=private-ai-max-model-upgrade.service \
+            --lines=120 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
+          printf '%s\n' '--- CUTOVER CAUSE PROBES ---'
+          worker=/opt/kelion-codex/codex-worker.mjs
+          worker_unit=/etc/systemd/system/kelion-codex-worker.service
+          printf 'WORKER_OLD_ALIAS_COUNT=%s\n' "$(grep -Fc 'qwen3.6-35b-a3b-local' "$worker" || true)"
+          printf 'WORKER_NEW_ALIAS_COUNT=%s\n' "$(grep -Fc 'qwen3.5-122b-a10b-local' "$worker" || true)"
+          printf 'WORKER_UNIT_OLD_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local$' "$worker_unit" || true)"
+          printf 'WORKER_UNIT_NEW_MODEL_COUNT=%s\n' "$(grep -c '^Environment=OPENCODE_MODEL=llama.cpp/qwen3.5-122b-a10b-local$' "$worker_unit" || true)"
+          printf '%s\n' '--- SAFE WORKER MODEL LINES ---'
+          grep -nE 'OPENCODE_MODEL|OPENCODE_MODEL_ID' "$worker" 2>/dev/null || true
+          printf '%s\n' '--- SAFE WORKER OPENCODE INVOCATION LINES ---'
+          grep -nE -- "OPENCODE|openCode|opencode|'--model'|\\\"--model\\\"" "$worker" 2>/dev/null \
+            | sed -n '1,120p' || true
+          grep -nE 'OPENCODE_MODEL|EnvironmentFile|ExecStart' "$worker_unit" 2>/dev/null || true
+          grep -n '^OPENCODE_MODEL=' /root/kelion/config/codex-worker.env 2>/dev/null || true
+          systemctl show kelion-codex-worker.service -p Environment --value 2>/dev/null \
+            | tr ' ' '\n' | grep '^OPENCODE_MODEL=' || true
+          set +e
+          systemd-analyze verify private-ai-llm.service >/tmp/private-ai-llm-verify.out 2>&1
+          llm_verify_rc=$?
+          systemd-analyze verify "$worker_unit" >/tmp/private-ai-worker-verify.out 2>&1
+          worker_verify_rc=$?
+          set -e
+          printf 'LLM_UNIT_VERIFY_RC=%s\n' "$llm_verify_rc"
+          sed -n '1,80p' /tmp/private-ai-llm-verify.out
+          printf 'WORKER_UNIT_VERIFY_RC=%s\n' "$worker_verify_rc"
+          sed -n '1,80p' /tmp/private-ai-worker-verify.out
+          rm -f -- /tmp/private-ai-llm-verify.out /tmp/private-ai-worker-verify.out
+          printf '%s\n' '--- FIRST CUTOVER LLM JOURNAL ---'
+          journalctl --no-pager --output=short-iso-precise --unit=private-ai-llm.service \
+            --since='2026-08-31 15:00:00 UTC' --until='2026-08-31 15:11:00 UTC' 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
+          printf '%s\n' '--- FIRST CUTOVER MAX JOURNAL WITHOUT PAM ---'
+          journalctl --no-pager --output=short-iso-precise --unit=private-ai-max-model-upgrade.service \
+            --since='2026-08-31 15:00:00 UTC' --until='2026-08-31 15:11:00 UTC' 2>/dev/null \
+            | sed -E '/pam_unix\(runuser:session\)/d; s/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
+          printf '%s\n' '--- LLM ACTIVATION DIAGNOSTIC ---'
+          systemctl show private-ai-llm.service \
+            -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus \
+            -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak --no-pager 2>/dev/null || true
+          systemctl cat private-ai-llm.service --no-pager 2>/dev/null || true
+          journalctl --no-pager --output=cat --unit=private-ai-llm.service \
+            --since='-30 minutes' --lines=300 2>/dev/null \
+            | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\\1=[REDACTED]/Ig' || true
+          if [ -f /root/private-ai-install-resume.log ]; then
+            printf '%s\n' '--- RESUME LOG TAIL ---'
+            tail -n 160 /root/private-ai-install-resume.log \
+              | sed -E 's/(password|token|secret|key)=([^[:space:]]+)/\1=[REDACTED]/Ig'
+          else
+            printf 'RESUME_LOG=missing\n'
+          fi
+          REMOTE

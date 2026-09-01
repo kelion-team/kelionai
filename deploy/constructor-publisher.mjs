@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Publisher separat: primește exclusiv patch-uri cu porți verzi, recreează
-// commitul într-un worktree fără credentiale Codex, revalidează porțile, apoi
+// commitul într-un worktree fără credentialele executorului OpenCode,
+// revalidează porțile, apoi
 // poate împinge numai refs/heads/codex/<task UUID> și deschide/îmbina un PR.
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -1014,12 +1015,12 @@ function receiptHash(value) {
 }
 
 async function runOnce() {
-  assertEnabledLayout()
-  mkdirSync(STATE, { recursive: true, mode: 0o700 })
   const hmac = loadSystemdCredential('constructor-publisher-secret', process.env.CONSTRUCTOR_PUBLISHER_SECRET_FILE)
   let githubCredential
   let signing
   try {
+    assertEnabledLayout()
+    mkdirSync(STATE, { recursive: true, mode: 0o700 })
     githubCredential = tokenPath()
     // Derivarea cheii publice e un self-check local al credentialei private și
     // precedă orice heartbeat ready, chiar când coada este goală.
@@ -1270,6 +1271,7 @@ async function selfTest() {
 const mode = process.argv[2] ?? '--once'
 if (mode === '--self-test') await selfTest()
 else if (mode === '--once') {
-  if (!ENABLED || !existsSync(ENABLE_MARKER)) process.stdout.write('constructor-publisher: dezactivat\n')
+  const activationMarkerExists = existsSync(ENABLE_MARKER)
+  if (!ENABLED && !activationMarkerExists) process.stdout.write('constructor-publisher: dezactivat\n')
   else await runOnce()
 } else fail(`Mod necunoscut: ${mode}`)

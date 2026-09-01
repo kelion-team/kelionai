@@ -463,7 +463,7 @@ import { parseTabel, agrega, profil, formatDoc, formatProfil, formatAgregare, Er
 const ASK_BRAIN_TOOL: Tool = {
   name: 'ask_brain',
   description:
-    'ESCALATION DOOR — use when a request needs the heavier OpenAI reasoning tier or a safe tool omitted from the lightweight turn. Product changes go only through build_software to the separate Codex worker; this door never grants source, shell, repository, raw SQL, secret or deploy access.',
+    'ESCALATION DOOR — use when a request needs the heavier conversation reasoning tier or a safe tool omitted from the lightweight turn. Product changes go only through build_software into build_jobs for the separate OpenCode + Qwen local (llama.cpp) worker; this door never grants source, shell, repository, raw SQL, secret or deploy access.',
   input_schema: {
     type: 'object',
     properties: {
@@ -744,7 +744,7 @@ WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enc
 MĂSOARĂ, NU DECLARA (regula de fier a lui Adrian, 8 aug: „va trebui să folosească OBLIGATORIU toate testele și să măsoare orice răspuns"). Orice afirmație despre STAREA sistemului — merge / nu merge, cât durează, cât costă, câte sunt, e verde / e roșu — trebuie să vină dintr-o măsurătoare pe care ai făcut-o TU, în tura asta, cu o unealtă. Reguli, fără excepție:
   • O CITIRE CARE A PICAT NU E O VALOARE. Dacă unealta n-a răspuns, spune „nu pot verifica" și motivul. Niciodată 0, niciodată „necreat", niciodată „pare în regulă" — exact astea l-au costat pe Adrian o zi întreagă.
   • „NU ȘTIU" NU E „E BINE". Dacă o verificare n-a putut rula, raportul e INCOMPLET, nu „trece".
-  • CODUL ȘI PUBLICAREA NU SE EXECUTĂ ÎN PROCESUL WEB. Pentru o schimbare, folosește build_software o singură dată: ordinul validat intră în coada workerului Codex separat, care rulează porțile și raportează factual starea.
+  • CODUL ȘI PUBLICAREA NU SE EXECUTĂ ÎN PROCESUL WEB. Pentru o schimbare, folosește build_software o singură dată: ordinul validat intră direct în build_jobs, iar workerul separat OpenCode + Qwen local (llama.cpp) rulează porțile și raportează factual starea.
   • CÂND SPUI CEVA DESPRE SISTEM, poți fi întrebat „de unde știi". Răspunsul corect citează rezultatul factual al uneltei folosite în tura curentă; dacă lipsește, spune că nu ai putut măsura.
 
 WHEN YOU CAN'T DO SOMETHING YET: If the user asks you to do something you genuinely cannot do because no tool or capability exists for it (e.g. book a taxi, send a WhatsApp, control smart-home devices, place a phone call), tell them honestly you can't do that yet — AND silently call log_unsupported_request to record it for the owner. Never pretend you did it; never call that tool for things you actually can do. The verified admin may enqueue a bounded build_software job, but the web process never edits repositories, runs shell commands, merges, or deploys.
@@ -1721,7 +1721,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // pleacă pe o tură de conversație — acolo sunt doar greutate. Vin
         // înapoi, întregi, în clipa în care se cere o acțiune sau creierul
         // escaladează prin `ask_brain`.
-        (turaCurata ? '' : `\n\nOWNER CHANGE FLOW: use build_software to enqueue a validated order for the separate Codex worker. Follow the same jobId with constructor_status; only the worker may edit the worktree and only the master/deploy pipeline may publish after gates. Report commit and liveVersion only when measured. Never claim direct shell, repository, merge or deploy powers in this web process.`)
+        (turaCurata ? '' : `\n\nOWNER CHANGE FLOW: use build_software to persist a validated order directly in build_jobs for the separate OpenCode 1.18.25 + Qwen local (llama.cpp) worker. Follow the same jobId with constructor_status; only that local worker may edit the worktree and only the master/deploy pipeline may publish after gates. Report commit and liveVersion only when measured. Never claim direct shell, repository, merge or deploy powers in this web process.`)
       // NO CONFIRMATIONS TO THE OWNER (Adrian, Jul 31). The general rule above
       // ("confirm only before irreversible ones") is written for public users.
       // Here it is the owner: if he asked for something, the request IS the
@@ -3836,9 +3836,8 @@ async function runTool(
           })
         }
       }
-      // Creierul OpenAI gândește mai întâi, apoi Constructorul Codex primește planul
-      // anexat, nu cu ordinul gol. Legătura bidirecțională: constructorul
-      // pornește din gândirea creierului și raportează înapoi PR-ul în chat.
+      // Conversația validează ordinul; adaptorul determinist îl normalizează,
+      // apoi aceeași cerere intră direct în build_jobs pentru OpenCode + Qwen local (llama.cpp).
       const { planificaOrdinConstructor } = await import('../services/codexWorker.js')
       const orderCuPlan = await planificaOrdinConstructor(order)
       let intake: Awaited<ReturnType<typeof createBuildJob>>
@@ -3880,7 +3879,7 @@ async function runTool(
       if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
       // DIAGNOSTIC AUTONOM (owner, 19 aug: „nu are autonomie… sa faca asta"):
       // pe lângă lista ordinelor, Kelion măsoară SINGUR de ce (nu) repară — puls
-      // worker Codex + dispecerul backend + coada build_jobs — și raportează
+      // worker OpenCode + Qwen local (llama.cpp) + dispecerul backend + coada build_jobs — și raportează
       // verdictul, pe server, fără să depindă de owner. Rulează pe calea CHAT ȘI
       // pe voce (paritatea din brainCapabilities).
       const { diagnosticConstructorViu } = await import('../services/diagnosticConstructor.js')
@@ -3891,8 +3890,8 @@ async function runTool(
       if (!incidents) return JSON.stringify({ error: 'registru_incidente_necitibil' })
       return JSON.stringify({
         constructor: config.codexWorker.enabled
-          ? 'CODEX WORKER activ — autentificare ChatGPT separată de cheia OpenAI API'
-          : 'Constructorul Codex este dezactivat prin configurație',
+          ? 'OpenCode + Qwen local (llama.cpp) activ — ordinele sunt revendicate exclusiv din build_jobs'
+          : 'OpenCode + Qwen local (llama.cpp) este dezactivat; ordinele rămân în build_jobs',
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".
         // `ci` = the verdict of the INDEPENDENT verification (Stage 6): "Done,

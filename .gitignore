@@ -16,8 +16,11 @@ frontend/dist/
 ios/native-dist/
 desktop/dist/
 desktop/src-tauri/target/
+constructor-desktop/dist/
+constructor-desktop/src-tauri/target/
 android/twa-manifest.json
 desktop/src-tauri/tauri.conf.json
+constructor-desktop/src-tauri/tauri.conf.json
 ios/ExportOptions.plist
 ios/ios/App/App/App.entitlements
 frontend/public/.well-known/assetlinks.json

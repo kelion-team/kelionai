@@ -2,8 +2,6 @@ name: VPS post-PONR recovery de9
 run-name: post-ponr-recovery-de9-${{ github.sha }}
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
       target_commit:
@@ -42,8 +40,7 @@ jobs:
   verify-incident:
     if: >-
       github.ref == 'refs/heads/master' && github.ref_name == 'master' &&
-      ((github.event_name == 'push' && github.event.before == 'afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3') ||
-       github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:

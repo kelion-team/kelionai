@@ -11,8 +11,13 @@ vi.mock('./dbPool.js', () => ({
     release: vi.fn(),
   }),
 }))
+vi.mock('./config.js', async () => {
+  const actual = await vi.importActual<typeof import('./config.js')>('./config.js')
+  return { ...actual, config: { ...actual.config, databaseUrl: 'postgres://pglite.test/kelion' } }
+})
 
 const pipeline = await import('./services/constructorPipeline.js')
+const buildJobs = await import('./db.js')
 const taskId = 'codex-123e4567-e89b-42d3-a456-426614174000'
 const handoffId = '123e4567-e89b-42d3-a456-426614174001'
 const publisherLease = '123e4567-e89b-42d3-a456-426614174002'
@@ -31,7 +36,10 @@ beforeEach(async () => {
   await database.exec(`
     CREATE TABLE build_jobs (
       id BIGSERIAL PRIMARY KEY,
+      ordered_by TEXT NOT NULL DEFAULT 'owner@example.test',
+      order_text TEXT NOT NULL DEFAULT 'Ordin Constructor de test',
       status TEXT NOT NULL DEFAULT 'queued',
+      attempts INTEGER NOT NULL DEFAULT 0,
       codex_task_id TEXT,
       constructor_stage TEXT NOT NULL DEFAULT 'queued',
       ci TEXT,
@@ -60,6 +68,13 @@ beforeEach(async () => {
       next_action TEXT NOT NULL,
       verification TEXT,
       lesson TEXT,
+      recurrence_count INT NOT NULL DEFAULT 1,
+      strategy JSONB,
+      strategy_action_fingerprint TEXT,
+      strategy_evidence_fingerprint TEXT,
+      strategy_decision_count INT NOT NULL DEFAULT 0,
+      strategy_pending BOOLEAN NOT NULL DEFAULT false,
+      opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       closed_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -134,10 +149,12 @@ beforeEach(async () => {
     ],
   )
   await database.exec(readFileSync(new URL('../migrations/20260908_constructor_release_dispatch_intents.sql', import.meta.url), 'utf8'))
+  await database.exec(readFileSync(new URL('../migrations/20260911_constructor_manual_model_outcomes.sql', import.meta.url), 'utf8'))
+  await database.exec(readFileSync(new URL('../migrations/20260912_constructor_execution_profile.sql', import.meta.url), 'utf8'))
   await database.query(
-    `INSERT INTO build_jobs(status, codex_task_id, constructor_stage)
-     VALUES ('running', $1, 'working')`,
-    [taskId],
+    `INSERT INTO build_jobs(status, codex_task_id, execution_profile, constructor_stage, ordered_by, order_text)
+     VALUES ('running', $1, 'fast', 'working', $2, $3)`,
+    [taskId, 'owner@example.test', 'Implementează și verifică ordinul Constructor'],
   )
 }, 30_000)
 
@@ -146,6 +163,221 @@ afterEach(async () => {
 }, 30_000)
 
 describe('Constructor worker -> publisher -> release pipeline', () => {
+  it('terminalizes only queued legacy worker retries during an idempotent upgrade', async () => {
+    await database.query(
+      `INSERT INTO build_jobs
+         (id, ordered_by, order_text, status, constructor_stage, progress, retry_not_before, execution_profile)
+       VALUES
+         (990, 'owner@example.test', 'legacy worker retry', 'queued', 'queued',
+          'worker_retry_scheduled', now() + interval '1 hour', NULL),
+         (991, 'owner@example.test', 'legacy stale base', 'queued', 'queued',
+          'stale_base_requeued', now() + interval '1 hour', NULL),
+         (992, 'owner@example.test', 'manual owner retry', 'queued', 'queued',
+          'owner_retry_scheduled', NULL, NULL),
+         (993, 'owner@example.test', 'initial request', 'queued', 'queued',
+          'queued', NULL, NULL)`,
+    )
+
+    const migration = readFileSync(
+      new URL('../migrations/20260911_constructor_manual_model_outcomes.sql', import.meta.url),
+      'utf8',
+    )
+    await database.exec(migration)
+    await database.exec(migration)
+
+    await expect(database.query<{
+      id: string
+      status: string
+      progress: string
+      retry_not_before: Date | null
+    }>(
+      `SELECT id::text, status, progress, retry_not_before
+         FROM build_jobs WHERE id BETWEEN 990 AND 993 ORDER BY id`,
+    )).resolves.toMatchObject({ rows: [
+      { id: '990', status: 'failed', progress: 'technical_failure', retry_not_before: null },
+      { id: '991', status: 'failed', progress: 'technical_failure', retry_not_before: null },
+      { id: '992', status: 'queued', progress: 'owner_retry_scheduled', retry_not_before: null },
+      { id: '993', status: 'queued', progress: 'queued', retry_not_before: null },
+    ] })
+    await expect(database.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM build_jobs
+        WHERE status='queued'
+          AND progress IN ('worker_retry_scheduled', 'stale_base_requeued')`,
+    )).resolves.toMatchObject({ rows: [{ count: '0' }] })
+    await expect(database.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM constructor_incidents
+        WHERE job_id IN (990, 991)
+          AND evidence LIKE 'legacy_automatic_retry_terminalized:%'`,
+    )).resolves.toMatchObject({ rows: [{ count: '2' }] })
+  })
+
+  it('registers every manual-model outcome as terminal in the durable activity catalog', async () => {
+    await expect(database.query<{ activity_key: string; terminal: boolean; sequence_no: number | null }>(
+      `SELECT activity_key, terminal, sequence_no
+         FROM constructor_activity_catalog
+        WHERE activity_key IN ('fast_insufficient', 'technical_failure', 'powerful_final_failure')
+        ORDER BY activity_key`,
+    )).resolves.toMatchObject({ rows: [
+      { activity_key: 'fast_insufficient', terminal: true, sequence_no: null },
+      { activity_key: 'powerful_final_failure', terminal: true, sequence_no: null },
+      { activity_key: 'technical_failure', terminal: true, sequence_no: null },
+    ] })
+  })
+
+  it.each([
+    {
+      label: 'unresolved no_changes/fast',
+      input: { event: 'unresolved', reason: 'no_changes', profile: 'fast' } as const,
+      expectedStage: 'unresolved',
+      expectedProgress: 'fast_insufficient',
+      evidence: 'worker_unresolved:no_changes;profile=fast',
+    },
+    {
+      label: 'unresolved test_failure/fast',
+      input: { event: 'unresolved', reason: 'test_failure', profile: 'fast' } as const,
+      expectedStage: 'unresolved',
+      expectedProgress: 'fast_insufficient',
+      evidence: 'worker_unresolved:test_failure;profile=fast',
+    },
+    {
+      label: 'unresolved quality_gate_failure/powerful',
+      input: { event: 'unresolved', reason: 'quality_gate_failure', profile: 'powerful' } as const,
+      expectedStage: 'unresolved',
+      expectedProgress: 'powerful_final_failure',
+      evidence: 'worker_unresolved:quality_gate_failure;profile=powerful',
+    },
+    {
+      label: 'technical brain_unavailable/fast',
+      input: { event: 'failed', code: 'brain_unavailable', profile: 'fast' } as const,
+      expectedStage: 'failed',
+      expectedProgress: 'technical_failure',
+      evidence: 'worker_failure:brain_unavailable;profile=fast',
+    },
+  ])(
+    'keeps $label terminal without automatic retry',
+    async ({ input, expectedStage, expectedProgress, evidence }) => {
+      await database.query('UPDATE build_jobs SET execution_profile=$2 WHERE id=$1', [1, input.profile])
+      await expect(buildJobs.advanceCodexBuildJob(1, taskId, input))
+        .resolves.toMatchObject({
+          id: 1,
+          status: 'failed',
+          constructorStage: expectedStage,
+          progress: expectedProgress,
+          retryNotBefore: null,
+          executionCycle: 0,
+        })
+      await expect(database.query<{
+        status: string
+        constructor_stage: string
+        progress: string
+        log: string
+        retry_not_before: Date | null
+        execution_cycle: number
+      }>(
+        `SELECT status, constructor_stage, progress, log, retry_not_before, execution_cycle
+           FROM build_jobs WHERE id=1`,
+      )).resolves.toMatchObject({ rows: [{
+        status: 'failed',
+        constructor_stage: expectedStage,
+        progress: expectedProgress,
+        log: evidence,
+        retry_not_before: null,
+        execution_cycle: 0,
+      }] })
+      await expect(database.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+           FROM constructor_activity_events
+          WHERE job_id=1 AND execution_cycle=0 AND activity_key=$1`,
+        [expectedProgress],
+      )).resolves.toMatchObject({ rows: [{ count: '1' }] })
+    },
+  )
+
+  it('terminalizes a silent worker on its persisted profile without retrying the job', async () => {
+    await database.query(
+      `UPDATE build_jobs
+          SET execution_profile='powerful', attempts=3, execution_cycle=7,
+              updated_at=now() - interval '16 minutes'
+        WHERE id=1`,
+    )
+
+    await expect(buildJobs.deblocheazaJoburileClaimate())
+      .resolves.toEqual({ terminalizate: 1 })
+    await expect(database.query<{
+      status: string
+      constructor_stage: string
+      progress: string
+      log: string
+      execution_profile: string
+      codex_task_id: string
+      attempts: number
+      execution_cycle: number
+      retry_not_before: Date | null
+    }>(
+      `SELECT status, constructor_stage, progress, log, execution_profile,
+              codex_task_id, attempts, execution_cycle, retry_not_before
+         FROM build_jobs WHERE id=1`,
+    )).resolves.toMatchObject({ rows: [{
+      status: 'failed',
+      constructor_stage: 'failed',
+      progress: 'technical_failure',
+      log: 'worker_failure:execution_timeout;profile=powerful',
+      execution_profile: 'powerful',
+      codex_task_id: taskId,
+      attempts: 3,
+      execution_cycle: 7,
+      retry_not_before: null,
+    }] })
+    await expect(database.query<{ cause_code: string; state: string }>(
+      'SELECT cause_code, state FROM constructor_incidents WHERE job_id=1',
+    )).resolves.toMatchObject({ rows: [{ cause_code: 'timeout', state: 'diagnosing' }] })
+    await expect(buildJobs.claimNextBuildJob(
+      'codex-223e4567-e89b-42d3-a456-426614174000',
+      'fast',
+    )).resolves.toEqual({ state: 'pipeline_active', job: null })
+    await expect(database.query<{ queued: string }>(
+      "SELECT count(*)::text AS queued FROM build_jobs WHERE id=1 AND status='queued'",
+    )).resolves.toMatchObject({ rows: [{ queued: '0' }] })
+  })
+
+  it('rejects a terminal event that claims a different profile than the signed claim', async () => {
+    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+      event: 'failed', code: 'worker_internal_failure', profile: 'powerful',
+    })).resolves.toBeNull()
+    await expect(database.query<{ status: string; execution_profile: string }>(
+      'SELECT status, execution_profile FROM build_jobs WHERE id=1',
+    )).resolves.toMatchObject({ rows: [{ status: 'running', execution_profile: 'fast' }] })
+  })
+
+  it('rejects unresolved directly from claimed while preserving a technical terminal exit', async () => {
+    await database.query("UPDATE build_jobs SET constructor_stage='claimed' WHERE id=1")
+    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+      event: 'unresolved', reason: 'no_changes', profile: 'fast',
+    })).resolves.toBeNull()
+    await expect(database.query<{ status: string; constructor_stage: string; log: string | null }>(
+      'SELECT status, constructor_stage, log FROM build_jobs WHERE id=1',
+    )).resolves.toMatchObject({ rows: [{ status: 'running', constructor_stage: 'claimed', log: null }] })
+
+    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+      event: 'failed', code: 'worker_internal_failure', profile: 'fast',
+    })).resolves.toMatchObject({
+      status: 'failed',
+      constructorStage: 'failed',
+      progress: 'technical_failure',
+    })
+  })
+
+  it('captures the signed terminal profile for an in-flight pre-migration claim', async () => {
+    await database.query('UPDATE build_jobs SET execution_profile=NULL WHERE id=1')
+    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+      event: 'failed', code: 'worker_internal_failure', profile: 'powerful',
+    })).resolves.toMatchObject({
+      status: 'failed',
+      executionProfile: 'powerful',
+      executionCycle: 0,
+    })
+  })
+
   it('migrează claim-ul release v1 ambiguu și păstrează merged-ul neatins pe v2', async () => {
     await expect(database.query<{
       job_id: number
@@ -252,8 +484,8 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       patchSha256: hash1,
       gateReceiptSha256: hash2,
     })).resolves.toMatchObject({ ok: true, event: { stage: 'gates_passed', status: 'running' } })
-    await expect(database.query<{ ci: string }>('SELECT ci FROM build_jobs WHERE id=1'))
-      .resolves.toMatchObject({ rows: [{ ci: 'local_gates' }] })
+    await expect(database.query<{ ci: string; brain: string }>('SELECT ci, brain FROM build_jobs WHERE id=1'))
+      .resolves.toMatchObject({ rows: [{ ci: 'local_gates', brain: 'OpenCode + Qwen local (llama.cpp)' }] })
 
     await expect(pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
@@ -788,7 +1020,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     })
   })
 
-  it('requeues the same job from a stale publisher base and removes publication state', { timeout: 30_000 }, async () => {
+  it('retires a stale publisher base as terminal until the owner explicitly retries', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
       baseCommit: base,
@@ -818,8 +1050,8 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       cleanupReceiptSha256: hash2,
     })).resolves.toEqual({
       jobId: '1',
-      status: 'queued',
-      stage: 'queued',
+      status: 'failed',
+      stage: 'failed',
       commit: null,
       liveVersion: null,
     })
@@ -827,6 +1059,8 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       id: string
       status: string
       codex_task_id: string | null
+      execution_profile: string | null
+      execution_cycle: number
       constructor_stage: string
       branch: string | null
       pr_url: string | null
@@ -834,15 +1068,17 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       live_version: string | null
       ci: string | null
     }>(
-      `SELECT id::text, status, codex_task_id, constructor_stage, branch, pr_url,
-              commit_sha, live_version, ci
+      `SELECT id::text, status, codex_task_id, execution_profile, execution_cycle,
+              constructor_stage, branch, pr_url, commit_sha, live_version, ci
          FROM build_jobs WHERE id=1`,
     )).resolves.toMatchObject({
       rows: [{
         id: '1',
-        status: 'queued',
-        codex_task_id: null,
-        constructor_stage: 'queued',
+        status: 'failed',
+        codex_task_id: taskId,
+        execution_profile: 'fast',
+        execution_cycle: 0,
+        constructor_stage: 'failed',
         branch: null,
         pr_url: null,
         commit_sha: null,
@@ -854,9 +1090,17 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       'SELECT count(*)::text AS count FROM constructor_pipeline WHERE job_id=1',
     )).resolves.toMatchObject({ rows: [{ count: '0' }] })
     await expect(pipeline.claimPublisherJob('223e4567-e89b-42d3-a456-426614174002')).resolves.toBeNull()
+    await expect(buildJobs.retryBuildJob(1)).resolves.toMatchObject({
+      ok: true,
+      job: { status: 'queued', executionProfile: null, executionCycle: 1 },
+    })
+    await expect(database.query<{ activity_key: string }>(
+      `SELECT activity_key FROM constructor_activity_events
+        WHERE job_id=1 AND execution_cycle=1 ORDER BY id DESC LIMIT 1`,
+    )).resolves.toMatchObject({ rows: [{ activity_key: 'manual_owner_retry' }] })
   })
 
-  it('rebuilds deterministic CI failures but exposes external GitHub authority waits', { timeout: 30_000 }, async () => {
+  it('keeps transport-only publisher recovery automatic for an external GitHub authority wait', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
       baseCommit: base,
@@ -876,7 +1120,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     )).resolves.toMatchObject({ rows: [{ state: 'blocked', cause_code: 'provider_auth' }] })
   })
 
-  it('requeues the same order for a deterministic CI repair', { timeout: 30_000 }, async () => {
+  it('makes a deterministic CI rejection terminal instead of reinvoking the model', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
       baseCommit: base,
@@ -890,12 +1134,12 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       prNumber: null,
       cleanupReceiptSha256: hash3,
     }))
-      .resolves.toMatchObject({ status: 'queued', stage: 'queued' })
+      .resolves.toMatchObject({ status: 'failed', stage: 'failed' })
     await expect(database.query<{ progress: string; pipelines: string }>(
       `SELECT b.progress, count(p.job_id)::text AS pipelines
          FROM build_jobs b LEFT JOIN constructor_pipeline p ON p.job_id=b.id
         WHERE b.id=1 GROUP BY b.progress`,
-    )).resolves.toMatchObject({ rows: [{ progress: 'worker_retry_scheduled', pipelines: '0' }] })
+    )).resolves.toMatchObject({ rows: [{ progress: 'publisher_manual_restart_required', pipelines: '0' }] })
     await expect(database.query<{ state: string; cause_code: string }>(
       'SELECT state, cause_code FROM constructor_incidents WHERE job_id=1',
     )).resolves.toMatchObject({ rows: [{ state: 'diagnosing', cause_code: 'ci_failure' }] })

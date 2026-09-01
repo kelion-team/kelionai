@@ -1,5 +1,6 @@
 import { getPool } from '../db.js'
 import type { ConstructorObservabilityView } from './constructorObservability.js'
+import { constructorActorLabel } from './constructorIdentity.js'
 
 export interface ConstructorWorkCardJob {
   id: number
@@ -89,7 +90,7 @@ export function projectConstructorWorkCard(
     acceptanceCriteria: metadata.acceptanceCriteria,
     contextLinks: metadata.contextLinks,
     owner: job.orderedBy ?? null,
-    actor: job.brain ?? null,
+    actor: constructorActorLabel(job.brain),
     plan: orderedStages.map((stage) => ({
       key: stage.key,
       label: stage.label,
