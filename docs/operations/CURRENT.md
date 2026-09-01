@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T13:46:25Z`
+Actualizat: `2026-09-01T13:58:28Z`
 
 ## Stare verificată
 
@@ -30,6 +30,11 @@ Actualizat: `2026-09-01T13:46:25Z`
 - Re-auditul pe hashurile finale a dat `GO` pentru deployul safe. Publicarea
   are `114/114` teste verzi; reluarea configurării leagă byte-exact aceeași
   tuplă ordonată de 25 artefacte și refuză înainte de mutații o generație veche.
+- Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
+  frontend. Poarta statică a identificat că proba reală `flock` era lansată de
+  runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
+  Testul execută acum numai acea probă prin boundary-ul `sudo` deja obligatoriu
+  în workflow; validatorul și codul de producție nu au fost relaxate.
 - Planul de migrare pentru starea live măsurată are exact versiunile
   `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
   sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
@@ -78,9 +83,9 @@ Actualizat: `2026-09-01T13:46:25Z`
 Nu se raportează finalizat până când finalizerul Contabo, claimul real al
 workerului și verificarea clientului Windows nu sunt toate verzi pentru același
 commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este commit/push pentru PR-ul operațional `#1560`, verificarea
-CI/build (inclusiv container-isolation, indisponibil local), merge-ul aprobat
-deja de owner și apoi deploy-ul serializat pe Contabo.
+Următorul pas sigur este rerularea CI/build pentru PR-ul operațional `#1560`
+(inclusiv container-isolation, indisponibil local), merge-ul aprobat deja de
+owner și apoi deploy-ul serializat pe Contabo.
 Până la dovada live exactă nu se raportează instalat sau finalizat.
 
 ## Legături canonice

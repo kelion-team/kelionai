@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, readFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -38,6 +39,52 @@ function memoryHistoryStore(initial = { schema: 1, outcomes: [] }) {
     write: (next) => { value = structuredClone(next) },
     current: () => structuredClone(value),
   }
+}
+
+async function assertRealPublicationBarrier(path) {
+  if (process.getuid?.() === 0) {
+    const barrier = createPublicationBarrier(path)
+    const first = await barrier.acquire()
+    assert.ok(first)
+    assert.equal(await barrier.acquire(), null)
+    await first.release()
+    const second = await barrier.acquire()
+    assert.ok(second)
+    await second.release()
+    return
+  }
+
+  // Contractul de producție cere lock root:root 0600, deci un runner GitHub
+  // neprivilegiat nu poate nici crea, nici deschide obiectul autentic. Workflowul
+  // folosește deja sudo pentru probele root; rulăm numai această probă reală în
+  // același boundary, fără să relaxăm validatorul din producție.
+  const moduleUrl = new URL('./constructor-model-control.mjs', import.meta.url).href
+  const program = `
+import assert from 'node:assert/strict'
+import { chmodSync, chownSync } from 'node:fs'
+import { createPublicationBarrier } from ${JSON.stringify(moduleUrl)}
+const path = process.argv[1]
+chownSync(path, 0, 0)
+chmodSync(path, 0o600)
+const barrier = createPublicationBarrier(path)
+const first = await barrier.acquire()
+assert.ok(first)
+assert.equal(await barrier.acquire(), null)
+await first.release()
+const second = await barrier.acquire()
+assert.ok(second)
+await second.release()
+`
+  const probe = spawnSync('/usr/bin/sudo', [
+    '--non-interactive',
+    process.execPath,
+    '--input-type=module',
+    '--eval',
+    program,
+    path,
+  ], { encoding: 'utf8', timeout: 15_000 })
+  assert.equal(probe.error, undefined, probe.error?.message)
+  assert.equal(probe.status, 0, probe.stderr || probe.stdout)
 }
 
 async function listenControl(dependencies) {
@@ -704,14 +751,7 @@ test('publication lease acoperă requested + accepted și serializează flock-ul
   try {
     writeFileSync(path, '', { mode: 0o600 })
     chmodSync(path, 0o600)
-    const barrier = createPublicationBarrier(path)
-    const first = await barrier.acquire()
-    assert.ok(first)
-    assert.equal(await barrier.acquire(), null)
-    await first.release()
-    const second = await barrier.acquire()
-    assert.ok(second)
-    await second.release()
+    await assertRealPublicationBarrier(path)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
