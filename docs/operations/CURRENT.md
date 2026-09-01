@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T13:58:28Z`
+Actualizat: `2026-09-01T14:04:33Z`
 
 ## Stare verificată
 
@@ -23,7 +23,7 @@ Actualizat: `2026-09-01T13:58:28Z`
 - Artefactele GGUF sigilate au exact `20.419.565.568` bytes pentru 35B și
   `76.536.964.608` bytes pentru 122B, în total `96.956.530.176` bytes.
 - Freeze-ul local final este verde: backend `1.539/1.539`, frontend `321/321`,
-  manifestul static exact `331/331`, în total `2.191/2.191` teste. Au trecut
+  manifestul static exact `332/332`, în total `2.192/2.192` teste. Au trecut
   separat 11 porți statice, 3 self-testuri, Gitleaks pe 50,32 MB fără secrete,
   jscpd pe 316 fișiere fără clone, sintaxa Bash `19/19`, YAML `25/25`, Node
   `97/97` și verificarea staged a 12 unități systemd.
@@ -33,8 +33,10 @@ Actualizat: `2026-09-01T13:58:28Z`
 - Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
   frontend. Poarta statică a identificat că proba reală `flock` era lansată de
   runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
-  Testul execută acum numai acea probă prin boundary-ul `sudo` deja obligatoriu
-  în workflow; validatorul și codul de producție nu au fost relaxate.
+  Pasul PR CI activează explicit numai acea probă prin boundary-ul `sudo` deja
+  obligatoriu în workflow. Gate-ul container rămâne portabil fără `sudo`, iar un
+  test static sigilează diferența; validatorul și codul de producție nu au fost
+  relaxate.
 - Planul de migrare pentru starea live măsurată are exact versiunile
   `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
   sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.

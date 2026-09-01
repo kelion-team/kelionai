@@ -61,6 +61,8 @@ jobs:
           npm test
 
       - name: Teste pentru porțile statice
+        env:
+          KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE: '1'
         run: |
           node --test \
             .github/private-ai/benchmark-active-model.test.mjs \

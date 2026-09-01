@@ -7,6 +7,7 @@ import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import {
   createModelControl,
   createHistoryStore,
@@ -42,49 +43,43 @@ function memoryHistoryStore(initial = { schema: 1, outcomes: [] }) {
 }
 
 async function assertRealPublicationBarrier(path) {
-  if (process.getuid?.() === 0) {
-    const barrier = createPublicationBarrier(path)
-    const first = await barrier.acquire()
-    assert.ok(first)
-    assert.equal(await barrier.acquire(), null)
-    await first.release()
-    const second = await barrier.acquire()
-    assert.ok(second)
-    await second.release()
+  const rootProbeMode = process.env.KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE ?? '0'
+  const sudoProbeChild = process.env.KELION_ROOT_PUBLICATION_BARRIER_PROBE_CHILD ?? '0'
+  assert.match(rootProbeMode, /^[01]$/)
+  assert.match(sudoProbeChild, /^[01]$/)
+  const uid = process.getuid?.()
+  // Imaginea gate rulează deliberat ca user non-root și nu conține sudo.
+  // Numai pasul PR CI setează opt-in-ul și poate folosi boundary-ul sudo deja
+  // obligatoriu; manifestele non-root locale rămân portabile fără să relaxeze
+  // validatorul de producție pentru un lock root:root 0600.
+  if (sudoProbeChild === '1') {
+    assert.equal(uid, 0, 'publication barrier subprocess did not cross the sudo root boundary')
+  } else if (uid !== 0) {
+    if (rootProbeMode === '0') return
+    const probe = spawnSync('/usr/bin/sudo', [
+      '--non-interactive',
+      '--user=root',
+      '/usr/bin/env',
+      'KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE=0',
+      'KELION_ROOT_PUBLICATION_BARRIER_PROBE_CHILD=1',
+      process.execPath,
+      '--test',
+      '--test-name-pattern=^publication lease acoperă requested \\+ accepted și serializează flock-ul real$',
+      fileURLToPath(import.meta.url),
+    ], { encoding: 'utf8', timeout: 30_000 })
+    assert.equal(probe.error, undefined, probe.error?.message)
+    assert.equal(probe.status, 0, probe.stderr || probe.stdout)
     return
   }
 
-  // Contractul de producție cere lock root:root 0600, deci un runner GitHub
-  // neprivilegiat nu poate nici crea, nici deschide obiectul autentic. Workflowul
-  // folosește deja sudo pentru probele root; rulăm numai această probă reală în
-  // același boundary, fără să relaxăm validatorul din producție.
-  const moduleUrl = new URL('./constructor-model-control.mjs', import.meta.url).href
-  const program = `
-import assert from 'node:assert/strict'
-import { chmodSync, chownSync } from 'node:fs'
-import { createPublicationBarrier } from ${JSON.stringify(moduleUrl)}
-const path = process.argv[1]
-chownSync(path, 0, 0)
-chmodSync(path, 0o600)
-const barrier = createPublicationBarrier(path)
-const first = await barrier.acquire()
-assert.ok(first)
-assert.equal(await barrier.acquire(), null)
-await first.release()
-const second = await barrier.acquire()
-assert.ok(second)
-await second.release()
-`
-  const probe = spawnSync('/usr/bin/sudo', [
-    '--non-interactive',
-    process.execPath,
-    '--input-type=module',
-    '--eval',
-    program,
-    path,
-  ], { encoding: 'utf8', timeout: 15_000 })
-  assert.equal(probe.error, undefined, probe.error?.message)
-  assert.equal(probe.status, 0, probe.stderr || probe.stdout)
+  const barrier = createPublicationBarrier(path)
+  const first = await barrier.acquire()
+  assert.ok(first)
+  assert.equal(await barrier.acquire(), null)
+  await first.release()
+  const second = await barrier.acquire()
+  assert.ok(second)
+  await second.release()
 }
 
 async function listenControl(dependencies) {

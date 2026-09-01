@@ -298,6 +298,28 @@ test('PR verification checks the actual pull-request head and runs release-train
   assert.match(workflow, /scripts\/release-train-workflow\.test\.mjs/)
 })
 
+test('PR CI sigilează proba root a publication lock fără a rupe gate-ul non-root', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
+  const stepStart = workflow.indexOf('      - name: Teste pentru porțile statice')
+  const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
+  assert.ok(stepStart >= 0 && stepEnd > stepStart)
+  const staticStep = workflow.slice(stepStart, stepEnd)
+  assert.match(
+    staticStep,
+    /\n\s+env:\n\s+KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE: '1'\n\s+run:/,
+  )
+
+  const probe = await readFile(new URL('../deploy/constructor-model-control.test.mjs', import.meta.url), 'utf8')
+  assert.match(probe, /process\.env\.KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE/)
+  assert.match(probe, /spawnSync\('\/usr\/bin\/sudo',[\s\S]*'--non-interactive'[\s\S]*'--user=root'[\s\S]*process\.execPath/)
+  assert.match(probe, /KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE=0/)
+  assert.match(probe, /KELION_ROOT_PUBLICATION_BARRIER_PROBE_CHILD=1/)
+  assert.match(probe, /assert\.equal\(uid, 0, 'publication barrier subprocess did not cross the sudo root boundary'\)/)
+
+  const controller = await readFile(new URL('../deploy/constructor-model-control.mjs', import.meta.url), 'utf8')
+  assert.match(controller, /descriptor\.uid !== 0[\s\S]*descriptor\.gid !== 0[\s\S]*0o600/)
+})
+
 test('every static gate invokes both release-train regression suites', async () => {
   for (const path of ['../deploy/gates/run-gates.sh', '../deploy/porti-pr.sh']) {
     const source = await readFile(new URL(path, import.meta.url), 'utf8')
