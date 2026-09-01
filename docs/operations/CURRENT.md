@@ -1,10 +1,11 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T14:15:40Z`
+Actualizat: `2026-09-01T14:35:00Z`
 
 ## Stare verificată
 
-- `origin/master` este la `d5c88b5173b7a3a8933856f7f0b996f91e801ef2`.
+- `origin/master` este la `f57c77b395e1f17ff3d498b120173971442a5f6e`;
+  PR-ul liniar `#1571` a fost îmbinat prin rebase.
 - AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
   `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
 - Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
@@ -64,14 +65,15 @@ Actualizat: `2026-09-01T14:15:40Z`
 - Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
   măsurători valide de inferență sau de durată a comutării; în această etapă nu
   este cerut și nu este pretins niciun benchmark valid de viteză.
-- PR-ul operațional `#1560` a trecut toate controalele, dar GitHub a refuzat
-  rebase merge din cauza celor trei merge commits istorice. PR-ul liniar
-  `#1571` pornește din masterul canonic și păstrează același arbore funcțional,
-  fără force-push sau altă strategie de merge. Ramura rămâne clasificată drept
-  release generic, cu request ID determinist; numai un PR canonic
-  `codex/<UUID>` cedează ownership-ul dispatcherului Constructor. După merge
-  este obligatoriu freeze pe `master` până când deploy-ul acelui SHA ajunge
-  terminal.
+- Prima rotație post-merge a refuzat corect markerul live
+  `constructor-unit-migration.pending` înainte de mutațiile runtime. Calea
+  owner-aware următoare este `configure-constructor`, iar `vps-set-env` poate fi
+  reluat numai după succesul complet al configurării.
+- Buildul release exact pentru `f57c77b` a oprit publicarea imaginilor la proba
+  read-only: self-testul workerului folosea două căi `/tmp` literale, iar testul
+  boundary elimina `TMPDIR=/work/tmp` din mediul allowlist al copilului. Fixul
+  în curs folosește `node:os.tmpdir()` pentru ambele directoare și transmite
+  explicit `TMPDIR`; manifestul static exact este local `332/332` verde.
 - Ownerul a aprobat explicit publicarea urgentă pe Contabo existent, fără cost
   nou. Nu mai este necesară o altă aprobare pentru commit, merge și deploy în
   limitele acestui contract; orice extindere de cost sau schimbare a profilurilor
@@ -87,9 +89,9 @@ Actualizat: `2026-09-01T14:15:40Z`
 Nu se raportează finalizat până când finalizerul Contabo, claimul real al
 workerului și verificarea clientului Windows nu sunt toate verzi pentru același
 commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este rerularea CI/build pentru PR-ul operațional `#1571`
-(inclusiv container-isolation, indisponibil local), merge-ul aprobat deja de
-owner și apoi deploy-ul serializat pe Contabo.
+Următorul pas sigur este PR-ul liniar al fixului read-only, CI/buildul canonic și
+merge-ul prin rebase. După buildul verde se reia `configure-constructor`; numai
+după succesul lui se reia `vps-set-env`, apoi deployul serializat pe Contabo.
 Până la dovada live exactă nu se raportează instalat sau finalizat.
 
 ## Legături canonice

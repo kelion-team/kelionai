@@ -16,6 +16,8 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
   const recoveryWorkflow = read('.github/workflows/vps-recovery.yml')
   const config = read('deploy/opencode-constructor.json')
   const instructions = read('deploy/opencode-constructor-instructions.md')
+  const gates = read('deploy/gates/run-gates.sh')
+  const buildWorkflow = read('.github/workflows/build-images.yml')
 
   assert.match(worker, /^const OPENCODE_VERSION = '1\.18\.25'$/m)
   assert.match(worker, /^const OPENCODE_MODEL_ID = 'qwen3\.6-35b-a3b-local'$/m)
@@ -26,6 +28,9 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
   assert.match(worker, /const CONSTRUCTOR_MODEL_PROFILES = Object\.freeze\(\{[\s\S]*fast:[\s\S]*powerful:/)
   assert.match(worker, /\.\.\.modelArgs/)
   assert.match(worker, /function activeConstructorProfile\(\)/)
+  assert.match(worker, /mkdtempSync\(join\(tmpdir\(\), 'kelion-worker-gate-classification-'\)\)/)
+  assert.match(worker, /mkdtempSync\(join\(tmpdir\(\), 'kelion-worker-run-logged-self-test-'\)\)/)
+  assert.doesNotMatch(worker, /mkdtempSync\('\/tmp\//)
   assert.doesNotMatch(worker, /switchConstructorModel|modelSwitchArgs|CONSTRUCTOR_TURNS/)
   assert.match(worker, /'-n', '-u', 'root', '--'/)
   assert.match(worker, /function openCodeParentEnv\(\)/)
@@ -58,6 +63,11 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
   assert.deepEqual(Object.keys(parsedConfig.provider), ['llama.cpp'])
   assert.equal(Object.hasOwn(parsedConfig.provider['llama.cpp'].options, 'apiKey'), false)
   assert.match(instructions, /Never use a paid or external AI provider/)
+  assert.match(gates, /^mkdir -p \/work\/tmp "\$WORK"$/m)
+  assert.match(gates, /^export TMPDIR=\/work\/tmp$/m)
+  assert.match(buildWorkflow, /docker run --rm --network none --read-only --cap-drop ALL/)
+  assert.match(buildWorkflow, /--tmpfs \/work:rw,nosuid,nodev,size=6g,uid=1000,gid=1000/)
+  assert.doesNotMatch(buildWorkflow, /--tmpfs \/tmp(?:[:\s])/)
 
   assert.match(localPreflightWorkflow, /OpenCode\/Qwen/)
   assert.match(localPreflightWorkflow, /OPENCODE_VERSION = '1\.18\.25'/)
@@ -76,7 +86,10 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
 
   const result = spawnSync(process.execPath, [resolve(ROOT, 'deploy/codex-worker.mjs'), '--self-test'], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH ?? '' },
+    env: {
+      PATH: process.env.PATH ?? '',
+      ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    },
   })
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.stdout.trim(), 'codex-worker self-test: TRECE')
