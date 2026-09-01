@@ -10,6 +10,9 @@ test('prinde configurări și adaptoare ale furnizorilor retrași', () => {
   assert.deepEqual(furnizoriRetrasiInLinie('const CHIRP_MODEL = env()'), ['chirp'])
   assert.deepEqual(furnizoriRetrasiInLinie('COQUI_URL=http://speech:5100'), ['coqui-server'])
   assert.deepEqual(furnizoriRetrasiInLinie("fetch('/api/voce/sintetizeaza')"), ['coqui-server'])
+  assert.deepEqual(furnizoriRetrasiInLinie("readFileSync('~/.codex/auth.json')"), ['codex-personal-auth'])
+  assert.deepEqual(furnizoriRetrasiInLinie("fetch('https://chatgpt.com/backend-api/codex')"), ['chatgpt-private-backend'])
+  assert.deepEqual(furnizoriRetrasiInLinie("'ChatGPT-Account-ID': accountId"), ['chatgpt-account-header'])
 })
 
 test('nu confundă modelele locale și cuvintele naturale cu furnizori online', () => {
