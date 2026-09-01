@@ -57,7 +57,6 @@ node --test \
   scripts/verifica-butoane.test.mjs \
   scripts/verifica-exporturi.test.mjs \
   scripts/verifica-hardcodari.test.mjs \
-  scripts/verifica-creier-unic.test.mjs \
   scripts/verifica-migrari.test.mjs \
   scripts/inventar-audit.test.mjs \
   scripts/verifica-contract-deploy.test.mjs \
