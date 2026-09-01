@@ -12,11 +12,6 @@ import {
   type OpenAIHealthResult,
   type OpenAIProviderErrorCode,
 } from './openaiHealth.js'
-import {
-  isSubscriptionMode,
-  getSubscriptionCredentials,
-  CHATGPT_ACCOUNT_ID_HEADER,
-} from './chatgptSubscription.js'
 
 export { probeOpenAIHealth } from './openaiHealth.js'
 export type { OpenAIHealthResult } from './openaiHealth.js'
@@ -110,7 +105,7 @@ export function safeOpenAIRetryAfterMs(raw: string | null, nowMs = Date.now()): 
 }
 
 export function openaiAvailable(): boolean {
-  return Boolean(config.openai?.key) || isSubscriptionMode()
+  return Boolean(config.openai?.key)
 }
 
 function contentToInput(content: OrMessage['content'], assistant: boolean): unknown {
@@ -246,24 +241,6 @@ async function openaiFetch(
   body: unknown,
   timeoutMs: number,
 ): Promise<Response> {
-  // Mod abonament ChatGPT Pro: rutare catre chatgpt.com/backend-api/codex cu token OAuth.
-  if (isSubscriptionMode()) {
-    const creds = await getSubscriptionCredentials()
-    if (creds) {
-      return fetch(`${creds.baseUrl}/responses`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${creds.accessToken}`,
-          [CHATGPT_ACCOUNT_ID_HEADER]: creds.accountId,
-          'Content-Type': 'application/json',
-          originator: 'codex_cli_rs',
-          'OpenAI-Beta': 'responses=experimental',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-    }
-  }
   return fetch(`${OPENAI_BASE}/responses`, {
     method: 'POST',
     headers: {

@@ -17,8 +17,7 @@ services:
       - ${KELION_CONFIG_FILE:?dedicated non-secret runtime config is required}
     environment:
       BIND_HOST: 0.0.0.0
-      # Mod abonament ChatGPT Pro: fisier gol -> config.openai.key='' -> isSubscriptionMode() activ.
-      OPENAI_API_KEY_FILE: /dev/null
+      OPENAI_API_KEY_FILE: /run/secrets/openai-project-key
       OPENAI_ADMIN_KEY_FILE: /run/secrets/openai-admin-key
       SESSION_SECRET_FILE: /run/secrets/session-secret
       GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google-client-secret
@@ -58,10 +57,10 @@ services:
         source: ${KELION_RELEASE_STATE_ROOT:?global release state root is required}
         target: /run/kelion-release
         read_only: true
-      # Mod abonament: auth.json OAuth ChatGPT montat READ-WRITE (se rescrie la refresh token).
       - type: bind
-        source: ${KELION_CODEX_AUTH_ROOT:-/root/kelion/app-codex-auth}
-        target: /home/node/.codex
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-project-key
+        target: /run/secrets/openai-project-key
+        read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-admin-key
         target: /run/secrets/openai-admin-key
