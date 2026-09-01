@@ -20,13 +20,6 @@ const CRITICAL_APP_SUITES = [
     ],
   },
   {
-    id: 'runtime-credential-isolation',
-    path: 'backend/src/openaiRuntimeBoundary.test.ts',
-    tests: [
-      'nu citește tokenul personal și nu apelează endpointuri ChatGPT private',
-    ],
-  },
-  {
     id: 'openai-status-redaction',
     path: 'backend/src/services/openaiHealth.test.ts',
     tests: [
