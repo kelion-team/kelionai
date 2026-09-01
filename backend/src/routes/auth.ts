@@ -75,6 +75,12 @@ function nativeOriginAllowed(origin: string | undefined, platform: NativePlatfor
     : origin === 'http://tauri.localhost' || origin === 'tauri://localhost'
 }
 
+function nativeRedirectFor(platform: NativePlatform): string {
+  return platform === 'constructor-desktop'
+    ? config.product.nativeRedirects.constructorDesktop
+    : config.product.nativeRedirects[platform]
+}
+
 // Google-connect DIAGNOSTIC (Adrian, Jul 10: "it doesn't do what you said").
 // Remembers exactly what happened at the last connect, so we know WHERE it
 // fails instead of guessing: did a refresh token come from Google? did a
@@ -195,7 +201,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const platform = req.body?.platform
     const installId = String(req.body?.installId ?? '')
     const codeChallenge = String(req.body?.codeChallenge ?? '')
-    if ((platform !== 'ios' && platform !== 'desktop')
+    if ((platform !== 'ios' && platform !== 'desktop' && platform !== 'constructor-desktop')
       || !nativeOriginAllowed(req.headers.origin, platform)
       || !UUID_RE.test(installId)
       || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) {
@@ -272,7 +278,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const code = String(req.body?.code ?? '')
     const state = String(req.body?.state ?? '')
     const verifier = String(req.body?.verifier ?? '')
-    if ((platform !== 'ios' && platform !== 'desktop')
+    if ((platform !== 'ios' && platform !== 'desktop' && platform !== 'constructor-desktop')
       || !nativeOriginAllowed(req.headers.origin, platform)
       || !UUID_RE.test(installId)
       || !/^[A-Za-z0-9_-]{43}$/.test(code)
@@ -482,7 +488,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           exchangeTtlSeconds: config.nativeAuth.exchangeTtlSeconds,
         }).catch(() => false)
         if (!completed) return fail('native_request_expired')
-        const redirect = new URL(config.product.nativeRedirects[nativeRequest.platform])
+        const redirect = new URL(nativeRedirectFor(nativeRequest.platform))
         redirect.searchParams.set('code', exchangeCode)
         redirect.searchParams.set('state', nativeRequest.clientState)
         return reply.redirect(redirect.toString())

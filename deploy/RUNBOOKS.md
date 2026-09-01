@@ -40,10 +40,34 @@ allowlist de domenii.
 
 ## Release și rollback
 
+### Ownership și freeze pentru pilotul Constructor
+
+`release-dispatch` cere exact un PR asociat, merged canonic în `master`, pentru
+SHA-ul candidat. Pentru un PR obișnuit valid, el derivă un request ID determinist
+din repository + SHA + runul CI; rerularea buildului pentru același CI nu
+inventează alt owner. Dispatcherul cere separat un singur build canonic verde
+și un singur artefact valid pentru acel SHA. Pentru un PR Constructor canonic
+(`codex/<UUID>`, titlu/body/commit exact verificate), dispatcherul generic se
+oprește fără dispatch: release-ul rămâne exclusiv în proprietatea dispatcherului
+Constructor și a request ID-ului său determinist. Zero/mai multe PR-uri asociate,
+un marker Constructor parțial sau metadate necanonice blochează fail-closed.
+
+Din momentul merge-ului PR-ului pilot Constructor este obligatoriu freeze pe
+`master`: nu se îmbină alt PR și nu se avansează `master` până când deploy-ul
+acelui SHA ajunge terminal. Nu lansa în paralel un release generic/manual cu alt
+request ID. Verificatorul urmărește identitatea exactă SHA/CI/build/request,
+așteaptă runul pending și acceptă o singură reușită cu jobul `release` verde;
+numai eșecurile aceluiași request ID/SHA pot fi recuperate, iar două request
+ID-uri reușite distincte sunt ambigue și se blochează. Dacă deploy-ul pilot se
+termină cu eșec, păstrează
+mutatorii de producție opriți până la diagnostic și o nouă decizie explicită a
+ownerului.
+
 1. Confirmă că SHA-ul integral este vârful `master`, `pr-verify` este verde și
    `build-images` a produs manifestul semnat pentru același SHA.
-2. După verificarea dovezilor, rulează manual `production-release`, cu
-   `release_mode=release`, în mediul `production`.
+2. Pentru un PR obișnuit, lasă `release-dispatch` să emită automat requestul
+   generic determinist. Pentru pilotul Constructor, așteaptă requestul
+   dispatcherului Constructor; nu lansa manual un request străin.
 3. Acceptă release-ul numai dacă workflow-ul confirmă versiunea publică exactă
    și `/readyz=200` după activarea efectelor.
 
@@ -126,71 +150,143 @@ Cheia master și backupul nu constituie disaster recovery dacă rămân pe aceea
 gazdă. Configurează și testează o destinație off-host înainte de producție.
 Dovada unei migrări distructive se consumă la release; nu se reutilizează.
 
-## Activarea workerului Codex pentru un singur admin
+## Activarea workerului Constructor local OpenCode/Qwen pentru un singur admin
 
-Workerul actual automatizează joburi locale, deci folosește CLI-ul
-non-interactiv; App Server este destinat clienților bogați cu auth, istoric,
-aprobări și evenimente și nu se publică pe web. Dacă va exista un control-plane
-local App Server, transportul acceptat este numai `stdio` sau Unix socket în
-același boundary host-only, nu WebSocket public.
+Workerul automatizează joburile cu OpenCode `1.18.25` și două profiluri locale,
+servite numai pe loopback de llama.cpp: FAST folosește Qwen3.6-35B-A3B Q4_K_M
+și este implicit, iar POWERFUL folosește Qwen3.5-122B-A10B Q4_K_M și se
+selectează numai manual din Admin. Constructorul nu folosește cheie OpenAI,
+login ChatGPT, provider AI cloud sau task extern.
 
-1. Instalează pachetul oficial `@openai/codex` la versiunea exactă cerută de
-   `deploy/codex-worker.mjs`. Nu folosi `curl | bash`. Verifică
-   `codex --version`, `codex exec --help` și `codex app-server --help` înainte de
-   instalarea unității.
-2. Creează utilizatorul și grupul neprivilegiate `kelion-codex`. Directoarele de
-   lucru sunt `/var/lib/kelion-codex`; cache-ul de autentificare separat este
-   `/var/lib/kelion-codex-auth`. Niciunul nu este montat în containerul web.
-3. Instalează `deploy/codex-worker.profile.toml` ca
-   `/opt/kelion-codex/profile-home/kelion-worker.config.toml`, root-owned și
-   read-only. Auth home conține numai starea gestionată de CLI. Profilul impune
-   `forced_login_method="api"`, `approval_policy="never"`, env allowlist și
-   rețea oprită pentru comenzile generate.
-4. Sursa canonică rămâne `/root/kelion/secrets/openai-project-key`, cu metadata
-   `0:10050:0440`. Unitatea workerului o primește numai prin
-   `LoadCredential=openai-project-key:...`; valoarea nu intră în environment,
-   argv sau jurnal. La prima pornire, la rotația cheii ori dacă statusul
-   cache-ului eșuează, workerul execută echivalentul sigur:
-
-   ```bash
-   /opt/kelion-codex/bin/codex \
-     -c 'forced_login_method="api"' \
-     -c 'cli_auth_credentials_store="file"' \
-     login --with-api-key \
-     < "$CREDENTIALS_DIRECTORY/openai-project-key"
-   ```
-
-   Redirecționarea este pe stdin; nu folosi `printenv`, pipe din `cat`,
-   substituție de comandă, `set -x`, `--with-access-token`, device-auth sau
-   login ChatGPT. Workflow-ul `vps-codex-login.yml` poate reînnoi manual același
-   cache fără ca GitHub Actions să primească vreodată cheia OpenAI.
-5. Workerul verifică statusul cu aceleași două override-uri `-c`, plasate
-   înainte de `login status`, și publică atomic, cu mod `0600` și
-   `fsync`, numai fingerprintul SHA-256 privat din auth home. Fișierele
-   `auth.json` și `.openai-project-key.sha256` rămân accesibile exclusiv
-   identității workerului; fingerprintul evită relogarea la fiecare minut.
-6. Creează configul dedicat din `deploy/codex-worker.env.example`; el conține
+1. Instalează mai întâi runtime-ul privat cu installerul Contabo versionat.
+   Receiptul `/etc/private-ai/.install-complete` trebuie să fixeze OpenCode
+   `1.18.25`, commitul llama.cpp și modelul FAST
+   `ggml-org/Qwen3.6-35B-A3B-GGUF` Q4_K_M. Instalează apoi POWERFUL numai prin
+   installerul versionat `.github/private-ai/upgrade-private-ai-max-model.sh`.
+   Acesta probează model-list și inferența pe POWERFUL, revine explicit la FAST
+   și probează model-list plus inferența pe FAST. Acceptă instalarea duală numai
+   cu receipturile finale `/etc/private-ai/.max-model-sealed` și
+   `/etc/private-ai/.max-model-complete`, ambele profile verificate și
+   `active_profile=fast`. Nu folosi `curl | bash` și nu înlocui binarele,
+   shardurile sau modelele în afara installerelor versionate.
+   Activarea temporară POWERFUL este o excepție tehnică aprobată exclusiv pentru
+   validarea installerului: nu este o decizie de profil, nu pornește workerul și
+   nu execută ori reia un ordin. Orice ieșire acceptată dovedește din nou FAST.
+2. Creează utilizatorul și grupul neprivilegiate `kelion-codex`. Numele Unix și
+   căile `codex-worker` sunt identificatori legacy păstrați pentru
+   compatibilitate; executorul este OpenCode. Repository-ul și starea joburilor
+   sunt în `/var/lib/kelion-codex` și nu sunt montate în containerul web.
+3. Instalează byte-identic `deploy/opencode-constructor.json` și
+   `deploy/opencode-constructor-instructions.md` în
+   `/srv/private-ai/home/.config/opencode/`, root-owned, grup `privateai` și
+   read-only pentru proces. Configul permite exclusiv providerul `llama.cpp`,
+   endpointul `http://127.0.0.1:24080/v1` și cele două modele locale fixate;
+   `model` și `small_model` rămân
+   `llama.cpp/qwen3.6-35b-a3b-local`. `apiKey`, autoupdate și sharing sunt
+   interzise.
+4. În starea implicită verifică `private-ai-llm.service` și
+   `private-ai-web.service` active, `/health` sănătos și `/v1/models` cu exact
+   aliasul FAST. PID-ul serviciului LLM trebuie să execute
+   `/opt/private-ai/bin/llama-server` și să aibă mapat fișierul GGUF canonic de
+   `20.419.565.568` bytes. Controllerul trebuie să raporteze ambele profile ca
+   instalate, dar numai FAST ca activ.
+5. Starea legacy de autentificare trebuie să fie absentă:
+   `/var/lib/kelion-codex-auth`, `/opt/kelion-codex/profile-home` și orice
+   wrapper Codex retras nu sunt precondiții și nu se recreează. Unitatea nu
+   primește `openai-project-key`; Constructorul nu are nicio credentială AI.
+6. Creează configul non-secret din `deploy/codex-worker.env.example`; el conține
    numai flagul, API-ul loopback, repository-ul public și digestul imaginii de
-   porți. HMAC-ul cozii intră exclusiv prin `LoadCredential`.
-7. Instalează unitatea și timerul cu markerul de condiție absent. Rulează
-   `node deploy/codex-worker.mjs --self-test`. Pentru preflightul Linux sunt
-   obligatorii CLI-ul și profilul root-owned, bubblewrap, Podman rootless,
-   clona fără credentiale, imaginea gate cu același commit și probele
-   adversariale pentru auth home, credentiale, `/tmp`, localhost și rețea.
-8. Activează în această ordine numai după probe: flagul backend, flagul
+   porți. HMAC-ul cozii intră exclusiv prin `LoadCredential` și nu este o cheie
+   de model.
+7. Instalează regula sudoers versionată, unitatea și timerul cu markerul de
+   condiție absent. Supervisorul rămâne `kelion-codex`, iar OpenCode este pornit
+   explicit ca root prin `sudo -n`, cu acces full-host conform contractului
+   Constructor. Rulează `node deploy/codex-worker.mjs --self-test`; preflightul
+   verifică versiunea OpenCode, configul local, llama.cpp, modelul, regula sudo,
+   clona, Podman rootless și imaginea gate fixată prin digest.
+8. Activează în această ordine numai după probe: flagul backend,
    `CODEX_WORKER_EXEC_ENABLED=1`, markerul
    `/etc/kelion/codex-worker.enabled`, apoi timerul. Orice lipsă raportează
-   `setup_required`; nu există fallback la ChatGPT/device-auth sau la alt
-   furnizor.
+   `setup_required`; nu există fallback la Codex cloud, ChatGPT/device-auth sau
+   alt furnizor AI.
 
 Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
 sau deploy.
+
+## Profilurile locale și comutarea manuală din Admin
+
+| Profil Admin | Model local | Activare permisă | Stare implicită |
+| --- | --- | --- | --- |
+| FAST / Rapid (35B) | `qwen3.6-35b-a3b-local` | click explicit al ownerului în Admin | activ după instalare și după reboot |
+| POWERFUL / Puternic (122B) | `qwen3.5-122b-a10b-local` | click explicit al ownerului în Admin | instalat pe disc, inactiv |
+
+Ambele modele rămân instalate și verificate pe disc. Nu porni două servere LLM
+și nu ține ambele GGUF-uri mapate simultan: un singur profil este servit de
+`private-ai-llm.service` și mapat în procesul `llama-server`. Verificarea se face
+pe PID-ul măsurat, aliasul din `/v1/models` și fișierul din `/proc/<PID>/maps`,
+nu din numele unui drop-in. Page cache-ul kernelului nu este al doilea model
+activ și nu constituie dovadă că două modele sunt servite.
+
+Contractul de decizie este strict manual. După claim există zero retry automat
+și zero reexecuție automată pentru worker, invocarea modelului și ordin,
+indiferent dacă rezultatul este timeout, eroare tehnică sau `unresolved`:
+
+- FAST este profilul implicit. Nici workerul, backendul, controllerul și nici
+  interfața Admin nu aleg sau schimbă profilul fără intenția manuală a ownerului.
+- Numai un rezultat terminal real `unresolved` pe FAST, cu motivul bounded
+  `no_changes`, `test_failure` sau `quality_gate_failure`, afișează recomandarea
+  exactă de a comuta manual la POWERFUL și apoi de a folosi explicit `Reia`.
+  Recomandarea explică motivul, dar nu apasă butonul, nu trimite comanda de
+  comutare și nu repune ordinul în coadă.
+- Același rezultat `unresolved` pe POWERFUL este terminal pentru ciclul curent
+  și nu recomandă `Reia` sau un model superior.
+- `execution_timeout`, `brain_unavailable` și `worker_internal_failure` sunt
+  erori tehnice. Ele se afișează separat și nu recomandă schimbarea modelului
+  sau `Reia`, indiferent de profil. Nu interpreta o eroare tehnică drept
+  insuficiență a modelului.
+- Un rezultat nerezolvat sau eșuat rămâne terminal pentru ciclul curent. Dacă
+  ownerul dorește altă încercare, după orice alegere manuală de profil folosește
+  explicit `Reia`; aceasta pornește un `execution_cycle` nou și primește un task
+  ID worker nou, fără să rescrie ori să continue ciclul terminal anterior.
+
+Ordinea unei comutări aprobate de owner este:
+
+1. În Admin, deschide cardul de control al modelului și confirmă starea
+   `ready`, profilul activ măsurat și că FAST plus POWERFUL sunt instalate. Dacă
+   starea este `switching`, `failed` sau `unavailable`, nu trimite altă comandă;
+   diagnostichează read-only.
+2. Apasă explicit butonul profilului ales. Nu rula direct
+   `/opt/private-ai/bin/constructor-model-switch` și nu edita drop-in-uri
+   systemd; Admin este sursa intenției manuale și păstrează request ID-ul
+   auditat.
+3. Controllerul persistă request ID-ul și ținta intenției manuale acceptate,
+   serializează operația cu workerul, capturează și oprește temporar timerul
+   acestuia, validează receipturile/modelul țintă, schimbă unicul `llama-server`,
+   verifică aliasul și maparea GGUF, apoi restaurează exact starea timerului.
+   Admin afișează `switching` pe durata operației.
+4. Continuă numai după ce Admin revine la `ready` și arată profilul/modelul
+   cerut. Abia apoi ownerul poate decide separat `Reia`, care pornește un
+   `execution_cycle` și un task ID worker noi; ciclul anterior rămâne terminal.
+5. Dacă o comandă POWERFUL eșuează în timpul activării, helperul restaurează
+   FAST ca rollback tehnic al aceleiași comenzi. Aceasta nu este escaladare
+   automată și nu reexecută niciun ordin. Dacă restaurarea nu poate fi dovedită,
+   starea rămâne fail-closed și cere diagnostic read-only.
+6. Pentru revenire normală, ownerul apasă explicit FAST în Admin și așteaptă
+   din nou `ready`. După un reboot, serviciul pornește canonic FAST și nu
+   restaurează automat un profil POWERFUL selectat anterior. Singura excepție:
+   dacă restartul a întrerupt o operație de comutare deja acceptată și persistată,
+   controllerul poate continua exact aceeași intenție manuală, cu același
+   request ID și aceeași țintă. Nu deduce o țintă, nu creează o comutare nouă și
+   nu reexecută workerul/modelul/ordinul. Fără receiptul valid al intenției
+   acceptate rămâne FAST și cere un click nou. După boot, verifică profilul în
+   Admin înainte de a decide un nou `execution_cycle` prin `Reia`.
 
 ## Instalarea publisherului și a dispatcherului de release
 
 Lanțul host-only are trei identități Unix și trei domenii HMAC distincte:
 
-1. `kelion-codex` scrie numai handofful `patch.diff` plus receiptul imuabil în
+1. `kelion-codex` (supervisorul OpenCode local) scrie numai handofful
+   `patch.diff` plus receiptul imuabil în
    `/var/lib/kelion-constructor-handoff/ready` și raportează `gates_passed`;
 2. `kelion-publisher` citește spool-ul, recreează commitul într-o clonă proprie,
    reexecută imaginea offline de porți, împinge numai ramura
@@ -199,6 +295,13 @@ Lanțul host-only are trei identități Unix și trei domenii HMAC distincte:
 3. `kelion-release` citește numai receiptul merge din API și poate dispatcha
    `deploy.yml` pentru acel SHA. Nu are Git, SSH, credentiale VPS ori acces la
    spool.
+
+Aceasta este limita unică de reluare: numai publication, CI și release pot
+continua idempotent după lease expirat, restart sau eșec recuperabil, exclusiv
+pe același handoff imuabil și același commit/SHA. Receiptul, request ID-ul și
+payloadul trebuie să coincidă; un payload ori commit diferit este o operație
+nouă și este refuzat sub identitatea veche. Reluarea downstream poate reverifica
+porțile și efectele, dar nu invocă workerul/modelul și nu reexecută ordinul.
 
 Rulează installerul numai din checkoutul exact care urmează să fie instalat:
 
@@ -249,10 +352,11 @@ fie aliniate, serviciile oneshot inactive și lista joburilor systemd goală.
 Prima execuție acceptă exclusiv bundle-ul urmărit din vârful curent `master`,
 dovada build-ului gate, release proof-ul și markerul activ pentru exact același
 SHA, plus pinul ed25519 al gazdei.
-Către VPS nu trimite config, HMAC-uri, tokenuri GitHub ori
-chei OpenAI. Nu reinstalează `apt`, `npm` sau CLI-ul și nu regenerează configul
-ori secretele. Reface tranzacțional numai configul workerului din copia live
-byte-identică; nu include `runtime.env`, nu recreează și nu restartează backendul.
+Către VPS nu trimite config, HMAC-uri, tokenuri GitHub ori chei OpenAI.
+Constructorul nu consumă o cheie AI. Nu reinstalează `apt`, `npm` sau CLI-ul și
+nu regenerează configul ori secretele. Reface tranzacțional numai configul
+workerului din copia live byte-identică; nu include `runtime.env`, nu recreează
+și nu restartează backendul.
 
 Înainte de prima oprire, helperul capturează durabil markerii și starea
 enabled/active a celor trei timere. Installerul publică generația nouă cu toate
@@ -260,20 +364,23 @@ unitățile quiesced, iar cutover-ul strict restaurează exact vectorul capturat
 în markeri, dar păstrează ready absent și toate unitățile oprite. Numai după
 dovada completă scrie și sincronizează faza exterioară `committed`; finalizerul
 poate publica ready și porni timerele abia după acel prag durabil. Un crash după
-primul start păstrează `committed`, iar retry-ul quiesce-uiește înainte să
-restaureze idempotent vectorul și să șteargă jurnalul. La crash, reia operația
-fără să modifici starea VPS. Selectorul read-only acceptă SHA-ul vechi numai din jurnalul root-only
+primul start păstrează `committed`, iar reluarea aceleiași instalări de release,
+pentru același commit pin-uit, quiesce-uiește înainte să restaureze idempotent
+vectorul și să șteargă jurnalul. Această reluare nu repornește workerul/modelul/
+ordinul. La crash, reia operația fără să modifici starea VPS. Selectorul
+read-only acceptă SHA-ul vechi numai din jurnalul root-only
 strict, dacă acel commit există, este strămoș al noului `master`, iar release-ul
 live a rămas exact pe acel SHA; fără jurnal, orice SHA diferit de vârful
 `master` este refuzat. Nu porni manual timere și nu
 șterge `constructor-upgrade.journal`, directoarele `constructor-upgrade.*` sau
 `constructor-unit-migration.pending`. Avansarea `master` nu rescrie și nu
-suprascrie jurnalul: rerun-ul sau un nou dispatch selectează determinist commitul
-pin-uit, iar un jurnal invalid, symlink ori cu SHA neînrudit este refuzat.
+suprascrie jurnalul: rerun-ul sau redispatchul aceluiași request de release
+selectează determinist commitul pin-uit, iar un jurnal invalid, symlink ori cu
+SHA neînrudit este refuzat.
 
 Acceptă upgrade-ul numai dacă evenimentul final este
 `constructor_upgrade_complete`, apoi rulează `constructor-status` și cere
-vectorul pre-upgrade exact, plus `codex-auth=ready`. Dacă preflight-ul raportează
+vectorul pre-upgrade exact, plus `opencode-qwen-local=ready|required`. Dacă preflight-ul raportează
 o stare necanonică ori alt recovery activ, diagnostichează read-only; nu folosi
 `configure-constructor`, deoarece reprovisionează configul și credentialele și
 refuză un Constructor deja activ.
@@ -295,7 +402,8 @@ Porțile de activare sunt cumulative și rămân implicit absente/zero:
 
 1. aplică migrarea `constructor_publication_pipeline` și confirmă readiness;
 2. verifică în staging HMAC-urile separate, expirarea/reînnoirea lease-urilor,
-   retry-ul limitat la trei și replay-ul nonce după restart;
+   retry-ul limitat la trei numai pentru publication/CI/release și replay-ul
+   nonce după restart, mereu pe același handoff/commit;
 3. setează flagurile backend `CONSTRUCTOR_PUBLISHER_ENABLED=1` și
    `CONSTRUCTOR_RELEASE_ENABLED=1`, apoi flagurile host
    `*_EXEC_ENABLED=1`;
@@ -303,13 +411,15 @@ Porțile de activare sunt cumulative și rămân implicit absente/zero:
 5. după un PR real auditat și un merge verde, creează markerul dispatcherului și
    pornește timerul release.
 
-Un crash eliberează lease-ul după 120 de secunde; receipturile identice sunt
-idempotente, iar un payload diferit este refuzat. După trei încercări eșuate
-jobul se oprește factual și cere intervenție admin, nu ocolirea porților. La
-incident, șterge markerul exact și oprește timerul aferent; nu șterge receipturi,
-ramuri sau runs până la triere. Revocă doar credentiala identității afectate.
-Restartul aplicației nu redeschide replay-ul: nonce-urile sunt durabile în
-`constructor_service_nonces` și expiratele sunt curățate de API.
+Un crash eliberează lease-ul după 120 de secunde; receipturile identice pentru
+același handoff/commit sunt idempotente, iar un payload diferit este refuzat.
+După trei încercări eșuate, etapa de publication/CI/release se oprește factual
+și cere intervenție admin, nu ocolirea porților; contorul nu autorizează vreodată
+reexecuția workerului/modelului/ordinului. La incident, șterge markerul exact și
+oprește timerul aferent; nu șterge receipturi, ramuri sau runs până la triere.
+Revocă doar credentiala identității afectate. Restartul aplicației nu redeschide
+replay-ul: nonce-urile sunt durabile în `constructor_service_nonces` și
+expiratele sunt curățate de API.
 
 ## Rotație și eliminarea secretelor legacy
 

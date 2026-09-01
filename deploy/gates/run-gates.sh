@@ -4,6 +4,19 @@ set -euo pipefail
 SOURCE=/source
 WORK=/work/repo
 
+# Markerul este emis de entrypointul fixat în imagine, nu de worktree-ul
+# verificat. Workerul acceptă un verdict de cod/test numai dacă vede și markerul
+# final cu exact codul de ieșire al containerului; un podman 125/126/127, OOM sau
+# proces omorât nu îl poate fabrica.
+gate_verdict() {
+  local status=$?
+  trap - EXIT
+  printf 'codex-gates: VERDICT schema=1 exit=%s\n' "$status"
+  exit "$status"
+}
+trap gate_verdict EXIT
+printf 'codex-gates: START schema=1\n'
+
 die() {
   printf 'codex-gates: %s\n' "$1" >&2
   exit 1
@@ -54,6 +67,10 @@ npm --prefix frontend run build
 npm --prefix frontend run lint
 npm --prefix frontend test
 node --test \
+  .github/private-ai/benchmark-active-model.test.mjs \
+  .github/private-ai/finalize-private-ai-constructor.test.mjs \
+  .github/private-ai/install-private-ai.test.mjs \
+  .github/private-ai/upgrade-private-ai-max-model.test.mjs \
   scripts/verifica-butoane.test.mjs \
   scripts/verifica-exporturi.test.mjs \
   scripts/verifica-hardcodari.test.mjs \
@@ -62,7 +79,12 @@ node --test \
   scripts/verifica-contract-deploy.test.mjs \
   scripts/release-train-preflight.test.mjs \
   scripts/release-train-workflow.test.mjs \
+  scripts/vps-recovery-workflow.test.mjs \
+  scripts/vps-pr-remediator.test.mjs \
+  scripts/vps-release-verifier.test.mjs \
   ios/appstore-build.test.mjs \
+  deploy/constructor-model-control.test.mjs \
+  deploy/constructor-model-switch.test.mjs \
   deploy/lib/create-migration-proof.test.mjs \
   deploy/lib/backup-schedule.test.mjs \
   deploy/lib/restore-verified-backup.test.mjs \

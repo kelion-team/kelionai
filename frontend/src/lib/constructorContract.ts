@@ -13,6 +13,15 @@ export type ConstructorWorkerState =
   | 'degraded'
   | 'unknown'
 
+export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode + Qwen local (llama.cpp)'
+
+/** UI compatibility for work cards persisted before the local executor. */
+export function constructorActorLabel(actor: string | null | undefined): string | null {
+  const value = actor?.trim()
+  if (!value) return null
+  return value === 'codex-worker' ? CONSTRUCTOR_LOCAL_ACTOR : value
+}
+
 export interface ConstructorActivity {
   id: string
   eventKey: string
@@ -30,6 +39,29 @@ export interface ConstructorProgress {
   currentStage: string | null
   resolved: boolean
   source: 'constructor_activity_events' | 'unavailable'
+}
+
+export type ConstructorModelProfile = 'fast' | 'powerful'
+export type ConstructorModelOutcomeReasonCode =
+  | 'test_failure'
+  | 'quality_gate_failure'
+  | 'no_changes'
+  | 'execution_timeout'
+  | 'brain_unavailable'
+  | 'worker_internal_failure'
+
+export interface ConstructorManualModelRecommendation {
+  profile: 'powerful'
+  reasonCode: 'fast_result_not_publishable'
+  reason: string
+}
+
+export interface ConstructorModelOutcome {
+  profile: ConstructorModelProfile
+  result: 'unresolved' | 'technical_failure'
+  reasonCode: ConstructorModelOutcomeReasonCode
+  reason: string
+  manualRecommendation: ConstructorManualModelRecommendation | null
 }
 
 export interface ConstructorContinuity {
@@ -53,6 +85,7 @@ export interface ConstructorContinuity {
   progress: ConstructorProgress
   activity: ConstructorActivity[]
   eventCount: number
+  modelOutcome: ConstructorModelOutcome | null
 }
 
 export interface ConstructorWorkCard {
@@ -112,6 +145,25 @@ const nonNegativeInteger = (value: unknown): boolean => Number.isSafeInteger(val
 const validIsoDate = (value: unknown): boolean =>
   typeof value === 'string' && Number.isFinite(Date.parse(value))
 const SHA40 = /^[0-9a-f]{40}$/
+const UNRESOLVED_REASON_CODES = [
+  'test_failure',
+  'quality_gate_failure',
+  'no_changes',
+] as const satisfies readonly ConstructorModelOutcomeReasonCode[]
+const TECHNICAL_FAILURE_REASON_CODES = [
+  'execution_timeout',
+  'brain_unavailable',
+  'worker_internal_failure',
+] as const satisfies readonly ConstructorModelOutcomeReasonCode[]
+const exactKeys = (value: Record<string, unknown>, expected: readonly string[]): boolean =>
+  Object.keys(value).length === expected.length
+  && Object.keys(value).every((key) => expected.includes(key))
+const boundedReason = (value: unknown): value is string =>
+  typeof value === 'string'
+  && value.length > 0
+  && value.length <= 500
+  && value.trim() === value
+  && !/[\p{Cc}\p{Cs}]/u.test(value)
 const safeContextLink = (value: string): boolean => {
   if (value.startsWith('#') || value.startsWith('/')) return true
   try {
@@ -146,10 +198,41 @@ export function isConstructorProgress(value: unknown): value is ConstructorProgr
     && (value.source === 'constructor_activity_events' || value.source === 'unavailable')
 }
 
+export function isConstructorModelOutcome(value: unknown): value is ConstructorModelOutcome {
+  if (!constructorRecord(value) || !exactKeys(value, [
+    'profile', 'result', 'reasonCode', 'reason', 'manualRecommendation',
+  ])) return false
+  if (
+    !['fast', 'powerful'].includes(String(value.profile ?? ''))
+    || !['unresolved', 'technical_failure'].includes(String(value.result ?? ''))
+    || !boundedReason(value.reason)
+  ) return false
+
+  const reasonMatchesResult = value.result === 'unresolved'
+    ? UNRESOLVED_REASON_CODES.includes(value.reasonCode as typeof UNRESOLVED_REASON_CODES[number])
+    : TECHNICAL_FAILURE_REASON_CODES.includes(
+        value.reasonCode as typeof TECHNICAL_FAILURE_REASON_CODES[number],
+      )
+  if (!reasonMatchesResult) return false
+
+  const recommendation = value.manualRecommendation
+  if (value.result === 'technical_failure' || value.profile === 'powerful') {
+    return recommendation === null
+  }
+  if (value.profile !== 'fast' || value.result !== 'unresolved' || !constructorRecord(recommendation)) {
+    return false
+  }
+  return exactKeys(recommendation, ['profile', 'reasonCode', 'reason'])
+    && recommendation.profile === 'powerful'
+    && recommendation.reasonCode === 'fast_result_not_publishable'
+    && boundedReason(recommendation.reason)
+}
+
 export function isConstructorContinuity(value: unknown): value is ConstructorContinuity {
   if (!constructorRecord(value)
     || !constructorRecord(value.retry)
-    || !constructorRecord(value.finalProof)) return false
+    || !constructorRecord(value.finalProof)
+    || !Object.prototype.hasOwnProperty.call(value, 'modelOutcome')) return false
   const complete = value.finalProof.complete
   const proofValid = complete === false
     ? nullableString(value.finalProof.commit) && nullableString(value.finalProof.liveVersion)
@@ -169,6 +252,7 @@ export function isConstructorContinuity(value: unknown): value is ConstructorCon
     && Array.isArray(value.activity)
     && value.activity.every(isConstructorActivity)
     && nonNegativeInteger(value.eventCount)
+    && (value.modelOutcome === null || isConstructorModelOutcome(value.modelOutcome))
 }
 
 export function isConstructorWorkCard(value: unknown): value is ConstructorWorkCard {

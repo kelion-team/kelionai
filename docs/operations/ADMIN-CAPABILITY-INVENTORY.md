@@ -37,7 +37,7 @@ iar rutele sunt în [`backend/src/routes/admin.ts`](../../backend/src/routes/adm
 
 | Prioritate | Work item | Motiv verificat |
 | --- | --- | --- |
-| P0 | [ADM-008 Constructor](#adm-008-constructor) | Workerul și timerele sunt inactive; două autorități externe lipsesc. |
+| P0 | [ADM-008 Constructor](#adm-008-constructor) | Traseul local OpenCode/Qwen și autoritățile GitHub/release cer dovadă live completă. |
 | P0 | [ADM-018 Live Voice](#adm-018-live-voice) | Captarea funcționează, dar sesiunea provider/relay nu ajunge la răspuns bidirecțional. |
 | P0 | [ADM-015 Fișa canonică](#adm-015-fisa-canonica-si-intake) | Implementarea există numai nepublicată și incidentul curent nu are card vizibil verificat. |
 | P0 | [ADM-014 Monitor și provider health](#adm-014-monitor-si-provider-health) | `OpenAI 1/2` comprimă cauza și nu oferă incident/următor pas canonic. |
@@ -57,7 +57,7 @@ iar rutele sunt în [`backend/src/routes/admin.ts`](../../backend/src/routes/adm
 | [ADM-005](#adm-005-inbox) | Inbox | `/inbound`, `/mailbox-live`, `/mailbox-delete`, `/contact-messages` | Verificat în cod; stările gol/eșec/neconfigurat sunt separate; live necunoscut | Folderele mail și limitele de citire trebuie documentate ca politică | Fără work card per mesaj/acțiune | IMAP, DB, mail config; receipt de delete/reply |
 | [ADM-006](#adm-006-gesturi) | Gesturi | `/gestures`, manifestul și preview-ul avatarului | Verificat în cod; aplicarea runtime end-to-end nu este probată | Timerele preview sunt cosmetice; catalogul trebuie să aibă un singur owner | Preview vizual, fără confirmare durabilă | Avatar/control frames; confirmare aplicată și test live |
 | [ADM-007](#adm-007-tokenuri) | Tokenuri | `/keys`, `/token-checks`, `/env-check` | Verificat în cod; status live necunoscut; parțial | Aliasurile de env sunt configurare backend, nu date UI | Diagnostic Admin, fără incident automat | Secret store, provider APIs; zero valori sensibile și work item la lipsă |
-| [ADM-008](#adm-008-constructor) | Constructor | `build_jobs`, activity events, rutele admin/internal și pipeline worker/publisher/release | Parțial și blocat extern; serviciile inactive | Copy-ul „max. 2 minute”, plafonul terminal de încercări și retry-ul manual de rutină sunt interzise | Stage separă `local_gates` de CI GitHub și proiectează progresul persistent; fișa nouă nu este live și AdminPanel nu o proiectează complet | Token signing, Codex login, GitHub, CI, VPS, deploy |
+| [ADM-008](#adm-008-constructor) | Constructor | `build_jobs`, activity events, rutele admin/internal și pipeline worker OpenCode/Qwen local, publisher/release | Parțial și blocat extern pentru publicare; dovada live completă lipsește | Zero retry/reexec automat pentru worker, model și ordin; `Reia` explicit pornește un ciclu nou, iar numai publication/CI/release pot relua idempotent același handoff/commit | Stage separă `local_gates` de CI GitHub și proiectează progresul persistent; fișa nouă nu este live și AdminPanel nu o proiectează complet | OpenCode 1.18.25, llama.cpp/Qwen local, token signing, GitHub, CI, VPS, deploy; fără cheie OpenAI în Constructor |
 | [ADM-009](#adm-009-recuperare) | Recuperare | `/backups` și `/backups/restore` | Verificat în cod; restore live netestat | Confirmarea umană este justificată pentru mutația cu impact; progresul nu trebuie simulat | Rezultat în tab, fără timeline durabil | Backup store, DB, deploy; dry-run, receipt și rollback |
 | [ADM-010](#adm-010-sistem) | Sistem | `/audit`, `/registru-audit`, `/demos`, `/models`, `/autoverificare` | Parțial; probele există, dar nu formează o singură stare operațională | Cadentele de polling sunt constante UI; rezultatele trebuie să rămână server-backed | Vizibil în tab, fără card automat pentru toate abaterile | Health, DB, config, jobs; creare/deduplicare work item |
 | [ADM-011](#adm-011-erori) | Erori | `/erori`, `client_errors`, probleme server/job | Parțial; colectare reală, handoff absent/neverificat | Polling 20 s este doar refresh; severitatea/cauza trebuie să vină din autoritate | Listă vizibilă, fără progres de remediere | Client telemetry, autodiagnostic, Constructor |
@@ -132,12 +132,25 @@ Owner: secret/config platform. Stare: `parțial`.
 Owner: Constructor pipeline. Stare: `blocat extern`.
 
 - [ ] Tokenul publisher are permisiunea minimă de signing și testul preflight trece.
-- [ ] Loginul Codex este valid; workerul raportează heartbeat/ready fără secret expus.
+- [ ] OpenCode `1.18.25`, llama.cpp loopback și Qwen3.6-35B-A3B local sunt
+      probate; workerul raportează heartbeat/ready fără cheie OpenAI sau cache Codex.
 - [ ] O cerere reală parcurge toate etapele cu procente/evenimente persistente.
-- [ ] Retry-urile recuperabile au cauză clasificată, termen/backoff persistat și
-      se reiau automat fără plafon terminal intern; contorul rămâne diagnostic.
-- [ ] Numai o autoritate externă reală poate produce `waiting_external`, cu o
-      singură acțiune explicită și reluare automată după restabilirea readiness.
+- [ ] După claim, workerul, modelul și ordinul au zero retry și zero reexecuție
+      automată; timeoutul, eroarea tehnică și `unresolved` rămân terminale pentru
+      ciclul curent.
+- [ ] `Reia` explicit este o decizie separată a ownerului: creează un
+      `execution_cycle` și un task ID worker noi, fără să rescrie ori să continue
+      ciclul terminal anterior.
+- [ ] Numai publication, CI și release pot relua idempotent un checkpoint, doar
+      pentru același handoff imuabil și același commit/SHA, fără a reinvoca modelul.
+- [ ] Installerul poate proba temporar POWERFUL numai în instalare și încheie cu
+      FAST activ dovedit; excepția nu execută sau reia niciun ordin.
+- [ ] După restart, controllerul continuă numai intenția manuală acceptată și
+      persistată, cu același request ID și aceeași țintă; nu decide profilul, nu
+      creează o comutare nouă și nu repune ordinul în coadă.
+- [ ] Numai o autoritate externă reală poate produce `waiting_external` pentru
+      publication/CI/release, cu o singură acțiune explicită și reluarea
+      aceluiași checkpoint downstream după restabilirea readiness.
 - [ ] `local_gates` are receipt propriu și nu este prezentat ca CI GitHub verde.
 - [ ] PR, CI, master, artifact, deploy, live și rollback au link/SHA/receipt comune.
 - [ ] Anularea explicită persistă `cancelled` ca rezultat terminal rezolvat,
@@ -164,8 +177,9 @@ Owner: platform health. Stare: `parțial`.
 Owner: observability. Stare: `parțial`.
 
 - [ ] Browser/server/job errors au fingerprint, cauză, severitate și first/last seen.
-- [ ] Erorile recuperabile pornesc reluarea automată cu backoff persistat, fără
-      plafon terminal intern; numai autoritatea externă cere o acțiune umană.
+- [ ] Erorile recuperabile urmează politica subsistemului. Pentru Constructor,
+      numai publication/CI/release pot relua același handoff/commit; rezultatul
+      workerului/modelului/ordinului rămâne terminal și nu intră în retry.
 - [ ] Monitorul arată progresul remedierii și rezultatul, nu doar alerta.
 
 ### ADM-012 Notificări

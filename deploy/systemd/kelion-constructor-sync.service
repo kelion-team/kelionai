@@ -1,14 +1,15 @@
 [Unit]
-Description=Synchronize the private Constructor source before Codex execution
+Description=Synchronize the private Constructor source before local OpenCode execution
 After=network-online.target kelion-runtime-config-recovery.service
 Wants=network-online.target
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
 
 [Service]
 Type=oneshot
-User=root
-Group=root
+User=kelion-codex
+Group=kelion-codex
 UMask=0077
 Environment=PATH=/usr/bin:/bin
 EnvironmentFile=/root/kelion/config/codex-worker.env
@@ -32,5 +33,7 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 SystemCallArchitectures=native
 TimeoutStartSec=5min

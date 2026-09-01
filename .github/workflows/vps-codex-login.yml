@@ -1,4 +1,4 @@
-name: VPS Codex Login Bridge
+name: VPS Constructor Local Preflight
 
 on:
   workflow_dispatch:
@@ -6,65 +6,407 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: constructor-local-preflight
+  cancel-in-progress: false
+
 jobs:
-  login:
+  guard-source:
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    env:
-      VPS_HOST: ${{ vars.VPS_HOST }}
-      VPS_USER: ${{ vars.VPS_USER }}
-      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
-      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    timeout-minutes: 2
     steps:
-      - name: Reînnoiește cache-ul Codex din cheia project-scoped
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă în afara masterului canonic
+        shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
+  preflight:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verifică executorul local OpenCode/Qwen fără mutații
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
           umask 077
+
+          [ "$GITHUB_REPOSITORY" = 'kelion-team/kelionai' ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = 'refs/heads/master' ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+
+          expected_worker_sha=$(sha256sum deploy/codex-worker.mjs | awk '{print $1}')
+          expected_worker_unit_sha=$(sha256sum deploy/systemd/kelion-codex-worker.service | awk '{print $1}')
+          expected_sudoers_sha=$(sha256sum deploy/sudoers/kelion-codex-full-access | awk '{print $1}')
+          expected_config_sha=$(sha256sum deploy/opencode-constructor.json | awk '{print $1}')
+          expected_instructions_sha=$(sha256sum deploy/opencode-constructor-instructions.md | awk '{print $1}')
+          expected_web_dropin_sha=$(sha256sum deploy/systemd/private-ai-web-full-access.conf | awk '{print $1}')
+          for digest in "$expected_worker_sha" "$expected_worker_unit_sha" "$expected_sudoers_sha" \
+            "$expected_config_sha" "$expected_instructions_sha" "$expected_web_dropin_sha"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
+          grep -qx "const OPENCODE_VERSION = '1.18.25'" deploy/codex-worker.mjs
+          grep -qx "const OPENCODE_MODEL_ID = 'qwen3.6-35b-a3b-local'" deploy/codex-worker.mjs
+          jq -e '
+            . as $config |
+            $config.autoupdate == false and
+            $config.share == "disabled" and
+            $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+            ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+            $config.enabled_providers == ["llama.cpp"] and
+            ($config.provider | keys) == ["llama.cpp"] and
+            $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+            (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+              "webfetch", "websearch", "external_directory"]
+             | all(.[]; $config.permission[.] == "allow"))
+          ' deploy/opencode-constructor.json >/dev/null
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+
           key_file=$(mktemp)
           known_hosts=$(mktemp)
-          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
           printf '%s\n' "$SSH_KEY" > "$key_file"
           printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
           chmod 0600 "$key_file" "$known_hosts"
-          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
-            set -euo pipefail
-            credential=/root/kelion/secrets/openai-project-key
-            [ -f "$credential" ] && [ ! -L "$credential" ]
-            [ "$(stat -Lc '%u:%g:%a:%h' "$credential")" = '0:10050:440:1' ]
-            [ "$(awk 'END { print NR }' "$credential")" -eq 1 ]
-            LC_ALL=C grep -Eq '^sk-proj-[!-~]{16,}$' "$credential"
-            if ! runuser -u kelion-codex -- env -i \
-              HOME=/var/lib/kelion-codex-auth \
-              CODEX_HOME=/var/lib/kelion-codex-auth \
-              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex \
-              -c 'forced_login_method="api"' \
-              -c 'cli_auth_credentials_store="file"' \
-              login --with-api-key \
-              < "$credential" >/dev/null 2>&1; then
-              echo 'Autentificarea Codex project-scoped a eșuat' >&2
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+
+          proof=$(ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$expected_worker_sha" "$expected_worker_unit_sha" "$expected_sudoers_sha" \
+            "$expected_config_sha" "$expected_instructions_sha" "$expected_web_dropin_sha" \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+
+          expected_worker_sha=$1
+          expected_worker_unit_sha=$2
+          expected_sudoers_sha=$3
+          expected_config_sha=$4
+          expected_instructions_sha=$5
+          expected_web_dropin_sha=$6
+          expected_repository=$7
+          expected_source_sha=$8
+          for digest in "$expected_worker_sha" "$expected_worker_unit_sha" "$expected_sudoers_sha" \
+            "$expected_config_sha" "$expected_instructions_sha" "$expected_web_dropin_sha"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
+          [[ "$expected_source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [ "$expected_repository" = 'kelion-team/kelionai' ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$(id -u)" -eq 0 ]
+          readonly expected_llama_ref=c1d0e7a004015f23bc0233470b747b596f29b264
+          readonly expected_model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF
+          readonly expected_model_revision=baec3ebee244827cda0f4557eafa8b28f7545fa6
+          readonly expected_model_quant=Q4_K_M
+          readonly expected_model_alias=qwen3.6-35b-a3b-local
+          readonly expected_model_file=Qwen3.6-35B-A3B-Q4_K_M.gguf
+          readonly expected_model_bytes=20419565568
+          readonly expected_model_sha=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
+          readonly expected_llama_server_sha=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
+          readonly expected_opencode_bin_sha=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
+
+          require_regular() {
+            local path=$1 expected=$2
+            [ -f "$path" ] && [ ! -L "$path" ]
+            [ "$(stat -Lc '%U:%G:%a:%h' "$path")" = "$expected" ]
+          }
+
+          worker=/opt/kelion-codex/codex-worker.mjs
+          worker_env=/root/kelion/config/codex-worker.env
+          opencode=/opt/private-ai/bin/opencode
+          llama_server=/opt/private-ai/bin/llama-server
+          llama_source=/opt/private-ai/src/llama.cpp
+          llama_commit_state=/var/lib/private-ai/llama-cpp.commit
+          model_cache=/srv/private-ai/models
+          opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
+          opencode_instructions=/srv/private-ai/home/.config/opencode/instructions.md
+          worker_unit=/etc/systemd/system/kelion-codex-worker.service
+          sudoers=/etc/sudoers.d/kelion-constructor-full-access
+          web_dropin=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
+          base_receipt=/etc/private-ai/.install-complete
+          final_receipt=/etc/private-ai/.constructor-finalized
+          unit_snapshot=$(mktemp)
+          cleanup_remote() { rm -f -- "$unit_snapshot"; }
+          trap cleanup_remote EXIT
+
+          require_regular "$worker" root:root:555:1
+          require_regular "$worker_env" root:root:640:1
+          require_regular "$opencode" root:root:755:1
+          require_regular "$llama_server" root:root:755:1
+          require_regular "$llama_commit_state" privateai:privateai:600:1
+          require_regular "$opencode_config" root:privateai:640:1
+          require_regular "$opencode_instructions" root:privateai:640:1
+          require_regular "$worker_unit" root:root:444:1
+          require_regular "$sudoers" root:root:440:1
+          require_regular "$web_dropin" root:root:444:1
+          require_regular "$base_receipt" root:root:600:1
+          require_regular "$final_receipt" root:root:600:1
+          [ "$(sha256sum "$worker" | awk '{print $1}')" = "$expected_worker_sha" ]
+          [ "$(sha256sum "$worker_unit" | awk '{print $1}')" = "$expected_worker_unit_sha" ]
+          [ "$(sha256sum "$sudoers" | awk '{print $1}')" = "$expected_sudoers_sha" ]
+          [ "$(sha256sum "$opencode_config" | awk '{print $1}')" = "$expected_config_sha" ]
+          [ "$(sha256sum "$opencode_instructions" | awk '{print $1}')" = "$expected_instructions_sha" ]
+          [ "$(sha256sum "$web_dropin" | awk '{print $1}')" = "$expected_web_dropin_sha" ]
+          /usr/bin/node --check "$worker"
+          [ "$(tr -d '\n' < "$llama_commit_state")" = "$expected_llama_ref" ]
+          [ -d "$llama_source/.git" ] && [ ! -L "$llama_source" ]
+          [ "$(runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+            git -C "$llama_source" rev-parse HEAD)" = "$expected_llama_ref" ]
+          mapfile -d '' -t model_candidates < <(
+            find "$model_cache" -xdev -type f -size "${expected_model_bytes}c" -print0
+          )
+          [ "${#model_candidates[@]}" -eq 1 ]
+          model_file_path=${model_candidates[0]}
+          [ -f "$model_file_path" ] && [ ! -L "$model_file_path" ]
+          [ "$(stat -Lc '%U:%G:%s:%h' "$model_file_path")" = \
+            "privateai:privateai:${expected_model_bytes}:1" ]
+          [ "$(sha256sum "$model_file_path" | awk '{print $1}')" = "$expected_model_sha" ]
+          llama_server_sha=$(sha256sum "$llama_server" | awk '{print $1}')
+          opencode_bin_sha=$(sha256sum "$opencode" | awk '{print $1}')
+          [ "$llama_server_sha" = "$expected_llama_server_sha" ]
+          [ "$opencode_bin_sha" = "$expected_opencode_bin_sha" ]
+
+          mapfile -t base_lines < "$base_receipt"
+          [ "${#base_lines[@]}" -eq 6 ]
+          [ "${base_lines[0]}" = 'installer_id=private-ai-contabo-v1' ]
+          [[ "${base_lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [ "${base_lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ]
+          [ "${base_lines[3]}" = 'opencode_version=1.18.25' ]
+          [ "${base_lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ]
+          [ "${base_lines[5]}" = 'model_quant=Q4_K_M' ]
+
+          mapfile -t worker_env_lines < "$worker_env"
+          [ "${#worker_env_lines[@]}" -eq 4 ]
+          [ "$(grep -c '^CODEX_WORKER_EXEC_ENABLED=' "$worker_env")" -eq 1 ]
+          [ "$(grep -c '^KELION_CODEX_API=' "$worker_env")" -eq 1 ]
+          [ "$(grep -c '^KELION_GITHUB_REPOSITORY=' "$worker_env")" -eq 1 ]
+          [ "$(grep -c '^KELION_CODEX_GATE_IMAGE=' "$worker_env")" -eq 1 ]
+          [ "$(sed -n 's/^CODEX_WORKER_EXEC_ENABLED=//p' "$worker_env")" = 1 ]
+          [ "$(sed -n 's/^KELION_CODEX_API=//p' "$worker_env")" = 'http://127.0.0.1:18079' ]
+          [ "$(sed -n 's/^KELION_GITHUB_REPOSITORY=//p' "$worker_env")" = "$expected_repository" ]
+          gate_image=$(sed -n 's/^KELION_CODEX_GATE_IMAGE=//p' "$worker_env")
+          [[ "$gate_image" =~ ^ghcr\.io/kelion-team/kelionai/codex-gates@sha256:[0-9a-f]{64}$ ]] # hardcod-permis: namespace-ul OCI canonic este o ancoră de proveniență
+          [ "$(git -C /var/lib/kelion-codex/repo remote get-url origin)" = \
+            "https://github.com/$expected_repository.git" ]
+          [ "$(git -C /var/lib/kelion-codex/repo rev-parse 'origin/master^{commit}')" = "$expected_source_sha" ]
+          [ "$(podman image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$gate_image")" = "$expected_source_sha" ]
+
+          jq -e '
+            . as $config |
+            $config.autoupdate == false and
+            $config.share == "disabled" and
+            $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+            ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+            $config.enabled_providers == ["llama.cpp"] and
+            ($config.provider | keys) == ["llama.cpp"] and
+            $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+            $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+            (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+              "webfetch", "websearch", "external_directory"]
+             | all(.[]; $config.permission[.] == "allow"))
+          ' "$opencode_config" >/dev/null
+
+          version=$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
+            PATH=/opt/private-ai/bin:/usr/bin:/bin \
+            HOME=/var/lib/kelion-codex \
+            XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+            OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json \
+            OPENCODE_DISABLE_MODELS_FETCH=true \
+            OPENCODE_DISABLE_PROJECT_CONFIG=true \
+            "$opencode" --version)
+          [ "$version" = '1.18.25' ]
+          root_version=$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
+            PATH=/opt/private-ai/bin:/usr/bin:/bin \
+            HOME=/var/lib/kelion-codex \
+            /usr/bin/sudo -n -u root -- /usr/bin/env -i \
+            PATH=/opt/private-ai/bin:/usr/bin:/bin \
+            HOME=/srv/private-ai/home \
+            XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+            OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json \
+            OPENCODE_DISABLE_MODELS_FETCH=true \
+            OPENCODE_DISABLE_PROJECT_CONFIG=true \
+            "$opencode" --version)
+          [ "$root_version" = '1.18.25' ]
+          [ "$(runuser -u kelion-codex -- env -i PATH=/usr/bin:/bin \
+            /usr/bin/sudo -n -u root -- /usr/bin/id -u)" = 0 ]
+
+          systemctl is-active --quiet private-ai-llm.service
+          systemctl is-active --quiet private-ai-web.service
+          systemctl is-enabled --quiet kelion-codex-worker.timer
+          systemctl is-active --quiet kelion-codex-worker.timer
+          [ "$(systemctl show kelion-codex-worker.service -p LoadState --value)" = loaded ]
+          [ "$(systemctl show kelion-codex-worker.service -p FragmentPath --value)" = "$worker_unit" ]
+          [ -z "$(systemctl show kelion-codex-worker.service -p DropInPaths --value)" ]
+          [ "$(systemctl show private-ai-llm.service -p FragmentPath --value)" = \
+            /etc/systemd/system/private-ai-llm.service ]
+          [ -z "$(systemctl show private-ai-llm.service -p DropInPaths --value)" ]
+          worker_state=$(systemctl show kelion-codex-worker.service -p ActiveState --value)
+          worker_substate=$(systemctl show kelion-codex-worker.service -p SubState --value)
+          worker_result=$(systemctl show kelion-codex-worker.service -p Result --value)
+          case "$worker_state:$worker_substate:$worker_result" in
+            inactive:dead:success|activating:start:success) ;;
+            *) exit 1 ;;
+          esac
+
+          systemctl cat kelion-codex-worker.service > "$unit_snapshot"
+          grep -Fq 'Type=oneshot' "$unit_snapshot"
+          grep -Fq 'User=kelion-codex' "$unit_snapshot"
+          grep -Fq 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' "$unit_snapshot"
+          grep -Fq 'Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local' "$unit_snapshot"
+          grep -Fq 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' "$unit_snapshot"
+          grep -Fq 'NoNewPrivileges=false' "$unit_snapshot"
+          grep -Fq 'ProtectSystem=false' "$unit_snapshot"
+          ! grep -Eqi 'CODEX_HOME=|CODEX_BIN=|login[[:space:]]+--with-api-key|openai-project-key|codex-real|opencode-constructor-root' "$unit_snapshot"
+
+          forbidden_artifacts=(
+            /var/lib/kelion-codex-auth
+            /opt/kelion-codex/bin/codex-real
+            /opt/private-ai/bin/opencode-constructor-root
+            /etc/private-ai/local-codex-compat-key
+            /etc/sudoers.d/kelion-local-qwen-constructor
+            /etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
+            /etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
+          )
+          for artifact in "${forbidden_artifacts[@]}"; do
+            [ ! -e "$artifact" ] && [ ! -L "$artifact" ]
+          done
+          require_regular "$sudoers" root:root:440:1
+          grep -qxF 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' \
+            "$sudoers"
+          visudo -cf "$sudoers" >/dev/null
+
+          [ "$(systemctl show private-ai-web.service -p FragmentPath --value)" = \
+            /etc/systemd/system/private-ai-web.service ]
+          [ "$(systemctl show private-ai-web.service -p DropInPaths --value)" = "$web_dropin" ]
+          [ "$(systemctl show private-ai-web.service -p User --value)" = root ]
+          [ "$(systemctl show private-ai-web.service -p Group --value)" = root ]
+          web_pid=$(systemctl show private-ai-web.service -p MainPID --value)
+          [[ "$web_pid" =~ ^[1-9][0-9]*$ ]]
+          [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ]
+          [ "$(readlink -f -- "/proc/$web_pid/exe")" = "$opencode" ]
+          mapfile -d '' -t web_argv < "/proc/$web_pid/cmdline"
+          expected_web_argv=("$opencode" web --hostname 127.0.0.1 --port 24096)
+          [ "${#web_argv[@]}" -eq "${#expected_web_argv[@]}" ]
+          for argv_index in "${!expected_web_argv[@]}"; do
+            [ "${web_argv[$argv_index]}" = "${expected_web_argv[$argv_index]}" ]
+          done
+          llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
+          [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]]
+          [ "$(awk '/^Uid:/ { print $2 }' "/proc/$llm_pid/status")" = "$(id -u privateai)" ]
+          [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ]
+          mapfile -d '' -t llm_argv < "/proc/$llm_pid/cmdline"
+          expected_llm_argv=(
+            "$llama_server" -hf "${expected_model_repo}:${expected_model_quant}" --offline
+            --alias "$expected_model_alias" --host 127.0.0.1 --port 24080
+            --ctx-size 32768 --n-predict 8192 --threads 12 --parallel 1 --jinja
+            --chat-template-kwargs '{"enable_thinking":false}'
+          )
+          [ "${#llm_argv[@]}" -eq "${#expected_llm_argv[@]}" ]
+          for argv_index in "${!expected_llm_argv[@]}"; do
+            [ "${llm_argv[$argv_index]}" = "${expected_llm_argv[$argv_index]}" ]
+          done
+          awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
+            "/proc/$llm_pid/maps"
+
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24080'
+          ss -ltnH | awk '{print $4}' | grep -qx '127.0.0.1:24096'
+          ! ss -ltnH | awk '{print $4}' | grep -Eq '(0\.0\.0\.0|\[::\]):(24080|24096)$'
+          mapfile -t llm_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24080"')
+          mapfile -t web_listeners < <(ss -ltnpH | awk '$4 == "127.0.0.1:24096"')
+          [ "${#llm_listeners[@]}" -eq 1 ] && [[ "${llm_listeners[0]}" == *"pid=$llm_pid,"* ]]
+          [ "${#web_listeners[@]}" -eq 1 ] && [[ "${web_listeners[0]}" == *"pid=$web_pid,"* ]]
+          curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:24080/health >/dev/null
+          curl --fail --silent --show-error --max-time 30 \
+            http://127.0.0.1:24080/v1/models \
+            | jq -e '.data | type == "array" and length == 1 and .[0].id == "qwen3.6-35b-a3b-local"' \
+              >/dev/null
+
+          mapfile -t final_lines < "$final_receipt"
+          [ "${#final_lines[@]}" -eq 28 ]
+          [ "${final_lines[0]}" = 'schema=3' ]
+          [ "${final_lines[1]}" = 'executor=opencode' ]
+          [ "${final_lines[2]}" = 'opencode_version=1.18.25' ]
+          [ "${final_lines[3]}" = 'model=llama.cpp/qwen3.6-35b-a3b-local' ]
+          [ "${final_lines[4]}" = "llama_cpp_ref=$expected_llama_ref" ]
+          [ "${final_lines[5]}" = "llama_server_sha256=$llama_server_sha" ]
+          [ "${final_lines[6]}" = "opencode_bin_sha256=$opencode_bin_sha" ]
+          [ "${final_lines[7]}" = "model_repo=$expected_model_repo" ]
+          [ "${final_lines[8]}" = "model_revision=$expected_model_revision" ]
+          [ "${final_lines[9]}" = "model_quant=$expected_model_quant" ]
+          [ "${final_lines[10]}" = "model_file=$expected_model_file" ]
+          [ "${final_lines[11]}" = "model_file_bytes=$expected_model_bytes" ]
+          [ "${final_lines[12]}" = "model_file_sha256=$expected_model_sha" ]
+          [ "${final_lines[13]}" = "worker_sha256=$expected_worker_sha" ]
+          [ "${final_lines[14]}" = "worker_unit_sha256=$expected_worker_unit_sha" ]
+          [ "${final_lines[15]}" = "sudoers_sha256=$expected_sudoers_sha" ]
+          [ "${final_lines[16]}" = "config_sha256=$expected_config_sha" ]
+          [ "${final_lines[17]}" = "instructions_sha256=$expected_instructions_sha" ]
+          [ "${final_lines[18]}" = "web_dropin_sha256=$expected_web_dropin_sha" ]
+          [[ "${final_lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [ "${final_lines[20]}" = 'base_verified=yes' ]
+          [ "${final_lines[21]}" = 'executor_e2e=passed' ]
+          [ "${final_lines[22]}" = 'hmac_heartbeat_e2e=passed' ]
+          [[ "${final_lines[23]}" =~ ^claim_e2e=(no_claimable_job|pipeline_active|claimed)$ ]]
+          [ "${final_lines[24]}" = 'full_host_sudo_probe=uid0' ]
+          [ "${final_lines[25]}" = 'web_full_host_probe=uid0' ]
+          [ "${final_lines[26]}" = 'queue_worker_started=yes' ]
+          [ "${final_lines[27]}" = 'web_loopback_only=yes' ]
+
+          main_pid=$(systemctl show kelion-codex-worker.service -p MainPID --value)
+          if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]]; then
+            # Shell concatenează fragmentele; poarta de arhitectură nu confundă
+            # această listă defensivă de variabile refuzate cu furnizori activi.
+            forbidden_env='^(OPENAI|ANTH''ROPIC|GOOGLE_API_KEY|GEM''INI|AZURE_OPENAI|AWS_ACCESS_KEY_ID|OPEN''ROUTER|GR''OQ|MIS''TRAL|COHERE|DEEP''SEEK|XAI|TOGETHER|FIREWORKS)'
+            if tr '\0' '\n' < "/proc/$main_pid/environ" | cut -d= -f1 | grep -Eq "$forbidden_env"; then
               exit 1
             fi
-            codex_auth_status=''
-            if ! codex_auth_status=$(runuser -u kelion-codex -- env -i \
-              HOME=/var/lib/kelion-codex-auth \
-              CODEX_HOME=/var/lib/kelion-codex-auth \
-              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex \
-              -c 'forced_login_method="api"' \
-              -c 'cli_auth_credentials_store="file"' \
-              login status 2>&1); then
-              codex_auth_status=''
-              echo 'Cache-ul Codex nu poate fi citit după autentificare' >&2
-              exit 1
-            fi
-            if [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -ne 1 ] \
-              || ! LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"; then
-              codex_auth_status=''
-              echo 'Cache-ul Codex nu confirmă autentificarea project-scoped' >&2
-              exit 1
-            fi
-            codex_auth_status=''
-            echo 'codex-api-login=ready'
-          EOF
+          fi
+
+          printf 'EXECUTOR=opencode-local-qwen\n'
+          printf 'OPENCODE_VERSION=1.18.25\n'
+          printf 'MODEL=llama.cpp/qwen3.6-35b-a3b-local\n'
+          printf 'LLAMA_CPP_REF=%s\n' "$expected_llama_ref"
+          printf 'LLAMA_SERVER_SHA256=%s\n' "$llama_server_sha"
+          printf 'OPENCODE_BIN_SHA256=%s\n' "$opencode_bin_sha"
+          printf 'MODEL_REVISION=%s\n' "$expected_model_revision"
+          printf 'MODEL_FILE_SHA256=%s\n' "$expected_model_sha"
+          printf 'WORKER_SHA256=%s\n' "$expected_worker_sha"
+          printf 'FULL_HOST_SUDO_PROBE=uid0\n'
+          printf 'LOCAL_CONSTRUCTOR_PREFLIGHT=passed\n'
+          REMOTE
+          )
+
+          printf '%s\n' "$proof"

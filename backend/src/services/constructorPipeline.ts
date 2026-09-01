@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { conexiuneDb, getPool } from '../dbPool.js'
+import { CONSTRUCTOR_LOCAL_ACTOR } from './constructorIdentity.js'
 
 export type ConstructorServiceDomain = 'codex-worker' | 'constructor-publisher' | 'constructor-release'
 
@@ -281,10 +282,10 @@ export async function recordWorkerHandoff(
       const updated = await sql.query<PipelineRow>(
         `UPDATE build_jobs
             SET constructor_stage='gates_passed', ci='local_gates',
-                progress=$2, progress_at=now(), updated_at=now(), brain='codex-worker'
+                progress=$2, progress_at=now(), updated_at=now(), brain=$3
           WHERE id=$1
           RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
-        [jobId, (handoff.progress ?? 'gates_passed').trim().slice(0, 500)],
+        [jobId, (handoff.progress ?? 'gates_passed').trim().slice(0, 500), CONSTRUCTOR_LOCAL_ACTOR],
       )
       return updated.rows[0]
         ? { ok: true, event: eventResult(updated.rows[0]) }
@@ -486,25 +487,25 @@ function publisherIncident(code: string): {
     state: 'diagnosing',
     causeCode: 'ci_failure',
     summary: 'Un control CI obligatoriu a respins versiunea publicată.',
-    nextAction: 'Reexecută același ordin peste masterul curent și repară cauza CI înainte de un handoff nou.',
+    nextAction: 'Verifică primul control CI eșuat; numai ownerul poate porni o implementare nouă prin comanda Reia.',
   }
   if (code === 'local_gate_failed') return {
     state: 'diagnosing',
     causeCode: 'test_failure',
     summary: 'Revalidarea izolată a publisherului a respins handoff-ul workerului.',
-    nextAction: 'Reproduce porțile în execuția Codex și repară diferența înainte de un handoff nou.',
+    nextAction: 'Verifică dovada porții; numai ownerul poate porni o implementare nouă prin comanda Reia.',
   }
   if (code === 'stale_base') return {
     state: 'diagnosing',
     causeCode: 'build_failure',
     summary: 'Masterul s-a schimbat după crearea handoff-ului, iar baza declarată a devenit stale.',
-    nextAction: 'Reexecută același ordin peste vârful master curent; nu reutiliza patch-ul vechi.',
+    nextAction: 'Nu reutiliza patch-ul vechi; numai ownerul poate porni o implementare nouă prin comanda Reia.',
   }
   if (code === 'pr_closed') return {
     state: 'diagnosing',
     causeCode: 'unknown',
     summary: 'PR-ul Constructor a fost închis fără merge.',
-    nextAction: 'Reexecută același ordin curat și creează un handoff nou.',
+    nextAction: 'Verifică motivul închiderii PR-ului; numai ownerul poate porni o implementare nouă prin comanda Reia.',
   }
   return {
     state: 'diagnosing',
@@ -579,19 +580,18 @@ export async function failPublisherLease(
           ],
         )
         await sql.query('DELETE FROM constructor_pipeline WHERE job_id=$1', [jobId])
-        const delay = retryDelay(Number(row.publisher_attempts), false)
-        const requeued = await sql.query<PipelineRow>(
+        const terminal = await sql.query<PipelineRow>(
           `UPDATE build_jobs
-              SET status='queued', constructor_stage='queued', execution_cycle=execution_cycle + 1, codex_task_id=NULL,
+              SET status='failed', constructor_stage='failed',
                   branch=NULL, pr_url=NULL, commit_sha=NULL, live_version=NULL, ci=NULL,
-                  progress=$3, log=$2,
-                  retry_not_before=now() + ($4::text || ' seconds')::interval,
+                  progress='publisher_manual_restart_required', log=$2,
+                  retry_not_before=NULL,
                   progress_at=now(), updated_at=now()
             WHERE id=$1
             RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
-          [jobId, code, code === 'stale_base' ? 'stale_base_requeued' : 'worker_retry_scheduled', delay],
+          [jobId, code],
         )
-        return requeued.rows[0] ? eventResult(requeued.rows[0]) : null
+        return terminal.rows[0] ? eventResult(terminal.rows[0]) : null
       }
       const external = incident.state === 'blocked'
       const delay = retryDelay(Number(row.publisher_attempts), external)

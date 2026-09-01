@@ -9,6 +9,10 @@ const migrationsDir = resolve(here, '..', 'migrations')
 const migrationName = /^\d{8}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/
 const destructiveSql = /\b(?:DROP\s+(?:TABLE|COLUMN|TYPE|FUNCTION|TRIGGER|INDEX|VIEW|SCHEMA|SEQUENCE|EXTENSION)|TRUNCATE(?:\s+TABLE)?|DELETE\s+FROM)\b/i
 
+export function isDestructiveMigration(sql: string): boolean {
+  return destructiveSql.test(sql)
+}
+
 export type MigrationSpec = {
   version: string
   sql: string
@@ -42,7 +46,7 @@ function loadMigrations(): MigrationSpec[] {
   if (files[0] !== '20260823_schema_migrations.sql') throw new Error('schema_migrations_must_be_first')
   return files.map((version) => {
     const sql = readFileSync(join(migrationsDir, version), 'utf8')
-    return { version, sql, digest: checksum(sql), destructive: destructiveSql.test(sql) }
+    return { version, sql, digest: checksum(sql), destructive: isDestructiveMigration(sql) }
   })
 }
 
@@ -172,7 +176,7 @@ export async function applyMigrationsAtomically(
     // for every destructive file before the bootstrap or any other migration can
     // mutate the database. A missing proof therefore rolls back an empty batch.
     for (const migration of pending) {
-      if (destructiveSql.test(migration.sql)) requireBackupProof(databaseUrl)
+      if (isDestructiveMigration(migration.sql)) requireBackupProof(databaseUrl)
     }
 
     for (const migration of pending) {

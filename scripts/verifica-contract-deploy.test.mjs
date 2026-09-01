@@ -24,7 +24,7 @@ test('contractul real backend-provision-compose este complet', () => {
 test('contractul declară exact schema runtime și toate intrările de control ale provisioning-ului', () => {
   const contract = JSON.parse(readFileSync(new URL('../config/runtime-contract.json', import.meta.url), 'utf8'))
   const expected = [...runtimeContractNames(contract)].sort()
-  assert.equal(expected.length, 87)
+  assert.equal(expected.length, 90)
   assert.deepEqual([...workflowRuntimeNames()].sort(), expected)
   assert.deepEqual([...cutoverRuntimeNames()].sort(), expected)
   const example = exampleRuntimeNames()
@@ -34,12 +34,18 @@ test('contractul declară exact schema runtime și toate intrările de control a
     file: 'github-release-oauth-token',
   })
   assert.equal(contract.secretFiles.OPENAI_ADMIN_KEY, 'openai-admin-key')
+  assert.equal(contract.hostGeneratedRuntimeSecretFiles.CONSTRUCTOR_MODEL_CONTROL_SECRET,
+    'constructor-model-control-secret')
   assert.deepEqual(contract.hostProvisionedSecretFiles.CONSTRUCTOR_GHCR_READ_TOKEN, {
     environment: 'GHCR_READ_TOKEN',
     file: 'github-ghcr-read-token',
     target: '/root/kelion/gate-secrets/github-ghcr-read-token',
   })
   assert.deepEqual(contract.workflowControlSecrets, ['VPS_SSH_KEY'])
+  const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
+  assert.doesNotMatch(workflow, /secrets\.CONSTRUCTOR_MODEL_CONTROL_SECRET/)
+  assert.match(workflow, /ensure_local_model_control_secret/)
+  assert.match(workflow, /openssl rand -hex 32/)
 })
 
 test('cheia OpenAI Admin este secret-file backend-only și distinctă de cheia de inferență', () => {

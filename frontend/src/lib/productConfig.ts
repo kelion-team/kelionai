@@ -5,14 +5,16 @@ interface ProductBuildConfig {
   githubRepository: string
   supportEmail: string
   nativeScheme: string
+  constructorNativeScheme: string
   nativeOrigins: string[]
-  nativeRedirects: { ios: string; desktop: string }
+  nativeRedirects: { ios: string; desktop: string; constructorDesktop: string }
   androidApplicationId: string
   androidVersionCode: number
   androidCertificateSha256: string[]
   iosBundleId: string
   iosTeamId: string
   desktopBundleId: string
+  constructorDesktopBundleId: string
 }
 
 declare const __PRODUCT_CONFIG__: ProductBuildConfig

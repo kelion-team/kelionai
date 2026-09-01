@@ -1,7 +1,7 @@
 // Single source for model-visible tool definitions shared by chat and voice.
 // The public web process deliberately has no source-tree, shell, repository,
 // deployment, raw SQL or secret-management tools. Product changes are queued
-// through BUILD_SOFTWARE_TOOL for the separate Codex worker.
+// through BUILD_SOFTWARE_TOOL into build_jobs for OpenCode + Qwen local (llama.cpp).
 
 import type { Tool } from './brain-types.js'
 import { ROSTER } from './agentiKelion.js'
@@ -81,18 +81,18 @@ export const CERINTA_PRIORITATE_TOOL: Tool = {
 }
 
 // The web process only enqueues a validated order. A separate, authenticated
-// Codex worker owns the worktree and reports gated progress for the same jobId.
+// OpenCode + Qwen local (llama.cpp) owns the worktree and reports progress for the same jobId.
 export const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a product build or repair for the separate Codex Constructor worker. The web application never edits the repository, runs a shell, merges or deploys. Report success only when the order was persisted, include its jobId, and use constructor_status for measured progress through gates, commit, master, deploy and live-version verification.",
+    "ADMIN ONLY. Validate and write a product build or repair directly to the canonical build_jobs queue for the separate OpenCode 1.18.25 + Qwen local (llama.cpp) Constructor worker. The web application never edits the repository, runs a shell, merges or deploys. Report success only when the order was persisted, include its jobId, and use constructor_status for measured progress through gates, commit, master, deploy and live-version verification.",
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 
 export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
   description:
-    "ADMIN ONLY. Read measured Constructor progress for queued Codex jobs, including jobId, worker state, stage, commit, task URL and live version. A missing heartbeat or unverified gate is reported as such; never infer completion.",
+    "ADMIN ONLY. Read measured Constructor progress for build_jobs handled by OpenCode + Qwen local (llama.cpp), including jobId, worker state, stage, commit and live version. A missing heartbeat or unverified gate is reported as such; never infer completion.",
   input_schema: { type: 'object', properties: {} },
 }
 
