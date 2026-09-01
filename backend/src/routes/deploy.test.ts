@@ -26,7 +26,7 @@ const BASE_JOB = {
   log: null,
   progress: 'rulează porțile',
   ci: null,
-  brain: 'codex-worker',
+  brain: 'OpenCode + Qwen local (llama.cpp)',
   costUsd: null,
   codexTaskId: 'codex-task',
   constructorStage: 'working',

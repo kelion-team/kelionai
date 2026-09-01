@@ -6,6 +6,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { describe, expect, it } from 'vitest'
 import {
   applyMigrationsAtomically,
+  isDestructiveMigration,
   transactionBody,
   type MigrationClient,
   type MigrationSpec,
@@ -104,6 +105,16 @@ async function withValidBackupProof(action: () => Promise<void>): Promise<void> 
 }
 
 describe('migration transaction parser', () => {
+  it('classifies the manual-model outcome trigger replacement as safe', () => {
+    const sql = readFileSync(
+      new URL('../migrations/20260911_constructor_manual_model_outcomes.sql', import.meta.url),
+      'utf8',
+    )
+    expect(sql).toContain('CREATE OR REPLACE TRIGGER trg_constructor_activity_event')
+    expect(sql).not.toContain('DROP TRIGGER')
+    expect(isDestructiveMigration(sql)).toBe(false)
+  })
+
   it('accepts line comments before BEGIN without returning the prologue', () => {
     expect(transactionBody('-- reviewed migration\r\n-- backup required\nBEGIN;\nSELECT 1;\nCOMMIT;'))
       .toBe('SELECT 1;')

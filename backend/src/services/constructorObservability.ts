@@ -105,6 +105,7 @@ export function projectConstructorObservability(
     if (event.sequenceNo !== null) runningSequence = Math.max(runningSequence, event.sequenceNo)
     const isLast = index === orderedEvents.length - 1
     const isRecovery = event.activityKey === 'automatic_retry'
+      || event.activityKey === 'manual_owner_retry'
       || event.activityKey === 'external_action_required'
     const isResolved = event.activityKey === 'deployed' || event.activityKey === 'cancelled'
     return {

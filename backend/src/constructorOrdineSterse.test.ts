@@ -25,7 +25,6 @@ const {
   deleteBuildJob,
   listArchivedBuildJobs,
   listBuildJobs,
-  requeueMoneyFailedBuildJobs,
   retryBuildJob,
 } = await import('./db.js')
 
@@ -183,44 +182,6 @@ describe('controalele țintite păstrează tranziția canonică', () => {
     await expect(database.query<{ status: string; order_text: string; execution_cycle: number }>(
       'SELECT status, order_text, execution_cycle FROM build_jobs WHERE id=5',
     )).resolves.toMatchObject({ rows: [{ status: 'cancelled', order_text: '[erased]', execution_cycle: 0 }] })
-  })
-
-  it('healerul de credit nu reia un rezultat cu ledger de publicație', async () => {
-    await database.query(
-      "UPDATE build_jobs SET log='OpenAI 402: insufficient credits' WHERE id=3",
-    )
-    await database.query('INSERT INTO constructor_pipeline(job_id) VALUES (3)')
-
-    await expect(requeueMoneyFailedBuildJobs()).resolves.toBe(0)
-    await expect(database.query<{ status: string; execution_cycle: number }>(
-      'SELECT status, execution_cycle FROM build_jobs WHERE id=3',
-    )).resolves.toMatchObject({ rows: [{ status: 'failed', execution_cycle: 0 }] })
-  })
-
-  it('healerul de credit nu reactivează implicit un ordin arhivat', async () => {
-    await database.query(
-      "UPDATE build_jobs SET arhivat=true, log='OpenAI 402: insufficient credits' WHERE id=3",
-    )
-
-    await expect(requeueMoneyFailedBuildJobs()).resolves.toBe(0)
-    await expect(database.query<{ status: string; arhivat: boolean }>(
-      'SELECT status, arhivat FROM build_jobs WHERE id=3',
-    )).resolves.toMatchObject({ rows: [{ status: 'failed', arhivat: true }] })
-  })
-
-  it('healerul de credit nu reactivează un ordin pseudonimizat prin erasure', async () => {
-    await database.query(
-      `UPDATE build_jobs
-          SET order_text='[erased]', status='failed', constructor_stage='working',
-              log='OpenAI 402: insufficient credits',
-              erasure_request_id='123e4567-e89b-42d3-a456-426614174000'
-        WHERE id=5`,
-    )
-
-    await expect(requeueMoneyFailedBuildJobs()).resolves.toBe(0)
-    await expect(database.query<{ status: string; execution_cycle: number; order_text: string }>(
-      'SELECT status, execution_cycle, order_text FROM build_jobs WHERE id=5',
-    )).resolves.toMatchObject({ rows: [{ status: 'failed', execution_cycle: 0, order_text: '[erased]' }] })
   })
 
   it('anularea persistă statusul, etapa, progresul și desprinde taskul workerului', async () => {

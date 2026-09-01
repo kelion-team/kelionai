@@ -303,7 +303,7 @@ export async function systemHealth(): Promise<string> {
 
   const constructor = await getConstructorChainStatus()
   const constructorReady = constructor.state === 'ready' || constructor.state === 'busy'
-  info.constructorCodex = constructorReady
+  info.constructorLocal = constructorReady
     ? `Lanț Constructor ${constructor.state}: worker + publisher + release`
     : `Lanț Constructor ${constructor.state}: ${constructor.reason}`
   if (!constructorReady) {

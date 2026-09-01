@@ -73,15 +73,23 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     outputs:
       execute: ${{ steps.guard.outputs.execute }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Alege runul canonic pentru requestul persistent
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
           CANDIDATE_SHA: ${{ inputs.commit_sha }}
+          CANONICAL_WORKFLOW_SHA: ${{ github.sha }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: |
@@ -93,18 +101,17 @@ jobs:
             [[ "$BUILD_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           fi
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANONICAL_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
           title="production-$RELEASE_REQUEST_ID-$CANDIDATE_SHA-$CI_RUN_ID-$BUILD_RUN_ID"
-          canonical=$GITHUB_RUN_ID
-          for page in $(seq 1 100); do
-            payload=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?event=workflow_dispatch&per_page=100&page=$page")
-            count=$(jq -er '.workflow_runs | length' <<<"$payload")
-            while IFS= read -r run_id; do
-              [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
-              if [ "$run_id" -lt "$canonical" ]; then canonical=$run_id; fi
-            done < <(jq -r --arg title "$title" '.workflow_runs[] | select(.event == "workflow_dispatch" and .display_title == $title) | .id' <<<"$payload")
-            if [ "$count" -lt 100 ]; then break; fi
-            [ "$page" -lt 100 ] || { echo '::error::Căutarea requestului release canonic nu a fost exhaustivă.'; exit 1; }
-          done
+          work=$(mktemp -d)
+          cleanup() { rm -rf -- "$work"; }
+          trap cleanup EXIT
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?event=workflow_dispatch&per_page=100" \
+            > "$work/deploy-runs-pages.json"
+          canonical=$(node scripts/release-dispatch-owner.mjs canonical-production-run \
+            "$work/deploy-runs-pages.json" "$title" "$CANONICAL_WORKFLOW_SHA" "$GITHUB_RUN_ID")
+          [[ "$canonical" =~ ^[1-9][0-9]*$ ]]
           if [ "$canonical" = "$GITHUB_RUN_ID" ]; then
             echo 'execute=true' >> "$GITHUB_OUTPUT"
           else

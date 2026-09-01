@@ -4281,6 +4281,65 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
   font-size: 11px;
   opacity: 0.75;
 }
+.admin-constructor-model-control {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+}
+.admin-constructor-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.constructor-model-button {
+  flex: 1 1 260px;
+  text-align: left;
+}
+.constructor-model-button.active {
+  border-color: #1a7f37;
+  color: #1a7f37;
+  opacity: 1;
+}
+.constructor-model-default,
+.constructor-model-verified {
+  opacity: 0.72;
+}
+.constructor-model-ready {
+  color: #1a7f37;
+  font-weight: 650;
+}
+.constructor-model-error {
+  color: #c1121f;
+}
+.constructor-outcome {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.constructor-outcome.recommendation {
+  border-color: rgba(208, 169, 32, 0.55);
+  background: rgba(208, 169, 32, 0.1);
+}
+.constructor-outcome.unresolved {
+  border-color: rgba(138, 109, 26, 0.4);
+  background: rgba(138, 109, 26, 0.07);
+}
+.constructor-outcome.technical {
+  border-color: rgba(193, 18, 31, 0.45);
+  background: rgba(193, 18, 31, 0.07);
+  color: #c1121f;
+}
+.constructor-outcome > div,
+.constructor-outcome > a {
+  display: block;
+  margin-top: 4px;
+}
 
 /* ── Diagnostic box ──────────────────────────────────────────────────────── */
 .admin-diagnostic-box {

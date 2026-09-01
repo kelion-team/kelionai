@@ -1,54 +1,97 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T13:13:43Z`
+Actualizat: `2026-09-01T14:04:33Z`
 
 ## Stare verificată
 
-- `origin/master` și producția activă sunt la
-  `5792fbfde2b603be8efcaa6fe67cabdd823d3171`, după merge-ul PR-ului `#1541`.
-- CI `33312315059`, build-ul `33312531594`, dispatch-ul `33312852263` și
-  release-ul canonic `33312856341` au încheiat cu succes pentru același SHA.
-  Receiptul este
-  `release_ok commit=5792fbfde2b603be8efcaa6fe67cabdd823d3171 slot=green`.
-- Verifierul `33312315032` a confirmat trei din trei eșantioane live, toate
-  endpointurile cu HTTP 200 și fără lipsuri: versiunea `5792fbf`, readiness,
-  liveness, health și release-proof cu `candidate=false`,
-  `sideEffectsActive=true` și commitul activ exact. Verdictul său final a eșuat
-  exclusiv pe `branch-protection`; incidentul canonic este `#1544`.
-- Proba reală Responses din Kelion nu este funcțională: OpenAI răspunde
-  `429 insufficient_quota`, iar UI afișează fallback-ul neutru. Capabilitatea
-  Realtime este indisponibilă cu `code=quota`.
-- `OPENAI_ADMIN_KEY` ajunge separat numai la OpenAI Costs/Usage din Kelion
-  Admin, dar endpointurile oficiale răspund `401 invalid_key` pentru valoarea
-  provisionată. Cheia nu este folosită pentru chat, voce sau Constructor.
-- Contractul implementat rămâne: aceeași cheie project-scoped
-  `OPENAI_API_KEY` pentru backend și Constructor; cheia admin separată doar
-  pentru Costs/Usage. Nicio cheie nu este expusă în browser, argv sau loguri.
-- Corecția statusului Codex este în Git, dar release-ul aplicației nu publică
-  automat copia host `/opt/kelion-codex/codex-worker.mjs`. Constructorul rămâne
-  nedeclarat funcțional până la un upgrade in-place canonic, apoi login,
-  status și heartbeat real verificate.
-- Schimbarea curentă elimină excepția one-shot consumată de PR-ul `#1541` și
-  extinde permanent allowlist-ul fail-closed numai pentru upgrade-ul canonic al
-  Constructorului, runbook, testul său și acest checkpoint operațional.
+- `origin/master` este la `d5c88b5173b7a3a8933856f7f0b996f91e801ef2`.
+- AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
+  `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
+- Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
+  instalat are `20,419,565,568` bytes și SHA-256
+  `671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7`.
+- Run-ul `33364953572` a verificat baza AI, accesul full-host, executorul
+  OpenCode și heartbeat-ul HMAC, apoi a făcut rollback deoarece
+  `kelion-constructor-sync.service` a încercat un `runuser` blocat de sandbox.
+- Laptopul nu găzduiește modelul. Clientul Windows trebuie să folosească
+  `https://kelionai.app` și aceeași coadă procesată de workerul Contabo.
+- Proba read-only `private-ai-active-model-benchmark`, run `33497637524`, a
+  măsurat `private-ai-llm.service` ca inactiv înainte de inferență; nu există o
+  măsurătoare validă de viteză pentru niciun model în starea curentă.
+- Re-rularea #2 a runului `33339737404` pentru vechiul workflow de reparare a
+  eșuat la `resume-install` în 19 secunde și nu a restaurat serviciul.
+- Artefactele GGUF sigilate au exact `20.419.565.568` bytes pentru 35B și
+  `76.536.964.608` bytes pentru 122B, în total `96.956.530.176` bytes.
+- Freeze-ul local final este verde: backend `1.539/1.539`, frontend `321/321`,
+  manifestul static exact `332/332`, în total `2.192/2.192` teste. Au trecut
+  separat 11 porți statice, 3 self-testuri, Gitleaks pe 50,32 MB fără secrete,
+  jscpd pe 316 fișiere fără clone, sintaxa Bash `19/19`, YAML `25/25`, Node
+  `97/97` și verificarea staged a 12 unități systemd.
+- Re-auditul pe hashurile finale a dat `GO` pentru deployul safe. Publicarea
+  are `114/114` teste verzi; reluarea configurării leagă byte-exact aceeași
+  tuplă ordonată de 25 artefacte și refuză înainte de mutații o generație veche.
+- Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
+  frontend. Poarta statică a identificat că proba reală `flock` era lansată de
+  runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
+  Pasul PR CI activează explicit numai acea probă prin boundary-ul `sudo` deja
+  obligatoriu în workflow. Gate-ul container rămâne portabil fără `sudo`, iar un
+  test static sigilează diferența; validatorul și codul de producție nu au fost
+  relaxate.
+- Planul de migrare pentru starea live măsurată are exact versiunile
+  `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
+  sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
 
-## Următorul pas sigur
+## Schimbarea în curs
 
-1. Integrează această curățare de politică numai după testele remediatorului,
-   siguranța workflow-urilor și verificarea sintaxei.
-2. Publică apoi upgrade-ul in-place al Constructorului într-un PR separat,
-   păstrând atomic markerii și timerele și fără a retransmite secretele.
-3. După upgrade, verifică hashul workerului host, loginul project-scoped,
-   `constructor-status` și heartbeatul real înainte de orice ordin pilot.
-4. Chatul și vocea pot deveni funcționale numai după ce proiectul OpenAI
-   provisionat are credit/spend limit disponibil sau primește o altă cheie
-   project-scoped cu quota. Costs/Usage necesită o cheie admin validă.
-5. Schimbarea regulilor de branch protection rămâne o operație GitHub separată
-   și nu se aplică fără confirmarea explicită a proprietarului.
+- Ownerul a respins al doilea VPS și orice cost nou. Ambele modele rămân pe
+  discul Contabo existent, dar numai unul este încărcat în RAM: 35B implicit la
+  instalare/reboot și 122B numai după comutarea manuală a ownerului din Admin.
+- Workerul nu schimbă modelul și nu reîncearcă/reexecută automat. Numai dacă o
+  execuție FAST validă se termină `unresolved`, produsul recomandă explicit
+  comutarea manuală la POWERFUL; ownerul decide separat comutarea și comanda
+  `Reia`. O cădere tehnică este terminală și raportată separat, fără recomandare
+  de model. POWERFUL nerezolvat este terminal, fără alt model recomandat.
+- Backendul și interfața Admin pentru starea/comanda manuală sunt verzi local.
+  Controllerul privilegiat UDS/HMAC, comutatorul systemd, workerul cu un singur
+  profil activ și cablarea installer/upgrade au teste locale verzi. Controllerul
+  este blocat fail-closed de recovery/ready și de toate jurnalele persistente,
+  iar ACK-ul de switch este serializat cu lockul canonic de publicare.
+- Instalarea 122B este reluabilă sub lockurile host + GitHub, păstrează profilul
+  manual la rerun și nu pornește controllerul înainte de receiptul final.
+  Workflowurile mutatoare Contabo folosesc aceeași coadă `production-release`,
+  iar configurarea Constructor poate aștepta bounded dovada release-images
+  exactă a noului master.
+- Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
+  măsurători valide de inferență sau de durată a comutării; în această etapă nu
+  este cerut și nu este pretins niciun benchmark valid de viteză.
+- Schimbarea este pregătită în PR-ul operațional `#1560`, nu în
+  `origin/master`. Ramura `ops/private-ai-install-20260830` este clasificată
+  drept release generic, cu request ID determinist; numai un PR viitor canonic
+  `codex/<UUID>` cedează ownership-ul dispatcherului Constructor. După merge
+  este obligatoriu freeze pe `master` până când deploy-ul acelui SHA ajunge
+  terminal.
+- Ownerul a aprobat explicit publicarea urgentă pe Contabo existent, fără cost
+  nou. Nu mai este necesară o altă aprobare pentru commit, merge și deploy în
+  limitele acestui contract; orice extindere de cost sau schimbare a profilurilor
+  rămâne exclusiv decizia ownerului.
+- Helperul de restore distructiv are defecte preexistente de reluare după
+  SIGKILL între jurnalul intern și receiptul exterior, precum și după eșecul
+  fazei `restoring`; un workdir decriptat poate rămâne și orfan. Nu sunt pe
+  calea acestui pilot safe; orice release viitor clasificat `destructive`
+  rămâne blocat până la remedierea și testarea acelor cazuri.
+
+## Prag de finalizare
+
+Nu se raportează finalizat până când finalizerul Contabo, claimul real al
+workerului și verificarea clientului Windows nu sunt toate verzi pentru același
+commit. Installerul Windows se publică numai semnat, după integrarea canonică.
+Următorul pas sigur este rerularea CI/build pentru PR-ul operațional `#1560`
+(inclusiv container-isolation, indisponibil local), merge-ul aprobat deja de
+owner și apoi deploy-ul serializat pe Contabo.
+Până la dovada live exactă nu se raportează instalat sau finalizat.
 
 ## Legături canonice
 
-- Workflow secrete producție: <https://github.com/kelion-team/kelionai/actions/workflows/vps-set-env.yml>
-- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Workflow release: <https://github.com/kelion-team/kelionai/actions/workflows/deploy.yml>
-- Versiune live: <https://kelionai.app/api/release-proof>
+- Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
+- PR canonic: <https://github.com/kelion-team/kelionai/pull/1560>
+- Aplicație: <https://kelionai.app>

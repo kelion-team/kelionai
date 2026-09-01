@@ -47,9 +47,9 @@ export const ENV_ALIASES: Record<string, string[]> = {
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
-  // OpenAI is the single online AI provider. Runtime inference and the Codex
-  // worker share only the project-scoped key. The organization Admin key is a
-  // distinct, backend-only control-plane credential for Costs/Usage reads.
+  // OpenAI is the single online conversation provider. Constructor is outside
+  // that boundary and uses only OpenCode + Qwen local (llama.cpp).
+  // The organization Admin key remains a backend-only control-plane credential.
   openaiKey: ['OPENAI_API_KEY'],
   openaiAdminKey: ['OPENAI_ADMIN_KEY'],
   openaiLuna: ['OPENAI_LUNA_MODEL'],
@@ -63,6 +63,7 @@ export const ENV_ALIASES: Record<string, string[]> = {
   codexWorkerSecret: ['CODEX_WORKER_SECRET'],
   constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
   constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
+  constructorModelControlSecret: ['CONSTRUCTOR_MODEL_CONTROL_SECRET'],
   browserWorkerSecret: ['BROWSER_WORKER_SECRET'],
   converterWorkerSecret: ['CONVERTER_WORKER_SECRET'],
   vapidPublicKey: ['VAPID_PUBLIC_KEY'],
@@ -120,6 +121,7 @@ const isProd = process.env.NODE_ENV === 'production'
 const codexWorkerEnabled = process.env.CODEX_WORKER_ENABLED === '1'
 const constructorPublisherEnabled = process.env.CONSTRUCTOR_PUBLISHER_ENABLED === '1'
 const constructorReleaseEnabled = process.env.CONSTRUCTOR_RELEASE_ENABLED === '1'
+const constructorModelControlEnabled = process.env.CONSTRUCTOR_MODEL_CONTROL_ENABLED === '1'
 const pushEnabled = process.env.PUSH_ENABLED === '1'
 
 function constructorServiceSecret(name: string, enabled: boolean): string {
@@ -157,10 +159,13 @@ type ProductConfig = {
   githubRepository: string
   supportEmail: string
   nativeScheme: string
+  constructorNativeScheme: string
   nativeOrigins: string[]
-  nativeRedirects: { ios: string; desktop: string }
+  nativeRedirects: { ios: string; desktop: string; constructorDesktop: string }
   androidApplicationId: string
   iosBundleId: string
+  desktopBundleId: string
+  constructorDesktopBundleId: string
 }
 
 function loadProductConfig(): ProductConfig {
@@ -173,6 +178,8 @@ function loadProductConfig(): ProductConfig {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(parsed.supportEmail ?? ''))) throw new Error('support_email_invalid')
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(parsed.githubRepository ?? ''))) throw new Error('repository_invalid')
     if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(String(parsed.nativeScheme ?? ''))) throw new Error('native_scheme_invalid')
+    if (!/^[a-z][a-z0-9+.-]{1,31}$/.test(String(parsed.constructorNativeScheme ?? ''))
+      || parsed.constructorNativeScheme === parsed.nativeScheme) throw new Error('constructor_native_scheme_invalid')
     if (!Array.isArray(parsed.nativeOrigins) || parsed.nativeOrigins.length === 0) throw new Error('native_origins_invalid')
     const nativeOriginStrings = parsed.nativeOrigins.map((raw) => String(raw))
     const nativeOrigins = nativeOriginStrings.map((raw) => new URL(raw))
@@ -184,15 +191,20 @@ function loadProductConfig(): ProductConfig {
     }
     const iosRedirect = new URL(String(parsed.nativeRedirects?.ios ?? ''))
     const desktopRedirect = new URL(String(parsed.nativeRedirects?.desktop ?? ''))
+    const constructorDesktopRedirect = new URL(String(parsed.nativeRedirects?.constructorDesktop ?? ''))
     if (iosRedirect.origin !== origin.origin || iosRedirect.pathname !== '/auth/native/complete' || iosRedirect.search || iosRedirect.hash) {
       throw new Error('native_ios_redirect_invalid')
     }
     if (desktopRedirect.protocol !== `${parsed.nativeScheme}:` || desktopRedirect.hostname !== 'auth' || desktopRedirect.pathname !== '/native/complete') {
       throw new Error('native_desktop_redirect_invalid')
     }
-    if (![parsed.androidApplicationId, parsed.iosBundleId].every((v) => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/.test(String(v ?? '')))) {
+    if (constructorDesktopRedirect.protocol !== `${parsed.constructorNativeScheme}:` || constructorDesktopRedirect.hostname !== 'auth' || constructorDesktopRedirect.pathname !== '/native/complete') {
+      throw new Error('constructor_native_desktop_redirect_invalid')
+    }
+    if (![parsed.androidApplicationId, parsed.iosBundleId, parsed.desktopBundleId, parsed.constructorDesktopBundleId].every((v) => /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/.test(String(v ?? '')))) {
       throw new Error('package_id_invalid')
     }
+    if (parsed.constructorDesktopBundleId === parsed.desktopBundleId) throw new Error('constructor_package_id_not_distinct')
     return parsed as ProductConfig
   } catch {
     throw new Error('config/product.json lipsește sau este invalid')
@@ -351,7 +363,7 @@ function configuredAdminEmail(): string {
 function runtimeOpenAIKey(): string {
   const key = fileOnlySecret(ENV_ALIASES.openaiKey[0])
   // Organization Admin keys are privileged control-plane credentials. They
-  // are never a fallback for runtime inference or the Codex worker.
+  // are never a fallback for runtime inference or the local Constructor worker.
   return /^sk-proj-[A-Za-z0-9_-]{16,}$/.test(key) ? key : ''
 }
 
@@ -500,9 +512,9 @@ export const config = {
   // NIMENI. mapsSearch/mapsDirections/geocode merg exclusiv pe Nominatim OSM
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
-  // OpenAI is the only AI provider. The Constructor authenticates the official
-  // Codex client from this same project key through its isolated login cache;
-  // the key is never inherited by generated commands.
+  // OpenAI is the only online provider for Kelion conversation/media. Constructor
+  // is separate and executes only OpenCode + Qwen local (llama.cpp); it never
+  // receives either OpenAI credential.
   openai: {
     key: runtimeOpenAIKey(),
     apiBaseUrl: endpointConfig.openaiApiBase,
@@ -535,11 +547,9 @@ export const config = {
   },
   codexWorker: {
     enabled: codexWorkerEnabled,
-    // Secret exclusiv pentru HMAC-ul cozii interne. Nu este token Codex,
-    // ChatGPT sau GitHub și nu părăsește workerul/procesul web.
+    // Numele câmpului rămâne compatibil cu serviciul instalat. Secretul este
+    // exclusiv pentru HMAC-ul cozii build_jobs, nu o credențială AI sau GitHub.
     secret: constructorServiceSecret(ENV_ALIASES.codexWorkerSecret[0], codexWorkerEnabled),
-    taskUrl: (process.env.CODEX_TASK_URL ?? '').trim(),
-    taskId: (process.env.CODEX_WORKER_TASK_ID ?? '').trim(),
   },
   constructorPublisher: {
     enabled: constructorPublisherEnabled,
@@ -553,6 +563,16 @@ export const config = {
     secret: constructorServiceSecret(
       ENV_ALIASES.constructorReleaseSecret[0],
       constructorReleaseEnabled,
+    ),
+  },
+  constructorModelControl: {
+    enabled: constructorModelControlEnabled,
+    socket: env('CONSTRUCTOR_MODEL_CONTROL_SOCKET'),
+    // Identitate separată de worker: această cheie autorizează numai cele două
+    // operații fixe ale controllerului de profil local, niciodată coada sau AI-ul.
+    secret: constructorServiceSecret(
+      ENV_ALIASES.constructorModelControlSecret[0],
+      constructorModelControlEnabled,
     ),
   },
   browserWorker: {

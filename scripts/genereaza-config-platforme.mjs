@@ -9,7 +9,8 @@ function citesteProdus() {
   const raw = JSON.parse(readFileSync(resolve(REPO, 'config/product.json'), 'utf8'))
   const requiredStrings = [
     'appName', 'appVersion', 'publicAppOrigin', 'githubRepository', 'supportEmail',
-    'nativeScheme', 'androidApplicationId', 'iosBundleId', 'iosTeamId', 'desktopBundleId',
+    'nativeScheme', 'constructorNativeScheme', 'androidApplicationId', 'iosBundleId',
+    'iosTeamId', 'desktopBundleId', 'constructorDesktopBundleId',
   ]
   for (const field of requiredStrings) {
     if (typeof raw[field] !== 'string' || !raw[field].trim()) throw new Error(`config/product.json: ${field} invalid`)
@@ -19,6 +20,9 @@ function citesteProdus() {
     throw new Error('config/product.json: publicAppOrigin trebuie să fie un origin HTTPS exact')
   }
   if (!/^[a-z][a-z0-9+.-]*$/.test(raw.nativeScheme)) throw new Error('config/product.json: nativeScheme invalid')
+  if (!/^[a-z][a-z0-9+.-]*$/.test(raw.constructorNativeScheme) || raw.constructorNativeScheme === raw.nativeScheme) {
+    throw new Error('config/product.json: constructorNativeScheme invalid')
+  }
   if (!Array.isArray(raw.nativeOrigins) || raw.nativeOrigins.length !== 3) throw new Error('config/product.json: nativeOrigins invalid')
   for (const value of raw.nativeOrigins) {
     const native = new URL(String(value))
@@ -29,12 +33,15 @@ function citesteProdus() {
     )
     if (!localShell || !['', '/'].includes(native.pathname) || native.search || native.hash) throw new Error('config/product.json: nativeOrigins invalid')
   }
-  if (raw.nativeRedirects?.ios !== `${raw.publicAppOrigin}/auth/native/complete` || raw.nativeRedirects?.desktop !== `${raw.nativeScheme}://auth/native/complete`) {
+  if (raw.nativeRedirects?.ios !== `${raw.publicAppOrigin}/auth/native/complete`
+    || raw.nativeRedirects?.desktop !== `${raw.nativeScheme}://auth/native/complete`
+    || raw.nativeRedirects?.constructorDesktop !== `${raw.constructorNativeScheme}://auth/native/complete`) {
     throw new Error('config/product.json: nativeRedirects nu derivă din origin/schemă')
   }
-  if (![raw.androidApplicationId, raw.iosBundleId, raw.desktopBundleId].every((value) => /^(?:[a-z][a-z0-9]*\.)+[a-z][a-z0-9]*$/i.test(value))) {
+  if (![raw.androidApplicationId, raw.iosBundleId, raw.desktopBundleId, raw.constructorDesktopBundleId].every((value) => /^(?:[a-z][a-z0-9]*\.)+[a-z][a-z0-9]*$/i.test(value))) {
     throw new Error('config/product.json: bundle identifier invalid')
   }
+  if (raw.constructorDesktopBundleId === raw.desktopBundleId) throw new Error('config/product.json: bundle-urile desktop trebuie să fie distincte')
   if (!Number.isSafeInteger(raw.androidVersionCode) || raw.androidVersionCode < 1) throw new Error('config/product.json: androidVersionCode invalid')
   if (!Array.isArray(raw.androidCertificateSha256) || raw.androidCertificateSha256.length < 2 || raw.androidCertificateSha256.some((value) => !/^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/.test(value))) {
     throw new Error('config/product.json: androidCertificateSha256 invalid')
@@ -109,26 +116,29 @@ export function androidManifestConfig() {
   }
 }
 
-export function tauriConfig() {
+function tauriConfigFor({ isConstructor = false } = {}) {
+  const appName = isConstructor ? 'Kelion Constructor' : product.appName
+  const bundleId = isConstructor ? product.constructorDesktopBundleId : product.desktopBundleId
+  const nativeScheme = isConstructor ? product.constructorNativeScheme : product.nativeScheme
   const oauthStart = `${product.publicAppOrigin}/auth/native/authorize*`
   return {
     $schema: 'https://schema.tauri.app/config/2',
-    productName: product.appName,
+    productName: appName,
     version: product.appVersion,
-    identifier: product.desktopBundleId,
+    identifier: bundleId,
     build: {
       beforeDevCommand: 'npm run bundle:web',
       beforeBuildCommand: 'npm run bundle:web',
       frontendDist: '../dist',
     },
-    plugins: { 'deep-link': { desktop: { schemes: [product.nativeScheme] } } },
+    plugins: { 'deep-link': { desktop: { schemes: [nativeScheme] } } },
     app: {
-      windows: [{ label: 'main', title: product.appName, width: 1280, height: 800, minWidth: 900, minHeight: 600, center: true, resizable: true }],
+      windows: [{ label: 'main', title: appName, width: 1280, height: 800, minWidth: 900, minHeight: 600, center: true, resizable: true }],
       security: {
         freezePrototype: true,
         csp: nativeCsp(),
         capabilities: [{
-          identifier: 'main-local-bundle',
+          identifier: isConstructor ? 'constructor-local-bundle' : 'main-local-bundle',
           description: 'Bundle local: callback OAuth și browser de sistem limitat la endpointul first-party.',
           windows: ['main'],
           permissions: [
@@ -141,17 +151,27 @@ export function tauriConfig() {
     },
     bundle: {
       active: true,
-      targets: ['nsis'],
+      targets: isConstructor ? ['nsis', 'msi'] : ['nsis'],
       createUpdaterArtifacts: false,
       publisher: 'AE Studio',
       copyright: '© 2026 AE Studio',
       category: 'Productivity',
-      shortDescription: 'Your brilliant AI assistant — it sees, hears and speaks.',
-      longDescription: 'Kelionai is a brilliant personal AI assistant that sees, hears and speaks with you in dozens of languages.',
-      icon: ['icons/32x32.png', 'icons/128x128.png', 'icons/128x128@2x.png', 'icons/icon.ico'],
+      shortDescription: isConstructor ? 'Control client for the Kelion Constructor worker.' : 'Your brilliant AI assistant — it sees, hears and speaks.',
+      longDescription: isConstructor ? 'Kelion Constructor sends authenticated build orders to the same Kelion queue and displays measured worker, PR and live deployment evidence.' : 'Kelionai is a brilliant personal AI assistant that sees, hears and speaks with you in dozens of languages.',
+      icon: isConstructor
+        ? ['../../desktop/src-tauri/icons/32x32.png', '../../desktop/src-tauri/icons/128x128.png', '../../desktop/src-tauri/icons/128x128@2x.png', '../../desktop/src-tauri/icons/icon.ico']
+        : ['icons/32x32.png', 'icons/128x128.png', 'icons/128x128@2x.png', 'icons/icon.ico'],
       windows: { nsis: { installMode: 'currentUser', languages: ['English', 'Romanian'] } },
     },
   }
+}
+
+export function tauriConfig() {
+  return tauriConfigFor()
+}
+
+export function constructorTauriConfig() {
+  return tauriConfigFor({ isConstructor: true })
 }
 
 export function assetLinks() {
@@ -202,6 +222,10 @@ function genereazaDesktop() {
   json('desktop/src-tauri/tauri.conf.json', tauriConfig())
 }
 
+function genereazaConstructorDesktop() {
+  json('constructor-desktop/src-tauri/tauri.conf.json', constructorTauriConfig())
+}
+
 function genereazaIos() {
   const entitlements = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n\t<key>com.apple.developer.associated-domains</key>\n\t<array>\n\t\t<string>applinks:${product.publicUrl.host}</string>\n\t</array>\n</dict>\n</plist>\n`
   scrieAtomic('ios/ios/App/App/App.entitlements', entitlements)
@@ -216,11 +240,12 @@ const direct = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (direct) {
   const targetIndex = process.argv.indexOf('--target')
   const target = targetIndex >= 0 ? process.argv[targetIndex + 1] : 'check'
-  const valid = new Set(['check', 'all', 'web-dist', 'android', 'desktop', 'ios'])
+  const valid = new Set(['check', 'all', 'web-dist', 'android', 'desktop', 'constructor-desktop', 'ios'])
   if (!valid.has(target)) throw new Error('target invalid')
   if (target === 'all' || target === 'web-dist') genereazaWebDist()
   if (target === 'all' || target === 'android') genereazaAndroid()
   if (target === 'all' || target === 'desktop') genereazaDesktop()
+  if (target === 'all' || target === 'constructor-desktop') genereazaConstructorDesktop()
   if (target === 'all' || target === 'ios') genereazaIos()
   process.stdout.write(target === 'check' ? 'Config platforme: config/product.json valid.\n' : `Config platforme: ${target} generat determinist.\n`)
 }

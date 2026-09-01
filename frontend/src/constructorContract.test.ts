@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import {
+  CONSTRUCTOR_LOCAL_ACTOR,
+  constructorActorLabel,
   constructorAvailabilityFromSnapshot,
   constructorHasVerifiedLiveResult,
   constructorJobsFromSnapshot,
   constructorJobCanBeCancelled,
   constructorPersistentEventsText,
   isConstructorContinuity,
+  isConstructorModelOutcome,
   isConstructorWorkCard,
   type ConstructorContinuity,
   type ConstructorWorkCard,
@@ -34,6 +37,7 @@ function continuity(complete: boolean): ConstructorContinuity {
     },
     activity: [],
     eventCount: 0,
+    modelOutcome: null,
   }
 }
 
@@ -73,6 +77,17 @@ describe('contractul acțiunilor și rezultatului Constructor în Admin', () => 
     expect(constructorHasVerifiedLiveResult('done', {} as ConstructorContinuity)).toBe(false)
   })
 
+  it('nu expune identitatea Codex retrasă, dar nu rescrie actori necunoscuți', () => {
+    expect(constructorActorLabel('codex-worker')).toBe(CONSTRUCTOR_LOCAL_ACTOR)
+    expect(constructorActorLabel('executor-auditat')).toBe('executor-auditat')
+    expect(constructorActorLabel(null)).toBeNull()
+
+    const stage = fs.readFileSync(new URL('./pages/Stage.tsx', import.meta.url), 'utf8')
+    const admin = fs.readFileSync(new URL('./components/admin/AdminProductie.tsx', import.meta.url), 'utf8')
+    expect(stage).toContain('constructorActorLabel(j.workCard.actor)')
+    expect(admin).toContain('constructorActorLabel(j.workCard.actor)')
+  })
+
   it('respinge profund continuity și workCard incomplete înainte de randare', () => {
     expect(isConstructorContinuity(continuity(false))).toBe(true)
     expect(isConstructorContinuity({})).toBe(false)
@@ -80,6 +95,9 @@ describe('contractul acțiunilor și rezultatului Constructor în Admin', () => 
     expect(isConstructorContinuity({ ...continuity(true), finalProof: { complete: true, commit: null, liveVersion: null } })).toBe(false)
     expect(isConstructorContinuity({ ...continuity(true), finalProof: { complete: true, commit: 'a'.repeat(40), liveVersion: 'b'.repeat(40) } })).toBe(false)
     expect(isConstructorContinuity({ ...continuity(false), activity: [{}] })).toBe(false)
+    const withoutOutcome = { ...continuity(false) } as Record<string, unknown>
+    delete withoutOutcome.modelOutcome
+    expect(isConstructorContinuity(withoutOutcome)).toBe(false)
 
     expect(isConstructorWorkCard(workCard())).toBe(true)
     expect(isConstructorWorkCard({})).toBe(false)
@@ -90,8 +108,52 @@ describe('contractul acțiunilor și rezultatului Constructor în Admin', () => 
     expect(isConstructorWorkCard({ ...workCard(), contextLinks: ['javascript:alert(1)'] })).toBe(false)
 
     const stage = fs.readFileSync(new URL('./pages/Stage.tsx', import.meta.url), 'utf8')
-    expect(stage).toContain('value.continuity === undefined || isConstructorContinuity(value.continuity)')
+    expect(stage).toContain('isConstructorContinuity(value.continuity)')
+    expect(stage).toContain("value.continuity.modelOutcome === null || value.status === 'failed'")
     expect(stage).toContain('value.workCard === undefined || value.workCard === null || isConstructorWorkCard(value.workCard)')
+  })
+
+  it('separă rezultatul nerezolvat de eroarea tehnică și permite recomandarea numai fast → powerful', () => {
+    const recommendation = {
+      profile: 'powerful',
+      reasonCode: 'fast_result_not_publishable',
+      reason: 'Profilul rapid nu a produs un rezultat publicabil.',
+    }
+    const fastUnresolved = {
+      profile: 'fast',
+      result: 'unresolved',
+      reasonCode: 'no_changes',
+      reason: 'Cerința a rămas fără modificare validă.',
+      manualRecommendation: recommendation,
+    }
+    expect(isConstructorModelOutcome(fastUnresolved)).toBe(true)
+    expect(isConstructorModelOutcome({
+      ...fastUnresolved,
+      profile: 'powerful',
+      manualRecommendation: null,
+    })).toBe(true)
+    expect(isConstructorModelOutcome({
+      ...fastUnresolved,
+      result: 'technical_failure',
+      reasonCode: 'execution_timeout',
+      manualRecommendation: null,
+    })).toBe(true)
+
+    expect(isConstructorModelOutcome({ ...fastUnresolved, manualRecommendation: null })).toBe(false)
+    expect(isConstructorModelOutcome({ ...fastUnresolved, profile: 'powerful' })).toBe(false)
+    expect(isConstructorModelOutcome({ ...fastUnresolved, result: 'technical_failure' })).toBe(false)
+    expect(isConstructorModelOutcome({
+      ...fastUnresolved,
+      reasonCode: 'execution_timeout',
+    })).toBe(false)
+    expect(isConstructorModelOutcome({
+      ...fastUnresolved,
+      result: 'technical_failure',
+      reasonCode: 'no_changes',
+      manualRecommendation: null,
+    })).toBe(false)
+    expect(isConstructorModelOutcome({ ...fastUnresolved, reason: 'log\nsecret' })).toBe(false)
+    expect(isConstructorModelOutcome({ ...fastUnresolved, command: 'switch powerful' })).toBe(false)
   })
 
   it('permite anularea exact pentru coada neatinsă și etapele workerului anulabile', () => {

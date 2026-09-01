@@ -63,6 +63,7 @@ const ASTEPTATE_BAZA: VariabilaAsteptata[] = [
   { alias: cuFisier(ENV_ALIASES.codexWorkerSecret), name: 'CODEX_WORKER_SECRET', what: 'autentificarea HMAC a cozii Constructor', breaks: 'workerul separat nu poate revendica joburi' },
   { alias: cuFisier(ENV_ALIASES.constructorPublisherSecret), name: 'CONSTRUCTOR_PUBLISHER_SECRET', what: 'autentificarea HMAC a publicării Constructor', breaks: 'publisherul separat nu poate prelua și publica handoff-uri' },
   { alias: cuFisier(ENV_ALIASES.constructorReleaseSecret), name: 'CONSTRUCTOR_RELEASE_SECRET', what: 'autentificarea HMAC a release-ului Constructor', breaks: 'releaserul separat nu poate prelua și urmări deploy-uri' },
+  { alias: cuFisier(ENV_ALIASES.constructorModelControlSecret), name: 'CONSTRUCTOR_MODEL_CONTROL_SECRET', what: 'comutarea manuală autentificată a modelului Constructor', breaks: 'Admin poate doar citi eroarea de control indisponibil; profilul activ nu poate fi schimbat' },
   { alias: cuFisier(ENV_ALIASES.githubReleaseOAuthToken), name: 'GITHUB_RELEASE_OAUTH_TOKEN', what: 'verificarea GitHub din consola Admin', breaks: 'Admin nu poate valida protecția, aprobările și controalele release-ului' },
 ]
 
@@ -151,7 +152,7 @@ export function envCheck(): EnvVarState[] {
 //
 // Sunt enumerate numai familiile consumate de runtime-ul curent. Numele
 // furnizorilor retrași nu creează sarcini false pentru administrator.
-const CUVINTE = /(OPENAI|GOOGLE|SERPER|MAIL|SMTP|IMAP|DATABASE|POSTGRES|SESSION|GITHUB|KELION|CODEX|BROWSER|CONVERTER|REVOLUT|PAYMENT|VAPID|PUSH)/i
+const CUVINTE = /(OPENAI|GOOGLE|SERPER|MAIL|SMTP|IMAP|DATABASE|POSTGRES|SESSION|GITHUB|KELION|CODEX|CONSTRUCTOR|BROWSER|CONVERTER|REVOLUT|PAYMENT|VAPID|PUSH)/i
 
 export function envOrphans(): string[] {
   const stiute = new Set<string>()
@@ -168,6 +169,7 @@ export function envOrphans(): string[] {
     'MAIL_IMAP_PORT', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'PAYMENT_MODE',
     'PAYMENT_CONTRACT_VERIFIED', 'REVOLUT_MERCHANT_API_VERSION', 'REVOLUT_ORDER_EXPIRY',
     'PUSH_ENABLED', 'PUSH_ENDPOINT_HOSTS', 'PUSH_MAX_SUBSCRIPTIONS', 'VAPID_PRIVATE_KEY_FILE',
+    'CONSTRUCTOR_MODEL_CONTROL_ENABLED', 'CONSTRUCTOR_MODEL_CONTROL_SOCKET',
     'NODE_ENV']) stiute.add(n)
   return Object.keys(process.env)
     .filter((n) => CUVINTE.test(n) && !stiute.has(n))
