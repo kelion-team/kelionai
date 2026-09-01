@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Auto-setup pentru sesiunile Claude Code (web).
+# Auto-setup pentru sesiunile web ale agentului de dezvoltare.
 # Pregătește proiectul ca agentul să poată face build / typecheck / lint fără
 # configurare manuală. NU atinge producția și NU cere secrete reale.
 set -euo pipefail
@@ -7,7 +7,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-log() { printf '\033[36m[claude-setup]\033[0m %s\n' "$*"; }
+log() { printf '\033[36m[setup-web]\033[0m %s\n' "$*"; }
 
 # 1. Dependențe backend
 if [ -f backend/package.json ]; then
