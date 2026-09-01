@@ -54,6 +54,9 @@ secrete sau presupuneri din conversație.
 - Nicio rută publică nu primește căi de fișiere, SQL, shell, URL-uri arbitrare,
   PAN/CVC sau tokenuri. Orice input extern are schemă, limită de mărime și
   autorizare la obiectul utilizatorului.
+- Taskurile pentru agentul Copilot rămân strict în repository-ul curent; nu
+  includ comenzi de acces pe hosturi externe (SSH/VPS), mutații pe sisteme
+  private sau instrucțiuni în afara sandboxului de CI.
 - Mutațiile pe cookie cer protecție CSRF și verificare strictă Origin. Cookie-ul
   de sesiune este Secure, HttpOnly, host-only și nu conține tokenuri OAuth.
 - HTML generat/iframe este sandboxat cu CSP minim; autentificarea Google se
