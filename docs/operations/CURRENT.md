@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T14:04:33Z`
+Actualizat: `2026-09-01T14:15:40Z`
 
 ## Stare verificată
 
@@ -64,9 +64,11 @@ Actualizat: `2026-09-01T14:04:33Z`
 - Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
   măsurători valide de inferență sau de durată a comutării; în această etapă nu
   este cerut și nu este pretins niciun benchmark valid de viteză.
-- Schimbarea este pregătită în PR-ul operațional `#1560`, nu în
-  `origin/master`. Ramura `ops/private-ai-install-20260830` este clasificată
-  drept release generic, cu request ID determinist; numai un PR viitor canonic
+- PR-ul operațional `#1560` a trecut toate controalele, dar GitHub a refuzat
+  rebase merge din cauza celor trei merge commits istorice. PR-ul liniar
+  `#1571` pornește din masterul canonic și păstrează același arbore funcțional,
+  fără force-push sau altă strategie de merge. Ramura rămâne clasificată drept
+  release generic, cu request ID determinist; numai un PR canonic
   `codex/<UUID>` cedează ownership-ul dispatcherului Constructor. După merge
   este obligatoriu freeze pe `master` până când deploy-ul acelui SHA ajunge
   terminal.
@@ -85,7 +87,7 @@ Actualizat: `2026-09-01T14:04:33Z`
 Nu se raportează finalizat până când finalizerul Contabo, claimul real al
 workerului și verificarea clientului Windows nu sunt toate verzi pentru același
 commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este rerularea CI/build pentru PR-ul operațional `#1560`
+Următorul pas sigur este rerularea CI/build pentru PR-ul operațional `#1571`
 (inclusiv container-isolation, indisponibil local), merge-ul aprobat deja de
 owner și apoi deploy-ul serializat pe Contabo.
 Până la dovada live exactă nu se raportează instalat sau finalizat.
@@ -93,5 +95,5 @@ Până la dovada live exactă nu se raportează instalat sau finalizat.
 ## Legături canonice
 
 - Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
-- PR canonic: <https://github.com/kelion-team/kelionai/pull/1560>
+- PR operațional: <https://github.com/kelion-team/kelionai/pull/1571>
 - Aplicație: <https://kelionai.app>
