@@ -5,12 +5,8 @@
  * Folosește AST-ul TypeScript, nu o expresie regulată care poate lega un
  * `.get()` oarecare de o adresă aflată mii de caractere mai jos. Verifică:
  *   - fiecare adresă folosită de un client are o rută;
+ *   - fiecare rută are un consumator în alt fișier sau un test de contract;
  *   - aceeași metodă + adresă nu este înregistrată de două ori.
- *
- * Nota: după eliminarea suitei de teste, acoperirea „fiecare rută are un
- * consumator sau un test" nu mai poate fi impusă (testele erau consumatorii
- * unora dintre rute), așa că rutele fără consumator sunt raportate doar
- * informativ, nu mai blochează poarta.
  */
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
@@ -294,9 +290,9 @@ function ruleaza() {
     for (const apel of rezultat.apeluriFaraRuta) console.error(`  ${apel.adresa} — ${apel.fisier}:${apel.linie}`)
   }
   if (rezultat.ruteFaraConsumator.length) {
-    console.log(`\nInformativ: ${rezultat.ruteFaraConsumator.length} rute fără consumator în alt fișier (erau acoperite doar de teste, acum eliminate):`)
+    console.error(`\nRUTE FĂRĂ CONSUMATOR SAU TEST ÎN ALT FIȘIER (${rezultat.ruteFaraConsumator.length}):`)
     for (const ruta of rezultat.ruteFaraConsumator) {
-      console.log(`  ${ruta.metoda} ${ruta.adresa} — ${ruta.fisier}:${ruta.linie}`)
+      console.error(`  ${ruta.metoda} ${ruta.adresa} — ${ruta.fisier}:${ruta.linie}`)
     }
   }
   if (rezultat.ruteDuplicate.length) {
@@ -310,11 +306,11 @@ function ruleaza() {
     console.error('\nNU POT VERIFICA: inventarul HTTP este gol sau incomplet.')
     process.exit(2)
   }
-  if (rezultat.apeluriFaraRuta.length || rezultat.ruteDuplicate.length) {
-    console.error('\nȚinta este 0: fiecare apel client are o rută și fiecare rută o singură înregistrare.')
+  if (rezultat.apeluriFaraRuta.length || rezultat.ruteFaraConsumator.length || rezultat.ruteDuplicate.length) {
+    console.error('\nȚinta este 0: fiecare rută are contract, consumator/test și o singură înregistrare.')
     process.exit(1)
   }
-  console.log('Contract HTTP: verde (0 apeluri rupte, 0 duplicate).')
+  console.log('Contract HTTP: verde (0 apeluri rupte, 0 rute orfane, 0 duplicate).')
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) ruleaza()
