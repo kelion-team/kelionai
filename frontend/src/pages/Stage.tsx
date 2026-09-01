@@ -24,6 +24,8 @@ import {
   isAdminTab,
   type AdminTab,
   type CreditAIFurnizor,
+  type OpenAIAdminSnapshot,
+  type OpenAIHealthClass,
 } from '../lib/admin'
 import {
   getWorkspace,
@@ -1054,11 +1056,14 @@ export interface BrainCredit {
   openai?: {
     checked: boolean
     serving: boolean
-    reason?: 'depleted' | 'quota' | 'error' | 'no_key'
+    status: number | null
+    class: OpenAIHealthClass
+    action?: string
     monthUsd?: number
     sold?: number
     soldMoneda?: string
     soldMotiv?: string
+    admin?: OpenAIAdminSnapshot
   }
 
   vps?: {

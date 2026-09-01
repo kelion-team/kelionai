@@ -1,7 +1,7 @@
 approval_policy = "never"
 cli_auth_credentials_store = "file"
 default_permissions = "kelion-worker"
-forced_login_method = "chatgpt"
+forced_login_method = "api"
 
 [shell_environment_policy]
 inherit = "none"

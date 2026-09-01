@@ -17,8 +17,12 @@ need() { command -v "$1" >/dev/null 2>&1 || die "lipsește utilitarul $1"; }
 COMMIT_SHA=${1:-}
 MANIFEST_FILE=${2:-}
 RELEASE_MODE=${3:-release}
+RECOVER_LOST_POST_PONR=${KELION_RECOVER_LOST_POST_PONR:-0}
 [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'commitul trebuie să fie SHA integral'
 [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]] || die 'modul release este invalid'
+[[ "$RECOVER_LOST_POST_PONR" =~ ^[01]$ ]] || die 'selectorul recovery post-PONR este invalid'
+[ "$RECOVER_LOST_POST_PONR" = 0 ] || [ "$RELEASE_MODE" = release ] \
+  || die 'recovery-ul post-PONR este permis numai în modul release'
 [ -f "$MANIFEST_FILE" ] || die 'manifestul OCI lipsește'
 GATE_MANIFEST_FILE=$(dirname -- "$MANIFEST_FILE")/codex-gates.json
 [ -f "$GATE_MANIFEST_FILE" ] && [ ! -L "$GATE_MANIFEST_FILE" ] || die 'manifestul gate lipsește'
@@ -269,15 +273,47 @@ candidate_public_live_proof() {
     && jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$live_ready" >/dev/null
 }
 
+prepared_candidate_destructive_journal_proof() {
+  local current_ponr=${point_of_no_return:-0} current_resume=${resume_destructive_recovery:-0}
+  [[ "$current_ponr" =~ ^[01]$ ]] && [[ "$current_resume" =~ ^[01]$ ]] || return 1
+  if [ ! -e "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ]; then
+    [ "$current_ponr" = 0 ] && [ "$current_resume" = 0 ]
+    return
+  fi
+  { [ "$current_ponr" = 1 ] || [ "$current_resume" = 1 ]; } || return 1
+  [ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ] || return 1
+  jq -e --arg commit "$COMMIT_SHA" '
+      (keys | sort) == (["activeRuntimeContainers","activeSlot","caddyfileSnapshot","commit",
+        "dbRestoreRequired","inactiveSlot","legacyRuntimeContainers","migrationContractBefore",
+        "oldMarker","oldUpstream","oldUpstreamPresent","phase","pointOfNoReturn","previousVersion",
+        "schema","updatedAt"] | sort) and
+      .schema == 1 and .commit == $commit and .phase == "point-of-no-return" and
+      .pointOfNoReturn == true and (.dbRestoreRequired | type == "boolean") and
+      (.activeSlot == "legacy" or .activeSlot == "blue" or .activeSlot == "green") and
+      (.inactiveSlot == "blue" or .inactiveSlot == "green") and .activeSlot != .inactiveSlot and
+      (.oldMarker | strings | test("^([0-9a-f]{40}|legacy)$")) and
+      (.previousVersion | strings | test("^[0-9a-f]{7,40}$")) and
+      (.oldMarker as $old | .previousVersion as $previous |
+        if $old == "legacy" then true else ($old | startswith($previous)) end) and
+      (.migrationContractBefore | strings | length > 0) and
+      (.activeRuntimeContainers | type == "array" and length == (unique | length) and
+        all(.[]; type == "string" and test("^[0-9a-f]{12,64}$"))) and
+      (.legacyRuntimeContainers | type == "array" and length == (unique | length) and
+        all(.[]; . == "kelionai-app" or . == "omniroute" or . == "kelionai-coqui")) and
+      (.oldUpstreamPresent | type == "boolean") and (.oldUpstream | type == "string") and
+      (.caddyfileSnapshot | type == "string") and
+      (.updatedAt | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    ' "$RECOVERY_JOURNAL" >/dev/null
+}
+
 prepared_candidate_public_live_proof() {
   local origin live_version live_ready path
   for path in "$RUNTIME_ROOT/runtime-config-cutover.journal" \
     "$RUNTIME_ROOT/constructor-activation.journal" "$RUNTIME_ROOT/constructor-gate-refresh.journal"; do
     [ ! -e "$path" ] && [ ! -L "$path" ] || return 1
   done
-  if [ "$resume_destructive_recovery" != 1 ] && [ "${recover_pre_ponr_destructive:-0}" != 1 ]; then
-    [ ! -e "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] || return 1
-  fi
+  prepared_candidate_destructive_journal_proof || return 1
   origin=$(jq -er '.publicAppOrigin | select(type == "string")' "$PRODUCT_FILE") || return 1
   live_version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -r '.v // empty') || return 1
   live_ready=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz") || return 1
@@ -1130,6 +1166,505 @@ cleanup_backup_schedule_snapshot() {
   backup_schedule_snapshot_dir=''
 }
 
+POST_PONR_INCIDENT_COMMIT=de9fe5f3f081373a23796d83b469651e9c1e33e7
+POST_PONR_INCIDENT_REQUEST=e5c00af2-1fb9-4daf-a30b-bdfed24d5689
+POST_PONR_INCIDENT_RELEASE_RUN=33227925046
+POST_PONR_INCIDENT_CI_RUN=33227451553
+POST_PONR_INCIDENT_BUILD_RUN=33227641381
+POST_PONR_OLD_SLOT=green
+POST_PONR_TARGET_SLOT=blue
+POST_PONR_OLD_MARKER=''
+POST_PONR_PREVIOUS_VERSION=''
+POST_PONR_MIGRATION_CONTRACT=''
+POST_PONR_CADDY_SHA256=''
+POST_PONR_OLD_UPSTREAM_SHA256=''
+POST_PONR_TARGET_UPSTREAM_SHA256=''
+POST_PONR_GATE_WORKER_SHA256=''
+POST_PONR_GATE_PUBLISHER_SHA256=''
+POST_PONR_GATE_RELEASE_SHA256=''
+
+post_ponr_canonical_upstream_sha256() {
+  local slot=$1
+  [[ "$slot" =~ ^(blue|green)$ ]] || return 1
+  printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$slot" \
+    | sha256sum | awk '{print $1}'
+}
+
+post_ponr_release_surface_proof() {
+  local expected_mode=$1 bind_port origin public_version public_ready internal_version internal_ready
+  [[ "$expected_mode" = prepared || "$expected_mode" = active ]] || return 1
+  case "$POST_PONR_TARGET_SLOT" in
+    blue) bind_port=18080 ;;
+    green) bind_port=18081 ;;
+    *) return 1 ;;
+  esac
+  origin=$(jq -er '.publicAppOrigin | select(type == "string" and startswith("https://"))' "$PRODUCT_FILE") \
+    || return 1
+  public_version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -r '.v // empty') \
+    || return 1
+  public_ready=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz") || return 1
+  internal_version=$(curl --fail --silent --show-error --max-time 12 --noproxy '*' \
+    "http://127.0.0.1:$bind_port/api/version" | jq -r '.v // empty') || return 1
+  internal_ready=$(curl --fail --silent --show-error --max-time 12 --noproxy '*' \
+    "http://127.0.0.1:$bind_port/readyz") || return 1
+  [ "$public_version" = "${COMMIT_SHA:0:7}" ] && [ "$internal_version" = "${COMMIT_SHA:0:7}" ] \
+    || return 1
+  if [ "$expected_mode" = prepared ]; then
+    jq -e '.ready == true and .release.candidate == true and .release.sideEffectsActive == false' \
+      <<<"$public_ready" >/dev/null \
+      && jq -e '.ready == true and .release.candidate == true and .release.sideEffectsActive == false' \
+        <<<"$internal_ready" >/dev/null
+  else
+    jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$public_ready" >/dev/null \
+      && jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$internal_ready" >/dev/null
+  fi
+}
+
+post_ponr_incident_authority_proof() {
+  local old_upstream_text
+  [ -f "$RELEASE_REQUEST_LEDGER" ] && [ ! -L "$RELEASE_REQUEST_LEDGER" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RELEASE_REQUEST_LEDGER")" = '0:0:600:1' ] || return 1
+  jq -e \
+    --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" \
+    --argjson ciRunId "$POST_PONR_INCIDENT_CI_RUN" --argjson buildRunId "$POST_PONR_INCIDENT_BUILD_RUN" \
+    --argjson workflowRunId "$POST_PONR_INCIDENT_RELEASE_RUN" '
+      (keys | sort) == (["buildRunId","ciRunId","commit","completedAt","mode","requestId",
+        "schema","startedAt","status","workflowRunId"] | sort) and
+      .schema == 1 and .status == "started" and .requestId == $requestId and
+      .commit == $commit and .mode == "release" and .ciRunId == $ciRunId and
+      .buildRunId == $buildRunId and .workflowRunId == $workflowRunId and
+      (.startedAt | strings | length > 0) and .completedAt == null
+    ' "$RELEASE_REQUEST_LEDGER" >/dev/null || return 1
+
+  [ -f "$RECOVERY_JOURNAL" ] && [ ! -L "$RECOVERY_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RECOVERY_JOURNAL")" = '0:0:600:1' ] || return 1
+  old_upstream_text=$(printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}' \
+    "$POST_PONR_OLD_SLOT") || return 1
+  jq -e --arg commit "$POST_PONR_INCIDENT_COMMIT" --arg oldUpstream "$old_upstream_text" '
+      (keys | sort) == (["activeRuntimeContainers","activeSlot","caddyfileSnapshot","commit",
+        "dbRestoreRequired","inactiveSlot","legacyRuntimeContainers","migrationContractBefore",
+        "oldMarker","oldUpstream","oldUpstreamPresent","phase","pointOfNoReturn","previousVersion",
+        "schema","updatedAt"] | sort) and
+      .schema == 1 and .commit == $commit and .phase == "point-of-no-return" and
+      .pointOfNoReturn == true and .dbRestoreRequired == true and
+      .activeSlot == "green" and .inactiveSlot == "blue" and
+      (.oldMarker | strings | test("^[0-9a-f]{40}$")) and .oldMarker != $commit and
+      (.previousVersion | strings | test("^[0-9a-f]{7,40}$")) and
+      (.oldMarker as $old | .previousVersion as $previous | $old | startswith($previous)) and
+      (.migrationContractBefore | strings | fromjson? |
+        .kind == "migrations_plan" and .risk == "destructive" and (.pending | type == "array")) and
+      (.activeRuntimeContainers | type == "array" and length == 5 and length == (unique | length) and
+        all(.[]; type == "string" and test("^[0-9a-f]{12,64}$"))) and
+      .legacyRuntimeContainers == [] and .oldUpstreamPresent == true and .oldUpstream == $oldUpstream and
+      (.caddyfileSnapshot | strings |
+        test("^/root/kelion/runtime/caddyfile-rollback\\.[A-Za-z0-9]+$")) and
+      (.updatedAt | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    ' "$RECOVERY_JOURNAL" >/dev/null || return 1
+  POST_PONR_OLD_MARKER=$(jq -er '.oldMarker' "$RECOVERY_JOURNAL") || return 1
+  POST_PONR_PREVIOUS_VERSION=$(jq -er '.previousVersion' "$RECOVERY_JOURNAL") || return 1
+  POST_PONR_MIGRATION_CONTRACT=$(jq -er '.migrationContractBefore' "$RECOVERY_JOURNAL") || return 1
+}
+
+post_ponr_completion_record_authority_proof() {
+  local origin live_version live_ready release_proof target_upstream_sha
+  [ -f "$RELEASE_REQUEST_LEDGER" ] && [ ! -L "$RELEASE_REQUEST_LEDGER" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RELEASE_REQUEST_LEDGER")" = '0:0:600:1' ] || return 1
+  jq -e --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" \
+    --argjson ciRunId "$POST_PONR_INCIDENT_CI_RUN" --argjson buildRunId "$POST_PONR_INCIDENT_BUILD_RUN" \
+    --argjson workflowRunId "$POST_PONR_INCIDENT_RELEASE_RUN" '
+      (keys | sort) == (["buildRunId","ciRunId","commit","completedAt","mode","requestId",
+        "schema","startedAt","status","workflowRunId"] | sort) and
+      .schema == 1 and (.status == "started" or .status == "success") and .requestId == $requestId and
+      .commit == $commit and .mode == "release" and .ciRunId == $ciRunId and
+      .buildRunId == $buildRunId and .workflowRunId == $workflowRunId and
+      (.startedAt | strings | length > 0) and
+      ((.status == "started" and .completedAt == null) or
+        (.status == "success" and (.completedAt | strings | length > 0)))
+    ' "$RELEASE_REQUEST_LEDGER" >/dev/null || return 1
+  [ -f "$RUNTIME_ROOT/last-release.json" ] && [ ! -L "$RUNTIME_ROOT/last-release.json" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/last-release.json")" = '0:0:600:1' ] || return 1
+  jq -e --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" \
+    --argjson ciRunId "$POST_PONR_INCIDENT_CI_RUN" --argjson buildRunId "$POST_PONR_INCIDENT_BUILD_RUN" \
+    --argjson workflowRunId "$POST_PONR_INCIDENT_RELEASE_RUN" '
+      (keys | sort) == (["buildRunId","ciRunId","commit","completedAt","mode","requestId",
+        "schema","slot","workflowRunId"] | sort) and
+      .schema == 1 and .requestId == $requestId and .commit == $commit and .slot == "blue" and
+      .mode == "release" and .ciRunId == $ciRunId and .buildRunId == $buildRunId and
+      .workflowRunId == $workflowRunId and (.completedAt | strings | length > 0)
+    ' "$RUNTIME_ROOT/last-release.json" >/dev/null || return 1
+  [ -f "$RELEASE_STATE_ROOT/active" ] && [ ! -L "$RELEASE_STATE_ROOT/active" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RELEASE_STATE_ROOT/active")" = '0:10050:640:1' ] \
+    && [ "$(wc -l < "$RELEASE_STATE_ROOT/active")" -eq 1 ] \
+    && grep -qx "$POST_PONR_INCIDENT_COMMIT" "$RELEASE_STATE_ROOT/active" || return 1
+  target_upstream_sha=$(post_ponr_canonical_upstream_sha256 "$POST_PONR_TARGET_SLOT") || return 1
+  [ -f "$UPSTREAM_FILE" ] && [ ! -L "$UPSTREAM_FILE" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UPSTREAM_FILE")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$UPSTREAM_FILE" | awk '{print $1}')" = "$target_upstream_sha" ] || return 1
+  origin=$(jq -er '.publicAppOrigin | select(type == "string" and startswith("https://"))' "$PRODUCT_FILE") \
+    || return 1
+  live_version=$(curl --fail --silent --show-error --max-time 12 "$origin/api/version" | jq -r '.v // empty') \
+    || return 1
+  live_ready=$(curl --fail --silent --show-error --max-time 12 "$origin/readyz") || return 1
+  release_proof=$(curl --fail --silent --show-error --max-time 12 "$origin/api/release-proof") || return 1
+  [ "$live_version" = "${POST_PONR_INCIDENT_COMMIT:0:7}" ] \
+    && jq -e '.ready == true and .release.sideEffectsActive == true' <<<"$live_ready" >/dev/null \
+    && jq -e --arg commit "$POST_PONR_INCIDENT_COMMIT" '
+      .ready == true and .activeCommit == $commit and .release.sideEffectsActive == true and
+      ((.release.candidate // false) == false)
+    ' <<<"$release_proof" >/dev/null
+}
+
+post_ponr_candidate_topology_proof() {
+  local expected_mode=$1 marker target_output old_output container role image expected_image running health
+  local managed_label slot_label commit_label old_full journal_full gate_path gate_sha proxy_image registry_repo
+  local -a target_containers=() old_containers=() journal_old_containers=() gate_hashes=()
+  local -A target_roles=() old_roles=()
+  [[ "$expected_mode" = prepared || "$expected_mode" = active ]] || return 1
+  post_ponr_incident_authority_proof || return 1
+
+  registry_repo=$(jq -er '.githubRepository | select(type == "string")' "$PRODUCT_FILE") || return 1
+  registry_repo=${registry_repo,,}
+  [[ "$registry_repo" =~ ^[a-z0-9_.-]+/[a-z0-9_.-]+$ ]] || return 1
+  jq -e --arg commit "$POST_PONR_INCIDENT_COMMIT" --arg imagePrefix "ghcr.io/$registry_repo/" '
+      .schema == 1 and .commit == $commit and
+      (.images | keys | sort) == (["app","browser","browser-egress","converter-gateway","converter-parser"] | sort) and
+      all(.images | to_entries[]; . as $entry |
+        ($entry.value | type == "string") and
+        ($entry.value | startswith($imagePrefix + $entry.key + "@sha256:")) and
+        ($entry.value | ltrimstr($imagePrefix + $entry.key + "@sha256:") | test("^[0-9a-f]{64}$")))
+    ' "$MANIFEST_FILE" >/dev/null || return 1
+
+  [ -f "$RELEASE_STATE_ROOT/active" ] && [ ! -L "$RELEASE_STATE_ROOT/active" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RELEASE_STATE_ROOT/active")" = '0:10050:640:1' ] \
+    && [ "$(wc -l < "$RELEASE_STATE_ROOT/active")" -eq 1 ] || return 1
+  marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active") || return 1
+  if [ "$expected_mode" = prepared ]; then
+    [ "$marker" = "$POST_PONR_OLD_MARKER" ] || return 1
+  else
+    [ "$marker" = "$POST_PONR_INCIDENT_COMMIT" ] || return 1
+  fi
+
+  target_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$POST_PONR_TARGET_SLOT") || return 1
+  [ -z "$target_output" ] || mapfile -t target_containers <<<"$target_output"
+  [ "${#target_containers[@]}" -eq 5 ] || return 1
+  for container in "${target_containers[@]}"; do
+    managed_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.managed"}}' "$container") || return 1
+    slot_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.slot"}}' "$container") || return 1
+    commit_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$container") || return 1
+    role=$(docker inspect -f '{{index .Config.Labels "com.kelion.role"}}' "$container") || return 1
+    [ "$managed_label" = true ] && [ "$slot_label" = "$POST_PONR_TARGET_SLOT" ] \
+      && [ "$commit_label" = "$POST_PONR_INCIDENT_COMMIT" ] || return 1
+    case "$role" in
+      app) expected_image=$(jq -er '.images.app' "$MANIFEST_FILE") ;;
+      browser-worker) expected_image=$(jq -er '.images.browser' "$MANIFEST_FILE") ;;
+      browser-egress) expected_image=$(jq -er '.images["browser-egress"]' "$MANIFEST_FILE") ;;
+      converter-gateway) expected_image=$(jq -er '.images["converter-gateway"]' "$MANIFEST_FILE") ;;
+      converter-parser) expected_image=$(jq -er '.images["converter-parser"]' "$MANIFEST_FILE") ;;
+      *) return 1 ;;
+    esac
+    [ -z "${target_roles[$role]:-}" ] || return 1
+    target_roles[$role]=1
+    image=$(docker inspect -f '{{.Config.Image}}' "$container") || return 1
+    running=$(docker inspect -f '{{.State.Running}}' "$container") || return 1
+    health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container") \
+      || return 1
+    [ "$image" = "$expected_image" ] && [ "$running" = true ] && [ "$health" = healthy ] \
+      && [ "$(container_restart_policy "$container")" = unless-stopped ] || return 1
+  done
+
+  old_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$POST_PONR_OLD_SLOT") || return 1
+  [ -z "$old_output" ] || mapfile -t old_containers <<<"$old_output"
+  mapfile -t journal_old_containers < <(jq -r '.activeRuntimeContainers[]' "$RECOVERY_JOURNAL")
+  [ "${#old_containers[@]}" -eq 5 ] && [ "${#journal_old_containers[@]}" -eq 5 ] || return 1
+  old_full=$(
+    for container in "${old_containers[@]}"; do
+      docker inspect -f '{{.Id}}' "$container" || exit 1
+    done | sort
+  ) || return 1
+  journal_full=$(
+    for container in "${journal_old_containers[@]}"; do
+      docker inspect -f '{{.Id}}' "$container" || exit 1
+    done | sort
+  ) || return 1
+  [ "$old_full" = "$journal_full" ] || return 1
+  for container in "${old_containers[@]}"; do
+    managed_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.managed"}}' "$container") || return 1
+    slot_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.slot"}}' "$container") || return 1
+    commit_label=$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$container") || return 1
+    role=$(docker inspect -f '{{index .Config.Labels "com.kelion.role"}}' "$container") || return 1
+    running=$(docker inspect -f '{{.State.Running}}' "$container") || return 1
+    [ "$managed_label" = true ] && [ "$slot_label" = "$POST_PONR_OLD_SLOT" ] \
+      && [ "$commit_label" = "$POST_PONR_OLD_MARKER" ] && [ "$running" = false ] \
+      && [ "$(container_restart_policy "$container")" = unless-stopped ] || return 1
+    case "$role" in app|browser-worker|browser-egress|converter-gateway|converter-parser) ;; *) return 1 ;; esac
+    [ -z "${old_roles[$role]:-}" ] || return 1
+    old_roles[$role]=1
+  done
+
+  docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null | grep -qx true || return 1
+  docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' kelion-proxy 2>/dev/null \
+    | grep -qx healthy || return 1
+  [ "$(container_restart_policy kelion-proxy)" = unless-stopped ] || return 1
+  proxy_image=$(docker inspect -f '{{.Config.Image}}' kelion-proxy 2>/dev/null) || return 1
+  [ "$proxy_image" = 'caddy:2@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a' ] \
+    || return 1
+  if docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true; then return 1; fi
+
+  [ -f "$BUNDLE_DIR/Caddyfile" ] && [ ! -L "$BUNDLE_DIR/Caddyfile" ] || return 1
+  [ -f "$LIVE_CADDYFILE" ] && [ ! -L "$LIVE_CADDYFILE" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$LIVE_CADDYFILE")" = '0:0:644:1' ] || return 1
+  POST_PONR_CADDY_SHA256=$(sha256sum "$BUNDLE_DIR/Caddyfile" | awk '{print $1}') || return 1
+  [ "$(sha256sum "$LIVE_CADDYFILE" | awk '{print $1}')" = "$POST_PONR_CADDY_SHA256" ] || return 1
+  POST_PONR_OLD_UPSTREAM_SHA256=$(post_ponr_canonical_upstream_sha256 "$POST_PONR_OLD_SLOT") \
+    || return 1
+  POST_PONR_TARGET_UPSTREAM_SHA256=$(post_ponr_canonical_upstream_sha256 "$POST_PONR_TARGET_SLOT") \
+    || return 1
+  [ -f "$UPSTREAM_FILE" ] && [ ! -L "$UPSTREAM_FILE" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UPSTREAM_FILE")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$UPSTREAM_FILE" | awk '{print $1}')" = "$POST_PONR_TARGET_UPSTREAM_SHA256" ] \
+    || return 1
+
+  for gate_path in "$ROOT/config/codex-worker.env" "$ROOT/config/constructor-publisher.env" \
+    "$ROOT/config/constructor-release.env"; do
+    if [ -e "$gate_path" ] || [ -L "$gate_path" ]; then
+      [ -f "$gate_path" ] && [ ! -L "$gate_path" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$gate_path")" = '0:0:640:1' ] || return 1
+      gate_sha=$(sha256sum "$gate_path" | awk '{print $1}') || return 1
+      [[ "$gate_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+      gate_hashes+=("$gate_sha")
+    else
+      gate_hashes+=(absent)
+    fi
+  done
+  if [ "${gate_hashes[0]}" = absent ]; then
+    [ "${gate_hashes[1]}" = absent ] && [ "${gate_hashes[2]}" = absent ] || return 1
+  else
+    [ "${gate_hashes[1]}" != absent ] && [ "${gate_hashes[2]}" != absent ] || return 1
+  fi
+  POST_PONR_GATE_WORKER_SHA256=${gate_hashes[0]}
+  POST_PONR_GATE_PUBLISHER_SHA256=${gate_hashes[1]}
+  POST_PONR_GATE_RELEASE_SHA256=${gate_hashes[2]}
+
+  [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
+    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending" || return 1
+  for gate_path in "$RUNTIME_ROOT/constructor-activation.journal" \
+    "$RUNTIME_ROOT/constructor-gate-refresh.journal" /run/kelion/runtime-config-recovery.ready \
+    /run/kelion/constructor-activation.pending /etc/kelion/codex-worker.enabled \
+    /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled; do
+    [ ! -e "$gate_path" ] && [ ! -L "$gate_path" ] || return 1
+  done
+  post_ponr_release_surface_proof "$expected_mode"
+}
+
+post_ponr_existing_quiesce_proof() {
+  local phase caddy_snapshot upstream_snapshot
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] || return 1
+  jq -e --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" \
+    --arg oldMarker "$POST_PONR_OLD_MARKER" --arg previousVersion "$POST_PONR_PREVIOUS_VERSION" \
+    --arg caddySha "$POST_PONR_CADDY_SHA256" --arg oldUpstreamSha "$POST_PONR_OLD_UPSTREAM_SHA256" \
+    --arg targetUpstreamSha "$POST_PONR_TARGET_UPSTREAM_SHA256" \
+    --arg worker "$POST_PONR_GATE_WORKER_SHA256" --arg publisher "$POST_PONR_GATE_PUBLISHER_SHA256" \
+    --arg release "$POST_PONR_GATE_RELEASE_SHA256" '
+      .schema == 2 and .requestId == $requestId and .commit == $commit and
+      (.phase == "active-prepared" or .phase == "active-published" or
+        .phase == "gate-prepared" or .phase == "gate-committed") and
+      .activeBefore == $oldMarker and .activeVersionBefore == $previousVersion and
+      .legacyContainers == [] and .legacyRestartPolicies == {} and
+      .proxyIntent.activeSlotBefore == "green" and .proxyIntent.targetSlot == "blue" and
+      .proxyIntent.managedProxyWasRunning == true and .proxyIntent.legacyProxyWasRunning == false and
+      .proxyIntent.legacyProxyRestartPolicy == null and
+      .proxyIntent.caddyfilePresent == true and
+      (.proxyIntent.caddyfileSnapshot | strings |
+        test("^/root/kelion/runtime/caddyfile-rollback\\.[A-Za-z0-9]+$")) and
+      .proxyIntent.caddyfileSha256 == $caddySha and .proxyIntent.oldUpstreamPresent == true and
+      (.proxyIntent.oldUpstreamSnapshot | strings |
+        test("^/root/kelion/runtime/upstream-rollback\\.[A-Za-z0-9]+$")) and
+      .proxyIntent.oldUpstreamSha256 == $oldUpstreamSha and
+      .proxyIntent.targetCaddyfileSha256 == $caddySha and
+      .proxyIntent.targetUpstreamSha256 == $targetUpstreamSha and
+      .gateSha256 == {worker:$worker,publisher:$publisher,release:$release} and
+      ((.phase != "gate-prepared" and .phase != "gate-committed") or
+        ([.targetGateSha256.worker,.targetGateSha256.publisher,.targetGateSha256.release] |
+          (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent")))) and
+      (.phase != "gate-committed" or .committedGateSha256 == .targetGateSha256)
+    ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" >/dev/null || return 1
+  phase=$(jq -er '.phase' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") || return 1
+  caddy_snapshot=$(jq -er '.proxyIntent.caddyfileSnapshot' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") || return 1
+  upstream_snapshot=$(jq -er '.proxyIntent.oldUpstreamSnapshot' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || return 1
+  [ -f "$caddy_snapshot" ] && [ ! -L "$caddy_snapshot" ] \
+    && [ "$(realpath -e -- "$caddy_snapshot")" = "$caddy_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$caddy_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$POST_PONR_CADDY_SHA256" ] \
+    || return 1
+  [ -f "$upstream_snapshot" ] && [ ! -L "$upstream_snapshot" ] \
+    && [ "$(realpath -e -- "$upstream_snapshot")" = "$upstream_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$upstream_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$POST_PONR_OLD_UPSTREAM_SHA256" ] \
+    || return 1
+  printf '%s' "$phase"
+}
+
+write_reconstructed_active_prepared_journal() {
+  local temporary='' caddy_snapshot='' upstream_snapshot='' journal_installed=0
+  [ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    || return 1
+  [ -f "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+    && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/runtime-config-cutover.journal")" = '0:0:600:1' ] \
+    && jq -e '.schema == 1 and .phase == "prepared" and
+      (.transactionRoot | strings | test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$"))' \
+      "$RUNTIME_ROOT/runtime-config-cutover.journal" >/dev/null || return 1
+  caddy_snapshot=$(mktemp "$RUNTIME_ROOT/caddyfile-rollback.XXXXXX") || return 1
+  upstream_snapshot=$(mktemp "$RUNTIME_ROOT/upstream-rollback.XXXXXX") \
+    || { rm -f -- "$caddy_snapshot"; return 1; }
+  if ! install -o root -g root -m 0600 "$LIVE_CADDYFILE" "$caddy_snapshot" \
+    || ! printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' \
+      "$POST_PONR_OLD_SLOT" > "$upstream_snapshot" \
+    || ! chown root:root "$upstream_snapshot" || ! chmod 0600 "$upstream_snapshot" \
+    || ! fsync_release_artifact "$caddy_snapshot" file \
+    || ! fsync_release_artifact "$upstream_snapshot" file \
+    || ! fsync_release_artifact "$RUNTIME_ROOT" directory; then
+    rm -f -- "$caddy_snapshot" "$upstream_snapshot"
+    return 1
+  fi
+  [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$POST_PONR_CADDY_SHA256" ] \
+    && [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$POST_PONR_OLD_UPSTREAM_SHA256" ] \
+    || { rm -f -- "$caddy_snapshot" "$upstream_snapshot"; return 1; }
+  temporary=$(mktemp "$RUNTIME_ROOT/.constructor-deploy-quiesce.XXXXXX") \
+    || { rm -f -- "$caddy_snapshot" "$upstream_snapshot"; return 1; }
+  if ! jq -n --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" \
+      --arg activeBefore "$POST_PONR_OLD_MARKER" --arg activeVersionBefore "$POST_PONR_PREVIOUS_VERSION" \
+      --arg caddySnapshot "$caddy_snapshot" --arg caddySha "$POST_PONR_CADDY_SHA256" \
+      --arg upstreamSnapshot "$upstream_snapshot" --arg oldUpstreamSha "$POST_PONR_OLD_UPSTREAM_SHA256" \
+      --arg targetUpstreamSha "$POST_PONR_TARGET_UPSTREAM_SHA256" \
+      --arg worker "$POST_PONR_GATE_WORKER_SHA256" --arg publisher "$POST_PONR_GATE_PUBLISHER_SHA256" \
+      --arg release "$POST_PONR_GATE_RELEASE_SHA256" '
+        {schema:2,phase:"active-prepared",requestId:$requestId,commit:$commit,
+          activeBefore:$activeBefore,activeVersionBefore:$activeVersionBefore,
+          legacyContainers:[],legacyRestartPolicies:{},
+          proxyIntent:{activeSlotBefore:"green",targetSlot:"blue",managedProxyWasRunning:true,
+            legacyProxyWasRunning:false,legacyProxyRestartPolicy:null,caddyfilePresent:true,
+            caddyfileSnapshot:$caddySnapshot,caddyfileSha256:$caddySha,oldUpstreamPresent:true,
+            oldUpstreamSnapshot:$upstreamSnapshot,oldUpstreamSha256:$oldUpstreamSha,
+            targetCaddyfileSha256:$caddySha,targetUpstreamSha256:$targetUpstreamSha},
+          gateSha256:{worker:$worker,publisher:$publisher,release:$release}}
+      ' > "$temporary" \
+    || ! chown root:root "$temporary" || ! chmod 0600 "$temporary" \
+    || ! fsync_release_artifact "$temporary" file; then
+    rm -f -- "$temporary" "$caddy_snapshot" "$upstream_snapshot"
+    return 1
+  fi
+  if ! mv -f -- "$temporary" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; then
+    rm -f -- "$temporary" "$caddy_snapshot" "$upstream_snapshot"
+    return 1
+  fi
+  journal_installed=1
+  # După rename jurnalul poate fi observat la reboot. Dacă fsync-ul directorului
+  # eșuează, snapshoturile referite rămân intenționat intacte pentru retry.
+  fsync_release_artifact "$RUNTIME_ROOT" directory || return 1
+  [ "$journal_installed" = 1 ] && post_ponr_existing_quiesce_proof >/dev/null
+}
+
+recover_lost_post_ponr_quiesce() {
+  local phase='' marker helper_failed=0
+  [ "$RECOVER_LOST_POST_PONR" = 1 ] || return 0
+  [ "$COMMIT_SHA" = "$POST_PONR_INCIDENT_COMMIT" ] \
+    && [ "$KELION_RELEASE_REQUEST_ID" = "$POST_PONR_INCIDENT_REQUEST" ] \
+    && [ "$KELION_RELEASE_WORKFLOW_RUN_ID" = "$POST_PONR_INCIDENT_RELEASE_RUN" ] \
+    && [ "$KELION_CI_RUN_ID" = "$POST_PONR_INCIDENT_CI_RUN" ] \
+    && [ "$KELION_BUILD_RUN_ID" = "$POST_PONR_INCIDENT_BUILD_RUN" ] \
+    || return 1
+
+  if [ -f "$RUNTIME_ROOT/last-release.json" ] && [ ! -L "$RUNTIME_ROOT/last-release.json" ] \
+    && jq -e --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" '
+      .schema == 1 and .requestId == $requestId and .commit == $commit
+    ' "$RUNTIME_ROOT/last-release.json" >/dev/null 2>&1; then
+    post_ponr_completion_record_authority_proof || return 1
+    # Completion-ul poate preceda clear-ul receiptului/quiesce sau ledger success.
+    # Recovery-ul canonic de mai jos finalizează exact gate/Constructor/scheduler.
+    return 0
+  fi
+
+  if [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+    [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+      || return 1
+    phase=$(jq -er --arg requestId "$POST_PONR_INCIDENT_REQUEST" --arg commit "$POST_PONR_INCIDENT_COMMIT" '
+      select(.schema == 2 and .requestId == $requestId and .commit == $commit and
+        (.phase == "active-prepared" or .phase == "active-published" or
+          .phase == "gate-prepared" or .phase == "gate-committed")) | .phase
+    ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") || return 1
+    case "$phase" in
+      active-published|gate-prepared|gate-committed)
+        # Aceste faze au deja autoritate canonică proprie pentru marker/gate și
+        # eventualele lor jurnale tranzitorii. Nu reinterpretăm snapshotul vechi.
+        post_ponr_incident_authority_proof
+        return
+        ;;
+      active-prepared) ;;
+      *) return 1 ;;
+    esac
+  else
+    post_ponr_candidate_topology_proof prepared || return 1
+    write_reconstructed_active_prepared_journal || return 1
+    phase=active-prepared
+  fi
+
+  marker=$(sed -n '1p' "$RELEASE_STATE_ROOT/active") || return 1
+  # Rehidratăm întotdeauna probele din receipt și din topologia live. Astfel un
+  # crash după publicarea jurnalului sintetic, dar înainte de pasul următor, nu
+  # depinde de variabilele procesului dispărut.
+  if [ "$marker" = "$POST_PONR_INCIDENT_COMMIT" ]; then
+    post_ponr_candidate_topology_proof active || return 1
+  else
+    post_ponr_candidate_topology_proof prepared || return 1
+  fi
+  case "$phase:$marker" in
+    active-prepared:"$POST_PONR_OLD_MARKER")
+      post_ponr_candidate_topology_proof prepared || return 1
+      [ "$(post_ponr_existing_quiesce_proof)" = active-prepared ] || return 1
+      if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+        || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ]; then
+        [ -f "$BUNDLE_DIR/lib/runtime-config-cutover.sh" ] \
+          && [ ! -L "$BUNDLE_DIR/lib/runtime-config-cutover.sh" ] || return 1
+        [ -f "$ROOT/config/compose.production.yml" ] \
+          && [ ! -L "$ROOT/config/compose.production.yml" ] \
+          && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/config/compose.production.yml")" = '0:0:444:1' ] \
+          || return 1
+        exec 9>&8
+        KELION_CUTOVER_LOCK_HELD=1 \
+        KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$POST_PONR_INCIDENT_REQUEST" \
+        KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$POST_PONR_INCIDENT_COMMIT" \
+          bash "$BUNDLE_DIR/lib/runtime-config-cutover.sh" --discard-unmutated-prepared \
+            "$POST_PONR_INCIDENT_COMMIT" "$ROOT/config/compose.production.yml" || helper_failed=1
+        exec 9>&-
+        [ "$helper_failed" = 0 ] || return 1
+      fi
+      [ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+        && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || return 1
+      # Niciun restore DB nu este permis aici: receiptul PONR rămâne autoritatea,
+      # iar fluxul normal continuă exclusiv prin roll-forward.
+      post_ponr_candidate_topology_proof prepared
+      ;;
+    active-prepared:"$POST_PONR_INCIDENT_COMMIT")
+      [ ! -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
+        && [ ! -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || return 1
+      post_ponr_candidate_topology_proof active || return 1
+      [ "$(post_ponr_existing_quiesce_proof)" = active-prepared ] || return 1
+      write_constructor_deploy_quiesce_journal active-published || return 1
+      [ "$(post_ponr_existing_quiesce_proof)" = active-published ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
   [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
     || die 'lock-ul de publicare nu este fișier regulat'
@@ -1156,6 +1691,21 @@ chmod 0600 "/proc/$$/fd/8"
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'pathul lock-ului a fost schimbat în timpul normalizării'
 flock 8
+[ "$(readlink /proc/$$/fd/8)" = "$PUBLICATION_LOCK" ] \
+  && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8)" = '0:0:600:1' ] \
+  && [ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'lock-ul de publicare s-a schimbat după flock'
+
+CONSTRUCTOR_UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+[ ! -e "$CONSTRUCTOR_UPGRADE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_UPGRADE_JOURNAL" ] \
+  || die 'un upgrade Constructor exterior este pending; release-ul este refuzat'
+[ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  || die 'o barieră unit-only Constructor este pending; release-ul este refuzat'
+
+recover_lost_post_ponr_quiesce \
+  || die 'recovery-ul incidentului post-PONR nu a putut dovedi și reconstitui exact starea'
 
 release_request_state=none
 release_pre_ponr_restored=0
@@ -1200,8 +1750,40 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
   [ -f "$gate_recovery_journal" ] && [ ! -L "$gate_recovery_journal" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_journal")" = '0:0:600' ] \
     || die 'jurnalul gate existent este nesigur'
-  gate_recovery_root=$(jq -er 'select(.schema == 1 and (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
+  gate_recovery_root=$(jq -er 'select(
+    (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+    .schema == 1 and (.commit | strings | test("^[0-9a-f]{40}$")) and
+    (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and
+    (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
     || die 'jurnalul gate existent este invalid'
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul gate nu are outer journal canonic pentru owner'
+  gate_recovery_owner_request_id=$(jq -er '
+    select((keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+      "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema",
+      "targetGateSha256"] | sort) and
+      .schema == 2 and .phase == "gate-prepared" and
+      (.requestId | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) and
+      (.commit | strings | test("^[0-9a-f]{40}$")) and
+      (.activeBefore | strings | test("^([0-9a-f]{40}|legacy)$")) and
+      (.activeVersionBefore | strings | test("^[0-9a-f]{7,40}$")) and
+      (.legacyContainers | type == "array") and (.legacyRestartPolicies | type == "object") and
+      (.proxyIntent | type == "object") and
+      (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.gateSha256.worker,.gateSha256.publisher,.gateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent"))) and
+      (.targetGateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.targetGateSha256.worker,.targetGateSha256.publisher,.targetGateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent")))) | .requestId
+  ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica requestul owner'
+  gate_recovery_owner_commit=$(jq -er '.commit' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica commitul owner'
+  [ "$gate_recovery_owner_request_id" = "$KELION_RELEASE_REQUEST_ID" ] \
+    && [ "$gate_recovery_owner_commit" = "$COMMIT_SHA" ] \
+    && [ "$(jq -er '.commit' "$gate_recovery_journal")" = "$gate_recovery_owner_commit" ] \
+    || die 'tupla ownerului gate nu corespunde outer/gate/current release'
   [ -d "$gate_recovery_root" ] && [ ! -L "$gate_recovery_root" ] \
     && [ "$(realpath -e -- "$gate_recovery_root")" = "$gate_recovery_root" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root")" = '0:0:700' ] \
@@ -1216,30 +1798,176 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root/recovery-compose.yml")" = '0:0:444' ] \
     || die 'compose-ul jurnalizat pentru gate este nesigur'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$gate_recovery_owner_request_id" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$gate_recovery_owner_commit" \
+    "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
     || die 'recovery-ul gate jurnalizat a eșuat'
   exec 9>&-
 fi
 
-# Jurnalele runtime/activare sunt recuperate cu helperul instalat care le-a
-# creat. Abia după ce starea veche este coerentă putem înlocui helperul cu
-# versiunea din bundle-ul candidat.
+# Jurnalele runtime/activare sunt recuperate în mod normal cu helperul care le-a
+# creat. Excepția de mai jos este o migrare one-shot, dublu pin-uită,
+# pentru generația care a inclus jurnalul canonic în globul directoarelor
+# `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
+# runtime/gate/deploy journals mixte.
+readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153
+
+validate_compatible_activation_blocker() {
+  local blocker=$1
+  [ -f "$blocker" ] && [ ! -L "$blocker" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$blocker")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$blocker")" -eq 1 ] \
+    && grep -qx 'schema=1' "$blocker"
+}
+
+recover_runtime_activation_before_upgrade() {
+  local live_helper=$ROOT/bin/runtime-config-cutover.sh
+  local live_compose=$ROOT/config/compose.production.yml
+  local candidate_helper=$BUNDLE_DIR/lib/runtime-config-cutover.sh
+  local activation_journal=$RUNTIME_ROOT/constructor-activation.journal
+  local unit_migration_pending=$RUNTIME_ROOT/constructor-unit-migration.pending
+  local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
+  local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal
+  local live_sha candidate_sha recovery_helper activation_operation='' activation_root='' activation_identity=''
+  local temporary='' status=0 cleanup_failed=0 use_compatible_activation_resume=0
+  local incompatible activation_candidate
+
+  [ -f "$live_helper" ] && [ ! -L "$live_helper" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$live_helper")" = '0:0:500:1' ] \
+    || return 1
+  [ -f "$live_compose" ] && [ ! -L "$live_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$live_compose")" = '0:0:444:1' ] \
+    || return 1
+  live_sha=$(sha256sum "$live_helper" | awk '{print $1}') || return 1
+  recovery_helper=$live_helper
+
+  if { [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; } \
+    && [ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]; then
+    for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; do
+      [ ! -e "$incompatible" ] && [ ! -L "$incompatible" ] || return 1
+    done
+    if [ -e "$unit_migration_pending" ] || [ -L "$unit_migration_pending" ]; then
+      validate_compatible_activation_blocker "$unit_migration_pending" || return 1
+    fi
+    [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+      || return 1
+    activation_operation=$(jq -er '
+      select(.schema == 2 and
+        (.phase == "prepared" or .phase == "quiesced" or .phase == "applied") and
+        .operation == "activate-worker-publisher" and
+        (.activationRoot | strings |
+          test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))) |
+      .operation
+    ' "$activation_journal") || return 1
+    activation_root=$(jq -er '.activationRoot' "$activation_journal") || return 1
+    [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+      && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+      || return 1
+    activation_identity=$(stat -Lc '%d:%i' "$activation_root") || return 1
+    [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
+    candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
+    [ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] || return 1
+
+    temporary=$(mktemp /run/kelion-activation-recovery-helper.XXXXXX) || return 1
+    if ! install -o root -g root -m 0500 "$candidate_helper" "$temporary" \
+      || [ -L "$temporary" ] \
+      || [ "$(stat -Lc '%u:%g:%a:%h' "$temporary")" != '0:0:500:1' ] \
+      || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] \
+      || ! fsync_release_artifact "$temporary" file; then
+      rm -f -- "$temporary" || true
+      return 1
+    fi
+    recovery_helper=$temporary
+    use_compatible_activation_resume=1
+  fi
+
+  exec 9>&8 || status=1
+  if [ "$status" = 0 ] && [ "$use_compatible_activation_resume" = 1 ]; then
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_ACTIVATION_RESUME_OPERATION="$activation_operation" \
+      bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+        && jq -e --arg operation "$activation_operation" --arg activationRoot "$activation_root" '
+          .schema == 2 and .phase == "applied" and .operation == $operation and
+          .activationRoot == $activationRoot
+        ' "$activation_journal" >/dev/null \
+        && [ ! -e /run/kelion/constructor-activation.pending ] \
+        && [ ! -L /run/kelion/constructor-activation.pending ] \
+        && [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+        && [ ! -L /run/kelion/runtime-config-recovery.ready ] \
+        && validate_compatible_activation_blocker "$unit_migration_pending" \
+        && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+        && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+        && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+        && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+        || status=1
+      if [ "$status" = 0 ]; then
+        validate_compatible_activation_blocker "$unit_migration_pending" || status=1
+        fsync_release_artifact "$unit_migration_pending" file || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -f -- "$activation_journal" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+          && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+          && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+          && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+          && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+          || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -rf --one-file-system -- "$activation_root" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+        [ ! -e "$activation_root" ] && [ ! -L "$activation_root" ] || status=1
+      fi
+    else
+      status=$?
+    fi
+    if [ "$status" = 0 ]; then
+      for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*; do
+        if [ -e "$activation_candidate" ] || [ -L "$activation_candidate" ]; then
+          status=1
+          break
+        fi
+      done
+    fi
+    if [ "$status" = 0 ]; then
+      [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+        && [ ! -L /run/kelion/runtime-config-recovery.ready ] || status=1
+    fi
+  elif [ "$status" = 0 ]; then
+    if KELION_CUTOVER_LOCK_HELD=1 \
+      KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+      KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+      "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      status=0
+    else
+      status=$?
+    fi
+  fi
+  exec 9>&- || cleanup_failed=1
+
+  if [ -n "$temporary" ]; then
+    rm -f -- "$temporary" || cleanup_failed=1
+    fsync_release_artifact /run directory || cleanup_failed=1
+  fi
+  [ "$status" = 0 ] && [ "$cleanup_failed" = 0 ]
+}
+
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
+  || [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
-  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ] \
-    || die 'helperul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
-  [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
-    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
-    || die 'compose-ul existent nu poate recupera jurnalul runtime/activare înainte de upgrade'
-  exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 \
-  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
-  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
-    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced \
-    || die 'recovery-ul runtime/activare cu helperul existent a eșuat'
-  exec 9>&-
+  recover_runtime_activation_before_upgrade \
+    || die 'recovery-ul runtime/activare pre-upgrade a eșuat fail-closed'
 fi
 
 # Upgrade atomic și fsync al recovery gate-ului de boot înainte de orice altă
@@ -1424,7 +2152,7 @@ KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --validate-env-
 exec 9>&-
 
 declare -A allowed_config=()
-for name in NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE; do
+for name in NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_ADMIN_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE; do
   allowed_config[$name]=1
 done
 while IFS='=' read -r name _value; do
@@ -1500,18 +2228,30 @@ esac
 [[ "$(config_value REVOLUT_ORDER_EXPIRY)" =~ ^PT([1-9][0-9]{0,2}M|[1-9][0-9]?H)$ ]] \
   || die 'REVOLUT_ORDER_EXPIRY trebuie să fie o durată ISO-8601 în minute sau ore'
 
-secret_files=(openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key migration-backup-proof-key)
+secret_files=(openai-project-key openai-admin-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key migration-backup-proof-key)
 [ "$(stat -c '%u:%g:%a' "$SECRET_ROOT")" = '0:10050:750' ] || die 'directorul de secrete trebuie root:10050 mode 0750'
 for name in "${secret_files[@]}"; do
   path=$SECRET_ROOT/$name
   [ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || die "secret-file lipsă: $name"
   [ "$(stat -c '%u:%g:%a' "$path")" = '0:10050:440' ] || die "ACL invalid pentru secret-file $name"
 done
-[ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
-  && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
-  || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
-case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in sk-proj-*) ;; *) die 'cheia OpenAI runtime nu este project-scoped' ;; esac
-[ ! -e "$SECRET_ROOT/openai-admin-key" ] || die 'cheia OpenAI admin nu poate exista în secret root-ul aplicației'
+constructor_release_enabled=$(config_value CONSTRUCTOR_RELEASE_ENABLED)
+if [ "$constructor_release_enabled" = 1 ]; then
+  [ "$(wc -l < "$SECRET_ROOT/github-release-oauth-token")" -eq 1 ] \
+    && [ "$(awk 'NR == 1 { print length; exit }' "$SECRET_ROOT/github-release-oauth-token")" -ge 32 ] \
+    || die 'github-release-oauth-token trebuie să fie o credentială dedicată validă'
+else
+  case "$(sed -n '1p' "$SECRET_ROOT/github-release-oauth-token")" in
+    disabled-placeholder-*) ;;
+    *) die 'github-release-oauth-token trebuie să fie o credentială dedicată validă' ;;
+  esac
+fi
+LC_ALL=C awk 'NR != 1 || $0 !~ /^sk-proj-[A-Za-z0-9_-]{16,}$/ { invalid = 1 } END { exit !(NR == 1 && !invalid) }' \
+  "$SECRET_ROOT/openai-project-key" \
+  || die 'cheia OpenAI runtime nu este project-scoped sau are format invalid'
+LC_ALL=C awk 'NR != 1 || $0 !~ /^sk-admin-[A-Za-z0-9_-]{16,}$/ { invalid = 1 } END { exit !(NR == 1 && !invalid) }' \
+  "$SECRET_ROOT/openai-admin-key" \
+  || die 'cheia OpenAI Admin trebuie să fie organization-admin, backend-only și validă'
 for name in revolut-merchant-secret-key revolut-webhook-signing-secret; do
   path=$SECRET_ROOT/$name
   [ "$(wc -l < "$path")" -eq 1 ] || die "$name trebuie să conțină exact o linie"
@@ -1629,50 +2369,62 @@ try {
     "release_candidate_receipt_sha256", "release_intent_receipt_sha256",
   ]
   const hasV2Schema = v2Columns.every((name) => columns.has(name))
-  const ownershipPredicate = hasV2Schema ? `
-        COALESCE(
-          p.release_protocol_version = 2
-          AND p.release_request_id = $3::uuid
-          AND p.release_target_sha = $4
-          AND p.merged_commit_sha = $4
-          AND p.release_target_receipt_sha256 IS NOT NULL
-          AND p.release_ci_run_id = $5::bigint
-          AND p.release_build_run_id = $6::bigint
-          AND p.release_artifact_id IS NOT NULL
-          AND p.release_candidate_receipt_sha256 IS NOT NULL
-          AND p.release_intent_receipt_sha256 IS NOT NULL
-          AND (p.release_workflow_run_id IS NULL OR p.release_workflow_run_id = $7::bigint),
-          false
-        )
-  ` : `
-        COALESCE(
-          p.release_request_id = $3::uuid
-          AND p.merged_commit_sha = $4
-          AND p.release_workflow_run_id = $7::bigint
-          AND p.release_dispatch_receipt_sha256 IS NOT NULL,
-          false
-        )
-  `
+  const sharedOwnershipValues = [
+    "running",
+    ["merged", "release_dispatched"],
+    process.env.KELION_RELEASE_REQUEST_ID,
+    process.env.KELION_RELEASE_COMMIT_SHA,
+  ]
+  const ownership = hasV2Schema ? {
+    predicate: `
+          COALESCE(
+            p.release_protocol_version = 2
+            AND p.release_request_id = $3::uuid
+            AND p.release_target_sha = $4::text
+            AND p.merged_commit_sha = $4::text
+            AND p.release_target_receipt_sha256 IS NOT NULL
+            AND p.release_ci_run_id = $5::bigint
+            AND p.release_build_run_id = $6::bigint
+            AND p.release_artifact_id IS NOT NULL
+            AND p.release_candidate_receipt_sha256 IS NOT NULL
+            AND p.release_intent_receipt_sha256 IS NOT NULL
+            AND (p.release_workflow_run_id IS NULL OR p.release_workflow_run_id = $7::bigint),
+            false
+          )
+    `,
+    values: [
+      ...sharedOwnershipValues,
+      process.env.KELION_RELEASE_CI_RUN_ID,
+      process.env.KELION_RELEASE_BUILD_RUN_ID,
+      process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
+    ],
+  } : {
+    predicate: `
+          COALESCE(
+            p.release_request_id = $3::uuid
+            AND p.merged_commit_sha = $4::text
+            AND p.release_workflow_run_id = $5::bigint
+            AND p.release_dispatch_receipt_sha256 IS NOT NULL,
+            false
+          )
+    `,
+    values: [
+      ...sharedOwnershipValues,
+      process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
+    ],
+  }
   const result = await client.query(`
     WITH in_flight AS (
-      SELECT (${ownershipPredicate}) AS is_current
+      SELECT (${ownership.predicate}) AS is_current
         FROM build_jobs b
         JOIN constructor_pipeline p ON p.job_id = b.id
-       WHERE b.status = $1
+       WHERE b.status = $1::text
          AND b.constructor_stage = ANY($2::text[])
     )
     SELECT count(*) FILTER (WHERE is_current IS NOT TRUE)::integer AS blocking,
            count(*) FILTER (WHERE is_current IS TRUE)::integer AS current
       FROM in_flight
-  `, [
-    "running",
-    ["merged", "release_dispatched"],
-    process.env.KELION_RELEASE_REQUEST_ID,
-    process.env.KELION_RELEASE_COMMIT_SHA,
-    process.env.KELION_RELEASE_CI_RUN_ID,
-    process.env.KELION_RELEASE_BUILD_RUN_ID,
-    process.env.KELION_RELEASE_WORKFLOW_RUN_ID,
-  ])
+  `, ownership.values)
   const row = result.rows[0]
   process.stdout.write(`${row?.blocking ?? "invalid"}:${row?.current ?? "invalid"}`)
 } finally {
@@ -2666,6 +3418,38 @@ constructor_release_services=(
   kelion-constructor-publisher.service
   kelion-constructor-release.service
 )
+
+stop_and_disable_constructor_release_timer() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+stop_and_disable_constructor_release_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+validate_constructor_release_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
 constructor_release_auxiliary_services=(
   kelion-constructor-sync.service
 )
@@ -2702,16 +3486,24 @@ force_quiesce_constructor_release() {
       fsync_release_artifact "$ready_root" directory || return 1
     fi
   fi
-  for unit in "${constructor_release_timers[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
-  for unit in "${constructor_release_services[@]}"; do systemctl disable --now "$unit" >/dev/null || failed=1; done
+  for unit in "${constructor_release_timers[@]}"; do stop_and_disable_constructor_release_timer "$unit" || failed=1; done
+  for unit in "${constructor_release_services[@]}"; do
+    stop_and_disable_constructor_release_service "$unit" || failed=1
+  done
   for unit in "${constructor_release_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl stop "$unit" >/dev/null || failed=1
+    systemctl stop "$unit" >/dev/null 2>&1 || :
   done
+  systemctl daemon-reload || failed=1
   for unit in "${constructor_release_timers[@]}" "${constructor_release_services[@]}" "${constructor_release_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
     case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+    case "$unit" in
+      kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+      kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+        validate_constructor_release_unit_file_state "$unit" || failed=1 ;;
+    esac
     if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
   done
   [ "$failed" = 0 ]
@@ -3027,6 +3819,7 @@ constructor_gate_matches_candidate() {
   fi
   [ "$config_count" = 3 ] || return 1
   expected_checks=$(config_value CONSTRUCTOR_REQUIRED_CHECKS)
+  release_expected_checks='verify,container-isolation'
   for path in "$worker_env" "$publisher_env" "$release_env"; do
     [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ] || return 1
   done
@@ -3037,7 +3830,7 @@ constructor_gate_matches_candidate() {
   [ "$(grep -c '^CONSTRUCTOR_REQUIRED_CHECKS=' "$publisher_env")" -eq 1 ] \
     && grep -qx "CONSTRUCTOR_REQUIRED_CHECKS=$expected_checks" "$publisher_env" || return 1
   [ "$(grep -c '^CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=' "$release_env")" -eq 1 ] \
-    && grep -qx "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$expected_checks" "$release_env" || return 1
+    && grep -qx "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=$release_expected_checks" "$release_env" || return 1
   for index in "${!constructor_release_markers[@]}"; do
     if [ -f "${constructor_release_markers[$index]}" ]; then
       [ "$(grep -c "^${constructor_release_exec_flags[$index]}=1$" "${constructor_release_configs[$index]}")" -eq 1 ] \
@@ -3061,6 +3854,10 @@ on_release_exit() {
     if [ "$release_cutover_committed" = 1 ] || [ "$release_rollforward_only" = 1 ]; then
       printf 'release: eșec după commitul app+gate; candidatul rămâne activ, iar Constructor rămâne quiesced pentru recovery exact\n' >&2
     elif [ "$point_of_no_return" = 1 ]; then
+      # După PONR nu mai există nicio cale sigură spre generația veche: markerul,
+      # gate-ul și unitățile rămân fail-closed până la roll-forward-ul exact.
+      release_rollforward_only=1
+      gate_matches_active_release=0
       recover_schedule_after_point_of_no_return \
         || printf 'release: RECOVERY INCOMPLET pentru schedulerul de backup\n' >&2
       printf 'release: eșec după point-of-no-return; candidatul, DB și proxy-ul rămân nemodificate\n' >&2
@@ -3469,14 +4266,17 @@ refresh_constructor_gate() (
   [ "$(stat -c '%u:%g:%a' "$token_file")" = '0:0:400' ] \
     || die 'ACL invalid pentru credentiala GHCR read-only folosită la gate'
   required_checks=$(config_value CONSTRUCTOR_REQUIRED_CHECKS)
+  release_required_checks='verify,container-isolation'
 
   stop_constructor_units() {
     local unit
     for unit in "${timers[@]}"; do systemctl disable --now "$unit" >/dev/null || return 1; done
-    for unit in "${services[@]}"; do systemctl disable --now "$unit" >/dev/null || return 1; done
+    for unit in "${services[@]}"; do stop_and_disable_constructor_release_service "$unit" || return 1; done
     for unit in "${timers[@]}" "${services[@]}"; do
       state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
       case "$state" in inactive|failed) ;; *) return 1 ;; esac
+      validate_constructor_release_unit_file_state "$unit" || return 1
+      [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
     done
   }
 
@@ -3517,7 +4317,10 @@ refresh_constructor_gate() (
         && [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
         && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ]; then
         exec 9>&8
-        if KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
+        if KELION_CUTOVER_LOCK_HELD=1 \
+          KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+          KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+          "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
           config_consistent=1
           journal_written=0
         else
@@ -3560,12 +4363,12 @@ refresh_constructor_gate() (
     registry_owner="${registry_owner%%/*}"
     authfile=$runtime/release-gate-auth.json
     rm -f -- "$authfile"
-    cat "$token_file" | runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin >/dev/null
-    if ! runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE" >/dev/null; then
-      runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null 2>&1 || true
+    cat "$token_file" | (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman login --authfile "$authfile" ghcr.io --username "$registry_owner" --password-stdin) >/dev/null
+    if ! (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman pull --authfile "$authfile" "$KELION_CODEX_GATE_IMAGE") >/dev/null; then
+      (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null 2>&1 || true
       exit 1
     fi
-    runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io >/dev/null
+    (cd "$runtime" && runuser -u "$user" -- env HOME="/var/lib/$user" XDG_RUNTIME_DIR="$runtime" podman logout --authfile "$authfile" ghcr.io) >/dev/null
     rm -f -- "$authfile"
     authfile=''
   done
@@ -3593,7 +4396,7 @@ refresh_constructor_gate() (
         ' "$target" > "$temporary"
         ;;
       release)
-        awk -F= -v checks="$required_checks" '
+        awk -F= -v checks="$release_required_checks" '
           $1 == "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS" { if (!checks_written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks; checks_written=1; next }
           { print }
           END { if (!checks_written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks }
@@ -3623,7 +4426,7 @@ refresh_constructor_gate() (
   assert_constructor_env_value "${staged[0]}" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "${staged[1]}" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "${staged[1]}" CONSTRUCTOR_REQUIRED_CHECKS "$required_checks"
-  assert_constructor_env_value "${staged[2]}" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$required_checks"
+  assert_constructor_env_value "${staged[2]}" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$release_required_checks"
   # Publicăm jurnalul numai după ce helperul curent a validat allowlist-ul și
   # setul obligatoriu complet pentru fiecare rol. Un config legacy invalid nu
   # poate crea astfel un jurnal pe care recovery-ul însuși l-ar refuza.
@@ -3671,13 +4474,16 @@ refresh_constructor_gate() (
     && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
     || die 'compose-ul persistent de recovery gate lipsește sau are ACL invalid'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
   exec 9>&-
   journal_written=0
   assert_constructor_env_value "$worker_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "$publisher_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"
   assert_constructor_env_value "$publisher_env" CONSTRUCTOR_REQUIRED_CHECKS "$required_checks"
-  assert_constructor_env_value "$release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$required_checks"
+  assert_constructor_env_value "$release_env" CONSTRUCTOR_RELEASE_REQUIRED_CHECKS "$release_required_checks"
   for path in "${targets[@]}"; do
     [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:640' ] \
       || die "config Constructor invalid după commit: $path"

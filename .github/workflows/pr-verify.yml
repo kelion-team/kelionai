@@ -71,6 +71,8 @@ jobs:
             scripts/verifica-contract-deploy.test.mjs \
             scripts/release-train-preflight.test.mjs \
             scripts/release-train-workflow.test.mjs \
+            scripts/vps-pr-remediator.test.mjs \
+            scripts/vps-release-verifier.test.mjs \
             ios/appstore-build.test.mjs \
             deploy/lib/create-migration-proof.test.mjs \
             deploy/lib/backup-schedule.test.mjs \
@@ -201,6 +203,7 @@ jobs:
             printf 'disabled-placeholder-%s\n' "$(openssl rand -hex 32)" > "/tmp/kelion-ci-secrets/$name"
           done
           printf 'sk-%s-%s\n' proj "$(openssl rand -hex 24)" > /tmp/kelion-ci-secrets/openai-project-key
+          printf 'sk-%s-%s\n' admin "$(openssl rand -hex 24)" > /tmp/kelion-ci-secrets/openai-admin-key
           printf '%s\n' 'postgresql://postgres@localhost/kelion_ci?host=/var/run/postgresql' > /tmp/kelion-ci-secrets/database-url
           ci_model_prefix=$(printf '%s%s' g pt-ci)
           cat > /tmp/kelion-ci-config/runtime.env <<ENV
@@ -210,10 +213,12 @@ jobs:
           FRONTEND_ORIGIN=https://ci.invalid
           ADMIN_EMAIL=owner@example.com
           OPENAI_API_KEY_FILE=/run/secrets/openai-project-key
+          OPENAI_ADMIN_KEY_FILE=/run/secrets/openai-admin-key
           OPENAI_LUNA_MODEL=${ci_model_prefix}-luna
           OPENAI_MEDIUM_MODEL=${ci_model_prefix}-medium
           OPENAI_HEAVY_MODEL=${ci_model_prefix}-heavy
           OPENAI_REALTIME_MODEL=${ci_model_prefix}-realtime
+          OPENAI_APPROVED_REALTIME_MODELS=${ci_model_prefix}-realtime,${ci_model_prefix}-realtime-transcription
           OPENAI_REALTIME_TRANSCRIPTION_MODEL=${ci_model_prefix}-realtime-transcription
           OPENAI_CALL_TRANSCRIPTION_MODEL=${ci_model_prefix}-call-transcription
           OPENAI_TTS_MODEL=${ci_model_prefix}-tts
@@ -234,6 +239,11 @@ jobs:
           CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret
           CONSTRUCTOR_RELEASE_ENABLED=0
           CONSTRUCTOR_RELEASE_SECRET_FILE=/run/secrets/constructor-release-secret
+          GITHUB_RELEASE_OAUTH_TOKEN_FILE=/run/secrets/github-release-oauth-token
+          CONSTRUCTOR_RETRY_BASE_SECONDS=60
+          CONSTRUCTOR_RETRY_MAX_SECONDS=1800
+          CONSTRUCTOR_EXTERNAL_RETRY_SECONDS=900
+          CONSTRUCTOR_REQUIRED_CHECKS=verify,container-isolation
           BROWSER_WORKER_SOCKET=/run/kelion-browser-api/browser.sock
           BROWSER_WORKER_SECRET_FILE=/run/secrets/browser-worker-secret
           CONVERTER_WORKER_SOCKET=/run/kelion-converter-api/converter.sock
@@ -281,6 +291,7 @@ jobs:
           PUSH_ENDPOINT_HOSTS=
           PUSH_MAX_SUBSCRIPTIONS=5
           GOOGLE_TTS_ENABLED=false
+          GOOGLE_TTS_VOICE=Charon
           SEARCH_ENABLED=false
           MAIL_ENABLED=false
           RELEASE_CANDIDATE_MODE=1

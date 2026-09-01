@@ -34,6 +34,9 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { cheltuieliAplicatiei } from '../services/cheltuieli.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { openaiAvailable } from '../services/openaiChat.js'
+import { openaiHealth } from '../services/openaiResponses.js'
+import { openaiHealthAction } from '../services/openaiHealth.js'
+import { openaiAdminSnapshot } from '../services/openaiAdmin.js'
 import { motivCatalogOpenAI, reimprospateazaCatalogOpenAI } from '../services/openaiModele.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -339,11 +342,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const [vps, serperBalance] = await Promise.all([
+    const [vps, serperBalance, openai, openaiAdmin] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
       // /account endpoint. Cached 5 min in the service.
       getSerperBalance(),
+      openaiHealth(),
+      openaiAdminSnapshot(),
     ])
     return reply.send({
       active: 'openai',
@@ -368,11 +373,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         error: serperBalance.error,
       },
       openai: {
-        checked: true,
-        serving: openaiAvailable(),
-        // Costul real vine dintr-un import separat al OpenAI Costs API; runtime
-        // nu transformă tokeni în dolari cu tarife scrise în cod.
-        monthUsd: undefined,
+        checked: openai.ok,
+        serving: openai.serving,
+        status: openai.status,
+        class: openai.class,
+        providerCode: openai.providerCode,
+        action: openaiHealthAction(openai.class),
+        // Independent control-plane measurement. It never changes the
+        // inference `serving` result above and never exposes the Admin key.
+        admin: openaiAdmin,
+        monthUsd: openaiAdmin.costs.available ? openaiAdmin.costs.monthUsd : undefined,
       },
       // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
       // desena, tipul din frontend mințea (loaded/remaining nu mai existau),
@@ -391,6 +401,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const citire = await citesteRezumatCost()
     if (!citire.citit) return reply.code(503).send({ error: 'costuri_necitibile', motiv: citire.motiv })
     const costs = citire.valoare
+    const providerOpenAI = await openaiAdminSnapshot()
     return reply.send({
       // (Câmpurile `spent` și `profit` au fost SCOASE — auditul admin, 3 aug:
       // tabul Bani nu le desena (citește spentUsd/masurat/estimat/today), iar
@@ -413,6 +424,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       masurat: costs.masurat,
       estimat: costs.estimat,
       felul: costs.felul,
+      // Provider measurement stays separate from the local cost journal. A
+      // failed Admin API read has no numeric fallback and never reports zero.
+      providerOpenAI,
     })
   })
 

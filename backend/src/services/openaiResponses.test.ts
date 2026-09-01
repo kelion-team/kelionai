@@ -96,6 +96,19 @@ describe('OpenAI Responses adapter', () => {
     expect(body.include).toEqual(['reasoning.encrypted_content'])
   })
 
+  it('nu trimite reasoning pentru un model non-reasoning folosit la probă', () => {
+    const body = toResponsesBody(
+      'gpt-4.1-mini',
+      [{ role: 'user', content: 'ok' }],
+      [],
+      { maxTokens: 8, reasoning: 'none' },
+      false,
+      false,
+    )
+    expect(body.max_output_tokens).toBe(8)
+    expect(body).not.toHaveProperty('reasoning')
+  })
+
   it('retrimite exact output items opace înaintea rezultatului uneltei', () => {
     const reasoning = {
       type: 'reasoning',

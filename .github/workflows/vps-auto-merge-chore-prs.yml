@@ -1,0 +1,124 @@
+name: Merge policy
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review, review_requested, review_request_removed]
+  # GitHub nu emite un event dedicat pentru rezolvarea unui review thread;
+  # watchdog-ul programat rămâne fallback-ul persistent pentru această tranziție.
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR VPS de reverificat după schimbarea unei conversații
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  merge-policy:
+    name: merge-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validează identitatea, scope-ul și conversațiile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = merge_group ]; then
+            [ "$MERGE_GROUP_BASE_REF" = refs/heads/master ]
+            [ "$MERGE_GROUP_HEAD_SHA" = "$GITHUB_SHA" ]
+            [[ "$GITHUB_REF" == refs/heads/gh-readonly-queue/master/* ]]
+            echo "Merge group $GITHUB_SHA este legat de master; politicile PR au fost verificate înainte de enqueue."
+            exit 0
+          elif [ "$EVENT_NAME" = pull_request ]; then
+            pr_number=$EVENT_PR_NUMBER
+          else
+            pr_number=$DISPATCH_PR_NUMBER
+          fi
+          [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]
+          pr=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number")
+          [ "$(jq -r '.base.ref' <<<"$pr")" = master ]
+          [ "$(jq -r '.state' <<<"$pr")" = open ]
+          [ "$(jq -r '.draft' <<<"$pr")" = false ]
+          head_ref=$(jq -r '.head.ref' <<<"$pr")
+
+          allowed='[
+            ".github/workflows/deploy.yml",
+            ".github/workflows/pr-verify.yml",
+            ".github/workflows/secret-scan.yml",
+            ".github/workflows/vps-auto-merge-chore-prs.yml",
+            ".github/workflows/vps-auto-merge-watchdog.yml",
+            ".github/workflows/vps-diag.yml",
+            ".github/workflows/vps-fix-acl.yml",
+            ".github/workflows/vps-post-ponr-recovery.yml",
+            ".github/workflows/vps-recovery.yml",
+            ".github/workflows/vps-seed-slots.yml",
+            ".github/workflows/vps-run.yml",
+            ".github/workflows/vps-release-verifier.yml",
+            ".github/workflows/vps-set-env.yml",
+            "Dockerfile.gates",
+            "deploy/RUNBOOKS.md",
+            "deploy/constructor-release.mjs",
+            "deploy/constructor-publisher.mjs",
+            "deploy/deploy.sh",
+            "deploy/instaleaza-constructor.sh",
+            "deploy/systemd/kelion-constructor-sync.service",
+            "deploy/constructor-release.env.example",
+            "deploy/constructor-publisher.env.example",
+            "deploy/kelionai.env.example",
+            "deploy/lib/codex-boundary.test.mjs",
+            "deploy/lib/constructor-publication.test.mjs",
+            "deploy/lib/release-rollback.test.mjs",
+            "deploy/lib/runtime-config-cutover.sh",
+            "deploy/upgrade-constructor.sh",
+            "docs/operations/CURRENT.md",
+            "scripts/lib/vps-pr-remediation.mjs",
+            "scripts/lib/vps-release-verification.mjs",
+            "scripts/vps-pr-remediator.mjs",
+            "scripts/vps-pr-remediator.test.mjs",
+            "scripts/vps-release-verifier.mjs",
+            "scripts/vps-release-verifier.test.mjs",
+            "scripts/verifica-workflow-uri-sigure.mjs"
+          ]'
+          file_entries=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate \
+            --jq '.[] | {filename, status, previous_filename: (.previous_filename // null)}' | jq -s '.')
+          files=$(jq '[.[].filename]' <<<"$file_entries")
+          is_vps=$(jq -r --argjson allowed "$allowed" '
+            any(.[]; . as $entry |
+              ($allowed | index($entry.filename)) != null or
+              ($entry.previous_filename != null and ($allowed | index($entry.previous_filename)) != null)
+            )
+          ' <<<"$file_entries")
+          if [ "$is_vps" = true ]; then
+            [[ "$head_ref" == chore/* ]]
+            jq -e 'all(.[]; .status != "renamed" and .previous_filename == null)' <<<"$file_entries" >/dev/null
+            jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
+          fi
+
+          owner=${GITHUB_REPOSITORY%%/*}
+          repo=${GITHUB_REPOSITORY#*/}
+          threads=$(gh api graphql \
+            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{id isResolved}}}}}' \
+            -F owner="$owner" -F name="$repo" -F number="$pr_number")
+          jq -e '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false' <<<"$threads" >/dev/null
+          unresolved=$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved != true)] | length' <<<"$threads")
+          if [ "$unresolved" -ne 0 ]; then
+            echo "::error::$unresolved conversații de review sunt nerezolvate; merge-ul rămâne blocat."
+            exit 1
+          fi
+
+          compare=$(gh api "/repos/${GITHUB_REPOSITORY}/compare/$(jq -r '.base.sha' <<<"$pr")...$(jq -r '.head.sha' <<<"$pr")")
+          [ "$(jq -r '.behind_by' <<<"$compare")" -eq 0 ]
+          [ "$(jq -r '.mergeable' <<<"$pr")" != false ]
+          [ "$(jq -r '.mergeable_state' <<<"$pr")" != dirty ]
+          echo "PR #$pr_number este eligibil: merge-policy completă, sincronizat și fără conversații nerezolvate; vps=$is_vps."

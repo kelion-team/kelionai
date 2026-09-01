@@ -36,7 +36,8 @@ describe('admin product contract', () => {
     expect(admin).toContain('codex login')
     expect(admin).not.toContain('{codex.setupInstructions}')
     expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
-    expect(admin).toContain('abonamentul ChatGPT nu este o cheie API')
+    expect(admin).toContain('Aceeași cheie OpenAI project-scoped')
+    expect(admin).toContain('cheia admin de control-plane nu este folosită aici')
     expect(admin).toContain("adminBilling.creditsUsed")
     expect(admin).not.toMatch(/·\s*0\s+credite consumate/i)
   })
@@ -47,6 +48,12 @@ describe('admin product contract', () => {
     expect(admin).toContain("'setup_required'")
     expect(admin).toContain('creditarea se face automat numai după webhook-ul')
     expect(admin).toContain('nu există credit anticipat sau verificare manuală')
+  })
+
+  it('renders both OpenAI provider period bounds in UTC', () => {
+    const admin = source('components/admin/AdminBani.tsx')
+    expect(admin).toContain("new Date(finance.providerOpenAI.period.start).toLocaleString('ro-RO', { timeZone: 'UTC' })")
+    expect(admin).toContain("new Date(finance.providerOpenAI.period.end).toLocaleString('ro-RO', { timeZone: 'UTC' })")
   })
 
   it('afișează numai scara automată OpenAI, fără ramuri custom retrase', () => {

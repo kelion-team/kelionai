@@ -392,7 +392,7 @@ export function buildAdminChapters(): ManualSection[] {
       title: '🔒 Doar admin — Constructor și publicare',
       audience: 'admin',
       paragraphs: [
-        'Web-ul validează și pune ordine în coadă; nu deține worktree, shell, credentiale Git sau tokenuri Codex. Workerul separat se autentifică prin clientul oficial codex login.',
+        'Web-ul validează și pune ordine în coadă; nu deține worktree, shell, credentiale Git sau cheia OpenAI. Workerul separat își actualizează cache-ul prin clientul oficial codex login --with-api-key, cu cheia project-scoped transmisă numai pe stdin.',
         'Un job are lease, heartbeat, progres și rezultate durabile. Executorul nu poate declara singur publicarea sau deploy-ul, iar un browser admin citește numai starea autorizată.',
         'Fluxul verificabil este job, worktree izolat, codex exec, porți, PR, îmbinare și deploy separat cu backup și readiness.',
       ],
@@ -403,7 +403,7 @@ export function buildAdminChapters(): ManualSection[] {
       paragraphs: [
         'Kitul offline este local, explicit și opțional. Instalarea pornește numai din Settings după preflight; modelele locale nu primesc chei și nu sunt folosite drept alternativă cloud a serverului.',
         'Fără rețea nu există acces la Google, memoria serverului, browser sau date live. Coada locală se sincronizează numai după autentificare și confirmă identificatorii acceptați, fără coordonate persistate implicit.',
-        'Separat, decis: Constructorul aplicației folosește Codex prin autentificarea oficială ChatGPT a adminului. Funcțiile runtime ale aplicației folosesc proiectul OpenAI API separat; abonamentul ChatGPT nu este transformat într-o cheie API.',
+        'Constructorul și funcțiile runtime folosesc aceeași identitate OpenAI project-scoped prin boundary-uri separate. Workerul primește numai credentiala systemd, o transmite pe stdin către loginul oficial Codex și nu o propagă în mediul codex exec, browser sau loguri.',
       ],
     },
   ]

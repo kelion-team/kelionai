@@ -1,7 +1,13 @@
 name: provision-production-secrets
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      auto_routed_to_master:
+        description: Setare internă; rulează doar dacă workflow-ul a fost redirecționat automat pe master
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -11,7 +17,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  route-to-master:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name != 'master' && inputs.auto_routed_to_master != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Redirecționează automat pe master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "vps-set-env.yml" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref master \
+            -f auto_routed_to_master=true
   provision:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -43,7 +66,7 @@ jobs:
       CONSTRUCTOR_RETRY_BASE_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_BASE_SECONDS || '60' }}
       CONSTRUCTOR_RETRY_MAX_SECONDS: ${{ vars.CONSTRUCTOR_RETRY_MAX_SECONDS || '1800' }}
       CONSTRUCTOR_EXTERNAL_RETRY_SECONDS: ${{ vars.CONSTRUCTOR_EXTERNAL_RETRY_SECONDS || '900' }}
-      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation' }}
+      CONSTRUCTOR_REQUIRED_CHECKS: ${{ vars.CONSTRUCTOR_REQUIRED_CHECKS || 'verify,container-isolation,current-tree,merge-policy' }}
       VISITOR_CHAT_TTL_SECONDS: ${{ vars.VISITOR_CHAT_TTL_SECONDS || '3600' }}
       VISITOR_ANALYTICS_RETENTION_DAYS: ${{ vars.VISITOR_ANALYTICS_RETENTION_DAYS || '7' }}
       SESSION_ABSOLUTE_TTL_SECONDS: ${{ vars.SESSION_ABSOLUTE_TTL_SECONDS }}
@@ -82,7 +105,6 @@ jobs:
       PUSH_ENDPOINT_HOSTS: ${{ vars.PUSH_ENDPOINT_HOSTS }}
       PUSH_MAX_SUBSCRIPTIONS: ${{ vars.PUSH_MAX_SUBSCRIPTIONS || '5' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -90,7 +112,7 @@ jobs:
       CODEX_WORKER_SECRET: ${{ secrets.CODEX_WORKER_SECRET }}
       CONSTRUCTOR_PUBLISHER_SECRET: ${{ secrets.CONSTRUCTOR_PUBLISHER_SECRET }}
       CONSTRUCTOR_RELEASE_SECRET: ${{ secrets.CONSTRUCTOR_RELEASE_SECRET }}
-      GITHUB_RELEASE_OAUTH_TOKEN: ${{ secrets.GITHUB_RELEASE_OAUTH_TOKEN }}
+      GITHUB_RELEASE_OAUTH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
       GHCR_READ_TOKEN: ${{ secrets.CONSTRUCTOR_GHCR_READ_TOKEN }}
       BROWSER_WORKER_SECRET: ${{ secrets.BROWSER_WORKER_SECRET }}
       CONVERTER_WORKER_SECRET: ${{ secrets.CONVERTER_WORKER_SECRET }}
@@ -105,6 +127,9 @@ jobs:
           persist-credentials: false
 
       - name: Aplică atomic allowlist-ul și secretele
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ADMIN_KEY: ${{ secrets.OPENAI_ADMIN_KEY }}
         run: |
           set -euo pipefail
           [ "$GITHUB_REF" = refs/heads/master ]
@@ -133,14 +158,15 @@ jobs:
           for name in PUBLIC_APP_ORIGIN ADMIN_EMAIL OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_SHUTDOWN_AT GOOGLE_CLIENT_ID GOOGLE_REDIRECT_URI GOOGLE_TOKEN_ENCRYPTION_KEY_ID CONSTRUCTOR_REQUIRED_CHECKS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS; do
             validate_single_line_env "$name" 2048
           done
-          for name in OPENAI_API_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
+          for name in OPENAI_API_KEY OPENAI_ADMIN_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
             validate_single_line_env "$name" 8192
           done
           [[ "$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" =~ ^[A-Za-z0-9_-]{1,32}$ ]]
           [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
           admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
           [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
-          case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
+          [[ "$OPENAI_API_KEY" =~ ^sk-proj-[A-Za-z0-9_-]{16,}$ ]] || exit 1
+          [[ "$OPENAI_ADMIN_KEY" =~ ^sk-admin-[A-Za-z0-9_-]{16,}$ ]] || exit 1
           [ "${#SESSION_SECRET}" -ge 32 ]
           [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
           [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]
@@ -229,9 +255,14 @@ jobs:
           [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_PUBLISHER_SECRET" ]
           [ "$CODEX_WORKER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
           [ "$CONSTRUCTOR_PUBLISHER_SECRET" != "$CONSTRUCTOR_RELEASE_SECRET" ]
-          [ "${#GITHUB_RELEASE_OAUTH_TOKEN}" -ge 32 ]
-          [ "${#GHCR_READ_TOKEN}" -ge 32 ]
-          [ "$GITHUB_RELEASE_OAUTH_TOKEN" != "$GHCR_READ_TOKEN" ]
+          if [ "$CONSTRUCTOR_RELEASE_ENABLED" = 1 ]; then
+            [ "${#GITHUB_RELEASE_OAUTH_TOKEN}" -ge 32 ]
+            [ "${#GHCR_READ_TOKEN}" -ge 32 ]
+            [ "$GITHUB_RELEASE_OAUTH_TOKEN" != "$GHCR_READ_TOKEN" ]
+          else
+            GITHUB_RELEASE_OAUTH_TOKEN="disabled-placeholder-$(openssl rand -hex 32)"
+            GHCR_READ_TOKEN="disabled-placeholder-$(openssl rand -hex 32)"
+          fi
           [[ "$VISITOR_CHAT_TTL_SECONDS" =~ ^[0-9]+$ ]]
           [[ "$VISITOR_ANALYTICS_RETENTION_DAYS" =~ ^[0-9]+$ ]]
           for numeric in SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PUSH_MAX_SUBSCRIPTIONS; do
@@ -280,6 +311,7 @@ jobs:
             "FRONTEND_ORIGIN=$PUBLIC_APP_ORIGIN" \
             "ADMIN_EMAIL=$admin_email" \
             'OPENAI_API_KEY_FILE=/run/secrets/openai-project-key' \
+            'OPENAI_ADMIN_KEY_FILE=/run/secrets/openai-admin-key' \
             "OPENAI_LUNA_MODEL=$OPENAI_LUNA_MODEL" \
             "OPENAI_MEDIUM_MODEL=$OPENAI_MEDIUM_MODEL" \
             "OPENAI_HEAVY_MODEL=$OPENAI_HEAVY_MODEL" \
@@ -388,6 +420,7 @@ jobs:
           encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
           {
             encode openai-project-key "$OPENAI_API_KEY"
+            encode openai-admin-key "$OPENAI_ADMIN_KEY"
             encode database-url "$DATABASE_URL"
             encode session-secret "$SESSION_SECRET"
             encode google-client-secret "$GOOGLE_CLIENT_SECRET"
@@ -414,14 +447,19 @@ jobs:
             deploy/systemd/kelion-codex-worker.service \
             deploy/systemd/kelion-constructor-publisher.service \
             deploy/systemd/kelion-constructor-release.service | gzip -n > "$bundle"
-          tar -tzf "$bundle" | grep -qx 'deploy/compose.production.yml'
-          tar -tzf "$bundle" | grep -qx 'deploy/lib/runtime-config-cutover.sh'
-          tar -tzf "$bundle" | grep -qx 'deploy/systemd/kelion-runtime-config-recovery.service'
-          tar -tzf "$bundle" | grep -qx 'deploy/systemd/kelion-constructor-sync.service'
-          for unit in \
-            kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
-            kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service; do
-            tar -tzf "$bundle" | grep -qx "deploy/systemd/$unit"
+          tar -tzf "$bundle" > "$RUNNER_TEMP/bundle-entries"
+          for entry in \
+            'deploy/compose.production.yml' \
+            'deploy/lib/runtime-config-cutover.sh' \
+            'deploy/systemd/kelion-runtime-config-recovery.service' \
+            'deploy/systemd/kelion-constructor-sync.service' \
+            'deploy/systemd/kelion-codex-worker.timer' \
+            'deploy/systemd/kelion-constructor-publisher.timer' \
+            'deploy/systemd/kelion-constructor-release.timer' \
+            'deploy/systemd/kelion-codex-worker.service' \
+            'deploy/systemd/kelion-constructor-publisher.service' \
+            'deploy/systemd/kelion-constructor-release.service'; do
+            grep -qx "$entry" "$RUNNER_TEMP/bundle-entries"
           done
 
           bundle_commit=$(git rev-parse HEAD)
@@ -457,7 +495,8 @@ jobs:
             case "$work" in /root/kelion/runtime/provision.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
           trap cleanup_remote EXIT
-          if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
+          tar -tzf "$bundle" > /tmp/bundle-entries-before-extract
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/bundle-entries-before-extract; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
           [ -f "$work/deploy/compose.production.yml" ] && [ -f "$work/deploy/lib/runtime-config-cutover.sh" ]
           [ -f "$work/deploy/systemd/kelion-runtime-config-recovery.service" ]
@@ -468,8 +507,26 @@ jobs:
             [ -f "$work/deploy/systemd/$unit" ] && [ ! -L "$work/deploy/systemd/$unit" ]
           done
 
-          exec 9>/root/kelion/publicare.lock
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<>"$publication_lock"
+          publication_fd_path=$(readlink /proc/$$/fd/9)
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_path" = "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
           flock -n 9
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+            && [ ! -L "$publication_lock" ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          [ ! -e "$constructor_upgrade_journal" ] && [ ! -L "$constructor_upgrade_journal" ] \
+            || { echo 'un upgrade Constructor exterior este pending; rotația runtime este refuzată' >&2; exit 1; }
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          [ ! -e "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ] \
+            || { echo 'o barieră unit-only Constructor este pending; rotația runtime este refuzată' >&2; exit 1; }
           export KELION_CUTOVER_LOCK_HELD=1
           deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
           if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
@@ -541,7 +598,8 @@ jobs:
               install -o root -g root -m 0600 "$work/deploy/systemd/$unit" "$cutover_stage/files/systemd-service.$unit"
               printf '%s\n' "systemd-service.$unit" >> "$cutover_stage/manifest"
             done
-            KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+            KELION_CUTOVER_LOCK_HELD=1 KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER=1 \
+              bash "$work/deploy/lib/runtime-config-cutover.sh" \
               "$cutover_stage" "$work/deploy/compose.production.yml" --leave-constructor-quiesced
             cutover_stage=''
           fi
@@ -596,7 +654,7 @@ jobs:
             chmod 0600 "$cutover_stage/files/$logical"
             printf '%s\n' "$logical" >> "$cutover_stage/manifest"
           }
-          for name in openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
+          for name in openai-project-key openai-admin-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
             stage_value "app-secret.$name" "$(decode "$name")"
           done
           stage_value app-secret.github-release-oauth-token "$oauth_token"
@@ -627,10 +685,10 @@ jobs:
               { print }
               END { if (!written) print "CONSTRUCTOR_REQUIRED_CHECKS=" checks }
             ' /root/kelion/config/constructor-publisher.env > "$cutover_stage/files/constructor-config.constructor-publisher.env"
-            awk -F= -v checks="$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "$cutover_stage/files/runtime.env")" '
+            awk -F= -v checks="verify,container-isolation" '
               $1 == "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS" { if (!written++) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks; next }
               { print }
-              END { if (!written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=" checks }
+              END { if (!written) print "CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=verify,container-isolation" }
             ' /root/kelion/config/constructor-release.env > "$cutover_stage/files/constructor-config.constructor-release.env"
             for logical in constructor-config.codex-worker.env constructor-config.constructor-publisher.env constructor-config.constructor-release.env; do
               chmod 0600 "$cutover_stage/files/$logical"

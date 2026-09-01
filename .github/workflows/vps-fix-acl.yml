@@ -1,0 +1,63 @@
+name: VPS Fix Secret ACLs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-secret-acl-maintenance
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Corecteaza ACL-urile secretelor pe VPS
+        run: |
+          set -euo pipefail
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          umask 077
+          key_file=$(mktemp); known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+              "$VPS_USER@$VPS_HOST" bash -s << 'EOF'
+            set -euo pipefail
+            gid_of() { local group=$1 entry gid
+              if [[ "$group" =~ ^[0-9]+$ ]]; then printf '%s\n' "$group"; return 0; fi
+              entry=$(getent group "$group") || { echo "ACL_GROUP_MISSING:$group" >&2; return 1; }
+              gid=$(awk -F: '{print $3}' <<< "$entry")
+              [[ "$gid" =~ ^[0-9]+$ ]] || { echo "ACL_GROUP_INVALID:$group" >&2; return 1; }
+              printf '%s\n' "$gid"
+            }
+            fix() { local p=$1 owner=$2 group=$3 mode=$4 owner_id group_id
+              echo "ACL_CHECK:$p"
+              [ -f "$p" ] && [ ! -L "$p" ] && [ -s "$p" ]
+              [ "$(wc -l < "$p")" -eq 1 ]
+              owner_id=$(id -u "$owner")
+              group_id=$(gid_of "$group")
+              chown "$owner":"$group" "$p"
+              chmod "$mode" "$p"
+              [ "$(stat -c '%u:%g:%a' "$p")" = "$owner_id:$group_id:${mode#0}" ]
+            }
+            publisher_group=$(gid_of kelion-publisher)
+            release_group=$(gid_of kelion-release)
+            fix /root/kelion/worker-secrets/github-worker-token root root 0440
+            fix /root/kelion/gate-secrets/github-ghcr-read-token root root 0400
+            fix /root/kelion/secrets/github-release-oauth-token root 10050 0440
+            fix /root/kelion/publisher-secrets/github-publisher-token root "$publisher_group" 0440
+            fix /root/kelion/release-secrets/github-release-token root "$release_group" 0440
+            echo ACL_OK
+          EOF

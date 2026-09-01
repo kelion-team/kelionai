@@ -17,9 +17,11 @@ sau ștergere recursivă.
 
 ## Provisionarea configului și secretelor
 
-1. Configurează repository variables pentru toate intrările non-secrete din
-   `config/runtime-contract.json` și repository secrets numai pentru intrările
-   din `secretFiles`.
+1. Configurează repository variables pentru toate intrările din
+   `requiredNonSecret` și repository secrets pentru toate intrările din
+   `secretFiles`, `hostProvisionedSecretFiles` și `workflowControlSecrets` din
+   `config/runtime-contract.json`. Intrările `generatedRuntime` sunt generate
+   canonic de workflow; nu le dubla drept variabile GitHub.
 2. Păstrează `CODEX_WORKER_ENABLED=0`, `PAYMENT_MODE=disabled` și
    `PUSH_ENABLED=0` până când fiecare capabilitate are verificarea proprie.
 3. Rulează manual `vps-set-env` în mediul aprobat. Workflow-ul validează
@@ -142,22 +144,31 @@ același boundary host-only, nu WebSocket public.
 3. Instalează `deploy/codex-worker.profile.toml` ca
    `/opt/kelion-codex/profile-home/kelion-worker.config.toml`, root-owned și
    read-only. Auth home conține numai starea gestionată de CLI. Profilul impune
-   `forced_login_method="chatgpt"`, `approval_policy="never"`, env allowlist și
+   `forced_login_method="api"`, `approval_policy="never"`, env allowlist și
    rețea oprită pentru comenzile generate.
-4. Ca utilizatorul workerului, rulează interactiv:
+4. Sursa canonică rămâne `/root/kelion/secrets/openai-project-key`, cu metadata
+   `0:10050:0440`. Unitatea workerului o primește numai prin
+   `LoadCredential=openai-project-key:...`; valoarea nu intră în environment,
+   argv sau jurnal. La prima pornire, la rotația cheii ori dacă statusul
+   cache-ului eșuează, workerul execută echivalentul sigur:
 
    ```bash
-   CODEX_HOME=/var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex login --device-auth
+   /opt/kelion-codex/bin/codex \
+     -c 'forced_login_method="api"' \
+     -c 'cli_auth_credentials_store="file"' \
+     login --with-api-key \
+     < "$CREDENTIALS_DIRECTORY/openai-project-key"
    ```
 
-   Device-code trebuie întâi permis în setările ChatGPT/workspace. Linkul și
-   codul one-time rămân în terminalul operatorului; nu se trimit backendului,
-   browserului Kelion, GitHub Actions sau logurilor. Dacă device-code nu este
-   disponibil, `codex login` folosește browserul și callbackul gestionat de CLI.
-   Nu folosi `--with-api-key`, `--with-access-token` sau external auth tokens.
-5. Verifică `codex login status`. Fișierul `auth.json`, când este folosit ca
-   credential store, se tratează ca o parolă și rămâne accesibil numai
-   identității workerului.
+   Redirecționarea este pe stdin; nu folosi `printenv`, pipe din `cat`,
+   substituție de comandă, `set -x`, `--with-access-token`, device-auth sau
+   login ChatGPT. Workflow-ul `vps-codex-login.yml` poate reînnoi manual același
+   cache fără ca GitHub Actions să primească vreodată cheia OpenAI.
+5. Workerul verifică statusul cu aceleași două override-uri `-c`, plasate
+   înainte de `login status`, și publică atomic, cu mod `0600` și
+   `fsync`, numai fingerprintul SHA-256 privat din auth home. Fișierele
+   `auth.json` și `.openai-project-key.sha256` rămân accesibile exclusiv
+   identității workerului; fingerprintul evită relogarea la fiecare minut.
 6. Creează configul dedicat din `deploy/codex-worker.env.example`; el conține
    numai flagul, API-ul loopback, repository-ul public și digestul imaginii de
    porți. HMAC-ul cozii intră exclusiv prin `LoadCredential`.
@@ -169,7 +180,8 @@ același boundary host-only, nu WebSocket public.
 8. Activează în această ordine numai după probe: flagul backend, flagul
    `CODEX_WORKER_EXEC_ENABLED=1`, markerul
    `/etc/kelion/codex-worker.enabled`, apoi timerul. Orice lipsă raportează
-   `setup_required`; nu există fallback la OpenAI API.
+   `setup_required`; nu există fallback la ChatGPT/device-auth sau la alt
+   furnizor.
 
 Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
 sau deploy.
@@ -211,8 +223,8 @@ credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
 - tokenul de sync al workerului, tokenul publisher în
   `/root/kelion/publisher-secrets/github-publisher-token` și tokenul dispatcher
   în `/root/kelion/release-secrets/github-release-token`, root-owned și
-  expuse numai grupului serviciului prin mode `0440`. Tokenul separat
-  `packages:read` pentru gate rămâne root-only mode `0400` în
+  expuse numai grupului serviciului prin mode `0440`. PAT-ul classic separat,
+  cu scope exclusiv `read:packages`, pentru gate rămâne root-only mode `0400` în
   `/root/kelion/gate-secrets/github-ghcr-read-token`. Niciuna dintre aceste
   credentiale nu intră în runtime.env, compose sau containerul web;
 - tokenul OAuth de review al consolei Admin este un secret separat, montat
@@ -224,6 +236,47 @@ credentiale. Nu activează și nu pornește niciun timer. Pregătește separat:
   publisherului, verifică fingerprintul SHA-256 prin canal separat și pune
   numai fingerprintul în configul non-secret. Cheia nu este cheie SSH de acces
   la repository și nu este primită de worker ori dispatcher.
+
+### Upgrade in-place al Constructorului instalat
+
+După bootstrap, codul și unitățile Constructorului se actualizează numai din
+workflow-ul `vps-constructor-control`, cu operația separată
+`upgrade-constructor`. Înainte de dispatch, rulează `constructor-status`, reține
+vectorul complet și cere una dintre stările canonice `000`, `100`, `110` sau
+`111`: pentru fiecare componentă, markerul și timerul enabled/active trebuie să
+fie aliniate, serviciile oneshot inactive și lista joburilor systemd goală.
+
+Prima execuție acceptă exclusiv bundle-ul urmărit din vârful curent `master`,
+dovada build-ului gate, release proof-ul și markerul activ pentru exact același
+SHA, plus pinul ed25519 al gazdei.
+Către VPS nu trimite config, HMAC-uri, tokenuri GitHub ori
+chei OpenAI. Nu reinstalează `apt`, `npm` sau CLI-ul și nu regenerează configul
+ori secretele. Reface tranzacțional numai configul workerului din copia live
+byte-identică; nu include `runtime.env`, nu recreează și nu restartează backendul.
+
+Înainte de prima oprire, helperul capturează durabil markerii și starea
+enabled/active a celor trei timere. Installerul publică generația nouă cu toate
+unitățile quiesced, iar cutover-ul strict restaurează exact vectorul capturat
+în markeri, dar păstrează ready absent și toate unitățile oprite. Numai după
+dovada completă scrie și sincronizează faza exterioară `committed`; finalizerul
+poate publica ready și porni timerele abia după acel prag durabil. Un crash după
+primul start păstrează `committed`, iar retry-ul quiesce-uiește înainte să
+restaureze idempotent vectorul și să șteargă jurnalul. La crash, reia operația
+fără să modifici starea VPS. Selectorul read-only acceptă SHA-ul vechi numai din jurnalul root-only
+strict, dacă acel commit există, este strămoș al noului `master`, iar release-ul
+live a rămas exact pe acel SHA; fără jurnal, orice SHA diferit de vârful
+`master` este refuzat. Nu porni manual timere și nu
+șterge `constructor-upgrade.journal`, directoarele `constructor-upgrade.*` sau
+`constructor-unit-migration.pending`. Avansarea `master` nu rescrie și nu
+suprascrie jurnalul: rerun-ul sau un nou dispatch selectează determinist commitul
+pin-uit, iar un jurnal invalid, symlink ori cu SHA neînrudit este refuzat.
+
+Acceptă upgrade-ul numai dacă evenimentul final este
+`constructor_upgrade_complete`, apoi rulează `constructor-status` și cere
+vectorul pre-upgrade exact, plus `codex-auth=ready`. Dacă preflight-ul raportează
+o stare necanonică ori alt recovery activ, diagnostichează read-only; nu folosi
+`configure-constructor`, deoarece reprovisionează configul și credentialele și
+refuză un Constructor deja activ.
 
 Credentiala publisherului are numai metadata read, Contents write, Pull
 requests write, Actions/Checks read și Administration **read-only** pe
@@ -263,9 +316,11 @@ Restartul aplicației nu redeschide replay-ul: nonce-urile sunt durabile în
 Înainte de cutover se revocă la furnizor cheile AI retrase, tokenurile GitHub
 legacy, parolele VPS/root, credentialele bancare vechi, certificatele mobile
 copiate în env și orice cheie găsită în istoricul Git. PAN/CVC se înlocuiesc, nu
-se mută într-un alt secret store. `OPENAI_ADMIN_KEY` rămâne absentă din aplicație
-și Codex; dacă va exista reconciliere financiară, folosește un proces separat și
-o credentială minimă.
+se mută într-un alt secret store. `OPENAI_ADMIN_KEY` este o credentială minimă
+distinctă, montată numai în backendul Kelion Admin pentru Costs/Usage și
+diagnostic de control-plane. Rămâne absentă din inferență, Realtime, media,
+Constructor, browser, răspunsuri API și loguri; nu poate înlocui
+`openai-project-key`.
 
 Rotația externă cere autoritate explicită și probă pe fiecare integrare.
 Ștergerea unui fișier sau a unui run GitHub nu înlocuiește revocarea.

@@ -23,7 +23,7 @@ const panou = readFileSync(join(aici, '../../frontend/src/components/ChatPanel.t
 describe('P20 — porțile de verdict ale rutei vocale (constatările critice)', () => {
   it('tura cu verdict NEDECIS nu se mai salvează fără numele măsurat (istoricul nu se otrăvește)', () => {
     // onTuraGata ȘI incheieTura: null + fără nume → nesalvat, cu jurnal
-    const aparitii = ruta.match(/verdictTura === null && !turaAdresata\(bufUser\.trim\(\)\)/g) ?? []
+    const aparitii = ruta.match(/verdictTura === null && (?:!startExplicit\.activa\(\) && )?!turaAdresata\(bufUser\.trim\(\)\)/g) ?? []
     expect(aparitii.length).toBeGreaterThanOrEqual(2)
     expect(ruta).toMatch(/tură nesalvată (?:la închidere )?\(tăcere corectă, fără nume\)/)
   })
@@ -43,6 +43,11 @@ describe('P20 — porțile de verdict ale rutei vocale (constatările critice)',
     expect(ruta).toMatch(/const adresata = turaAdresataAcum\(\)[\s\S]{0,500}?if \(!adresata && !turaDeSistem\) \{/)
     // în onTranscriereUser, false definitiv doar pe transcript FINAL
     expect(ruta).toMatch(/else if \(final && verdictTura === null\) \{/)
+  })
+
+  it('startul explicit permite primul audio chiar când transcrierea sosește ulterior', () => {
+    expect(ruta).toMatch(/if \(startExplicit\.activa\(\)\) return true/)
+    expect(ruta).toMatch(/const areTemei = rostireCurenta\.trim\(\) \|\| bufUser\.trim\(\) \|\| turaDeSistem \|\| startExplicit\.activa\(\)/)
   })
 
   it('gardul de limbă judecă ÎNAINTE de livrare: cadrele așteaptă verdictul, cu fail-open 700ms', () => {

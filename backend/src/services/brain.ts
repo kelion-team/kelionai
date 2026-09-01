@@ -1,5 +1,6 @@
 import { config } from '../config.js'
 import { openaiChat, openaiAvailable } from './openaiChat.js'
+import { isOpenAIProviderThrottleError } from './openaiResponses.js'
 import { modelOpenAIExista, scaraOpenAI } from './openaiModele.js'
 import type { BrainTool, BrainCallOpts, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
@@ -7,12 +8,15 @@ import type { Message } from './brain-types.js'
 // The only product brain is OpenAI Responses. The `openai/` prefix remains an
 // internal routing marker, not a second provider switch.
 
-// A TRANSIENT error (provider saturated/down) — worth a pause before the next
-// rung. 400/401/404 (our request/key) are NOT here: they're not transient, but
-// we still move to the next model (a wrong name must not kill the expert).
+// A TRANSIENT availability error (provider down/transport) may use the next
+// rung. Request, auth and every provider 429 are terminal for the ladder: the
+// Responses adapter already owns the sole bounded rate-limit retry.
 export function isTransientBrainError(err: unknown): boolean {
+  // Responses owns the single bounded retry for rate_limit_exceeded. Neither
+  // a second model nor a background memory task may fan a provider 429 out.
+  if (isOpenAIProviderThrottleError(err)) return false
   const s = String((err as { message?: string })?.message ?? err)
-  return /\b429\b|rate.?limit|degraded|openai (5\d\d|408|409)|timed? ?out|econnreset|etimedout|fetch failed/i.test(
+  return /degraded|openai (5\d\d|408|409)|timed? ?out|econnreset|etimedout|fetch failed/i.test(
     s,
   )
 }
@@ -55,10 +59,10 @@ export async function brainChat(
   return openaiChat(code, messages, tools, opts)
 }
 
-// Runs a call across the model ladder: tries each rung, skips the saturated/
-// dead ones, returns the FIRST good result; throws the last error only if ALL
-// failed. `sleep`/`now` injectable for tests. Short total budget — the user is
-// waiting for the expert, we don't keep him hanging on the ladder forever.
+// Runs a call across the model ladder: tries the next rung only for genuine
+// availability/transport failures and returns the first good result. Provider
+// 429s are terminal here because the transport owns their sole bounded retry.
+// `sleep`/`now` are injectable for tests; the user never waits indefinitely.
 export async function runBrainLadder<T>(
   models: string[],
   call: (model: string) => Promise<T>,
@@ -103,9 +107,9 @@ export const brain = {
           content: typeof m.content === 'string' ? m.content : '',
         })
       }
-      // The model ladder here too (memory/summaries in the background): a 429
-      // no longer leaves memory without learning. If a specific model was
-      // requested, it is tried first.
+      // Memory/summaries use the same ladder for genuine availability errors.
+      // A provider 429 stops on its first rung, so a background task cannot
+      // multiply quota/rate-limit traffic across models.
       const ladder = params.model
         ? [params.model, ...(await expertModelLadder()).filter((m) => m !== params.model)]
         : await expertModelLadder()
@@ -169,8 +173,8 @@ export async function brainCompleteWithTools(
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
-  // The same model ladder as brainComplete — every ROUND tries it, so a 429
-  // on one rung no longer breaks the expert's whole tool loop.
+  // The same model ladder as brainComplete. Availability failures may move to
+  // another rung, while a provider 429 is terminal for the whole tool loop.
   const ladder = opts.models?.length ? opts.models : await expertModelLadder()
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -232,14 +236,22 @@ export async function verifyKeys(): Promise<{
     return { primary: 'not_configured', reserve: 'not_configured', diag: { provider: 'openai' } }
   }
   let primary = 'fail'
+  let failureStatus: number | undefined
   try {
     const r = await brainChat(`${OPENAI_PREFIX}${config.openai.luna}`, [{ role: 'user', content: 'ping' }], [], {
-      maxTokens: 8,
-      reasoning: 'none',
+      // Modelele cu raționament pot consuma bugetul înainte să emită text;
+      // aceeași limită dovedită de verifyModels evită un „fail” fals la cheie.
+      maxTokens: 64,
     })
     primary = r.model ? 'ok' : 'fail'
-  } catch {
-    primary = 'fail'
+  } catch (error) {
+    const match = /\bopenai\s+([45]\d{2})\b/i.exec(error instanceof Error ? error.message : String(error))
+    failureStatus = match ? Number(match[1]) : undefined
+    primary = failureStatus ? `fail_${failureStatus}` : 'fail'
   }
-  return { primary, reserve: primary, diag: { provider: 'openai' } }
+  return {
+    primary,
+    reserve: primary,
+    diag: { provider: 'openai', ...(failureStatus ? { status: failureStatus } : {}) },
+  }
 }

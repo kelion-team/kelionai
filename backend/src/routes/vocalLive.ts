@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { RawData } from 'ws'
 import { config } from '../config.js'
 import { getSessionUser, validateWebSocketSession, webSocketSessionUser } from '../session.js'
@@ -22,13 +22,32 @@ import { creeazaDetectorVocePeste } from '../services/vocePesteKelion.js'
 import type { UnealtaVocala } from '../services/vocalLive.js'
 import { execSharedAdminTool, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
-import { saveMessage, getRecentHistory, listBuildJobs, getSpeechLang, setSpeechLangPref, debitWalletMinorAtomar, grantCreditMinor, recordProviderUsage, recordSimptomLive, inregistreazaSarcinaOperationala, noteazaEvenimentOperational, tranzitioneazaSarcinaOperationala } from '../db.js'
+import {
+  confirmaDebitVocalLive,
+  consumaDebitVocalLive,
+  debiteazaVocalLiveAtomar,
+  getRecentHistory,
+  getSpeechLang,
+  inregistreazaSarcinaOperationala,
+  listBuildJobs,
+  noteazaEvenimentOperational,
+  ramburseazaDebitVocalLive,
+  recordProviderUsage,
+  recordSimptomLive,
+  saveMessage,
+  setSpeechLangPref,
+  tranzitioneazaSarcinaOperationala,
+} from '../db.js'
 import { esteAdminKelion } from '../services/adminIdentity.js'
 import { rezumaStareFinalaSarcinaOperationala } from '../services/jurnalOperational.js'
 import { trackSpeechLang } from '../services/lang.js'
 import { pareCerereVizuala } from '../services/simptomeLive.js'
 import { pretentiiFaraFapta, textulNuPotVerifica, clasificaRezultatUnealta, type DovadaUnealta } from '../services/poartaFaptelor.js'
 import { parseInputImageDataUrl } from '../services/inputImage.js'
+import { openaiHealth } from '../services/openaiResponses.js'
+import type { OpenAIHealthResult } from '../services/openaiHealth.js'
+import { capabilitateVocalaDinHealth } from '../services/openaiVoiceStatus.js'
+import type { VocalLiveCapability } from '../shared/api-types.js'
 
 // ── RUTA VOCII UNIFICATE — CALE SEPARATĂ ȘI EXCLUSIVĂ (4 aug 2026) ───────────
 //
@@ -66,7 +85,7 @@ import { parseInputImageDataUrl } from '../services/inputImage.js'
 //                                                  handleControl, ca la scris)
 //     { type:'intrerupt' }                         barge-in: oprește redarea ACUM
 //     { type:'tura_gata' }                         Kelion a terminat de vorbit
-//     { type:'eroare', motiv }                     eroare NUMITĂ (nu murim tăcut)
+//     { type:'eroare', motiv, code? }              cod public sigur, fără body provider
 
 // ── UNELTELE SESIUNII LIVE — DOAR SETUL DOVEDIT (8 aug, „pornește la voce,
 // dar nimic") ────────────────────────────────────────────────────────────────
@@ -126,6 +145,16 @@ const UNEALTA_CREIER: UnealtaVocala = {
  *  frontend/src/lib/chat.ts). */
 const CTRL = String.fromCharCode(31)
 
+/** Extrage numai câmpurile `data:` dintr-un eveniment SSE. Câmpurile `id:` și
+ * comentariile de keep-alive sunt metadate de transport, nu răspunsul creierului. */
+export function dateDinEvenimentSse(eveniment: string): string {
+  const linii = eveniment.replace(/\r\n?/g, '\n').split('\n')
+  return linii
+    .filter((linie) => linie.startsWith('data:'))
+    .map((linie) => linie.slice(5).replace(/^ /, ''))
+    .join('\n')
+}
+
 // ── PULSUL VOCII — DIAGNOSTIC PUBLIC, DOAR CIFRE (9 aug seara) ───────────────
 // „Nu merge audio" fără acces la jurnalul VPS = ghicit pe rând. Contoarele
 // astea spun EXACT unde moare sunetul: serverul primește audio de la Google?
@@ -159,6 +188,50 @@ export const pulsVoce = {
 
 const sesiuniLivePeUtilizator = new Map<string, number>()
 
+/** Transformă ID-ul opac al unui tool call Realtime într-un UUID stabil acceptat
+ * de limita de replay a /api/chat. ID-urile OpenAI (`call_...`) nu sunt UUID-uri;
+ * trimiterea lor directă făcea fiecare ușă `cere_creierului` să moară cu 400. */
+export function cheieIdempotentaTuraVocala(seed: string): string {
+  const bytes = createHash('sha256').update(`vocal-live-chat:${seed}`).digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x50 // UUID v5-style, determinist
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant RFC 4122
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/** Poartă one-shot pentru gestul manual de pornire a microfonului. O conexiune
+ * nouă/reîncercată pornește nearmată; numai cadrul explicit_start o deschide. */
+export function creeazaPoartaStartExplicit(acum: () => number = Date.now): {
+  armeaza: () => boolean
+  incepeTura: () => boolean
+  activa: () => boolean
+  consuma: () => void
+} {
+  let cadruPrimit = false
+  let panaLa = 0
+  let turaInCurs = false
+  return {
+    armeaza: () => {
+      if (cadruPrimit) return false
+      cadruPrimit = true
+      panaLa = acum() + 30_000
+      return true
+    },
+    incepeTura: () => {
+      if (turaInCurs) return true
+      if (panaLa <= acum()) return false
+      panaLa = 0
+      turaInCurs = true
+      return true
+    },
+    activa: () => turaInCurs || panaLa > acum(),
+    consuma: () => {
+      panaLa = 0
+      turaInCurs = false
+    },
+  }
+}
+
 /** O tură COMPLETĂ pe creierul clasic, prin chiar ruta /api/chat (cookie-ul
  *  sesiunii omului → aceleași drepturi, aceleași unelte, aceeași
  *  contabilizare). Întoarce textul final; cadrele de control trec prin
@@ -178,6 +251,7 @@ export async function turaCreierului(
   // `continuareUsa` ca chat.ts să nu mai forțeze uneltele de faptă.
   triere?: { istoric: { role: 'user' | 'assistant'; content: string }[] },
 ): Promise<{ ok: true; text: string } | { ok: false; motiv: string }> {
+  const chatIdempotencyKey = cheieIdempotentaTuraVocala(idempotencyKey)
   let r: Response
   try {
     r = await fetch(`http://127.0.0.1:${config.port}/api/chat`, {
@@ -185,7 +259,7 @@ export async function turaCreierului(
       headers: { 'content-type': 'application/json', cookie, origin: config.publicOrigin },
       body: JSON.stringify({
         messages: triere ? triere.istoric : [{ role: 'user', content: cerere }],
-        idempotencyKey,
+        idempotencyKey: chatIdempotencyKey,
         continuareUsa: triere ? true : undefined,
         // Glasul e al modelului live — sinteza serială rămâne stinsă (regula
         // vocii unice) și nu plătim o sinteză pe care n-o redă nimeni.
@@ -259,18 +333,50 @@ export async function turaCreierului(
       }
     }
   }
+  // /api/chat este SSE: `id:` și `data:` sunt scrise de stratul de replay în
+  // jurul fiecărei bucăți. Întâi despachetăm evenimentele, apoi trimitem DOAR
+  // payload-ul data către parserul CTRL; altfel prefixele SSE ajungeau în
+  // răspunsul vocal și cadrele de control puteau fi înghițite.
+  let sseRest = ''
+  const emiteEvenimentSse = (eveniment: string): void => {
+    const date = dateDinEvenimentSse(eveniment)
+    if (date) consuma(date, false)
+  }
+  const consumaSse = (bucata: string, final: boolean): void => {
+    sseRest += bucata
+    for (;;) {
+      const delimitator = sseRest.match(/\r?\n\r?\n/)
+      if (!delimitator || delimitator.index === undefined) {
+        if (final && sseRest) {
+          emiteEvenimentSse(sseRest)
+          sseRest = ''
+        }
+        return
+      }
+      const eveniment = sseRest.slice(0, delimitator.index)
+      sseRest = sseRest.slice(delimitator.index + delimitator[0].length)
+      emiteEvenimentSse(eveniment)
+    }
+  }
   try {
     const cititor = r.body?.getReader()
+    const esteSse = r.headers.get('content-type')?.toLowerCase().includes('text/event-stream') ?? false
     if (cititor) {
       const decodor = new TextDecoder()
       for (;;) {
         const { done, value } = await cititor.read()
         if (done) break
-        consuma(decodor.decode(value, { stream: true }), false)
+        const bucata = decodor.decode(value, { stream: true })
+        if (esteSse) consumaSse(bucata, false)
+        else consuma(bucata, false)
       }
-      consuma(decodor.decode(), true)
+      const coada = decodor.decode()
+      if (esteSse) consumaSse(coada, true)
+      else consuma(coada, true)
     } else {
-      consuma(await r.text(), true)
+      const corp = await r.text()
+      if (esteSse) consumaSse(corp, true)
+      else consuma(corp, true)
     }
   } catch (e) {
     if (!text.trim()) return { ok: false, motiv: `fluxul creierului s-a rupt: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}` }
@@ -323,11 +429,159 @@ export function ancoraConstructor(codexActiv: boolean): string {
     : '\nPENTRU ADMIN — CONSTRUCTOR: workerul Codex nu este configurat; spune setup_required și nu inventa execuție locală.'
 }
 
-export function capacitateVocalLive(): { disponibil: boolean; model: string; voce: string } {
+export async function capacitateVocalLive(
+  verificaOpenAI: () => Promise<OpenAIHealthResult> = openaiHealth,
+  verificaConfigurare: () => boolean = vocalLiveDisponibila,
+): Promise<VocalLiveCapability> {
+  const configured = verificaConfigurare()
+  if (!configured) {
+    return capabilitateVocalaDinHealth(false, config.openai.realtime, config.openaiVoice)
+  }
+  try {
+    return capabilitateVocalaDinHealth(
+      true,
+      config.openai.realtime,
+      config.openaiVoice,
+      await verificaOpenAI(),
+    )
+  } catch {
+    return capabilitateVocalaDinHealth(true, config.openai.realtime, config.openaiVoice)
+  }
+}
+
+export function verdictMeteringVocalLive(
+  motiv:
+    | 'provider_usage_missing_response_id'
+    | 'provider_usage_unavailable'
+    | 'realtime_transcription_usage_unavailable',
+): {
+  frame: { type: 'eroare'; motiv: string; code: 'billing_unavailable' }
+  closeCode: 1008
+  closeReason: 'billing_unavailable'
+  refundInitialCharge: false
+} {
   return {
-    disponibil: vocalLiveDisponibila(),
-    model: config.openai.realtime,
-    voce: config.openaiVoice,
+    frame: { type: 'eroare', motiv, code: 'billing_unavailable' },
+    closeCode: 1008,
+    closeReason: 'billing_unavailable',
+    // Providerul a servit deja; păstrăm debitarea turei livrate, dar oprim
+    // sesiunea ca să nu existe o a doua debitare automată fără metering durabil.
+    refundInitialCharge: false,
+  }
+}
+
+/** A provider response must not unlock another billable turn until its usage
+ * is durable. A stuck database write therefore becomes a bounded terminal
+ * failure instead of leaving the paid Realtime session running indefinitely. */
+export async function meterizeazaVocalLiveCuDeadline(
+  write: () => Promise<void>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('provider_usage_timeout_invalid')
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    await Promise.race([
+      Promise.resolve().then(write),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('provider_usage_timeout')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** Debitarea periodică are aceeași limită fail-closed ca metering-ul. O bază
+ * de date blocată nu poate lăsa o sesiune Realtime să consume în continuare. */
+export async function debiteazaVocalLiveCuDeadline<T>(
+  write: () => Promise<T>,
+  timeoutMs = 5_000,
+): Promise<T> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('voice_debit_timeout_invalid')
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      Promise.resolve().then(write),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('voice_debit_timeout')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+export function rearmeazaCeasCostVocalLive(
+  current: ReturnType<typeof setInterval> | null,
+  esteInchis: () => boolean,
+  tick: () => Promise<boolean> | boolean | void,
+  intervalMs = 60_000,
+): ReturnType<typeof setInterval> | null {
+  if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) throw new Error('voice_billing_interval_invalid')
+  if (current) clearInterval(current)
+  if (esteInchis()) return null
+  return setInterval(() => {
+    if (!esteInchis()) void tick()
+  }, intervalMs)
+}
+
+export interface ControlRambursareVocalLive {
+  seteazaReferinta(ref: string): boolean
+  ramburseaza(): Promise<boolean>
+  referintaCurenta(): string | null
+}
+
+/** Rambursarea debitului de setup este idempotentă și serializată. Un false
+ * sau reject tranzitoriu păstrează aceeași referință și o reîncearcă limitat;
+ * referința dispare numai după confirmarea durabilă din ledger. */
+export function creeazaControlRambursareVocalLive(
+  write: (ref: string) => Promise<boolean>,
+  options: { maxAttempts?: number; retryDelayMs?: number } = {},
+): ControlRambursareVocalLive {
+  const maxAttempts = options.maxAttempts ?? 3
+  const retryDelayMs = options.retryDelayMs ?? 50
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts <= 0) throw new Error('voice_refund_attempts_invalid')
+  if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0) throw new Error('voice_refund_delay_invalid')
+  let refCurent: string | null = null
+  let inFlight: Promise<boolean> | null = null
+
+  const delay = (): Promise<void> => retryDelayMs === 0
+    ? Promise.resolve()
+    : new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+
+  return {
+    seteazaReferinta: (ref) => {
+      if (!ref || (refCurent !== null && refCurent !== ref)) return false
+      refCurent = ref
+      return true
+    },
+    ramburseaza: () => {
+      if (!refCurent) return Promise.resolve(true)
+      if (inFlight) return inFlight
+      const target = refCurent
+      let current: Promise<boolean>
+      current = (async () => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          let durable = false
+          try {
+            durable = await write(target)
+          } catch {
+            durable = false
+          }
+          if (durable) {
+            if (refCurent === target) refCurent = null
+            return true
+          }
+          if (attempt < maxAttempts) await delay()
+        }
+        return false
+      })().finally(() => {
+        if (inFlight === current) inFlight = null
+      })
+      inFlight = current
+      return current
+    },
+    referintaCurenta: () => refCurent,
   }
 }
 
@@ -355,7 +609,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/vocal-live/capability', async (req, reply) => {
     if (!getSessionUser(req)) return reply.code(401).send({ error: 'unauthorized' })
     reply.header('Cache-Control', 'no-store')
-    return capacitateVocalLive()
+    return await capacitateVocalLive()
   })
 
   app.get('/api/vocal-live', {
@@ -370,7 +624,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       try { socket.close(1008, 'session_limit') } catch { /* already closed */ }
       return
     }
-    sesiuniLivePeUtilizator.set(userKey, 1)
     if (!vocalLiveDisponibila()) {
       try {
         socket.close(1011, 'vocal_live_indisponibil')
@@ -379,38 +632,187 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
+    sesiuniLivePeUtilizator.set(userKey, 1)
     const billingSessionId = randomUUID()
     // Product usage is billable for every non-admin account. A missing payment
     // link must never turn an existing customer balance into free provider use.
     const monetizedCustomer = !isAdminSession
+    let inchis = false
     let billingTick = 0
     let providerReady = false
-    let initialChargeRef: string | null = null
-    const chargeMinute = async (): Promise<boolean> => {
-      if (!monetizedCustomer) return true
+    let chargeInFlight: Promise<boolean> | null = null
+    let initialBillingRef: string | null = null
+    let onDebitAcknowledged: () => void = () => undefined
+    const pendingBillingRefs = new Set<string>()
+    const billingGates = new Map<string, {
+      rezervaConsum: () => Promise<boolean>
+      confirmaDupaTrimitere: () => Promise<boolean>
+    }>()
+    const refundController = creeazaControlRambursareVocalLive(async (ref) => {
+      const result = await ramburseazaDebitVocalLive(ref)
+      return result === 'refunded' || result === 'duplicate'
+    })
+    const chargeMinute = (deferUntilProviderInput = false): Promise<boolean> => {
+      if (inchis) return Promise.resolve(false)
+      if (!monetizedCustomer) return Promise.resolve(!inchis)
+      if (chargeInFlight) return chargeInFlight
       const tick = ++billingTick
-      const ref = `voice:${billingSessionId}:${tick}`
-      const result = await debitWalletMinorAtomar(
-        user.email,
-        config.billing.voiceMinuteMinor,
-        ref,
-        'vocal live minute',
-      )
-      if (result.ok) {
-        if (tick === 1 && !result.duplicate) initialChargeRef = ref
-        if (!result.duplicate) return true
-        try { socket.close(1008, 'billing_tick_reused') } catch { /* closed */ }
+      const ref = `voice-debit:v1:${billingSessionId}:${tick}`
+      if (tick === 1) initialBillingRef = ref
+      const handoffToken = randomUUID()
+      let debitAttempt: Promise<boolean> | null = null
+      const executeDebit = async (): Promise<boolean> => {
+        if (inchis) return false
+        const debitDeadline = Date.now() + 5_000
+        // The initial operation is created only when the first provider-bound
+        // input exists, so this deadline is a crash-recovery window rather
+        // than an idle-user timeout. Periodic gates retain one minute to wait
+        // for the next input after cancelling the active response.
+        const consumeDeadline = Date.now() + (tick === 1 ? 15_000 : 55_000)
+        type DebitResult = Awaited<ReturnType<typeof debiteazaVocalLiveAtomar>>
+        let deadlineState: 'waiting' | 'timely' | 'timed_out' = 'waiting'
+        let settledResult: DebitResult | null = null
+        const rawDebit = debiteazaVocalLiveAtomar(
+          user.email,
+          config.billing.voiceMinuteMinor,
+          ref,
+          consumeDeadline,
+        )
+        const reconcileLateDebit = (result: DebitResult): void => {
+          if (!result.ok) return
+          void ramburseazaDebitVocalLive(ref).then((refund) => {
+            if (refund !== 'refunded' && refund !== 'duplicate') {
+              app.log.error({ ref, refund }, 'vocal-live: late debit remains pending for durable reconciler')
+            }
+          }).catch((error) => {
+            app.log.error({ err: String(error).slice(0, 160) }, 'vocal-live: late debit reconciliation failed')
+          })
+        }
+        void rawDebit.then((result) => {
+          settledResult = result
+          if (deadlineState === 'timed_out') reconcileLateDebit(result)
+        }, (error) => {
+          app.log.error({ err: String(error).slice(0, 160) }, 'vocal-live debit promise rejected')
+        })
+        let result: Awaited<ReturnType<typeof debiteazaVocalLiveAtomar>>
+        try {
+          result = await debiteazaVocalLiveCuDeadline(
+            () => rawDebit,
+            Math.max(1, debitDeadline - Date.now()),
+          )
+          deadlineState = 'timely'
+        } catch (error) {
+          deadlineState = 'timed_out'
+          if (settledResult) reconcileLateDebit(settledResult)
+          app.log.error({ err: String(error).slice(0, 160) }, 'vocal-live debit failed')
+          try { socket.close(1008, 'billing_unavailable') } catch { /* closed */ }
+          return false
+        }
+        if (result.ok) {
+          if (result.duplicate) {
+            reconcileLateDebit(result)
+            try { socket.close(1008, 'billing_tick_reused') } catch { /* closed */ }
+            return false
+          }
+          pendingBillingRefs.add(ref)
+          if (tick === 1) {
+            if (!refundController.seteazaReferinta(ref)) {
+              reconcileLateDebit(result)
+              try { socket.close(1008, 'billing_reference_conflict') } catch { /* closed */ }
+              return false
+            }
+            // The socket may close while the atomic debit is awaiting the DB.
+            // Compensate the late success here; the close handler could not
+            // refund a reference that did not exist yet.
+            if (inchis && !providerReady) {
+              const refunded = await refundController.ramburseaza()
+              if (!refunded) app.log.error('vocal-live: setup refund could not be persisted')
+              return false
+            }
+          }
+          if (inchis) {
+            reconcileLateDebit(result)
+            return false
+          }
+          return !inchis
+        }
+        try { socket.close(1008, result.code === 'insufficient' ? 'fara_credit' : 'billing_unavailable') } catch { /* closed */ }
         return false
       }
-      try { socket.close(1008, result.code === 'insufficient' ? 'fara_credit' : 'billing_unavailable') } catch { /* closed */ }
-      return false
+      const runDebit = (): Promise<boolean> => {
+        debitAttempt ??= executeDebit()
+        return debitAttempt
+      }
+      const reserveConsumption = async (): Promise<boolean> => {
+        // The setup minute is deliberately charged lazily: opening an idle
+        // provider socket costs the customer nothing. Only the first queued
+        // audio/text/tool input starts the durable charge.
+        if (!await runDebit()) return false
+        // Rezervarea DB, scrierea confirmată în socket și ACK-ul DB au fiecare
+        // propriul deadline. Fereastra durabilă trebuie să le poată cuprinde.
+        const ackDeadline = Date.now() + 18_000
+        try {
+          const consumed = await debiteazaVocalLiveCuDeadline(
+            () => consumaDebitVocalLive(ref, handoffToken, ackDeadline),
+            5_000,
+          )
+          return consumed === 'ok' || consumed === 'duplicate'
+        } catch {
+          return false
+        }
+      }
+      const acknowledgeAfterSend = async (): Promise<boolean> => {
+        try {
+          const acknowledged = await debiteazaVocalLiveCuDeadline(
+            () => confirmaDebitVocalLive(ref, handoffToken),
+            5_000,
+          )
+          const durable = acknowledged === 'ok' || acknowledged === 'duplicate'
+          if (durable) {
+            pendingBillingRefs.delete(ref)
+            billingGates.delete(ref)
+            if (!inchis) onDebitAcknowledged()
+          }
+          return durable
+        } catch {
+          return false
+        }
+      }
+      billingGates.set(ref, {
+        rezervaConsum: reserveConsumption,
+        confirmaDupaTrimitere: acknowledgeAfterSend,
+      })
+      if (deferUntilProviderInput) return Promise.resolve(true)
+      const debit = providerReady && live
+        ? live.asteaptaDebit(runDebit, reserveConsumption, acknowledgeAfterSend)
+        : runDebit()
+      let tracked: Promise<boolean>
+      tracked = debit.finally(() => {
+        if (chargeInFlight === tracked) chargeInFlight = null
+      })
+      chargeInFlight = tracked
+      return tracked
     }
     const refundInitialSetupCharge = async (): Promise<void> => {
-      if (providerReady || !initialChargeRef || !monetizedCustomer) return
-      const ref = initialChargeRef
-      initialChargeRef = null
-      const refunded = await grantCreditMinor(user.email, config.billing.voiceMinuteMinor, `${ref}:setup_refund`)
-      if (!refunded) app.log.error('vocal-live: setup refund could not be persisted')
+      if (!monetizedCustomer) return
+      const initialRef = refundController.referintaCurenta()
+      if (!initialRef || !pendingBillingRefs.has(initialRef)) return
+      const refunded = await refundController.ramburseaza()
+      if (refunded) {
+        pendingBillingRefs.delete(initialRef)
+        billingGates.delete(initialRef)
+      }
+      else app.log.error('vocal-live: setup refund remains in durable reconciliation queue')
+    }
+    const refundUnacknowledgedCharges = async (): Promise<void> => {
+      await refundInitialSetupCharge()
+      for (const ref of pendingBillingRefs) {
+        const result = await ramburseazaDebitVocalLive(ref)
+        if (result === 'refunded' || result === 'duplicate') {
+          pendingBillingRefs.delete(ref)
+          billingGates.delete(ref)
+        }
+      }
     }
 
     // Pulsul numără sesiunile REAL (audit 9 aug: contoarele existau din #947,
@@ -425,7 +827,6 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       sesiuniLivePeUtilizator.delete(userKey)
     }
 
-    let inchis = false
     let live: VocalLive | null = null
     // OPUS PE HOPUL BROWSER↔SERVER (owner, 12 aug: „fă Opus"). OFF până când:
     // (a) flagul `config.voiceOpus` e pornit, (b) codecul de server se încarcă
@@ -484,6 +885,10 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
     // transcrierea providerului poate sosi după primul cadru audio, deci tura
     // ambientală trecea drept „sistem" și se REDA (audit 9 aug, critică).
     let turaDeSistem = false
+    // Prima rostire poate fi armată explicit DOAR de cadrul trimis în urma
+    // clickului pe microfon. Reconectarea automată nu trimite cadrul și nu
+    // deschide accidental poarta peste o conversație ambientală.
+    const startExplicit = creeazaPoartaStartExplicit()
     // Rostirea CURENTĂ (segmentată pe pauze >2,5s): adresarea se judecă pe
     // ULTIMA rostire, nu pe tot ce s-a strâns peste ture mute — altfel
     // „Kelion, …" proaspăt rămânea îngropat după primele 4 cuvinte VECHI.
@@ -755,7 +1160,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       // ale userului, otrăveau instrucțiunea sesiunii următoare (filtrul
       // anti-otravă lasă rândurile 'user' mereu) ȘI memoria de lungă durată.
       // Sub STRICT: fără nume măsurat, tura nu intră în istoric.
-      if (verdictTura === null && !turaAdresata(bufUser.trim())) {
+      if (verdictTura === null && !startExplicit.activa() && !turaAdresata(bufUser.trim())) {
         if (bufUser.trim() || bufKelion.trim()) {
           app.log.info(`[VOCE] tură nesalvată la închidere (tăcere corectă, fără nume): auzit „${bufUser.trim().slice(0, 120)}"`)
         }
@@ -769,7 +1174,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       salveazaTura()
     }
 
-    const ceasCost = setInterval(() => { void chargeMinute() }, 60_000)
+    // Periodic billing starts only after the provider proves readiness. Until
+    // then the initial debit is the only in-flight operation.
+    let ceasCost: ReturnType<typeof setInterval> | null = null
 
     // ── ANUNȚUL „CÂND E GATA" (8 aug, ownerul: „să anunțe când e gata") ──────
     // Ordinele de constructor pornite PRIN UȘĂ din sesiunea asta se țin minte
@@ -859,7 +1266,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             tz?: string
             cadre?: unknown
           }
-          if (m.type === 'coords') {
+          if (m.type === 'explicit_start') {
+            // One-shot, bounded: numai clickul manual din client armează prima
+            // rostire; retry/visibility/revenire după apel nu trimit acest cadru.
+            startExplicit.armeaza()
+          } else if (m.type === 'coords') {
             if (Number.isFinite(m.lat) && Number.isFinite(m.lon)
               && (m.lat as number) >= -90 && (m.lat as number) <= 90
               && (m.lon as number) >= -180 && (m.lon as number) <= 180) {
@@ -1042,10 +1453,13 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         }
       }
     })
-    socket.on('close', () => {
+    let socketCleanupDone = false
+    const cleanupSocketSession = (): void => {
+      if (socketCleanupDone) return
+      socketCleanupDone = true
       inchis = true
       scadeSesiunea()
-      clearInterval(ceasCost)
+      if (ceasCost) clearInterval(ceasCost)
       clearInterval(ceasOrdine)
       if (ceasTacere) {
         clearTimeout(ceasTacere)
@@ -1057,31 +1471,18 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       incheieTura() // o tură neterminată nu se pierde — dar una SUPRIMATĂ nu se salvează
       live?.inchide()
-      void refundInitialSetupCharge()
+      void refundUnacknowledgedCharges()
       opus?.inchide() // eliberează codecul Opus (WASM) al sesiunii
       opus = null
+    }
+    socket.on('close', () => {
+      cleanupSocketSession()
       app.log.info('vocal-live: WS închis')
     })
-    socket.on('error', () => {
-      inchis = true
-      scadeSesiunea()
-      clearInterval(ceasCost)
-      clearInterval(ceasOrdine)
-      if (ceasTacere) {
-        clearTimeout(ceasTacere)
-        ceasTacere = null
-      }
-      if (ceasAsteptareVerdict) {
-        clearTimeout(ceasAsteptareVerdict)
-        ceasAsteptareVerdict = null
-      }
-      incheieTura()
-      live?.inchide()
-      void refundInitialSetupCharge()
-    })
+    socket.on('error', cleanupSocketSession)
 
     void (async () => {
-      if (!await chargeMinute()) return
+      if (!await chargeMinute(true)) return
       // Memoria: ultimele schimburi din istoric intră în instrucțiunea de setup.
       // O citire picată NU blochează vocea — sesiunea pornește fără memorie și
       // spune asta în jurnal (mai bine o voce uitucă decât niciuna).
@@ -1174,14 +1575,11 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
 
       if (inchis) return
       // ── GARDUL TREZIRII PE NUME — DETERMINIST, PE SERVER ──────────────────
-      // 9 aug (ownerul, a treia oară: „nu identifică când discuțiile ambientale
-      // sunt între alte persoane"): gardul s-a născut cu contractul „numele la
-      // început SAU dialog în curs". 15 aug (ownerul, VERBATIM): „kelion
-      // trebuie sa raspunda doar cind aude numele, doar atunci" — STRICT:
-      // fereastra de dialog și excepția primei ture au fost scoase; audio-ul
-      // modelului pleacă spre difuzor DOAR pe tură cu numele MĂSURAT în
-      // transcriere. O tură pornită de SISTEM (anunț de ordin, fără vorbă de
-      // om în față) trece mereu. Verdictul se ia O DATĂ pe tură, la prima
+      // 9 aug: după prima rostire armată explicit prin click, audio-ul modelului
+      // pleacă spre difuzor DOAR pe tură cu numele MĂSURAT în transcriere. O
+      // reconectare automată nu armează excepția. O tură pornită de SISTEM
+      // (anunț de ordin, fără vorbă de om în față) trece mereu. Verdictul se ia
+      // O DATĂ pe tură, la prima
       // bucată de audio, pe transcrierea de până atunci; tura suprimată se
       // scrie în jurnal cu ce s-a auzit — o tăcere GREȘITĂ trebuie să se poată
       // vedea, nu să dispară (lecția numeStrigat).
@@ -1203,11 +1601,12 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         // primele 4 cuvinte ale unui text vechi (audit 9 aug).
         const spusa = rostireCurenta.trim() || bufUser.trim()
         if (turaDeSistem) return true // anunț declarat EXPLICIT, nu dedus
-        // ── STRICT (owner, 15 aug, verbatim: „kelion trebuie sa raspunda doar
-        // cind aude numele, doar atunci") ───────────────────────────────────
-        // „Doar atunci" a scos: fereastra de dialog (120s), excepția primei
-        // ture ȘI trecerea „nimic auzit → nu suprimăm orbește" — un enunț fără
-        // nume MĂSURAT în transcriere nu primește răspuns. Nu e blocajul la
+        // Cadrul explicit primit de la click este temei suficient pentru prima
+        // tură chiar dacă providerul livrează audio înaintea transcrierii.
+        if (startExplicit.activa()) return true
+        // ── AMBIENT STRICT DUPĂ STARTUL EXPLICIT ─────────────────────────────
+        // Fereastra de dialog rămâne scoasă: după rostirea armată de click, un
+        // enunț fără nume MĂSURAT în transcriere nu primește răspuns. Nu e blocajul la
         // rece din 9 aug (ăla suprima și frazele CU nume): numele deschide
         // tura oricând, iar cadrele așteaptă transcrierea (mai jos) înainte de
         // verdict, deci o transcriere întârziată cu „Kelion" tot se redă.
@@ -1334,7 +1733,29 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
       }
       live = deschideVocalLive(instructiune, liveTools, {
         onGata: async () => {
+          let initialGate: {
+            rezervaConsum: () => Promise<boolean>
+            confirmaDupaTrimitere: () => Promise<boolean>
+          } | null = null
+          if (monetizedCustomer) {
+            const initialRef = initialBillingRef
+            initialGate = initialRef ? billingGates.get(initialRef) ?? null : null
+            if (!initialGate) {
+              return false
+            }
+          }
           providerReady = true
+          onDebitAcknowledged = () => {
+            if (inchis) return
+            if (monetizedCustomer) {
+              ceasCost = rearmeazaCeasCostVocalLive(
+                ceasCost,
+                () => inchis,
+                chargeMinute,
+              )
+            }
+          }
+          pulsVoce.ultimaEroare = ''
           // OPUS: cât sesiunea se pregătește, încercăm codecul de server O DATĂ.
           // Îl anunțăm clientului DOAR dacă flagul e pornit ȘI codecul chiar s-a
           // încărcat — altfel clientul rămâne pe PCM (fără cursă, fără regresie).
@@ -1343,6 +1764,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             if (!opus) app.log.warn('vocal-live: VOICE_OPUS pornit, dar codecul de server nu s-a încărcat — rămân pe PCM')
           }
           trimite({ type: 'gata', opus: !!(config.voiceOpus && opus) })
+          return initialGate ?? true
         },
         onAudioIesire: (data) => {
           pulsVoce.cadreAudioDeLaOpenAI++
@@ -1353,7 +1775,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             return
           }
           if (verdictTura === null) {
-            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem
+            const areTemei = rostireCurenta.trim() || bufUser.trim() || turaDeSistem || startExplicit.activa()
             if (!areTemei) {
               // Transcrierea n-a sosit încă (Google o trimite adesea DUPĂ
               // primul cadru audio) — verdict AMÂNAT: ținem cadrul și judecăm
@@ -1379,6 +1801,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               return
             }
             verdictTura = true
+            if (!turaDeSistem) startExplicit.consuma()
             turaDeSistem = false // anunțul e consumat de tura lui
             taiatDeVoce = false // replică nouă — tăierea veche nu o mai privește
             varsaTextulInAsteptare() // textul ținut se judecă cu ACELAȘI verdict
@@ -1407,6 +1830,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           livreazaCadru(data)
         },
         onTranscriereUser: (text, final) => {
+          if (text.trim()) startExplicit.incepeTura()
           const acum = Date.now()
           // O rostire nouă după o tăiere explicită deschide o tură nouă; nu
           // reanimăm replica pe care omul a oprit-o, ci pornim cu buffere curate.
@@ -1495,6 +1919,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             app.log.info(`[VOCE-DIAG] judecat adresare: verdict=${_adresat} | final=${final} | spusa="${_spusa.slice(0, 80)}" | cadreAsteptare=${cadreInAsteptare.length} | textAsteptare=${textInAsteptare.length}`)
             if (_adresat) {
               verdictTura = true
+              if (!turaDeSistem) startExplicit.consuma()
               verdictDinCeas = false
               turaDeSistem = false
               taiatDeVoce = false
@@ -1658,7 +2083,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
                 trimite({ type: 'control', frame })
               }
             }
-            let r = await turaCreierului(req.headers.cookie ?? '', cerere, apel.id, coords, cadre, laEcran, monitorLive, tranzactiiLive)
+            let r = await turaCreierului(req.headers.cookie ?? '', cerere, `${billingSessionId}:${apel.id}`, coords, cadre, laEcran, monitorLive, tranzactiiLive)
             // TRIEREA ÎN DOI (§4) — CONVERGENȚA: dacă în timpul măcinării omul a
             // spus lucruri noi (întrebat de Live sau de la sine), creierul greu
             // primește încă o rundă CU ISTORICUL rundei anterioare (altfel runda
@@ -1681,7 +2106,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
               const r2 = await turaCreierului(
                 req.headers.cookie ?? '',
                 cerere,
-                `${apel.id}:triage:${runde}`,
+                `${billingSessionId}:${apel.id}:triage:${runde}`,
                 coords,
                 cadre,
                 laEcran,
@@ -1786,6 +2211,9 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
         },
         onIntrerupt: () => {
+          // speech_started mută dreptul one-shot pe tura curentă; nu îl consumă.
+          // Astfel un răspuns cu unealtă >30s nu devine mut după expirarea ceasului.
+          startExplicit.incepeTura()
           pulsVoce.intreruperiModel++
           taiereManuala = false
           verdictTura = null // barge-in: tura moare, următoarea se judecă proaspăt
@@ -1849,7 +2277,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
             bufKelion = ''
             rostireCurenta = ''
             inchideSarcinaVoce()
-          } else if (verdictTura === null && !turaAdresata(bufUser.trim())) {
+          } else if (verdictTura === null && !startExplicit.activa() && !turaAdresata(bufUser.trim())) {
             // AUDITUL 15 aug (critică, confirmată de 3 verificatori): modelul a
             // TĂCUT corect pe vorbire neadresată — verdictul null nu înseamnă
             // „tura e bună". Fără numele măsurat, bălăriile urechii nu intră
@@ -1880,34 +2308,50 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
           }
           trimite({ type: 'tura_gata' })
         },
-        onUsage: (usage) => {
+        onUsage: async (usage) => {
           if (!usage.responseId) {
-            trimite({ type: 'eroare', motiv: 'provider_usage_missing_response_id' })
-            try { socket.close(1011, 'provider_usage_missing') } catch { /* closed */ }
-            return
+            throw new Error('provider_usage_missing_response_id')
           }
-          void recordProviderUsage({
-            responseId: usage.responseId,
-            userEmail: user.email,
-            surface: 'realtime',
-            sessionId: billingSessionId,
-            model: config.openai.realtime,
-            serviceTier: null,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            inputAudioTokens: usage.inputAudioTokens,
-            outputAudioTokens: usage.outputAudioTokens,
-          }).catch((error) => {
+          try {
+            await meterizeazaVocalLiveCuDeadline(() => recordProviderUsage({
+              responseId: usage.responseId,
+              userEmail: user.email,
+              surface: usage.surface,
+              sessionId: billingSessionId,
+              model: usage.model,
+              serviceTier: null,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              inputAudioTokens: usage.inputAudioTokens,
+              outputAudioTokens: usage.outputAudioTokens,
+            }))
+          } catch (error) {
             app.log.error({ err: String(error).slice(0, 160) }, 'vocal-live metering failed')
-            trimite({ type: 'eroare', motiv: 'provider_usage_unavailable' })
-            try { socket.close(1011, 'provider_usage_unavailable') } catch { /* closed */ }
-          })
+            throw error
+          }
         },
-        onEroare: (motiv) => {
+        onEroare: (motiv, code) => {
           pulsVoce.ultimaEroare = motiv.slice(0, 160)
-          trimite({ type: 'eroare', motiv })
+          const meteringVerdict = code === 'billing_unavailable'
+            ? verdictMeteringVocalLive(
+                motiv === 'provider_usage_missing_response_id'
+                || motiv === 'realtime_transcription_usage_unavailable'
+                  ? motiv
+                  : 'provider_usage_unavailable',
+              )
+            : null
+          trimite(meteringVerdict?.frame ?? { type: 'eroare', motiv, ...(code ? { code } : {}) })
           app.log.warn(`vocal-live: ${motiv}`)
-          void refundInitialSetupCharge()
+          // Fatal provider/metering failures are owned by the server. Stop all
+          // timers and both sockets even if the browser ignores the error frame.
+          inchis = true
+          if (ceasCost) clearInterval(ceasCost)
+          clearInterval(ceasOrdine)
+          live?.inchide()
+          void refundUnacknowledgedCharges()
+          try {
+            socket.close(meteringVerdict?.closeCode ?? 1011, meteringVerdict?.closeReason ?? 'provider_unavailable')
+          } catch { /* already closed */ }
         },
         onInfo: (msg) => {
           pulsVoce.varianta = msg.slice(0, 120)
@@ -1915,7 +2359,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         },
       }, limbaPin)
       if (!live) {
-        await refundInitialSetupCharge()
+        await refundUnacknowledgedCharges()
         try {
           socket.close(1011, 'vocal_live_indisponibil')
         } catch {

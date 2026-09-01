@@ -26,13 +26,15 @@ function callersOf(symbol: string): string[] {
 }
 
 describe('single product-debit boundary', () => {
-  it('routes every paid capability through the central identity-aware debit', () => {
+  it('routes every paid capability through an approved identity-aware debit boundary', () => {
     expect(callersOf('debitWalletMinorAtomar')).toEqual([
       'routes/a2a.ts',
       'routes/chat.ts',
-      'routes/vocalLive.ts',
       'services/apelTraducere.ts',
       'services/tarife.ts',
+    ])
+    expect(callersOf('debiteazaVocalLiveAtomar')).toEqual([
+      'routes/vocalLive.ts',
     ])
     expect(callersOf('taxeazaServiciu')).toEqual([
       'routes/chat.ts',
@@ -48,6 +50,7 @@ describe('single product-debit boundary', () => {
 
     const db = readFileSync(join(sourceRoot, 'db.ts'), 'utf8')
     expect(db).toMatch(/function debitWalletMinorAtomar[\s\S]*?if \(esteAdminKelion\(email\)\) return \{ ok: true, debitedMinor: 0/)
+    expect(db).toMatch(/function debiteazaVocalLiveAtomar[\s\S]*?if \(esteAdminKelion\(email\)\) return \{ ok: true, debitedMinor: 0/)
   })
 
   it('does not attach a second wallet debit to included capabilities', () => {
@@ -58,7 +61,7 @@ describe('single product-debit boundary', () => {
       'routes/deploy.ts',
     ]) {
       const source = readFileSync(join(sourceRoot, path), 'utf8')
-      expect(source).not.toMatch(/debitWalletMinorAtomar|taxeazaServiciu|balance_minor\s*=/)
+      expect(source).not.toMatch(/debitWalletMinorAtomar|debiteazaVocalLiveAtomar|taxeazaServiciu|balance_minor\s*=/)
     }
   })
 })

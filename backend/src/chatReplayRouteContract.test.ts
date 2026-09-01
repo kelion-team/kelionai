@@ -28,7 +28,9 @@ describe('chat route durable replay wiring', () => {
 
   it('persists every normal terminal path before ending the SSE response', () => {
     const afterClaim = chat.slice(chat.indexOf('const replayClaim = await claimChatTurn'))
-    expect(afterClaim.match(/await completeChatTurn\(\{/g)?.length).toBeGreaterThanOrEqual(4)
+    // Trei căi normale rămân după eliminarea terminalului artificial
+    // `text_gate_no_name`: comandă instant, tăcere ambientală și răspuns final.
+    expect(afterClaim.match(/await completeChatTurn\(\{/g)?.length).toBeGreaterThanOrEqual(3)
     expect(afterClaim.match(/await failChatTurn\(\{/g)?.length).toBeGreaterThanOrEqual(4)
     expect(afterClaim).toContain('executeChatSideEffect({')
     expect(afterClaim).toContain('saveChatMessageOnce({')

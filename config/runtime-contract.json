@@ -7,8 +7,13 @@
     "BILLING_TOPUP_STEP_MINOR",
     "CALL_UTTERANCE_PRICE_MINOR",
     "CHAT_TURN_PRICE_MINOR",
+    "CODEX_WORKER_ENABLED",
+    "CONSTRUCTOR_EXTERNAL_RETRY_SECONDS",
     "CONSTRUCTOR_PUBLISHER_ENABLED",
     "CONSTRUCTOR_RELEASE_ENABLED",
+    "CONSTRUCTOR_REQUIRED_CHECKS",
+    "CONSTRUCTOR_RETRY_BASE_SECONDS",
+    "CONSTRUCTOR_RETRY_MAX_SECONDS",
     "CREDIT_PRICE_MINOR",
     "DATA_CONTROLLER_NAME",
     "FINANCIAL_RETENTION_YEARS",
@@ -58,6 +63,18 @@
     "VOCAL_LIVE_IDLE_TIMEOUT_SECONDS",
     "VOICE_LIVE_MINUTE_PRICE_MINOR"
   ],
+  "generatedRuntime": [
+    "BROWSER_WORKER_SOCKET",
+    "CONVERTER_WORKER_SOCKET",
+    "FRONTEND_ORIGIN",
+    "GOOGLE_TTS_ENABLED",
+    "GOOGLE_TTS_VOICE",
+    "MAIL_ENABLED",
+    "NODE_ENV",
+    "PORT",
+    "RELEASE_CANDIDATE_MODE",
+    "SEARCH_ENABLED"
+  ],
   "secretFiles": {
     "BROWSER_WORKER_SECRET": "browser-worker-secret",
     "CODEX_WORKER_SECRET": "codex-worker-secret",
@@ -65,8 +82,13 @@
     "CONSTRUCTOR_RELEASE_SECRET": "constructor-release-secret",
     "CONVERTER_WORKER_SECRET": "converter-worker-secret",
     "DATABASE_URL": "database-url",
+    "GITHUB_RELEASE_OAUTH_TOKEN": {
+      "actionsSecret": "RELEASE_GITHUB_TOKEN",
+      "file": "github-release-oauth-token"
+    },
     "GOOGLE_CLIENT_SECRET": "google-client-secret",
     "GOOGLE_TOKEN_ENCRYPTION_KEY": "google-token-encryption-key",
+    "OPENAI_ADMIN_KEY": "openai-admin-key",
     "OPENAI_API_KEY": "openai-project-key",
     "REVOLUT_MERCHANT_SECRET_KEY": "revolut-merchant-secret-key",
     "REVOLUT_WEBHOOK_SIGNING_SECRET": "revolut-webhook-signing-secret",
@@ -75,5 +97,20 @@
   },
   "hostOnlySecretFiles": {
     "MIGRATION_BACKUP_PROOF_KEY": "migration-backup-proof-key"
-  }
+  },
+  "hostProvisionedSecretFiles": {
+    "CONSTRUCTOR_GHCR_READ_TOKEN": {
+      "environment": "GHCR_READ_TOKEN",
+      "file": "github-ghcr-read-token",
+      "target": "/root/kelion/gate-secrets/github-ghcr-read-token"
+    }
+  },
+  "workflowControlVariables": [
+    "VPS_HOST",
+    "VPS_HOST_KEY",
+    "VPS_USER"
+  ],
+  "workflowControlSecrets": [
+    "VPS_SSH_KEY"
+  ]
 }

@@ -18,7 +18,9 @@ vi.mock('./resurse.js', () => ({
   PRAG_MEMORIE_PCT: 10,
   PRAG_INCARCARE_PCT: 90,
 }))
-vi.mock('./openaiResponses.js', () => ({ openaiHealth: async () => ({ ok: true, serving: true }) }))
+vi.mock('./openaiResponses.js', () => ({
+  openaiHealth: async () => ({ ok: true, serving: true, status: 200, class: 'ok' }),
+}))
 vi.mock('./dispecer.js', () => ({ stareDispecer: () => ({}) }))
 vi.mock('./browser.js', () => ({ probaBrowserulMainilor: async () => ({ ok: true }) }))
 vi.mock('./constructorChainStatus.js', () => ({

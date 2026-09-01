@@ -34,4 +34,3 @@ RestrictSUIDSGID=true
 LockPersonality=true
 SystemCallArchitectures=native
 TimeoutStartSec=5min
-

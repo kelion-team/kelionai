@@ -4,9 +4,9 @@ Acest document este contractul curent de verificare, nu un istoric de decizii. T
 
 ## Acoperire inventar
 
-- `frontend/src`: 170 fișiere — 116 producție și 54 teste.
-- Cod/config/stil/manifest de producție: 31.461 linii.
-- Teste frontend: 3.261 linii.
+- `frontend/src`: 189 fișiere — 126 producție și 63 teste.
+- Cod/config/stil/manifest de producție: 33.469 linii.
+- Teste frontend: 4.553 linii.
 - Configurație/build inspectată: `package.json`, lockfile, toate tsconfig-urile, `vite.config.ts`, `index.html`, `public/sw.js`, scripturile frontend și workflow-ul PR.
 - Fișiere de producție neclasificate: **0**.
 
@@ -74,7 +74,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 ### Biblioteci — chat, voce și senzori
 
 - `chat.ts`: stream chat și idempotency; `chatReplayPolicy.ts`: oprirea retry-ului ambiguu; `offlineStore.ts`: istoric/outbox tranzacțional account-scoped; `coadaOffline.ts`: compatibilitate și ACK strict; `offlineSync.ts`: drenare mutex la mount/reconnect în batch-uri de maximum 100; `contextOffline.ts`: context local minim; `callMedia.ts`: envelope și segmentare media pentru apel.
-- `vocalLive.ts`: client unic OpenAI Realtime prin backend; `voiceHeartbeat.ts`, `voceUnica.ts`, `rutaAudio.ts`, `audioFocus.ts`: o singură voce și ownership audio.
+- `vocalLive.ts`: client unic OpenAI Realtime prin backend; `vocalLiveAvailability.ts`: coduri publice fără body provider, terminale fără retry și maximum cinci reluări tranzitorii; `voiceHeartbeat.ts`, `voceUnica.ts`, `rutaAudio.ts`, `audioFocus.ts`: o singură voce și ownership audio.
 - `micStream.ts`, `vad.ts`, `pcm.ts`, `pcmWorklet.ts`, `opusVoce.ts`, `audioGraph.ts`, `audioIO.ts`: captură, VAD, codec și redare.
 - `apel.ts`, `apelMic.ts`, `apelSonerie.ts`: apel și semnalizare; `voceBrowser.ts`, `vociKelion.ts`: fallback senzorial local.
 - `camera.ts`, `cameraConsent.ts`, `avatarCamera.ts`: cameră și consimțământ; `auzAmbiental.ts`: indicii FFT neconcludente pe streamul comun.
@@ -122,10 +122,10 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | --- | --- | --- | --- |
 | C01 | Stage | trimite text / Enter / Shift+Enter | un singur `/api/chat`, UUID idempotent per tură, transcript complet |
 | C02 | Chat | Stop | oprește streamul și audio fără a șterge întrebarea următoare |
-| C03 | Live | start cu o atingere | `connecting → listening → thinking → speaking`; status și reconectare vizibile |
+| C03 | Live | start cu o atingere | capability probe real OpenAI; `connecting → listening → thinking → speaking`; status și reconectare vizibile |
 | C04 | Live | vorbește peste răspuns | barge-in golește bufferul audio și păstrează transcriptul ambelor sensuri |
-| C05 | Live | pauză 20s / tab background | sesiunea nu moare la 15s; închiderea serverului are motiv și reluare deliberată |
-| C06 | Live | permission denied / socket timeout | eroare acționabilă, timer curățat, fără buclă de reconnect |
+| C05 | Live | pauză 20s / tab background / idle timeout | sesiunea nu moare la 15s; idle timeout oprește normal microfonul și cere un start nou, fără reconectare automată |
+| C06 | Live | invalid key / quota / model access / rate-limit / 5xx / transport | cauzele terminale au mesaj distinct și zero retry; cele tranzitorii au exact cinci reluări 1/2/4/8/15s, anulabile din buton |
 | C07 | Chat | limbă și voce | preferința se salvează per cont; un singur output audio |
 | C08 | Chat | atașare/drop/paste | tip/mărime validate; offline refuză înainte de network |
 | C09 | Cameră | pornește / schimbă / stop | consimțământ explicit, indicator persistent, tracks oprite la revoke/unmount |
@@ -183,8 +183,8 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | A10 | Constructor | evaluate/send/cancel/retry/clean | worker Codex, status și progres reale; idempotency și autoritate server |
 | A11 | Agent specializat | create | numai formular React → POST JSON `/api/enterprise/agent-nou`; fără consolă HTML paralelă |
 | A12 | Creier | afișare | OpenAI read-only; trepte din GET, fără selector/POST/KV mutabil |
-| A13 | Codex | heartbeat/setup/task | browser worker: `codex login`; headless: flux oficial `codex login --device-auth`; URL/cod/token nu intră în Kelion DOM/DB/log, task URL oficial noopener |
-| A14 | Codex | cost/capabilități | subscription numai pentru Codex text/reasoning/Constructor; Realtime/TTS/image/video rămân OpenAI API server-side; cost intern separat și debit Kelion admin zero din `/balance` |
+| A13 | Codex | heartbeat/setup/task | workerul reînnoiește cache-ul numai din `openai-project-key`, prin `codex login --with-api-key` pe stdin; cheia/fingerprintul/cache-ul nu intră în Kelion DOM/DB/log, task URL oficial noopener |
+| A14 | Codex | cost/capabilități | aceeași cheie project-scoped deservește backendul și Constructorul prin boundary-uri separate; Realtime/TTS/image/video rămân exclusiv server-side, cost intern separat și debit Kelion admin zero din `/balance` |
 | A15 | VPS/diagnostic | citire/autoverificare | status real, eșec explicit; fără restart/deploy VPS direct din browser |
 
 ## Matrice live — native și securitate

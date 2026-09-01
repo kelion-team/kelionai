@@ -49,6 +49,7 @@ import { runOrchestrator } from '../services/orchestrator.js'
 import { memorieUnificata } from '../services/memorieUnificata.js'
 import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { modelOpenAI } from '../services/openaiModele.js'
+import { isOpenAIProviderThrottleError } from '../services/openaiResponses.js'
 import { recallMemories, recallMemoriiTranzactii, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu, CAPABILITIES, grupaExecutieUnealta } from '../services/brainCapabilities.js'
 import { lectiiCurente } from '../services/autoInvatare.js'
@@ -996,7 +997,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // This route allows a big body (camera frames / attached images). It is the
       // most cost-sensitive one, so it gets a tighter rate limit than the global
       // default — 40/min per IP is far more than a human types, but stops an
-      // automated flood from burning API/subscription.
+      // automated flood from burning API usage.
       bodyLimit: 12_000_000,
       config: { rateLimit: { max: 40, timeWindow: '1 minute' } },
     },
@@ -2369,32 +2370,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // ca și catch-ul să o poată consulta: pana de creier pe o tură neadresată
     // se stinge cu {ignored}, nu cu bulă rostită (audit 9 aug).
     let gateDecided = !voceAmbianta
-    // POARTA DE NUME PE TEXT (owner, 23 aug 2026: „numele lui e cheia care
-    // deschide chatul sau orice cerinta" — repetat de 10000 de ori).
-    // Pe VOCE există deja turaAdresata; pe TEXT poarta era bypassed.
-    // Acum: fără „Kelion" la început → {ignored}, ca pe voce.
-    // Excepții: ușa creierului (eUsaCreierului — tur formulat de modelul live,
-    // nu de om) și continuarea ușii (continuareUsa). Visitor chat e rută
-    // separată (/api/visitor-chat/send) — nu trece pe aici, deci e exempt.
-    if (!voceAmbianta && !eUsaCreierului && !req.body?.continuareUsa && lastUserText && !numeStrigat(lastUserText)) {
-      reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true, reason: 'name_required' })}${CTRL}`)
-      await scrieJurnalOperational(() => tranzitioneazaSarcinaOperationala({
-        taskId: sarcinaOperationalaId,
-        stare: 'expired',
-        code: 'text_gate_no_name',
-        metadata: { ambientVoice: false, nameWasHeard: false },
-      }))
-      await completeChatTurn({
-        userEmail: user.email,
-        idempotencyKey: clientKey,
-        leaseToken: replayLeaseToken,
-        text: replayCapture.text(),
-        code: 'text_gate_no_name',
-      })
-      reply.raw.end()
-      console.log(`[TEXT] tura ${turnId.slice(0, 8)}: tăcere — fără nume la început. TEXT: „${lastUserText.slice(0, 60)}"`)
-      return
-    }
+    // Un mesaj tastat în caseta de chat este adresat explicit prin gestul de
+    // trimitere. Wake-word-ul rămâne exclusiv pe vocea ambientală; aplicat aici,
+    // făcea mesajele scrise obișnuite să dispară fără răspuns.
     // THE BRAIN CLOCK (admin): the first real word measures speed; the bar moves
     // to "Composing the reply". Once per turn, only for the admin (his telemetry).
     let firstWordMarked = false
@@ -3109,6 +3087,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // disable replay so external effects cannot be duplicated.
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
+      let opresteFallbackProvider429 = false
       const MAX_INCERCARI_MODEL = 3
       // MODELUL EFECTIV al rundelor (registrul backend #1): `ask_brain` poate urca
       // tura LA MIJLOC prin `escaladare`, iar orchestratorul citește
@@ -3179,9 +3158,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             lastBrainErr = ge
             if (textFlowed) throw ge // partial text already at the user — no retry
             const errMsg = String(ge)
+            // The Responses adapter has already performed the one permitted,
+            // Retry-After-bounded retry for a true request rate limit. Quota,
+            // credit/spend/usage limits are terminal immediately. In both
+            // cases, repeating this turn or switching models only amplifies 429.
+            const provider429 = isOpenAIProviderThrottleError(ge)
+            if (provider429) opresteFallbackProvider429 = true
             const is503OrHighDemand = errMsg.includes('503') || /high demand/i.test(errMsg) || /UNAVAILABLE/i.test(errMsg)
             const modelVinovat = modelEfectiv() // sinteza a murit pe modelul efectiv de ACUM
-            const potiRelua = attempt + 1 < MAX_INCERCARI_MODEL && unelteEfectIncercate.length === unelteLaStart
+            const potiRelua = !provider429 && attempt + 1 < MAX_INCERCARI_MODEL && unelteEfectIncercate.length === unelteLaStart
             if (potiRelua) {
               console.warn(`[brain] ${modelVinovat} failed (${errMsg.slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_MODEL}`)
               const basePauza = is503OrHighDemand ? 1000 : 800
@@ -3195,6 +3180,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             elibereazaSlot(slotTinut)
             slotTinut = null
           }
+          if (opresteFallbackProvider429) break
           // Fapte cu EFECT deja făcute în încercarea eșuată → gata cu reluările
           // (vezi declarația faptaInIncercareEsuata de sus). Plasele citesc flag-ul.
           if (!r && unelteEfectIncercate.length > unelteLaStart) {
@@ -3236,14 +3222,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (slotPlasa) elibereazaSlot(slotPlasa)
         }
       }
-if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel) {
-        const modelProfund = orchestratorModel
-        orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
-        escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
-        escaladare.reasoning = undefined
-        plasaRulata = true // comutarea de mai sus aprindea condiția plasei oglindite → ricoșeu înapoi pe profund
-        console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
-        await incearcaPlasa()
+      if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !== orchestratorModel) {
+        if (!opresteFallbackProvider429) {
+          const modelProfund = orchestratorModel
+          orchestratorModel = orChatModel // runBrainOnce + reasoning citesc valoarea nouă
+          escaladare.model = undefined // golim escaladarea, ca rezerva rapidă să câștige (altfel ar reurca la greu)
+          escaladare.reasoning = undefined
+          plasaRulata = true // comutarea de mai sus aprindea condiția plasei oglindite → ricoșeu înapoi pe profund
+          console.error(`[CREIER PROFUND EPUIZAT] ${modelProfund} → cad pe fața rapidă ${orchestratorModel}`)
+          await incearcaPlasa()
+        }
       }
       // ── PLASA OGLINDITĂ: FAȚA RAPIDĂ EPUIZATĂ → O URCARE PE CREIERUL PROFUND
       // (owner, 15 aug, prins LIVE cu captura + F12: tura lui a păginat db_query
@@ -3254,7 +3242,7 @@ if (!r && !textFlowed && !faptaInIncercareEsuata && orChatModel && orChatModel !
       // mers (unelte multe, context mare) murea fără să fi atins vreodată
       // inteligența reală. Urcăm O SINGURĂ dată, doar pe calea deja pierdută
       // (!r && !textFlowed) — o tură care mergea nu poate fi stricată de plasă. */
-      if (!r && !textFlowed && !faptaInIncercareEsuata && !plasaRulata && config.modelCreierProfund && orchestratorModel === orChatModel) {
+      if (!r && !textFlowed && !faptaInIncercareEsuata && !plasaRulata && config.modelCreierProfund && !opresteFallbackProvider429 && orchestratorModel === orChatModel) {
         const profund = `openai/${config.modelCreierProfund}`
         if (modelEfectiv() === profund) {
           // REGISTRUL BACKEND #1 + #3: tura a rulat DEJA pe profund și a murit

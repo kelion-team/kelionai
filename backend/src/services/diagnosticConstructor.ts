@@ -147,7 +147,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
       cod: 'codex_worker_offline',
       severitate: 'critic',
       ce: 'Workerul Codex separat nu are un heartbeat recent de stare ready; comenzile rămân în coadă.',
-      recomandare: 'Rulează autentificarea oficială `codex login` numai în worker și verifică serviciul separat; procesul web nu primește credentialele.',
+      recomandare: 'Verifică credentiala systemd `openai-project-key` și reînnoiește cache-ul prin bridge-ul VPS; loginul Codex primește cheia numai pe stdin, iar procesul web nu o primește.',
     })
   }
   if (!publisherReady) {

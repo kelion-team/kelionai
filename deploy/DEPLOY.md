@@ -2,8 +2,10 @@
 
 Producția se publică numai dintr-un commit integral din `master` care are
 `pr-verify` verde și imagini OCI construite din același commit, fixate prin
-digest și semnate keyless. Publicarea este manuală, în mediul GitHub
-`production`; nu există cron care urmărește și publică un `master` mobil.
+digest și semnate keyless. `release-dispatch` pornește automat workflow-ul
+auditat `production-release` numai după CI și build verzi pentru vârful exact
+din `master`; mutatorul rulează în mediul GitHub `production`. Nu există cron
+care urmărește și publică un `master` mobil.
 
 ## Surse de adevăr
 
@@ -30,8 +32,10 @@ Containerul web nu montează repository-ul sau `/root/kelion`.
 2. `build-images` acceptă numai un run `push` verde pe `master`, construiește
    imaginile din SHA-ul exact, le publică prin digest și emite manifestul
    semnat.
-3. `production-release` pornește numai prin dispatch manual autorizat, cere SHA integral și folosește mediul `production`. Verifică runul
-   CI, runul de build, manifestul și semnăturile înainte de SSH.
+3. `release-dispatch` verifică buildul verde pentru vârful curent din `master`
+   și lansează `production-release` printr-un dispatch auditat. Acesta cere SHA
+   integral, rulează în mediul `production` și verifică runul CI, runul de
+   build, manifestul și semnăturile înainte de SSH.
 4. `deploy.sh` planifică migrările și capturează slotul, proxy-ul, upstreamul,
    markerul, containerele și Caddyfile-ul înainte de orice mutație DB. Pentru o
    migrare distructivă pune proxy-ul managed în maintenance 503; la primul
@@ -95,20 +99,27 @@ payload personal brut.
 
 ## Separarea OpenAI și Codex
 
-Fișierul `openai-project-key` conține numai cheia project-scoped folosită de
-backend pentru funcțiile OpenAI ale clienților. `OPENAI_ADMIN_KEY` nu aparține
-runtime-ului public, workerului Codex sau secret root-ului aplicației.
+Fișierul `openai-project-key` conține unica cheie project-scoped de inferență.
+Backendul o montează read-only pentru funcțiile OpenAI ale clienților, iar
+workerul Codex primește o copie izolată prin systemd `LoadCredential` numai cât
+să actualizeze cache-ul cu `codex login --with-api-key` pe stdin. Valoarea nu
+intră în environment, argv sau log. `OPENAI_ADMIN_KEY` este distinctă și poate
+fi montată numai în backendul Admin; nu aparține runtime-ului de inferență sau
+Constructorului.
 
 Constructorul are trei servicii host-only separate. Web-ul deține coada și câte
-un verificator HMAC per domeniu; nu primește `CODEX_HOME`, `auth.json`, token
-ChatGPT, token Git sau shell. Workerul folosește CLI-ul oficial cu login ChatGPT
+un verificator HMAC per domeniu; nu primește `CODEX_HOME`, `auth.json`, cheie
+OpenAI, token Git sau shell. Workerul folosește CLI-ul oficial cu cache API-key
 gestionat de Codex, profil fără rețea pentru comenzile generate și o imagine
-offline fixată pentru porți. El produce numai un handoff `gates_passed`.
+offline fixată pentru porți. Procesul `codex exec` primește doar environmentul
+allowlisted, nici cheia și nici directorul de credentiale. El produce numai un
+handoff `gates_passed`.
 Publisherul are credentiala GitHub minimă, dar nu are Codex/VPS; dispatcherul
 are numai permisiune Actions pentru commituri deja merged, fără Git/VPS.
 Flagurile, markerii și timerele celor trei identități rămân implicit oprite.
 
 App Server nu este expus de Kelion și nu este necesar pentru coada actuală.
-Ceremonia de login se face de operator în terminalul workerului; statusul public
-este numai `setup_required`, `ready`, `busy` sau `degraded`, fără URL, cod sau
-token de autentificare.
+Loginul este refăcut automat numai când fingerprintul cheii se schimbă sau
+statusul cache-ului eșuează; bridge-ul VPS este recuperarea manuală. Statusul
+public este numai `setup_required`, `ready`, `busy` sau `degraded`, fără cheie,
+fingerprint sau token de autentificare.

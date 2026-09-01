@@ -8,6 +8,12 @@ die() { printf 'runtime-cutover: %s\n' "$1" >&2; exit 1; }
 recover_only=0
 validate_only=0
 leave_constructor_quiesced=0
+discard_unmutated_prepared=0
+discard_target_commit=''
+discard_unmutated_gate_prepared=0
+discard_gate_request_id=''
+discard_gate_commit=''
+discard_gate_active_commit=''
 boot_recovery=${KELION_RECOVERY_BOOT:-0}
 case "$boot_recovery" in 0|1) ;; *) die 'KELION_RECOVERY_BOOT trebuie 0 sau 1' ;; esac
 activation_resume_operation=${KELION_ACTIVATION_RESUME_OPERATION:-}
@@ -17,6 +23,20 @@ case "$activation_resume_operation" in
 esac
 deploy_quiesce_proof=${KELION_DEPLOY_QUIESCE_PROOF:-0}
 case "$deploy_quiesce_proof" in 0|1) ;; *) die 'KELION_DEPLOY_QUIESCE_PROOF trebuie 0 sau 1' ;; esac
+defer_secret_gates=${KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER:-0}
+case "$defer_secret_gates" in 0|1) ;; *) die 'KELION_DEFER_SECRET_GATES_TO_STRICT_CUTOVER trebuie 0 sau 1' ;; esac
+constructor_upgrade_owner=${KELION_CONSTRUCTOR_UPGRADE_OWNER:-0}
+case "$constructor_upgrade_owner" in 0|1) ;; *) die 'KELION_CONSTRUCTOR_UPGRADE_OWNER trebuie 0 sau 1' ;; esac
+constructor_upgrade_source_commit=${KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT:-}
+if [ "$constructor_upgrade_owner" = 1 ]; then
+  [[ "$constructor_upgrade_source_commit" =~ ^[0-9a-f]{40}$ ]] \
+    || die 'KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT este invalid'
+else
+  [ -z "$constructor_upgrade_source_commit" ] \
+    || die 'sursa upgrade-ului este permisă numai ownerului explicit'
+fi
+unset KELION_CONSTRUCTOR_UPGRADE_OWNER
+unset KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT
 deploy_owner_request_id=${KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID:-}
 deploy_owner_commit=${KELION_DEPLOY_QUIESCE_OWNER_COMMIT:-}
 if [ -n "$deploy_owner_request_id" ] || [ -n "$deploy_owner_commit" ]; then
@@ -30,6 +50,31 @@ validation_logical=''
 validation_file=''
 compose_file=''
 case "${1:-}" in
+  --discard-unmutated-gate-prepared)
+    [ "$#" -eq 5 ] \
+      || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-gate-prepared REQUEST_ID COMMIT ACTIVE_COMMIT COMPOSE_FILE'
+    [[ "$2" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] \
+      || die 'requestul discard gate este invalid'
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || die 'commitul discard gate este invalid'
+    [[ "$4" =~ ^[0-9a-f]{40}$ ]] || die 'commitul activ așteptat pentru discard gate este invalid'
+    [ "$3" != "$4" ] || die 'commitul candidat și commitul activ al discardului gate trebuie să difere'
+    discard_unmutated_gate_prepared=1
+    discard_gate_request_id=$2
+    discard_gate_commit=$3
+    discard_gate_active_commit=$4
+    recover_only=1
+    compose_file=$5
+    ;;
+  --discard-unmutated-prepared)
+    [ "$#" -eq 3 ] \
+      || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-prepared COMMIT COMPOSE_FILE'
+    [[ "$2" =~ ^[0-9a-f]{40}$ ]] || die 'commitul recovery este invalid'
+    discard_unmutated_prepared=1
+    discard_target_commit=$2
+    recover_only=1
+    leave_constructor_quiesced=1
+    compose_file=$3
+    ;;
   --recover-only)
     [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$3" = --leave-constructor-quiesced ]; } \
       || die 'utilizare: runtime-config-cutover.sh --recover-only COMPOSE_FILE [--leave-constructor-quiesced]'
@@ -52,13 +97,73 @@ case "${1:-}" in
     ;;
 esac
 if [ -n "$activation_resume_operation" ]; then
-  [ "$recover_only" = 1 ] && [ "$leave_constructor_quiesced" = 0 ] \
-    || die 'resume-ul activării este permis numai în recover-only non-leave'
+  [ "$recover_only" = 1 ] && [ "$discard_unmutated_prepared" = 0 ] \
+    && [ "$discard_unmutated_gate_prepared" = 0 ] \
+    || die 'resume-ul activării este permis numai în recover-only generic'
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    [ "$activation_resume_operation" = activate-worker-publisher ] \
+      || die 'resume+leave este rezervat migrării worker/publisher pin-uite'
+  fi
 fi
 
 # Bariera minimă rulează înainte de validarea compose-ului, inventarul de
 # utilitare și publication lock. La boot, orice astfel de eroare trebuie să
 # lase stamp-ul absent și inclusiv unitățile legacy disabled/inactive.
+validate_constructor_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      # Serviciile oneshot sunt intenționat statice: numai timerele le pot
+      # porni, iar validatorul unității interzice [Install]/WantedBy.
+      [ "$state" = static ] ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_constructor_prepublication_unit_file_state() {
+  local unit=$1 state
+  state=$(systemctl show "$unit" --property=UnitFileState --value 2>/dev/null) || return 1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer)
+      [ "$state" = disabled ] ;;
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service)
+      case "$state" in disabled|static) ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+
+# Serviciile canonice sunt statice și `systemctl disable` întoarce non-zero
+# chiar dacă postcondiția sigură este deja satisfăcută. Oprim sincron serviciul,
+# încercăm să retragem orice symlink [Install] legacy, iar apelantul validează
+# apoi UnitFileState, ActiveState și absența joburilor. Codul de ieșire al
+# mutatorului nu poate înlocui acele postcondiții.
+stop_and_disable_constructor_timer() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+stop_and_disable_constructor_service() {
+  local unit=$1
+  case "$unit" in
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service) ;;
+    *) return 1 ;;
+  esac
+  systemctl stop "$unit" >/dev/null 2>&1 || :
+  systemctl disable --no-reload "$unit" >/dev/null 2>&1 || :
+}
+
+report_quiesce_postcondition_failure() {
+  printf 'runtime-cutover: quiesce-postcondition:%s:%s\n' "$1" "$2" >&2
+}
+
 early_recover_only_barrier() {
   local unit state failed=0 ready_root=/run/kelion ready_stamp=/run/kelion/runtime-config-recovery.ready
   if [ -e "$ready_root" ] || [ -L "$ready_root" ]; then
@@ -82,16 +187,81 @@ early_recover_only_barrier() {
     kelion-constructor-sync.service; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     case "$unit" in
-      kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null || failed=1 ;;
-      *) systemctl disable --now "$unit" >/dev/null || failed=1 ;;
+      kelion-constructor-sync.service) systemctl stop "$unit" >/dev/null 2>&1 || : ;;
+      *.timer) stop_and_disable_constructor_timer "$unit" || failed=1 ;;
+      *.service) stop_and_disable_constructor_service "$unit" || failed=1 ;;
+      *) failed=1 ;;
     esac
-    state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    if [ "$unit" != kelion-constructor-sync.service ] && systemctl is-enabled --quiet "$unit"; then failed=1; fi
-    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
+  done
+  systemctl daemon-reload || { report_quiesce_postcondition_failure systemd daemon-reload; failed=1; }
+  for unit in \
+    kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
+    kelion-codex-worker.service kelion-constructor-publisher.service kelion-constructor-release.service \
+    kelion-constructor-sync.service; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
+    if [ "$unit" != kelion-constructor-sync.service ]; then
+      validate_constructor_prepublication_unit_file_state "$unit" \
+        || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; }
+    fi
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
   done
   [ "$failed" = 0 ]
 }
+
+ROOT=/root/kelion
+CONFIG_ROOT=$ROOT/config
+SECRET_ROOT=$ROOT/secrets
+RUNTIME_ROOT=$ROOT/runtime
+COMPOSE_BIN=$ROOT/bin/docker-compose
+PUBLICATION_LOCK=$ROOT/publicare.lock
+JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
+ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
+GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
+DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
+UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
+UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
+READY_ROOT=/run/kelion
+READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
+ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
+
+for early_tool in flock readlink stat; do
+  command -v "$early_tool" >/dev/null 2>&1 || die "lipsește utilitarul $early_tool"
+done
+if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then
+  [ -f /proc/$$/fd/9 ] \
+    && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+    || die 'FD9 moștenit nu este lock-ul canonic de publicare'
+  publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+  flock -n 9 || die 'lock-ul de publicare moștenit nu este deținut'
+else
+  [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$PUBLICATION_LOCK")" = '0:0:600:1' ] \
+    || die 'pathul lock-ului de publicare este nesigur'
+  exec 9<>"$PUBLICATION_LOCK"
+  [ -f /proc/$$/fd/9 ] \
+    && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+    || die 'FD9 nu este lock-ul canonic de publicare'
+  publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+  [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+    || die 'pathul și FD9 nu indică același lock de publicare'
+  flock -n 9 || die 'altă operație de publicare este activă'
+fi
+[ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$(readlink /proc/$$/fd/9)" = "$PUBLICATION_LOCK" ] \
+  && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'lock-ul de publicare s-a schimbat după flock'
+
+# Bariera rămâne înaintea validării compose/tooling, dar numai după
+# serializarea cu toți ceilalți mutatori ai publicației.
 if [ "$recover_only" = 1 ]; then
   early_recover_only_barrier \
     || die 'bariera recovery nu a putut retrage stamp-ul și opri toate unitățile înainte de preflight'
@@ -113,30 +283,43 @@ if [ "$validate_only" = 0 ]; then
   [ -f "$compose_file" ] && [ ! -L "$compose_file" ] || die 'compose.production.yml lipsește sau este symlink'
 fi
 
-for tool in awk cmp curl dirname docker flock getent grep jq mktemp od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
+for tool in awk cmp curl dirname docker find findmnt flock getent grep jq mktemp mountpoint od python3 readlink rmdir sed sha256sum sleep sort stat sync systemctl tail tr uniq wc; do
   command -v "$tool" >/dev/null 2>&1 || die "lipsește utilitarul $tool"
 done
 
-ROOT=/root/kelion
-CONFIG_ROOT=$ROOT/config
-SECRET_ROOT=$ROOT/secrets
-RUNTIME_ROOT=$ROOT/runtime
-COMPOSE_BIN=$ROOT/bin/docker-compose
-PUBLICATION_LOCK=$ROOT/publicare.lock
-JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
-ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
-GATE_JOURNAL=$RUNTIME_ROOT/constructor-gate-refresh.journal
-DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
-UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
-READY_ROOT=/run/kelion
-READY_STAMP=$READY_ROOT/runtime-config-recovery.ready
-ACTIVATION_PENDING=$READY_ROOT/constructor-activation.pending
-
-if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then
-  flock -n 9 || die 'lock-ul de publicare moștenit nu este deținut'
+upgrade_journal_phase=''
+if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then
+  [ "$constructor_upgrade_owner" = 1 ] \
+    || die 'un upgrade Constructor exterior este pending; cutover-ul generic este refuzat'
+  [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] \
+    || die 'ownerul upgrade-ului Constructor trebuie să moștenească publication lock'
+  [ -f "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UPGRADE_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg sourceCommit "$constructor_upgrade_source_commit" '
+      .schema == 1 and .kind == "constructor-upgrade" and
+      (.phase == "armed" or .phase == "installed" or .phase == "committed") and
+      .sourceCommit == $sourceCommit and
+      (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\.[A-Za-z0-9]+$")) and
+      (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
+      (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
+    ' "$UPGRADE_JOURNAL" >/dev/null \
+    || die 'jurnalul exterior al upgrade-ului Constructor este nesigur'
+  upgrade_journal_phase=$(jq -er '.phase' "$UPGRADE_JOURNAL")
+  if [ "$validate_only" = 0 ] && [ "$upgrade_journal_phase" != committed ]; then
+    [ "$leave_constructor_quiesced" = 1 ] \
+      || die 'jurnalul upgrade-ului blochează ready și timerele până la faza committed durabilă'
+  fi
 else
-  exec 9>"$PUBLICATION_LOCK"
-  flock -n 9 || die 'altă operație de publicare este activă'
+  [ "$constructor_upgrade_owner" = 0 ] \
+    || die 'ownerul upgrade-ului Constructor nu are jurnalul exterior durabil'
+fi
+
+if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only existentă este nesigură'
 fi
 
 fsync_path() {
@@ -391,48 +574,122 @@ deploy_quiesce_owned_by_caller() {
   ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null
 }
 
+# Pending-ul unit-only este folosit atât de upgrade-ul Constructor, cât și de
+# release-ul care publică cele șase unități înainte de refresh-ul gate-ului.
+# Ownerul upgrade-ului este autentificat de outer journal mai sus. Orice alt
+# recover-only poate trece de această barieră numai ca owner exact al jurnalului
+# deploy, sub lock moștenit, într-una dintre cele două faze canonice. Operația
+# incident este separată și nu poate publica ready înaintea dovezii ei complete.
+strict_pending_deploy_recovery_owner() {
+  local phase
+  [ "$recover_only" = 1 ] && [ "$boot_recovery" = 0 ] \
+    && [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] \
+    && validate_deploy_quiesce_journal \
+    && [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    && deploy_quiesce_owned_by_caller \
+    || return 1
+  phase=$(jq -er '.phase' "$DEPLOY_QUIESCE_JOURNAL") || return 1
+  if [ "$discard_unmutated_gate_prepared" = 1 ]; then
+    [ "$leave_constructor_quiesced" = 0 ] && [ "$deploy_quiesce_proof" = 1 ] \
+      && [ "$phase" = gate-prepared ] \
+      && [ "$deploy_owner_request_id" = "$discard_gate_request_id" ] \
+      && [ "$deploy_owner_commit" = "$discard_gate_commit" ] \
+      && jq -e --arg requestId "$discard_gate_request_id" --arg commit "$discard_gate_commit" \
+        --arg active "$discard_gate_active_commit" '
+          .schema == 2 and .phase == "gate-prepared" and
+          .requestId == $requestId and .commit == $commit and .activeBefore == $active
+        ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null
+    return
+  fi
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    [ "$deploy_quiesce_proof" = 0 ] && [ "$phase" = gate-prepared ] \
+      && { { [ -f "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$GATE_JOURNAL")" = '0:0:600:1' ] \
+            && jq -e --arg commit "$deploy_owner_commit" '
+              .schema == 1 and .commit == $commit and
+              (.helperSha256 | strings | test("^[0-9a-f]{64}$")) and
+              (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$"))
+            ' "$GATE_JOURNAL" >/dev/null; } \
+        || { [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+            && deploy_quiesce_generation_proof target; }; }
+    return
+  fi
+  [ "$deploy_quiesce_proof" = 1 ] && [ "$phase" = gate-committed ] \
+    && [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+    && deploy_quiesce_generation_proof committed
+}
+
 deploy_quiesce_generation_proof() {
-  local phase active_expected active_observed expected actual index
+  local scope=${1:-either} phase active_expected active_observed expected actual index
   local -a keys=(worker publisher release)
+  local -a proof_configs=(
+    "$CONFIG_ROOT/codex-worker.env"
+    "$CONFIG_ROOT/constructor-publisher.env"
+    "$CONFIG_ROOT/constructor-release.env"
+  )
+  case "$scope" in either|old|target|committed) ;; *) return 1 ;; esac
   [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/release-state/active")" = '0:10050:640:1' ] \
     && [ "$(wc -l < "$RUNTIME_ROOT/release-state/active")" -eq 1 ] || return 1
   phase=$(jq -er '.phase' "$DEPLOY_QUIESCE_JOURNAL") || return 1
   active_observed=$(sed -n '1p' "$RUNTIME_ROOT/release-state/active") || return 1
-  if active_expected=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL" 2>/dev/null) \
+  if [ "$scope" != committed ] \
+    && active_expected=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL" 2>/dev/null) \
     && [ "$active_observed" = "$active_expected" ]; then
-    for index in "${!constructor_configs[@]}"; do
+    for index in "${!proof_configs[@]}"; do
       expected=$(jq -er --arg key "${keys[$index]}" '.gateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
       if [ "$expected" = absent ]; then
-        [ ! -e "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] || return 1
+        [ ! -e "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] || return 1
       else
-        [ -f "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] \
-          && [ "$(stat -Lc '%u:%g:%a:%h' "${constructor_configs[$index]}")" = '0:0:640:1' ] || return 1
-        actual=$(sha256sum "${constructor_configs[$index]}" | awk '{print $1}') || return 1
+        [ -f "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] \
+          && [ "$(stat -Lc '%u:%g:%a:%h' "${proof_configs[$index]}")" = '0:0:640:1' ] || return 1
+        actual=$(sha256sum "${proof_configs[$index]}" | awk '{print $1}') || return 1
         [ "$actual" = "$expected" ] || return 1
       fi
     done
     return 0
   fi
-  [ "$phase" = gate-committed ] || return 1
+  [ "$scope" != old ] || return 1
+  if [ "$scope" = target ]; then
+    [ "$phase" = gate-prepared ] || return 1
+  else
+    [ "$phase" = gate-committed ] || return 1
+  fi
   active_expected=$(jq -er '.commit' "$DEPLOY_QUIESCE_JOURNAL") || return 1
   [ "$active_observed" = "$active_expected" ] || return 1
-  for index in "${!constructor_configs[@]}"; do
-    expected=$(jq -er --arg key "${keys[$index]}" '.committedGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
-    if [ "$expected" = absent ]; then
-      [ ! -e "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] || return 1
+  for index in "${!proof_configs[@]}"; do
+    if [ "$scope" = target ]; then
+      expected=$(jq -er --arg key "${keys[$index]}" '.targetGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
     else
-      [ -f "${constructor_configs[$index]}" ] && [ ! -L "${constructor_configs[$index]}" ] \
-        && [ "$(stat -Lc '%u:%g:%a:%h' "${constructor_configs[$index]}")" = '0:0:640:1' ] || return 1
-      actual=$(sha256sum "${constructor_configs[$index]}" | awk '{print $1}') || return 1
+      expected=$(jq -er --arg key "${keys[$index]}" '.committedGateSha256[$key]' "$DEPLOY_QUIESCE_JOURNAL") || return 1
+    fi
+    if [ "$expected" = absent ]; then
+      [ ! -e "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] || return 1
+    else
+      [ -f "${proof_configs[$index]}" ] && [ ! -L "${proof_configs[$index]}" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "${proof_configs[$index]}")" = '0:0:640:1' ] || return 1
+      actual=$(sha256sum "${proof_configs[$index]}" | awk '{print $1}') || return 1
       [ "$actual" = "$expected" ] || return 1
     fi
   done
 }
 
+if [ -f "$UNIT_MIGRATION_PENDING" ] && [ "$constructor_upgrade_owner" != 1 ] \
+  && [ "$recover_only" = 1 ]; then
+  strict_pending_deploy_recovery_owner \
+    || die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'
+fi
+
 clear_deploy_quiesce_journal() {
   [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] || return 1
   rm -f -- "$DEPLOY_QUIESCE_JOURNAL" || return 1
+  # După unlink, vectorul live a fost deja validat, ready publicat și timerele
+  # reconciliate. Un fsync eșuat trebuie raportat, dar cleanup-ul nu mai are
+  # voie să oprească un Constructor ownerless. La power-loss jurnalul fie
+  # rămâne absent, fie reapare integral și operația exactă poate fi reluată.
+  deploy_quiesce_journal_unlinked=1
+  recovery_in_progress=0
   fsync_path "$RUNTIME_ROOT"
 }
 
@@ -448,7 +705,7 @@ remove_transaction_dir() {
 
 remove_activation_dir() {
   local candidate=$1 canonical
-  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]] || return 1
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9._-]+$ ]] || return 1
   [ -d "$candidate" ] && [ ! -L "$candidate" ] || return 1
   canonical=$(realpath -e -- "$candidate") || return 1
   [ "$canonical" = "$candidate" ] || return 1
@@ -577,6 +834,7 @@ journal_clear_durable=0
 activation_barrier_pending=0
 gate_journal_clear_durable=0
 recovery_in_progress=0
+deploy_quiesce_journal_unlinked=0
 
 group_id() {
   local group=$1 record
@@ -597,7 +855,7 @@ map_logical() {
   case "$logical" in
     runtime.env)
       mapped_target=$CONFIG_ROOT/runtime.env; mapped_group=10050; mapped_mode=640; restart_required=1 ;;
-    app-secret.openai-project-key|app-secret.database-url|app-secret.session-secret|app-secret.google-client-secret|app-secret.google-token-encryption-key|app-secret.codex-worker-secret|app-secret.constructor-publisher-secret|app-secret.constructor-release-secret|app-secret.browser-worker-secret|app-secret.converter-worker-secret|app-secret.revolut-merchant-secret-key|app-secret.revolut-webhook-signing-secret|app-secret.vapid-private-key|app-secret.github-release-oauth-token|app-secret.migration-backup-proof-key)
+    app-secret.openai-project-key|app-secret.openai-admin-key|app-secret.database-url|app-secret.session-secret|app-secret.google-client-secret|app-secret.google-token-encryption-key|app-secret.codex-worker-secret|app-secret.constructor-publisher-secret|app-secret.constructor-release-secret|app-secret.browser-worker-secret|app-secret.converter-worker-secret|app-secret.revolut-merchant-secret-key|app-secret.revolut-webhook-signing-secret|app-secret.vapid-private-key|app-secret.github-release-oauth-token|app-secret.migration-backup-proof-key)
       mapped_target=$SECRET_ROOT/$secret_name; mapped_group=10050; mapped_mode=440; restart_required=1 ;;
     gate-secret.github-ghcr-read-token)
       mapped_target=$ROOT/gate-secrets/github-ghcr-read-token; mapped_mode=400 ;;
@@ -641,7 +899,7 @@ validate_env_file() {
   validate_text_file_bytes "$file" || return 1
   case "$logical" in
     runtime.env)
-      allowed_names='NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE'
+      allowed_names='NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_ADMIN_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_FUTURE_SKEW_SECONDS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_TURNS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE'
       required_names=$allowed_names
       ;;
     constructor-config.codex-worker.env)
@@ -749,6 +1007,7 @@ PY
       [ "${values[$name]}" = "$value" ] || return 1
     done <<'CONSTANTS'
 OPENAI_API_KEY_FILE	/run/secrets/openai-project-key
+OPENAI_ADMIN_KEY_FILE	/run/secrets/openai-admin-key
 DATABASE_URL_FILE	/run/secrets/database-url
 SESSION_SECRET_FILE	/run/secrets/session-secret
 GOOGLE_CLIENT_SECRET_FILE	/run/secrets/google-client-secret
@@ -783,8 +1042,17 @@ CONSTANTS
   fi
 }
 
+validate_constructor_checks_contract() {
+  local runtime_checks=$1 publisher_checks=$2 release_checks=$3
+  [ "$runtime_checks" = "$publisher_checks" ] \
+    && [ "$release_checks" = 'verify,container-isolation' ]
+}
+
 validate_constructor_timer_unit() {
-  local file=$1 logical=$2 timer=${logical#systemd-timer.} service
+  local file logical timer service
+  file=$1
+  logical=$2
+  timer=${logical#systemd-timer.}
   validate_text_file_bytes "$file" || return 1
   case "$timer" in
     kelion-codex-worker.timer) service=kelion-codex-worker.service ;;
@@ -801,7 +1069,10 @@ validate_constructor_timer_unit() {
 }
 
 validate_constructor_service_unit() {
-  local file=$1 logical=$2 service=${logical#systemd-service.} marker user executable
+  local file logical service marker user executable
+  file=$1
+  logical=$2
+  service=${logical#systemd-service.}
   validate_text_file_bytes "$file" || return 1
   case "$service" in
     kelion-codex-worker.service)
@@ -823,14 +1094,45 @@ validate_constructor_service_unit() {
     && [ "$(grep -c '^\[Install\]$' "$file")" -eq 0 ]
 }
 
+report_live_constructor_quiesce_failure() {
+  local unit=${1:-unknown} predicate=${2:-unknown}
+  case "$unit" in
+    runtime-ready-stamp|systemd|\
+    kelion-codex-worker.timer|kelion-constructor-publisher.timer|kelion-constructor-release.timer|\
+    kelion-codex-worker.service|kelion-constructor-publisher.service|kelion-constructor-release.service|\
+    kelion-constructor-sync.service|kelion-runtime-config-recovery.service) ;;
+    *) unit=unknown ;;
+  esac
+  case "$predicate" in
+    ready-stamp-present|file-type|file-metadata-query|file-metadata|timer-contract|service-contract|\
+    unit-catalog|fragment-query|fragment-path|dropins-query|dropins-present|load-state-query|load-state|\
+    reload-state-query|reload-needed|unit-count|timer-unit-file-state|service-unit-file-state|\
+    active-state-query|active-state|pending-job|auxiliary-active-state-query|auxiliary-active-state|\
+    auxiliary-pending-job) ;;
+    *) predicate=unknown ;;
+  esac
+  printf 'runtime-cutover: live-quiesce-contract:%s:%s\n' "$unit" "$predicate" >&2
+}
+
 validate_effective_constructor_unit() {
-  local unit=$1 expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
-  fragment=$(systemctl show "$unit" --property=FragmentPath --value) || return 1
-  dropins=$(systemctl show "$unit" --property=DropInPaths --value) || return 1
-  load_state=$(systemctl show "$unit" --property=LoadState --value) || return 1
-  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) || return 1
-  [ "$load_state" = loaded ] && [ "$fragment" = "$expected" ] \
-    && [ -z "$dropins" ] && [ "$need_reload" = no ]
+  local unit=$1 report=${2:-0} expected=/etc/systemd/system/$1 fragment dropins load_state need_reload
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  fragment=$(systemctl show "$unit" --property=FragmentPath --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-query; return 1; }
+  dropins=$(systemctl show "$unit" --property=DropInPaths --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-query; return 1; }
+  load_state=$(systemctl show "$unit" --property=LoadState --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state-query; return 1; }
+  need_reload=$(systemctl show "$unit" --property=NeedDaemonReload --value) \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-state-query; return 1; }
+  [ "$load_state" = loaded ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" load-state; return 1; }
+  [ "$fragment" = "$expected" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" fragment-path; return 1; }
+  [ -z "$dropins" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" dropins-present; return 1; }
+  [ "$need_reload" = no ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" reload-needed; return 1; }
 }
 
 validate_live_runtime_recovery_unit() {
@@ -919,7 +1221,7 @@ validate_live_runtime_contract() {
     runtime_checks=$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "$CONFIG_ROOT/runtime.env")
     publisher_checks=$(sed -n 's/^CONSTRUCTOR_REQUIRED_CHECKS=//p' "${constructor_configs[1]}")
     release_checks=$(sed -n 's/^CONSTRUCTOR_RELEASE_REQUIRED_CHECKS=//p' "${constructor_configs[2]}")
-    [ "$runtime_checks" = "$publisher_checks" ] && [ "$runtime_checks" = "$release_checks" ] || return 1
+    validate_constructor_checks_contract "$runtime_checks" "$publisher_checks" "$release_checks" || return 1
   fi
   for index in "${!constructor_markers[@]}"; do
     path=${constructor_markers[$index]}
@@ -978,47 +1280,112 @@ validate_live_runtime_contract() {
 }
 
 validate_live_constructor_units_quiesced() {
-  local unit path count=0
-  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  local report=${1:-0} unit path metadata count=0
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure runtime-ready-stamp ready-stamp-present; return 1; }
   for unit in "${constructor_timers[@]}"; do
     path=/etc/systemd/system/$unit
     [ -f "$path" ] && [ ! -L "$path" ] \
-      && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:444' ] \
-      && validate_constructor_timer_unit "$path" "systemd-timer.$unit" \
-      && systemctl cat "$unit" >/dev/null 2>&1 \
-      && validate_effective_constructor_unit "$unit" || return 1
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-type; return 1; }
+    metadata=$(stat -c '%u:%g:%a' "$path") \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata-query; return 1; }
+    [ "$metadata" = '0:0:444' ] \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata; return 1; }
+    validate_constructor_timer_unit "$path" "systemd-timer.$unit" \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" timer-contract; return 1; }
+    systemctl cat "$unit" >/dev/null 2>&1 \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
+    validate_effective_constructor_unit "$unit" "$report" || return 1
     count=$((count + 1))
   done
   for unit in "${constructor_services[@]}"; do
     path=/etc/systemd/system/$unit
     [ -f "$path" ] && [ ! -L "$path" ] \
-      && [ "$(stat -c '%u:%g:%a' "$path")" = '0:0:444' ] \
-      && validate_constructor_service_unit "$path" "systemd-service.$unit" \
-      && systemctl cat "$unit" >/dev/null 2>&1 \
-      && validate_effective_constructor_unit "$unit" || return 1
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-type; return 1; }
+    metadata=$(stat -c '%u:%g:%a' "$path") \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata-query; return 1; }
+    [ "$metadata" = '0:0:444' ] \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" file-metadata; return 1; }
+    validate_constructor_service_unit "$path" "systemd-service.$unit" \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" service-contract; return 1; }
+    systemctl cat "$unit" >/dev/null 2>&1 \
+      || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" unit-catalog; return 1; }
+    validate_effective_constructor_unit "$unit" "$report" || return 1
     count=$((count + 1))
   done
-  [ "$count" -eq 6 ] || return 1
-  validate_constructor_quiesce_barrier
+  [ "$count" -eq 6 ] \
+    || { [ "$report" = 0 ] || report_live_constructor_quiesce_failure systemd unit-count; return 1; }
+  validate_constructor_quiesce_barrier "$report"
+}
+
+wait_for_live_constructor_units_quiesced() {
+  local attempt report
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    report=0
+    [ "$attempt" -lt 12 ] || report=1
+    if validate_live_constructor_units_quiesced "$report"; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    # systemctl daemon-reload este sincron, dar proprietățile efective pot fi
+    # observate tranzitoriu din generații diferite. Repetăm numai dovada
+    # read-only; niciun predicat și nicio mutație nu sunt relaxate.
+    sleep 0.25
+  done
+  return 1
 }
 
 validate_constructor_quiesce_barrier() {
-  local unit state count=0
-  [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] || return 1
+  local report=${1:-0} unit state count=0 predicate
+  case "$report" in 0|1) ;; *) return 1 ;; esac
+  if [ -e "$READY_STAMP" ] || [ -L "$READY_STAMP" ]; then
+    [ "$report" = 0 ] || report_live_constructor_quiesce_failure runtime-ready-stamp ready-stamp-present
+    return 1
+  fi
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
     count=$((count + 1))
-    if systemctl is-enabled --quiet "$unit"; then return 1; fi
-    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
-    case "$state" in inactive|failed) ;; *) return 1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    if ! validate_constructor_unit_file_state "$unit"; then
+      case "$unit" in *.timer) predicate=timer-unit-file-state ;; *) predicate=service-unit-file-state ;; esac
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" "$predicate"
+      return 1
+    fi
+    state=$(systemctl show "$unit" --property=ActiveState --value) || {
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" active-state-query
+      return 1
+    }
+    case "$state" in
+      inactive|failed) ;;
+      *)
+        [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" active-state
+        return 1 ;;
+    esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" pending-job
+      return 1
+    fi
   done
-  case "$count" in 0|6) ;; *) return 1 ;; esac
+  case "$count" in
+    0|6) ;;
+    *)
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure systemd unit-count
+      return 1 ;;
+  esac
   for unit in "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
-    case "$state" in inactive|failed) ;; *) return 1 ;; esac
-    [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    state=$(systemctl show "$unit" --property=ActiveState --value) || {
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-active-state-query
+      return 1
+    }
+    case "$state" in
+      inactive|failed) ;;
+      *)
+        [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-active-state
+        return 1 ;;
+    esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      [ "$report" = 0 ] || report_live_constructor_quiesce_failure "$unit" auxiliary-pending-job
+      return 1
+    fi
   done
 }
 
@@ -1126,41 +1493,72 @@ quiesce_constructor_units() {
   force_quiesce_constructor_units
 }
 
-force_quiesce_constructor_units() {
+validate_constructor_quiesce_postconditions() {
   local allow_partial=${1:-0} unit state failed=0 count=0
+  case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
+  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    count=$((count + 1))
+    state=$(systemctl show "$unit" --property=ActiveState --value) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
+    validate_constructor_prepublication_unit_file_state "$unit" \
+      || { report_quiesce_postcondition_failure "$unit" unit-file-state; failed=1; }
+    # La boot, un legacy WantedBy poate avea deja un start job care așteaptă
+    # după Before=. Stop-ul sincron urmat de postcondiția fără job trebuie să-l
+    # anuleze; altfel ar porni imediat după recovery-ul fail-closed.
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
+  done
+  if [ "$count" -ne 0 ] && [ "$count" -ne 6 ] && [ "$allow_partial" != 1 ]; then failed=1; fi
+  constructor_unit_count=$count
+  for unit in "${constructor_auxiliary_services[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    state=$(systemctl show "$unit" --property=ActiveState --value) \
+      || { report_quiesce_postcondition_failure "$unit" active-state-query; failed=1; continue; }
+    case "$state" in inactive|failed) ;; *) report_quiesce_postcondition_failure "$unit" active-state; failed=1 ;; esac
+    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then
+      report_quiesce_postcondition_failure "$unit" pending-job; failed=1
+    fi
+  done
+  [ "$failed" = 0 ]
+}
+
+wait_for_constructor_quiesce_postconditions() {
+  local allow_partial=${1:-0} attempt
+  case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    if validate_constructor_quiesce_postconditions "$allow_partial"; then return 0; fi
+    [ "$attempt" -lt 12 ] || break
+    sleep 0.25
+  done
+  return 1
+}
+
+force_quiesce_constructor_units() {
+  local allow_partial=${1:-0} unit
   case "$allow_partial" in 0|1) ;; *) return 1 ;; esac
   # Stamp-ul este capabilitatea de execuție a întregului lanț. Îl retragem și
   # sincronizăm înainte de primul stop, astfel încât niciun SIGKILL să nu poată
   # lăsa o stare false-ready cu numai o parte dintre unități oprite.
   clear_runtime_ready_stamp || return 1
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
-    if systemctl cat "$unit" >/dev/null 2>&1; then count=$((count + 1)); fi
-  done
-  if [ "$count" -ne 0 ] && [ "$count" -ne 6 ] && [ "$allow_partial" != 1 ]; then failed=1; fi
-  constructor_unit_count=$count
   units_quiesced=1
   for unit in "${constructor_timers[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl disable --now "$unit" >/dev/null || failed=1
+    stop_and_disable_constructor_timer "$unit"
   done
   for unit in "${constructor_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl disable --now "$unit" >/dev/null || failed=1
+    stop_and_disable_constructor_service "$unit"
   done
   for unit in "${constructor_auxiliary_services[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    systemctl stop "$unit" >/dev/null || failed=1
+    systemctl stop "$unit" >/dev/null 2>&1 || :
   done
-  for unit in "${constructor_timers[@]}" "${constructor_services[@]}" "${constructor_auxiliary_services[@]}"; do
-    systemctl cat "$unit" >/dev/null 2>&1 || continue
-    state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
-    case "$state" in inactive|failed) ;; *) failed=1 ;; esac
-    # La boot, un legacy WantedBy poate avea deja un start job care așteaptă
-    # după Before=. disable --now trebuie să-l anuleze sincron; altfel ar porni
-    # imediat după ce recovery-ul fail-closed returnează.
-    if [ -n "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ]; then failed=1; fi
-  done
-  [ "$failed" = 0 ]
+  systemctl daemon-reload \
+    || { report_quiesce_postcondition_failure systemd daemon-reload; return 1; }
+  wait_for_constructor_quiesce_postconditions "$allow_partial"
 }
 
 start_constructor_unit() {
@@ -1198,8 +1596,8 @@ restore_constructor_timers() {
   done
   if [ "$boot_recovery" = 0 ]; then
     for unit in "${constructor_services[@]}"; do
-      systemctl disable "$unit" >/dev/null || failed=1
-      if systemctl is-enabled --quiet "$unit"; then failed=1; fi
+      stop_and_disable_constructor_service "$unit" || failed=1
+      validate_constructor_unit_file_state "$unit" || failed=1
       state=$(systemctl show "$unit" --property=ActiveState --value) || { failed=1; continue; }
       case "$state" in inactive|failed) ;; *) failed=1 ;; esac
     done
@@ -1258,7 +1656,8 @@ roll_forward_unit_transaction() {
 
   # Setul 1..5 este tolerat exclusiv după autentificarea jurnalului, a
   # directorului root-only, a setului exact și a hashurilor candidaților.
-  quiesce_units_for_recovery 1 || return 1
+  quiesce_units_for_recovery 1 \
+    || { printf 'runtime-cutover: unit-roll-forward:pre-quiesce\n' >&2; return 1; }
   for index in "${!forward_targets[@]}"; do
     temporary=$(mktemp "${forward_targets[$index]}.unit-forward.XXXXXX") || { failed=1; continue; }
     if install -o "${forward_owners[$index]}" -g "${forward_groups[$index]}" -m "${forward_modes[$index]}" \
@@ -1270,29 +1669,47 @@ roll_forward_unit_transaction() {
       && fsync_path "$(dirname -- "${forward_targets[$index]}")"; then
       :
     else
-      rm -f -- "$temporary"; failed=1
+      rm -f -- "$temporary"
+      printf 'runtime-cutover: unit-roll-forward:publish:%s\n' "${forward_logicals[$index]}" >&2
+      failed=1
     fi
   done
   [ "$failed" = 0 ] || return 1
-  systemctl daemon-reload || return 1
-  force_quiesce_constructor_units || return 1
-  validate_live_constructor_units_quiesced || return 1
+  systemctl daemon-reload \
+    || { printf 'runtime-cutover: unit-roll-forward:daemon-reload\n' >&2; return 1; }
+  force_quiesce_constructor_units \
+    || { printf 'runtime-cutover: unit-roll-forward:post-quiesce\n' >&2; return 1; }
+  wait_for_live_constructor_units_quiesced \
+    || { printf 'runtime-cutover: unit-roll-forward:strict-live-unit-contract\n' >&2; return 1; }
   # Un forward unit-only nu publică niciodată capabilitatea de execuție. Markerul
   # pending obligă următoarea etapă mixtă să treacă schema runtime strictă.
-  clear_runtime_ready_stamp || return 1
+  clear_runtime_ready_stamp \
+    || { printf 'runtime-cutover: unit-roll-forward:ready-clear\n' >&2; return 1; }
   units_quiesced=0
 }
 
-effective_file() {
-  local wanted=$1 index
-  for index in "${!logical_names[@]}"; do
-    if [ "${logical_names[$index]}" = "$wanted" ]; then printf '%s' "${prepared[$index]}"; return 0; fi
-  done
-  map_logical "$wanted"
-  [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] || return 1
-  [ "$(stat -c '%u:%g:%a' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode" ] || return 1
-  validate_secret_file "$mapped_target" || return 1
-  printf '%s' "$mapped_target"
+resolve_validated_candidate() {
+  local output_name=$1 wanted=$2 candidate previous_restart_required=$restart_required
+  if grep -Fxq -- "$wanted" "$stage_root/manifest"; then
+    candidate=$stage_root/files/$wanted
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul validat a dispărut după manifest: $wanted"
+    validate_secret_file "$candidate" \
+      || die "candidatul din manifest nu mai este valid: $wanted"
+  else
+    map_logical "$wanted"
+    # Rezolvarea unei valori live este read-only. map_logical setează și
+    # restart_required pentru mutațiile app/runtime; verificarea distinctness
+    # nu are voie să transforme un cutover parțial într-un restart backend.
+    restart_required=$previous_restart_required
+    candidate=$mapped_target
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || die "candidatul nu este în manifest și lipsește live: $wanted"
+    [ "$(stat -c '%u:%g:%a' "$candidate")" = "$mapped_owner:$mapped_group:$mapped_mode" ] \
+      || die "candidatul live are ACL invalid: $wanted"
+    validate_secret_file "$candidate" || die "candidatul live este invalid: $wanted"
+  fi
+  printf -v "$output_name" '%s' "$candidate"
 }
 
 assert_pairwise_distinct() {
@@ -1300,12 +1717,36 @@ assert_pairwise_distinct() {
   local -a values=()
   local logical file value existing
   for logical in "$@"; do
-    file=$(effective_file "$logical") || die "$label lipsesc sau au ACL invalid: $logical"
+    resolve_validated_candidate file "$logical"
     value=$(sed -n '1p' "$file")
     [ "${#value}" -ge 32 ] || die "$label conține o valoare prea scurtă"
     for existing in "${values[@]:-}"; do [ "$value" != "$existing" ] || die "$label trebuie să fie distincte"; done
     values+=("$value")
   done
+}
+
+validate_candidate_secret_separation() {
+  if [ "$unit_only_transaction" = 1 ] && [ "$defer_secret_gates" = 1 ]; then
+    # Tranzacția unit-only publică exclusiv cele șase unități, le păstrează
+    # quiesced și ridică bariera durabilă care poate fi consumată numai de
+    # cutover-ul mixt următor. Opt-in-ul este permis numai apelanților care
+    # continuă cu un astfel de cutover. Nu valida aici secretele live legacy: noile
+    # credențiale sunt încă în payload-ul apelantului și sunt staged abia după
+    # instalarea unităților. Cutover-ul mixt validează candidații efectivi înainte
+    # de orice commit și nu poate consuma bariera dacă distinctness eșuează.
+    return 0
+  fi
+  assert_pairwise_distinct 'HMAC-urile Constructor' \
+    app-secret.codex-worker-secret app-secret.constructor-publisher-secret app-secret.constructor-release-secret \
+    || return 1
+  assert_pairwise_distinct 'credentialele OAuth Admin și GHCR' \
+    app-secret.github-release-oauth-token gate-secret.github-ghcr-read-token \
+    || return 1
+  if [ "$constructor_configured" -eq 3 ]; then
+    assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin' \
+      worker-secret.github-worker-token publisher-secret.github-publisher-token release-secret.github-release-token gate-secret.github-ghcr-read-token app-secret.github-release-oauth-token \
+      || return 1
+  fi
 }
 
 recreate_active_release() {
@@ -1534,6 +1975,312 @@ recover_interrupted_gate_refresh() {
   fi
 }
 
+validate_unmutated_gate_transaction() {
+  local gate_root=$1 expected_helper_sha=${2:-} helper_sha observed expected index source actual
+  local -a gate_names=(codex-worker.env constructor-publisher.env constructor-release.env)
+  local -a gate_logicals=(constructor-config.codex-worker.env constructor-config.constructor-publisher.env constructor-config.constructor-release.env)
+  local -a gate_keys=(worker publisher release)
+  [[ "$gate_root" =~ ^/root/kelion/runtime/(constructor-gate-txn\.[A-Za-z0-9]+|constructor-gate-discarded\.[0-9a-f]{40}\.[0-9a-f]{64})$ ]] \
+    && [ -d "$gate_root" ] && [ ! -L "$gate_root" ] \
+    && [ "$(realpath -e -- "$gate_root")" = "$gate_root" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$gate_root")" = '0:0:700' ] \
+    || return 1
+  observed=$(find "$gate_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || return 1
+  expected=$'new:d\nrecovery-compose.yml:f\nrecovery-helper.sh:f'
+  [ "$observed" = "$expected" ] || return 1
+  [ -d "$gate_root/new" ] && [ ! -L "$gate_root/new" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$gate_root/new")" = '0:0:700' ] \
+    && [ -f "$gate_root/recovery-helper.sh" ] && [ ! -L "$gate_root/recovery-helper.sh" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$gate_root/recovery-helper.sh")" = '0:0:500:1' ] \
+    && [ -f "$gate_root/recovery-compose.yml" ] && [ ! -L "$gate_root/recovery-compose.yml" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$gate_root/recovery-compose.yml")" = '0:0:444:1' ] \
+    && cmp -s -- "$gate_root/recovery-compose.yml" "$compose_file" \
+    || return 1
+  helper_sha=$(sha256sum "$gate_root/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ -z "$expected_helper_sha" ] || [ "$helper_sha" = "$expected_helper_sha" ] || return 1
+  observed=$(find "$gate_root/new" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || return 1
+  expected=$'codex-worker.env:f\nconstructor-publisher.env:f\nconstructor-release.env:f'
+  [ "$observed" = "$expected" ] || return 1
+  for index in "${!gate_names[@]}"; do
+    source=$gate_root/new/${gate_names[$index]}
+    [ -f "$source" ] && [ ! -L "$source" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$source")" = '0:0:600:1' ] \
+      && validate_env_file "$source" "${gate_logicals[$index]}" \
+      || return 1
+    expected=$(jq -er --arg key "${gate_keys[$index]}" '.targetGateSha256[$key]' \
+      "$DEPLOY_QUIESCE_JOURNAL") || return 1
+    actual=$(sha256sum "$source" | awk '{print $1}') || return 1
+    [ "$actual" = "$expected" ] || return 1
+  done
+}
+
+validate_discarded_gate_tombstone() {
+  local candidate=$1 failed_commit=$2 canonical expected_helper_sha
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-gate-discarded\.([0-9a-f]{40})\.([0-9a-f]{64})$ ]] \
+    || return 1
+  [ "${BASH_REMATCH[1]}" = "$failed_commit" ] || return 1
+  expected_helper_sha=${BASH_REMATCH[2]}
+  [ -d "$candidate" ] && [ ! -L "$candidate" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$candidate")" = '0:0:700' ] \
+    || return 1
+  canonical=$(realpath -e -- "$candidate") || return 1
+  [ "$canonical" = "$candidate" ] \
+    && validate_unmutated_gate_transaction "$candidate" "$expected_helper_sha"
+}
+
+remove_discarded_gate_tombstone() {
+  local candidate=$1 failed_commit=$2 helper_sha gc_root foreign
+  validate_discarded_gate_tombstone "$candidate" "$failed_commit" || return 1
+  helper_sha=$(sha256sum "$candidate/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  gc_root=$RUNTIME_ROOT/constructor-gate-gc.$failed_commit.$helper_sha
+  for foreign in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$foreign" ] && [ ! -L "$foreign" ] || return 1
+  done
+  [ ! -e "$gc_root" ] && [ ! -L "$gc_root" ] || return 1
+  # Tombstone-ul este încă integral și autentificat înainte de rename. După
+  # rename+fsync, numele GC din directorul runtime root-only devine autoritatea
+  # durabilă pentru cleanup și nu mai este interpretat ca recovery data. Un
+  # SIGKILL în rm poate lăsa conținut parțial; retry-ul autentifică din nou
+  # operandul GC și îi fixează identitatea device:inode înainte de ștergere.
+  mv -T -- "$candidate" "$gc_root" || return 1
+  fsync_path "$RUNTIME_ROOT" || return 1
+  remove_discarded_gate_gc "$gc_root" "$failed_commit"
+}
+
+validate_discarded_gate_gc() {
+  local candidate=$1 failed_commit=$2 canonical candidate_device runtime_device mount_rc mount_target
+  local mount_targets
+  [[ "$candidate" =~ ^/root/kelion/runtime/constructor-gate-gc\.([0-9a-f]{40})\.[0-9a-f]{64}$ ]] \
+    || return 1
+  [ "${BASH_REMATCH[1]}" = "$failed_commit" ] || return 1
+  [ -d "$candidate" ] && [ ! -L "$candidate" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$candidate")" = '0:0:700' ] \
+    || return 1
+  canonical=$(realpath -e -- "$candidate") || return 1
+  [ "$canonical" = "$candidate" ] || return 1
+  candidate_device=$(stat -Lc '%d' -- "$candidate") || return 1
+  runtime_device=$(stat -Lc '%d' -- "$RUNTIME_ROOT") || return 1
+  [ "$candidate_device" = "$runtime_device" ] || return 1
+  command -v mountpoint >/dev/null 2>&1 || return 1
+  if mountpoint -q -- "$candidate"; then
+    return 1
+  else
+    mount_rc=$?
+    [ "$mount_rc" -eq 32 ] || return 1
+  fi
+  # `--one-file-system` oprește filesystem-uri străine, dar nu un bind mount pe
+  # același st_dev. Inventarul raw al mount namespace-ului trebuie să fie
+  # disponibil și nu poate conține operandul sau vreun descendent al lui.
+  mount_targets=$(findmnt -n -r -o TARGET) || return 1
+  while IFS= read -r mount_target; do
+    case "$mount_target" in
+      "$candidate"|"$candidate"/*) return 1 ;;
+    esac
+  done <<< "$mount_targets"
+}
+
+remove_discarded_gate_gc() {
+  local candidate=$1 failed_commit=$2 identity_before identity_after
+  identity_before=$(stat -Lc '%d:%i' -- "$candidate") || return 1
+  validate_discarded_gate_gc "$candidate" "$failed_commit" || return 1
+  identity_after=$(stat -Lc '%d:%i' -- "$candidate") || return 1
+  [ "$identity_after" = "$identity_before" ] || return 1
+  rm -rf --one-file-system -- "$candidate" || return 1
+  fsync_path "$RUNTIME_ROOT"
+}
+
+withdraw_gate_transaction_durably() {
+  local gate_root=$1 failed_commit=$2 helper_sha tombstone
+  helper_sha=$(sha256sum "$gate_root/recovery-helper.sh" | awk '{print $1}') || return 1
+  [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  tombstone=$RUNTIME_ROOT/constructor-gate-discarded.$failed_commit.$helper_sha
+  [ ! -e "$tombstone" ] && [ ! -L "$tombstone" ] || return 1
+  validate_unmutated_gate_transaction "$gate_root" "$helper_sha" || return 1
+  mv -T -- "$gate_root" "$tombstone" || return 1
+  fsync_path "$RUNTIME_ROOT" || return 1
+  remove_discarded_gate_tombstone "$tombstone" "$failed_commit"
+}
+
+# Recovery-ul incidentului gate-prepared este deliberat mai îngust decât
+# recovery-ul generic. Dovedește că refresh-ul nu a mutat niciun byte live,
+# retrage durabil numai intenția gate și tranzacția ei, apoi lasă fluxul
+# recover-only standard să consume pending-ul, să publice ready/timerele și să
+# șteargă outer journal numai după încă o dovadă a generației vechi.
+discard_unmutated_gate_prepared_refresh() {
+  local expected_request=$1 failed_commit=$2 expected_active=$3 selected_compose=$4
+  local gate_root='' helper_sha='' gate_journal_sha='' candidate pending_present=0 count=0
+  local -a candidates=() tombstones=() gc_roots=()
+  recovery_in_progress=1
+  [ "$discard_unmutated_gate_prepared" = 1 ] && [ "$recover_only" = 1 ] \
+    && [ "$leave_constructor_quiesced" = 0 ] && [ "$boot_recovery" = 0 ] \
+    && [ "$deploy_quiesce_proof" = 1 ] \
+    || die 'discardul gate-prepared cere recovery strict cu dovadă și fără boot'
+  [ "$expected_request" = "$discard_gate_request_id" ] \
+    && [ "$failed_commit" = "$discard_gate_commit" ] \
+    && [ "$expected_active" = "$discard_gate_active_commit" ] \
+    && [ "$selected_compose" = "$compose_file" ] \
+    && [ "$selected_compose" = "$CONFIG_ROOT/compose.production.yml" ] \
+    || die 'tupla invocației discard gate nu este exactă'
+  [ "$deploy_owner_request_id" = "$expected_request" ] \
+    && [ "$deploy_owner_commit" = "$failed_commit" ] \
+    && deploy_quiesce_owned_by_caller \
+    || die 'ownerul discardului gate nu corespunde jurnalului deploy'
+  jq -e --arg requestId "$expected_request" --arg commit "$failed_commit" \
+    --arg active "$expected_active" '
+      (keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+        "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema",
+        "targetGateSha256"] | sort) and
+      .schema == 2 and .phase == "gate-prepared" and
+      .requestId == $requestId and .commit == $commit and .activeBefore == $active and
+      .activeBefore != .commit and
+      (.activeBefore as $old | .activeVersionBefore as $version | $old | startswith($version)) and
+      .legacyContainers == [] and .legacyRestartPolicies == {} and
+      (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+      (.targetGateSha256 | keys | sort) == ["publisher","release","worker"]
+    ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'outer journal nu este incidentul gate-prepared exact'
+  deploy_quiesce_generation_proof old \
+    || die 'markerul activ sau hashurile gate live nu sunt generația veche exactă'
+  validate_unit_migration_pending || die 'pending-ul unit-only este nesigur'
+  if [ -f "$UNIT_MIGRATION_PENDING" ]; then pending_present=1; fi
+  validate_live_constructor_units_quiesced \
+    || die 'pending-ul și bariera fizică Constructor nu sunt exacte'
+  for candidate in "$JOURNAL" "$ACTIVATION_JOURNAL" "$ACTIVATION_PENDING" "$READY_STAMP" \
+    "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'discardul gate refuză un jurnal/stamp concurent'
+  done
+
+  if [ -e "$GATE_JOURNAL" ] || [ -L "$GATE_JOURNAL" ]; then
+    [ "$pending_present" = 1 ] \
+      || die 'jurnalul gate nu poate fi retras după consumarea pending-ului'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-discarded.*; do
+      [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+        || die 'jurnalul gate și tombstone-ul nu pot coexista'
+    done
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+      [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+        || die 'jurnalul gate și cleanup-ul GC nu pot coexista'
+    done
+    [ -f "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$GATE_JOURNAL")" = '0:0:600:1' ] \
+      && jq -e --arg commit "$failed_commit" '
+        (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+        .schema == 1 and .commit == $commit and
+        (.helperSha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$"))
+      ' "$GATE_JOURNAL" >/dev/null \
+      || die 'jurnalul gate al incidentului este nesigur'
+    gate_root=$(jq -er '.transactionRoot' "$GATE_JOURNAL")
+    helper_sha=$(jq -er '.helperSha256' "$GATE_JOURNAL")
+    gate_journal_sha=$(sha256sum "$GATE_JOURNAL" | awk '{print $1}')
+    validate_unmutated_gate_transaction "$gate_root" "$helper_sha" \
+      || die 'tranzacția gate nu dovedește candidatul jurnalizat intact'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-txn.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tranzacție gate dangling'; continue; }
+      [ "$candidate" = "$gate_root" ] \
+        || die 'un director gate străin blochează discardul incidentului'
+      count=$((count + 1))
+    done
+    [ "$count" -eq 1 ] || die 'inventarul tranzacțiilor gate nu este exact'
+
+    # Ultima probă înaintea primei mutații. Ordinea unlink+fsync înainte de
+    # ștergerea txn face orice crash fail-closed, dar reluabil.
+    [ "$(sha256sum "$GATE_JOURNAL" | awk '{print $1}')" = "$gate_journal_sha" ] \
+      && validate_unmutated_gate_transaction "$gate_root" "$helper_sha" \
+      && deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof old \
+      && validate_live_constructor_units_quiesced \
+      || die 'starea incidentului s-a schimbat înainte de commitul discard gate'
+    rm -f -- "$GATE_JOURNAL" || die 'jurnalul gate nu a putut fi retras'
+    fsync_path "$RUNTIME_ROOT" || die 'retragerea jurnalului gate nu este durabilă'
+    withdraw_gate_transaction_durably "$gate_root" "$failed_commit" \
+      || die 'tranzacția gate nu a putut fi retrasă durabil după jurnal'
+  else
+    # Reluare după un crash între unlink, rename-ul durabil și ștergerea txn.
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-discarded.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tombstone gate dangling'; continue; }
+      validate_discarded_gate_tombstone "$candidate" "$failed_commit" \
+        || die 'tombstone-ul tranzacției gate este nesigur sau corupt'
+      tombstones+=("$candidate")
+    done
+    [ "${#tombstones[@]}" -le 1 ] \
+      || die 'mai multe tombstone-uri gate fac reluarea ambiguă'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'cleanup gate GC dangling'; continue; }
+      validate_discarded_gate_gc "$candidate" "$failed_commit" \
+        || die 'cleanup-ul gate GC este străin sau are inode nesigur'
+      gc_roots+=("$candidate")
+    done
+    [ "${#gc_roots[@]}" -le 1 ] \
+      || die 'mai multe directoare gate GC fac reluarea ambiguă'
+    for candidate in "$RUNTIME_ROOT"/constructor-gate-txn.*; do
+      [ -e "$candidate" ] || { [ ! -L "$candidate" ] || die 'tranzacție gate dangling'; continue; }
+      validate_unmutated_gate_transaction "$candidate" '' \
+        || die 'un director gate orfan nu corespunde exact incidentului'
+      candidates+=("$candidate")
+    done
+    [ "${#candidates[@]}" -le 1 ] \
+      || die 'mai multe tranzacții gate candidate fac reluarea ambiguă'
+    [ "$(( ${#tombstones[@]} + ${#candidates[@]} + ${#gc_roots[@]} ))" -le 1 ] \
+      || die 'inventarele txn/tombstone/GC gate fac reluarea ambiguă'
+    if [ "${#candidates[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'o tranzacție gate orfană nu poate coexista cu pending consumat'
+      withdraw_gate_transaction_durably "${candidates[0]}" "$failed_commit" \
+        || die 'tranzacția gate orfană nu a putut fi retrasă durabil'
+    elif [ "${#tombstones[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'un tombstone gate nu poate coexista cu pending consumat'
+      remove_discarded_gate_tombstone "${tombstones[0]}" "$failed_commit" \
+        || die 'tombstone-ul gate nu a putut fi șters durabil'
+    elif [ "${#gc_roots[@]}" -eq 1 ]; then
+      [ "$pending_present" = 1 ] \
+        || die 'un cleanup gate GC nu poate coexista cu pending consumat'
+      remove_discarded_gate_gc "${gc_roots[0]}" "$failed_commit" \
+        || die 'cleanup-ul gate GC nu a putut fi reluat durabil'
+    fi
+  fi
+
+  # Inclusiv reluarea care observă deja journal/txn absente persistă explicit
+  # absența lor înainte să permită consumarea pending-ului.
+  for candidate in \
+    "$RUNTIME_ROOT"/constructor-gate-txn.* \
+    "$RUNTIME_ROOT"/constructor-gate-discarded.* \
+    "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'un artefact gate a reapărut înainte de finalizarea discardului'
+  done
+  fsync_path "$RUNTIME_ROOT" \
+    || die 'absența artefactelor gate nu a putut fi persistată la reluare'
+  # Fsync-ul este ultima operație care poate ceda/reporni între dovada absenței
+  # și consumarea pending-ului. Repetăm inventarul după el, astfel încât niciun
+  # artefact resurrectat/concurent să nu primească implicit autoritate.
+  for candidate in \
+    "$RUNTIME_ROOT"/constructor-gate-txn.* \
+    "$RUNTIME_ROOT"/constructor-gate-discarded.* \
+    "$RUNTIME_ROOT"/constructor-gate-gc.*; do
+    [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
+      || die 'un artefact gate a reapărut după fsync-ul final al discardului'
+  done
+  [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
+    && deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof old \
+    && validate_unit_migration_pending \
+    && validate_live_constructor_units_quiesced \
+    || die 'postcondiția discardului gate nu păstrează generația veche quiesced'
+  if [ "$pending_present" = 1 ]; then
+    [ -f "$UNIT_MIGRATION_PENDING" ] \
+      || die 'discardul gate a consumat prematur pending-ul'
+  else
+    [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+      && validate_live_runtime_contract \
+      || die 'reluarea post-discard fără pending nu are contractul live exact'
+  fi
+}
+
 recover_interrupted_activation() {
   local activation_root operation phase state_file type name first second extra index marker timer service restored state failed=0 count=0
   local wants_dir=/etc/systemd/system/timers.target.wants wants_link origin
@@ -1639,7 +2386,7 @@ recover_interrupted_activation() {
   done
   fsync_path /etc/kelion || failed=1
   systemctl daemon-reload || failed=1
-  if [ "$leave_constructor_quiesced" = 1 ] || [ "$activation_resume_operation" != "$operation" ]; then
+  if [ "$activation_resume_operation" != "$operation" ]; then
     write_activation_journal_phase quiesced || failed=1
     validate_activation_pending || failed=1
     [ -f "$ACTIVATION_PENDING" ] || failed=1
@@ -1660,10 +2407,38 @@ recover_interrupted_activation() {
     force_quiesce_constructor_units || true
     die 'faza applied a activării nu a putut fi publicată durabil înainte de start'
   }
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    # Jurnalul activării urmează să fie consumat de deploy. Publicăm mai întâi
+    # blockerul persistent folosit deja de migrarea strictă a unităților;
+    # astfel niciun crash după retragerea pendingului activării nu poate lăsa
+    # boot recovery să pornească marker-ele abia comise.
+    publish_unit_migration_pending || {
+      force_quiesce_constructor_units || true
+      die 'blockerul durabil al activării applied nu a putut fi publicat'
+    }
+  fi
   clear_activation_pending || {
     force_quiesce_constructor_units || true
     die 'gate-ul pending nu a putut fi retras după commitul applied'
   }
+  if [ "$leave_constructor_quiesced" = 1 ]; then
+    # Deploy-ul one-shot poate consuma o activare deja comisă fără să execute
+    # workerul ori publisherul în preflight. `applied` este pragul durabil;
+    # pending dispare numai după el, iar ready rămâne retras. Apelantul pin-uit
+    # verifică apoi exact jurnalul și curăță jurnalul înaintea snapshotului.
+    if [ "$failed" != 0 ] \
+      || ! validate_unit_migration_pending \
+      || [ ! -f "$UNIT_MIGRATION_PENDING" ] \
+      || [ -e "$ACTIVATION_PENDING" ] || [ -L "$ACTIVATION_PENDING" ] \
+      || [ -e "$READY_STAMP" ] || [ -L "$READY_STAMP" ] \
+      || ! validate_constructor_quiesce_barrier; then
+      force_quiesce_constructor_units || true
+      die 'commitul applied nu a putut rămâne quiesced; unitățile rămân oprite'
+    fi
+    units_quiesced=0
+    recovery_in_progress=0
+    return 0
+  fi
   publish_runtime_ready_stamp || failed=1
   for index in "${!constructor_timers[@]}"; do
     timer=${constructor_timers[$index]}
@@ -1839,7 +2614,7 @@ recover_interrupted_cutover() {
     # Primul cutover mixt poate avea drept backup runtime.env din schema veche.
     # Rollbackul pre-commit este terminal numai în starea tranzitorie sigură:
     # unitățile noi exacte rămân oprite, stamp-ul absent și pending păstrat.
-    validate_live_constructor_units_quiesced \
+    wait_for_live_constructor_units_quiesced \
       || die 'rollbackul mixt pre-commit nu a păstrat unitățile exact quiesced'
     clear_journal || die 'jurnalul mixt rollback nu a putut fi șters pentru retry'
     recovery_in_progress=0
@@ -1859,6 +2634,351 @@ recover_interrupted_cutover() {
   clear_journal || die 'jurnalul recuperat nu a putut fi șters durabil'
   recovery_in_progress=0
   remove_transaction_after_durable_journal_clear "$recovery_root" || printf 'runtime-cutover: avertisment: tranzacția recuperată a rămas root-only\n' >&2
+}
+
+# Închiderea de urgență este deliberat mai îngustă decât recovery-ul generic:
+# acceptă numai tranzacția `prepared` cunoscută, ale cărei unsprezece ținte nu
+# au fost mutate deloc. Release-ul candidat trebuie să fie deja complet și
+# izolat în slotul țintă, în timp ce markerul activ și toate bytes-urile config
+# rămân generația veche. Funcția nu restaurează și nu publică nimic; după toate
+# dovezile șterge durabil doar jurnalul runtime și directorul lui de tranzacție.
+discard_unmutated_prepared_cutover() {
+  local target_commit=$1 selected_compose=$2 recovery_root rollback_manifest recovery_compose backups_root
+  local logical present extra backup active_before active_version active_slot target_slot path expected actual
+  local caddy_snapshot upstream_snapshot expected_old_upstream_sha expected_target_upstream_sha
+  local observed_top_level observed_backups observed_manifest proxy_health proxy_policy role id image
+  local target_output role_output rollback_manifest_sha recovery_compose_sha
+  local manifest_count=0
+  local -a manifest_logicals=() target_ids=() role_ids=()
+  local -A seen=()
+  local -A allowed=(
+    [app-secret.codex-worker-secret]=1
+    [app-secret.constructor-publisher-secret]=1
+    [app-secret.constructor-release-secret]=1
+    [worker-secret.github-worker-token]=1
+    [publisher-secret.github-publisher-token]=1
+    [release-secret.github-release-token]=1
+    [gate-secret.github-ghcr-read-token]=1
+    [constructor-config.codex-worker.env]=1
+    [constructor-config.constructor-publisher.env]=1
+    [constructor-config.constructor-release.env]=1
+    [runtime.env]=1
+  )
+
+  # Din acest punct, orice refuz trebuie să lase jurnalul și tranzacția pentru
+  # investigație/retry. Cleanup-ul nu are voie să deducă o generație restaurabilă.
+  recovery_in_progress=1
+  [ "$discard_unmutated_prepared" = 1 ] && [ "$recover_only" = 1 ] \
+    && [ "$leave_constructor_quiesced" = 1 ] \
+    || die 'modul discard cere recovery-only cu Constructor quiesced'
+  [[ "$target_commit" =~ ^[0-9a-f]{40}$ ]] && [ "$target_commit" = "$discard_target_commit" ] \
+    || die 'commitul discard nu corespunde invocației autentificate'
+  [ "$selected_compose" = "$compose_file" ] \
+    && [ "$selected_compose" = "$CONFIG_ROOT/compose.production.yml" ] \
+    || die 'compose-ul discard nu este calea live fixă a invocației autentificate'
+
+  validate_deploy_quiesce_journal \
+    || die 'jurnalul deploy nu este autentic pentru discard'
+  [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul deploy lipsește sau are inode/ACL nesigur'
+  deploy_quiesce_owned_by_caller \
+    || die 'ownerul recovery nu corespunde jurnalului deploy'
+  [ "$deploy_owner_commit" = "$target_commit" ] \
+    || die 'ownerul recovery nu corespunde commitului țintă'
+  jq -e --arg commit "$target_commit" '
+    (keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+      "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema"] | sort) and
+    .schema == 2 and .phase == "active-prepared" and .commit == $commit and
+    (.activeBefore | strings | test("^[0-9a-f]{40}$")) and .activeBefore != $commit and
+    (.activeVersionBefore | strings | test("^[0-9a-f]{7,40}$")) and
+    (.activeBefore as $old | .activeVersionBefore as $version | $old | startswith($version)) and
+    .legacyContainers == [] and .legacyRestartPolicies == {} and
+    (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+    (.proxyIntent | keys | sort) == (["activeSlotBefore","caddyfilePresent","caddyfileSha256",
+      "caddyfileSnapshot","legacyProxyRestartPolicy","legacyProxyWasRunning","managedProxyWasRunning",
+      "oldUpstreamPresent","oldUpstreamSha256","oldUpstreamSnapshot","targetCaddyfileSha256",
+      "targetSlot","targetUpstreamSha256"] | sort) and
+    (.proxyIntent.activeSlotBefore == "blue" or .proxyIntent.activeSlotBefore == "green") and
+    (.proxyIntent.targetSlot == "blue" or .proxyIntent.targetSlot == "green") and
+    .proxyIntent.activeSlotBefore != .proxyIntent.targetSlot and
+    .proxyIntent.managedProxyWasRunning == true and .proxyIntent.legacyProxyWasRunning == false and
+    .proxyIntent.legacyProxyRestartPolicy == null and
+    .proxyIntent.caddyfilePresent == true and .proxyIntent.oldUpstreamPresent == true
+  ' "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'jurnalul deploy nu descrie exact generația active-prepared recuperabilă'
+  deploy_quiesce_generation_proof \
+    || die 'markerul vechi și gate-urile nu corespund generației active-prepared'
+
+  validate_unit_migration_pending \
+    || die 'bariera unit-only este nesigură în recovery'
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only exactă lipsește în recovery'
+  for path in "$READY_STAMP" "$ACTIVATION_PENDING" "$ACTIVATION_JOURNAL" "$GATE_JOURNAL"; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] \
+      || die "capabilitate Constructor neașteptată în recovery: $path"
+  done
+  for path in "${constructor_markers[@]}"; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] \
+      || die "marker Constructor neașteptat în recovery: $path"
+  done
+  wait_for_live_constructor_units_quiesced \
+    || die 'Constructor nu este exact instalat, inactiv și dezactivat în recovery'
+
+  [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul runtime prepared lipsește sau este nesigur'
+  jq -e '
+    (keys | sort) == ["phase","schema","transactionRoot"] and
+    .schema == 1 and .phase == "prepared" and
+    (.transactionRoot | strings | test("^/root/kelion/runtime/runtime-config-txn\\.[A-Za-z0-9]+$"))
+  ' "$JOURNAL" >/dev/null || die 'jurnalul runtime nu este exact schema 1 prepared'
+  recovery_root=$(jq -er '.transactionRoot' "$JOURNAL") \
+    || die 'directorul tranzacției nu poate fi citit'
+  transaction_root=$recovery_root
+  [ -d "$recovery_root" ] && [ ! -L "$recovery_root" ] \
+    && [ "$(realpath -e -- "$recovery_root")" = "$recovery_root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$recovery_root")" = '0:0:700' ] \
+    || die 'directorul tranzacției prepared este nesigur'
+  rollback_manifest=$recovery_root/rollback-manifest
+  recovery_compose=$recovery_root/recovery-compose.yml
+  backups_root=$recovery_root/backups
+  observed_top_level=$(find "$recovery_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul tranzacției prepared nu poate fi citit'
+  [ "$observed_top_level" = $'backups:d\nrecovery-compose.yml:f\nrollback-manifest:f' ] \
+    || die 'tranzacția prepared conține noduri top-level neașteptate'
+  [ -d "$backups_root" ] && [ ! -L "$backups_root" ] \
+    && [ "$(realpath -e -- "$backups_root")" = "$backups_root" ] \
+    && [ "$(stat -c '%u:%g:%a' "$backups_root")" = '0:0:700' ] \
+    || die 'directorul backupurilor prepared este nesigur'
+  [ -f "$rollback_manifest" ] && [ ! -L "$rollback_manifest" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$rollback_manifest")" = '0:0:600:1' ] \
+    || die 'manifestul prepared este nesigur'
+  [ -f "$recovery_compose" ] && [ ! -L "$recovery_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$recovery_compose")" = '0:0:600:1' ] \
+    || die 'compose-ul prepared este nesigur'
+  [ -f "$selected_compose" ] && [ ! -L "$selected_compose" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$selected_compose")" = '0:0:444:1' ] \
+    && cmp -s -- "$recovery_compose" "$selected_compose" \
+    || die 'compose-ul live nu este byte-identic cu snapshotul prepared'
+  rollback_manifest_sha=$(sha256sum "$rollback_manifest" | awk '{print $1}') \
+    || die 'hashul manifestului prepared nu poate fi citit'
+  recovery_compose_sha=$(sha256sum "$recovery_compose" | awk '{print $1}') \
+    || die 'hashul compose-ului prepared nu poate fi citit'
+
+  while IFS=$'\t' read -r logical present extra; do
+    [ -n "$logical" ] && [ -z "$extra" ] && [ "$present" = 1 ] \
+      || die 'manifestul prepared conține o intrare invalidă sau absentă'
+    [ -n "${allowed[$logical]:-}" ] && [ -z "${seen[$logical]:-}" ] \
+      || die 'manifestul prepared conține o intrare extra sau duplicată'
+    seen[$logical]=1
+    manifest_logicals+=("$logical")
+    manifest_count=$((manifest_count + 1))
+    map_logical "$logical"
+    backup=$backups_root/$logical
+    [ -f "$backup" ] && [ ! -L "$backup" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$backup")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      || die "backupul prepared are inode/ACL invalid: $logical"
+    [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && cmp -s -- "$mapped_target" "$backup" \
+      || die "ținta live nu este byte-identică cu backupul prepared: $logical"
+  done < "$rollback_manifest"
+  [ "$manifest_count" -eq 11 ] \
+    || die 'manifestul prepared nu conține exact cele unsprezece intrări'
+  observed_manifest=$(printf '%s\n' "${manifest_logicals[@]}" | LC_ALL=C sort) \
+    || die 'manifestul prepared nu poate fi ordonat'
+  expected=$(printf '%s\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'allowlistul prepared nu poate fi ordonat'
+  [ "$observed_manifest" = "$expected" ] \
+    || die 'manifestul prepared nu corespunde allowlistului exact'
+  observed_backups=$(find "$backups_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul backupurilor prepared nu poate fi citit'
+  expected=$(printf '%s:f\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'inventarul așteptat al backupurilor nu poate fi construit'
+  [ "$observed_backups" = "$expected" ] \
+    || die 'directorul backupurilor prepared conține noduri extra sau lipsă'
+
+  active_before=$(jq -er '.activeBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'markerul vechi nu poate fi citit'
+  active_version=$(jq -er '.activeVersionBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'versiunea veche nu poate fi citită'
+  active_slot=$(jq -er '.proxyIntent.activeSlotBefore' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'slotul vechi nu poate fi citit'
+  target_slot=$(jq -er '.proxyIntent.targetSlot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'slotul țintă nu poate fi citit'
+  [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/release-state/active")" = '0:10050:640:1' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/release-state/active")" -eq 1 ] \
+    && grep -qx "$active_before" "$RUNTIME_ROOT/release-state/active" \
+    && [ "${active_before:0:${#active_version}}" = "$active_version" ] \
+    || die 'markerul activ nu este exact generația veche jurnalizată'
+
+  caddy_snapshot=$(jq -er '.proxyIntent.caddyfileSnapshot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'snapshotul Caddyfile nu poate fi citit'
+  upstream_snapshot=$(jq -er '.proxyIntent.oldUpstreamSnapshot' "$DEPLOY_QUIESCE_JOURNAL") \
+    || die 'snapshotul upstream vechi nu poate fi citit'
+  [ -f "$caddy_snapshot" ] && [ ! -L "$caddy_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$caddy_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$(jq -er '.proxyIntent.caddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    || die 'snapshotul Caddyfile vechi nu corespunde jurnalului'
+  [ -f "$upstream_snapshot" ] && [ ! -L "$upstream_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$upstream_snapshot")" = '0:0:600:1' ] \
+    || die 'snapshotul upstream vechi este nesigur'
+  expected_old_upstream_sha=$(printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$active_slot" \
+    | sha256sum | awk '{print $1}') || die 'hashul upstream vechi nu poate fi construit'
+  [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$expected_old_upstream_sha" ] \
+    && [ "$expected_old_upstream_sha" = "$(jq -er '.proxyIntent.oldUpstreamSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ "$(tail -c 1 -- "$upstream_snapshot" | od -An -t u1 | tr -d '[:space:]')" = 10 ] \
+    || die 'snapshotul upstream vechi nu are bytes/newline canonice'
+
+  [ -f "$ROOT/proxy/Caddyfile" ] && [ ! -L "$ROOT/proxy/Caddyfile" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/proxy/Caddyfile")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$ROOT/proxy/Caddyfile" | awk '{print $1}')" = "$(jq -er '.proxyIntent.targetCaddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    || die 'Caddyfile-ul live nu corespunde bytes-urilor țintă jurnalizate'
+  path=$ROOT/proxy/upstream/kelion-upstream.caddy
+  [ -f "$path" ] && [ ! -L "$path" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$path")" = '0:0:644:1' ] \
+    || die 'upstream-ul live este nesigur'
+  expected_target_upstream_sha=$(printf 'reverse_proxy app-%s:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}\n' "$target_slot" \
+    | sha256sum | awk '{print $1}') || die 'hashul upstream țintă nu poate fi construit'
+  actual=$(sha256sum "$path" | awk '{print $1}') || die 'hashul upstream live nu poate fi citit'
+  [ "$actual" = "$expected_target_upstream_sha" ] \
+    && [ "$actual" = "$(jq -er '.proxyIntent.targetUpstreamSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ "$(tail -c 1 -- "$path" | od -An -t u1 | tr -d '[:space:]')" = 10 ] \
+    || die 'upstream-ul live nu are bytes/hash/newline canonice pentru slotul țintă'
+
+  [ "$(docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null)" = true ] \
+    || die 'proxy-ul managed nu rulează'
+  proxy_health=$(docker inspect -f '{{.State.Health.Status}}' kelion-proxy 2>/dev/null) \
+    || die 'health-ul proxy-ului managed nu poate fi citit'
+  proxy_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' kelion-proxy 2>/dev/null) \
+    || die 'restart policy-ul proxy-ului managed nu poate fi citit'
+  [ "$proxy_health" = healthy ] && [ "$proxy_policy" = unless-stopped ] \
+    || die 'proxy-ul managed nu este healthy cu restart policy canonic'
+  if docker inspect -f '{{.State.Running}}' kelion-caddy 2>/dev/null | grep -qx true; then
+    die 'proxy-ul legacy rulează simultan cu proxy-ul managed'
+  fi
+
+  target_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$target_slot") \
+    || die 'inventarul Docker al slotului țintă nu poate fi citit integral'
+  [ -z "$target_output" ] || mapfile -t target_ids <<<"$target_output"
+  [ "${#target_ids[@]}" -eq 5 ] \
+    || die 'slotul țintă nu conține exact cinci containere managed'
+  for role in app browser-worker browser-egress converter-gateway converter-parser; do
+    role_ids=()
+    role_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+      --filter "label=com.kelion.slot=$target_slot" --filter "label=com.kelion.role=$role") \
+      || die "inventarul Docker al rolului țintă nu poate fi citit integral: $role"
+    [ -z "$role_output" ] || mapfile -t role_ids <<<"$role_output"
+    [ "${#role_ids[@]}" -eq 1 ] || die "rolul țintă nu este unic: $role"
+    id=${role_ids[0]}
+    [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] \
+      && [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ] \
+      && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id")" = unless-stopped ] \
+      && [ "$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$id")" = "$target_commit" ] \
+      || die "containerul țintă nu este healthy/running/canonic: $role"
+    image=$(docker inspect -f '{{.Config.Image}}' "$id") \
+      || die "imaginea containerului țintă nu poate fi citită: $role"
+    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
+      || die "containerul țintă nu folosește o imagine immutable: $role"
+  done
+
+  # Ultima verificare înainte de prima și singura mutație confirmă că ownerul,
+  # markerul, bytes-urile și topologia nu s-au schimbat sub publication lock.
+  jq -e --arg commit "$target_commit" \
+    '.schema == 2 and .phase == "active-prepared" and .commit == $commit' \
+    "$DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'faza jurnalului deploy s-a schimbat înainte de commitul discard'
+  deploy_quiesce_owned_by_caller && deploy_quiesce_generation_proof \
+    || die 'generația active-prepared s-a schimbat înainte de commitul discard'
+  observed_top_level=$(find "$recovery_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul tranzacției nu poate fi recitit înainte de discard'
+  [ "$observed_top_level" = $'backups:d\nrecovery-compose.yml:f\nrollback-manifest:f' ] \
+    && [ "$(sha256sum "$rollback_manifest" | awk '{print $1}')" = "$rollback_manifest_sha" ] \
+    && [ "$(sha256sum "$recovery_compose" | awk '{print $1}')" = "$recovery_compose_sha" ] \
+    && cmp -s -- "$recovery_compose" "$selected_compose" \
+    || die 'tranzacția/compose-ul s-a schimbat înainte de commitul discard'
+  expected=$(printf '%s:f\n' "${!allowed[@]}" | LC_ALL=C sort) \
+    || die 'inventarul backupurilor nu poate fi reconstruit înainte de discard'
+  observed_backups=$(find "$backups_root" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort) \
+    || die 'inventarul backupurilor nu poate fi recitit înainte de discard'
+  [ "$observed_backups" = "$expected" ] \
+    || die 'inventarul backupurilor s-a schimbat înainte de commitul discard'
+  for logical in "${manifest_logicals[@]}"; do
+    map_logical "$logical"
+    backup=$backups_root/$logical
+    [ -f "$backup" ] && [ ! -L "$backup" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$backup")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && [ -f "$mapped_target" ] && [ ! -L "$mapped_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$mapped_target")" = "$mapped_owner:$mapped_group:$mapped_mode:1" ] \
+      && cmp -s -- "$mapped_target" "$backup" \
+      || die "backupul sau ținta live s-a schimbat înainte de discard: $logical"
+  done
+  [ -f "$caddy_snapshot" ] && [ ! -L "$caddy_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$caddy_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$caddy_snapshot" | awk '{print $1}')" = "$(jq -er '.proxyIntent.caddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ -f "$upstream_snapshot" ] && [ ! -L "$upstream_snapshot" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$upstream_snapshot")" = '0:0:600:1' ] \
+    && [ "$(sha256sum "$upstream_snapshot" | awk '{print $1}')" = "$expected_old_upstream_sha" ] \
+    || die 'snapshoturile proxy s-au schimbat înainte de commitul discard'
+  [ -f "$ROOT/proxy/Caddyfile" ] && [ ! -L "$ROOT/proxy/Caddyfile" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/proxy/Caddyfile")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$ROOT/proxy/Caddyfile" | awk '{print $1}')" = "$(jq -er '.proxyIntent.targetCaddyfileSha256' "$DEPLOY_QUIESCE_JOURNAL")" ] \
+    && [ -f "$path" ] && [ ! -L "$path" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$path")" = '0:0:644:1' ] \
+    && [ "$(sha256sum "$path" | awk '{print $1}')" = "$expected_target_upstream_sha" ] \
+    || die 'bytes-urile proxy live s-au schimbat înainte de commitul discard'
+  [ "$(docker inspect -f '{{.State.Running}}' kelion-proxy 2>/dev/null)" = true ] \
+    && [ "$(docker inspect -f '{{.State.Health.Status}}' kelion-proxy 2>/dev/null)" = healthy ] \
+    && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' kelion-proxy 2>/dev/null)" = unless-stopped ] \
+    || die 'proxy-ul managed s-a schimbat înainte de commitul discard'
+  target_ids=()
+  target_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+    --filter "label=com.kelion.slot=$target_slot") \
+    || die 'inventarul final Docker al slotului țintă nu poate fi citit integral'
+  [ -z "$target_output" ] || mapfile -t target_ids <<<"$target_output"
+  [ "${#target_ids[@]}" -eq 5 ] \
+    || die 'slotul țintă s-a schimbat înainte de commitul discard'
+  for role in app browser-worker browser-egress converter-gateway converter-parser; do
+    role_ids=()
+    role_output=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+      --filter "label=com.kelion.slot=$target_slot" --filter "label=com.kelion.role=$role") \
+      || die "inventarul final Docker al rolului nu poate fi citit integral: $role"
+    [ -z "$role_output" ] || mapfile -t role_ids <<<"$role_output"
+    [ "${#role_ids[@]}" -eq 1 ] || die "rolul s-a schimbat înainte de discard: $role"
+    id=${role_ids[0]}
+    [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] \
+      && [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ] \
+      && [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id")" = unless-stopped ] \
+      && [ "$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$id")" = "$target_commit" ] \
+      || die "containerul s-a schimbat înainte de discard: $role"
+  done
+  [ -f "$JOURNAL" ] && [ ! -L "$JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg root "$recovery_root" \
+      '.schema == 1 and .phase == "prepared" and .transactionRoot == $root' "$JOURNAL" >/dev/null \
+    || die 'jurnalul runtime s-a schimbat înainte de commitul discard'
+  [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$UNIT_MIGRATION_PENDING")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$UNIT_MIGRATION_PENDING")" -eq 1 ] \
+    && grep -qx 'schema=1' "$UNIT_MIGRATION_PENDING" \
+    || die 'bariera unit-only s-a schimbat înainte de commitul discard'
+  wait_for_live_constructor_units_quiesced \
+    || die 'Constructor nu a rămas quiesced înainte de commitul discard'
+  clear_journal || die 'jurnalul runtime prepared nu a putut fi șters durabil'
+  remove_transaction_after_durable_journal_clear "$recovery_root" \
+    || die 'tranzacția runtime prepared nu a putut fi eliminată după unlink durabil'
+  transaction_root=''
+  recovery_in_progress=0
+  units_quiesced=0
+  config_consistent=1
+  backend_consistent=1
+  operation_succeeded=1
 }
 
 garbage_collect_transactions() {
@@ -1881,12 +3001,19 @@ garbage_collect_activations() {
   local candidate canonical
   for candidate in "$RUNTIME_ROOT"/constructor-activation.*; do
     [ -e "$candidate" ] || continue
-    [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9]+$ ]] \
+    # Recovery-ul quiesced păstrează intenționat jurnalul canonic. Globul
+    # directorului îl include, dar el nu este un snapshot orfan.
+    [ "$candidate" = "$ACTIVATION_JOURNAL" ] && continue
+    [[ "$candidate" =~ ^/root/kelion/runtime/constructor-activation\.[A-Za-z0-9._-]+$ ]] \
       && [ -d "$candidate" ] && [ ! -L "$candidate" ] \
       && [ "$(stat -c '%u:%g:%a' "$candidate")" = '0:0:700' ] || return 1
     canonical=$(realpath -e -- "$candidate") || return 1
     [ "$canonical" = "$candidate" ] || return 1
     if [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]; then
+      # Persistăm mai întâi absența jurnalului. Altfel un power-loss după
+      # ștergerea snapshotului ar putea readuce unlink-ul nedurabil și ar lăsa
+      # un jurnal fără rollback root, stare pe care recovery-ul trebuie s-o refuze.
+      fsync_path "$RUNTIME_ROOT" || return 1
       remove_activation_dir "$canonical" || return 1
       fsync_path "$RUNTIME_ROOT" || return 1
     fi
@@ -1956,7 +3083,7 @@ cleanup_cutover() {
               # Backupul runtime pre-migrare poate aparține allowlistului vechi.
               # Nu îl declarăm strict și nu republicăm stamp-ul; închidem
               # rollbackul quiesced ca următorul retry mixt să poată progresa.
-              if validate_live_constructor_units_quiesced; then
+              if wait_for_live_constructor_units_quiesced; then
                 units_quiesced=0
               else
                 cleanup_failed=1
@@ -2029,6 +3156,12 @@ cleanup_cutover() {
 }
 trap cleanup_cutover EXIT
 
+# Modul special armează cleanup-ul fail-closed înaintea oricărui validator.
+# Un owner/jurnal invalid nu poate ajunge la cleanup-ul tranzacțional generic.
+if [ "$discard_unmutated_prepared" = 1 ] || [ "$discard_unmutated_gate_prepared" = 1 ]; then
+  recovery_in_progress=1
+fi
+
 # Recover-only este și bariera de boot. Oprește mai întâi orice generație
 # detectabilă, inclusiv unități legacy ori un set 1..5 fără proveniență. Acest
 # pas nu repară fișiere fără jurnal; doar elimină side-effect-urile înaintea
@@ -2055,7 +3188,10 @@ if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
     deploy_quiesce_authorized=1
   elif [ "$recover_only" = 1 ] && [ "$leave_constructor_quiesced" = 0 ] \
     && [ "$deploy_quiesce_proof" = 1 ] && deploy_quiesce_owned_by_caller \
-    && deploy_quiesce_generation_proof; then
+    && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
+          && deploy_quiesce_generation_proof old; } \
+      || { [ "$discard_unmutated_gate_prepared" = 0 ] \
+          && deploy_quiesce_generation_proof committed; }; }; then
     # Numai ownerul tuplei poate publica stamp-ul și șterge jurnalul, după ce
     # active+gate corespund exact snapshotului vechi sau commitului gate nou.
     deploy_quiesce_authorized=1
@@ -2073,6 +3209,10 @@ if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
   fi
 fi
 
+if [ "$discard_unmutated_prepared" = 1 ]; then
+  discard_unmutated_prepared_cutover "$discard_target_commit" "$compose_file"
+  exit 0
+fi
 if ! ensure_constructor_marker_root_durable; then
   force_quiesce_constructor_units 1 || true
   clear_runtime_ready_stamp || true
@@ -2081,6 +3221,10 @@ fi
 if [ -n "$activation_resume_operation" ] \
   && [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]; then
   die 'resume-ul activării cere jurnalul durabil existent'
+fi
+if [ "$discard_unmutated_gate_prepared" = 1 ]; then
+  discard_unmutated_gate_prepared_refresh \
+    "$discard_gate_request_id" "$discard_gate_commit" "$discard_gate_active_commit" "$compose_file"
 fi
 recover_interrupted_gate_refresh
 recover_interrupted_activation
@@ -2115,7 +3259,11 @@ if [ "$recover_only" = 1 ]; then
       || die 'unitățile nu sunt sigur quiesced sub bariera pending'
     if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
       if [ "$deploy_quiesce_proof" = 1 ] && deploy_quiesce_owned_by_caller \
-        && deploy_quiesce_generation_proof && validate_live_runtime_contract; then
+        && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
+              && deploy_quiesce_generation_proof old; } \
+          || { [ "$discard_unmutated_gate_prepared" = 0 ] \
+              && deploy_quiesce_generation_proof committed; }; } \
+        && validate_live_runtime_contract; then
         clear_unit_migration_pending \
           || die 'bariera unit-only nu a putut fi consumată după dovada strictă a deploy-ului'
       else
@@ -2232,14 +3380,7 @@ for index in "${!logical_names[@]}"; do
   fi
 done
 
-assert_pairwise_distinct 'HMAC-urile Constructor' \
-  app-secret.codex-worker-secret app-secret.constructor-publisher-secret app-secret.constructor-release-secret
-assert_pairwise_distinct 'credentialele OAuth Admin și GHCR' \
-  app-secret.github-release-oauth-token gate-secret.github-ghcr-read-token
-if [ "$constructor_configured" -eq 3 ]; then
-  assert_pairwise_distinct 'tokenurile GitHub Constructor și OAuth Admin' \
-    worker-secret.github-worker-token publisher-secret.github-publisher-token release-secret.github-release-token gate-secret.github-ghcr-read-token app-secret.github-release-oauth-token
-fi
+validate_candidate_secret_separation
 
 if [ "$restart_required" = 1 ] && { [ -e "$RUNTIME_ROOT/release-state/active" ] || [ -L "$RUNTIME_ROOT/release-state/active" ]; }; then
   [ -f "$RUNTIME_ROOT/release-state/active" ] && [ ! -L "$RUNTIME_ROOT/release-state/active" ] \
@@ -2284,7 +3425,7 @@ if [ "$constructor_staged_unit_count" -eq 6 ]; then
     || die 'cele șase unități comise nu au putut fi dovedite inactive și dezactivate'
 fi
 if [ "$unit_only_transaction" = 1 ]; then
-  validate_live_constructor_units_quiesced \
+  wait_for_live_constructor_units_quiesced \
     || die 'setul unit-only comis nu este exact, inactiv și dezactivat'
 else
   validate_live_runtime_contract \

@@ -1,0 +1,857 @@
+name: VPS Recovery
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  classify:
+    if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      execute: ${{ steps.decision.outputs.execute }}
+      incident: ${{ steps.decision.outputs.incident }}
+      hotfix_commit: ${{ steps.decision.outputs.hotfix_commit }}
+      helper_sha256: ${{ steps.decision.outputs.helper_sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: github.event_name == 'push' && github.event.before == 'aadb55932d41ac26635df90028276e25ba9f51af'
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Separă recovery-ul generic de incidentul gate-prepared
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            case "$BEFORE_SHA" in
+              de9fe5f3f081373a23796d83b469651e9c1e33e7|afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3)
+                echo 'execute=false' >> "$GITHUB_OUTPUT"
+                echo 'incident=false' >> "$GITHUB_OUTPUT"
+                echo '::notice::RECOVERY_DEFERRED: tranziția incidentului aparține workflow-ului post-PONR dedicat.'
+                exit 0
+                ;;
+              aadb55932d41ac26635df90028276e25ba9f51af)
+                failed_commit=aadb55932d41ac26635df90028276e25ba9f51af
+                active_commit=10c7ce5b06307e953db9184f0ecb57e6ca60ad38
+                request=ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3
+                ci_run=33316869492
+                build_run=33317102554
+                failed_run=33317466950
+                failed_job=99273467144
+                hotfix=$(git rev-parse HEAD)
+                [[ "$hotfix" =~ ^[0-9a-f]{40}$ ]]
+                [ "$hotfix" = "$GITHUB_SHA" ]
+                [ "$(git rev-parse HEAD^)" = "$failed_commit" ]
+                [ "$(git rev-list --count "$failed_commit..$hotfix")" -eq 1 ]
+                [ "$(git rev-list --parents -n 1 "$hotfix" | awk '{print NF}')" -eq 2 ]
+                remote_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+                [ "$remote_master" = "$hotfix" ]
+                git diff --check "$failed_commit" "$hotfix"
+
+                mapfile -t changed < <(git diff --name-status --no-renames "$failed_commit" "$hotfix")
+                [ "${#changed[@]}" -eq 5 ]
+                for expected in \
+                  $'M\t.github/workflows/vps-recovery.yml' \
+                  $'M\tdeploy/deploy.sh' \
+                  $'M\tdeploy/instaleaza-constructor.sh' \
+                  $'M\tdeploy/lib/constructor-publication.test.mjs' \
+                  $'M\tdeploy/lib/runtime-config-cutover.sh'; do
+                  printf '%s\n' "${changed[@]}" | grep -Fxq "$expected" \
+                    || { echo "::error::Hotfixul exact nu conține $expected"; exit 1; }
+                done
+                for path in \
+                  .github/workflows/vps-recovery.yml \
+                  deploy/deploy.sh \
+                  deploy/instaleaza-constructor.sh \
+                  deploy/lib/constructor-publication.test.mjs \
+                  deploy/lib/runtime-config-cutover.sh; do
+                  [ -f "$path" ]
+                  [ ! -L "$path" ]
+                done
+                helper_sha256=$(sha256sum deploy/lib/runtime-config-cutover.sh | awk '{print $1}')
+                [[ "$helper_sha256" =~ ^[0-9a-f]{64}$ ]]
+
+                ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run}")
+                jq -e --argjson id "$ci_run" --arg sha "$failed_commit" '
+                  .id == $id and .head_sha == $sha and .head_branch == "master" and
+                  .event == "push" and .conclusion == "success" and
+                  (.path == ".github/workflows/pr-verify.yml" or
+                   (.path | startswith(".github/workflows/pr-verify.yml@")))
+                ' <<<"$ci" >/dev/null
+                ci_jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ci_run}/jobs?filter=latest&per_page=100")
+                jq -e '
+                  .total_count == 3 and
+                  ([.jobs[] | select(.conclusion == "success") | .name] | unique | sort) ==
+                    ["container-isolation", "release-train-preflight", "verify"]
+                ' <<<"$ci_jobs" >/dev/null
+
+                build=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run}")
+                jq -e --argjson id "$build_run" --arg sha "$failed_commit" \
+                  --arg title "build-release-${ci_run}-${failed_commit}" '
+                  .id == $id and .head_sha == $sha and .head_branch == "master" and
+                  .event == "workflow_run" and .conclusion == "success" and
+                  (.path == ".github/workflows/build-images.yml" or
+                   (.path | startswith(".github/workflows/build-images.yml@"))) and
+                  .display_title == $title
+                ' <<<"$build" >/dev/null
+
+                release=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${failed_run}")
+                jq -e --argjson id "$failed_run" --arg sha "$failed_commit" \
+                  --arg title "production-${request}-${failed_commit}-${ci_run}-${build_run}" '
+                  .id == $id and .head_sha == $sha and .head_branch == "master" and
+                  .event == "workflow_dispatch" and .conclusion == "failure" and
+                  (.path == ".github/workflows/deploy.yml" or
+                   (.path | startswith(".github/workflows/deploy.yml@"))) and
+                  .display_title == $title
+                ' <<<"$release" >/dev/null
+                release_job=$(gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${failed_job}")
+                jq -e --argjson id "$failed_job" --argjson runId "$failed_run" \
+                  --arg sha "$failed_commit" '
+                  .id == $id and .run_id == $runId and .head_sha == $sha and
+                  .name == "release" and .conclusion == "failure" and
+                  any(.steps[]; .name == "Release blue-green pe VPS" and .conclusion == "failure") and
+                  any(.steps[]; .name == "Dovadă externă exactă" and .conclusion == "skipped")
+                ' <<<"$release_job" >/dev/null
+
+                deadline=$((SECONDS + 9900))
+                hotfix_ci_id=''
+                while [ "$SECONDS" -lt "$deadline" ]; do
+                  hotfix_ci_runs=$(gh api \
+                    "repos/${GITHUB_REPOSITORY}/actions/workflows/pr-verify.yml/runs?branch=master&event=push&per_page=100")
+                  hotfix_ci_matches=$(jq -c --arg sha "$hotfix" '
+                    [.workflow_runs[] | select(
+                      .head_sha == $sha and .head_branch == "master" and .event == "push" and
+                      (.path == ".github/workflows/pr-verify.yml" or
+                       (.path | startswith(".github/workflows/pr-verify.yml@"))))]
+                  ' <<<"$hotfix_ci_runs")
+                  hotfix_ci_count=$(jq -r 'length' <<<"$hotfix_ci_matches")
+                  case "$hotfix_ci_count" in
+                    0) sleep 30; continue ;;
+                    1) ;;
+                    *) echo '::error::Există mai multe runuri pr-verify push pentru hotfixul exact.'; exit 1 ;;
+                  esac
+                  hotfix_ci_id=$(jq -er '.[0].id' <<<"$hotfix_ci_matches")
+                  hotfix_ci_conclusion=$(jq -r '.[0].conclusion // ""' <<<"$hotfix_ci_matches")
+                  case "$hotfix_ci_conclusion" in
+                    '') sleep 30 ;;
+                    success) break ;;
+                    *) echo "::error::pr-verify push al hotfixului s-a încheiat cu $hotfix_ci_conclusion."; exit 1 ;;
+                  esac
+                done
+                [[ "$hotfix_ci_id" =~ ^[1-9][0-9]*$ ]] \
+                  || { echo '::error::pr-verify push exact al hotfixului nu a apărut în timp util.'; exit 1; }
+                hotfix_ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${hotfix_ci_id}")
+                jq -e --argjson id "$hotfix_ci_id" --arg sha "$hotfix" '
+                  .id == $id and .head_sha == $sha and .head_branch == "master" and
+                  .event == "push" and .conclusion == "success" and
+                  (.path == ".github/workflows/pr-verify.yml" or
+                   (.path | startswith(".github/workflows/pr-verify.yml@")))
+                ' <<<"$hotfix_ci" >/dev/null
+                hotfix_ci_jobs=$(gh api \
+                  "repos/${GITHUB_REPOSITORY}/actions/runs/${hotfix_ci_id}/jobs?filter=latest&per_page=100")
+                jq -e '
+                  .total_count == 3 and
+                  ([.jobs[] | select(.conclusion == "success") | .name] | unique | sort) ==
+                    ["container-isolation", "release-train-preflight", "verify"]
+                ' <<<"$hotfix_ci_jobs" >/dev/null
+
+                printf 'execute=true\nincident=true\nhotfix_commit=%s\nhelper_sha256=%s\n' \
+                  "$hotfix" "$helper_sha256" >> "$GITHUB_OUTPUT"
+                printf 'INCIDENT_VERIFIED failed_run=%s failed_job=%s ci_run=%s build_run=%s hotfix_ci=%s\n' \
+                  "$failed_run" "$failed_job" "$ci_run" "$build_run" "$hotfix_ci_id"
+                exit 0
+                ;;
+            esac
+          fi
+          echo 'execute=true' >> "$GITHUB_OUTPUT"
+          echo 'incident=false' >> "$GITHUB_OUTPUT"
+
+  recover:
+    if: needs.classify.outputs.execute == 'true' && github.ref == 'refs/heads/master' && github.ref_name == 'master'
+    needs: classify
+    concurrency:
+      group: production-release
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.classify.outputs.incident == 'true'
+        with:
+          ref: ${{ needs.classify.outputs.hotfix_commit }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Recuperează exact incidentul gate-prepared aadb
+        if: needs.classify.outputs.incident == 'true'
+        env:
+          HOTFIX_COMMIT: ${{ needs.classify.outputs.hotfix_commit }}
+          HELPER_SHA256: ${{ needs.classify.outputs.helper_sha256 }}
+          PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          phase=runner-preflight
+          on_err() {
+            local failed_line=$1 rc=$2
+            printf '{"ok":false,"event":"gate_prepared_incident_recovery_failure","phase":"%s","line":%s,"exit_code":%s}\n' \
+              "$phase" "$failed_line" "$rc" >&2
+            exit "$rc"
+          }
+          trap 'on_err "$LINENO" "$?"' ERR
+          failed_commit=aadb55932d41ac26635df90028276e25ba9f51af
+          active_commit=10c7ce5b06307e953db9184f0ecb57e6ca60ad38
+          request=ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3
+          ci_run=33316869492
+          build_run=33317102554
+          failed_run=33317466950
+          failed_job=99273467144
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$HOTFIX_COMMIT" ]
+          [ "$(git rev-parse HEAD^)" = "$failed_commit" ]
+          [ "$(git rev-list --count "$failed_commit..$HOTFIX_COMMIT")" -eq 1 ]
+          [ "$(sha256sum deploy/lib/runtime-config-cutover.sh | awk '{print $1}')" = "$HELPER_SHA256" ]
+          [ "$PUBLIC_APP_ORIGIN" = https://kelionai.app ] # hardcod-permis: tuplă publică imuabilă a incidentului de producție
+          [ -n "$VPS_HOST" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST_KEY" ]
+          [ -n "$SSH_KEY" ]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+
+          umask 077
+          key_file=''
+          known_hosts=''
+          helper_copy=''
+          # Stagingul este în afara runtime-ului Kelion și este unic per attempt;
+          # un runner pierdut nu poate bloca rerularea aceluiași run_id.
+          remote_stage="/root/kelion-gate-recovery.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            local rc=$?
+            trap - EXIT ERR
+            set +e
+            if [ -n "$key_file" ] && [ -s "$key_file" ] \
+              && [ -n "$known_hosts" ] && [ -s "$known_hosts" ]; then
+              ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+                -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+                "$VPS_USER@$VPS_HOST" bash -s -- "$remote_stage" >/dev/null 2>&1 <<'CLEANUP' || true
+          set -euo pipefail
+          stage=$1
+          [[ "$stage" =~ ^/root/kelion-gate-recovery\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
+          if [ -e "$stage" ] || [ -L "$stage" ]; then
+            [ -d "$stage" ]
+            [ ! -L "$stage" ]
+            [ "$(realpath -e -- "$stage")" = "$stage" ]
+            [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+            rm -rf -- "$stage"
+          fi
+          CLEANUP
+            fi
+            rm -f -- "$helper_copy" "$key_file" "$known_hosts"
+            exit "$rc"
+          }
+          trap cleanup EXIT
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          helper_copy=$(mktemp)
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          install -m 0600 deploy/lib/runtime-config-cutover.sh "$helper_copy"
+          chmod 0600 "$key_file" "$known_hosts" "$helper_copy"
+          [ "$(sha256sum "$helper_copy" | awk '{print $1}')" = "$HELPER_SHA256" ]
+          ssh_opts=(-i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=30 -o ServerAliveCountMax=10)
+
+          phase=remote-stage
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_stage" <<'STAGE'
+          set -euo pipefail
+          stage=$1
+          [[ "$stage" =~ ^/root/kelion-gate-recovery\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
+          [ ! -e "$stage" ]
+          [ ! -L "$stage" ]
+          install -d -o root -g root -m 0700 "$stage"
+          [ -d "$stage" ]
+          [ ! -L "$stage" ]
+          [ "$(realpath -e -- "$stage")" = "$stage" ]
+          [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+          STAGE
+          scp "${ssh_opts[@]}" "$helper_copy" \
+            "$VPS_USER@$VPS_HOST:$remote_stage/runtime-config-cutover.incoming"
+
+          phase=remote-recovery
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_stage" "$HELPER_SHA256" "$HOTFIX_COMMIT" "$request" \
+            "$failed_commit" "$active_commit" "$ci_run" "$build_run" \
+            "$failed_run" "$failed_job" "$PUBLIC_APP_ORIGIN" <<'REMOTE'
+          set -Eeuo pipefail
+          phase=remote-preflight
+          on_err() {
+            local failed_line=$1 rc=$2
+            printf '{"ok":false,"event":"gate_prepared_incident_recovery_failure","phase":"%s","line":%s,"exit_code":%s}\n' \
+              "$phase" "$failed_line" "$rc" >&2
+            exit "$rc"
+          }
+          trap 'on_err "$LINENO" "$?"' ERR
+          stage=$1
+          expected_helper_sha=$2
+          hotfix_commit=$3
+          request=$4
+          failed_commit=$5
+          active_commit=$6
+          ci_run=$7
+          build_run=$8
+          failed_run=$9
+          failed_job=${10}
+          public_origin=${11}
+          [[ "$stage" =~ ^/root/kelion-gate-recovery\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
+          [[ "$expected_helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$hotfix_commit" =~ ^[0-9a-f]{40}$ ]]
+          [ "$request" = ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3 ]
+          [ "$failed_commit" = aadb55932d41ac26635df90028276e25ba9f51af ]
+          [ "$active_commit" = 10c7ce5b06307e953db9184f0ecb57e6ca60ad38 ]
+          [ "$ci_run" = 33316869492 ]
+          [ "$build_run" = 33317102554 ]
+          [ "$failed_run" = 33317466950 ]
+          [ "$failed_job" = 99273467144 ]
+          [ "$public_origin" = https://kelionai.app ] # hardcod-permis: tuplă publică imuabilă a incidentului de producție
+          [ -d "$stage" ]
+          [ ! -L "$stage" ]
+          [ "$(realpath -e -- "$stage")" = "$stage" ]
+          [ "$(stat -Lc '%u:%g:%a' "$stage")" = '0:0:700' ]
+          incoming=$stage/runtime-config-cutover.incoming
+          helper=$stage/runtime-config-cutover.sh
+          [ -f "$incoming" ]
+          [ ! -L "$incoming" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$incoming")" = '0:0:600:1' ]
+          [ "$(sha256sum "$incoming" | awk '{print $1}')" = "$expected_helper_sha" ]
+
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ]
+          [ ! -L "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<"$publication_lock"
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ]
+          [ -f /proc/$$/fd/9 ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          flock -n 9
+          [ ! -L "$publication_lock" ]
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+
+          phase=incident-proof
+          runtime=/root/kelion/runtime
+          compose=/root/kelion/config/compose.production.yml
+          outer=$runtime/constructor-deploy-quiesce.journal
+          gate=$runtime/constructor-gate-refresh.journal
+          unit_pending=$runtime/constructor-unit-migration.pending
+          active_file=$runtime/release-state/active
+          ledger=$runtime/release-state/requests/$request.json
+          upstream=/root/kelion/proxy/upstream/kelion-upstream.caddy
+          ready_stamp=/run/kelion/runtime-config-recovery.ready
+          for rejected in \
+            "$runtime/destructive-cutover-recovery.json" \
+            "$runtime/constructor-upgrade.journal" \
+            "$runtime/constructor-activation.journal" \
+            "$runtime/runtime-config-cutover.journal" \
+            /run/kelion/constructor-activation.pending; do
+            [ ! -e "$rejected" ]
+            [ ! -L "$rejected" ]
+          done
+          [ -f "$compose" ]
+          [ ! -L "$compose" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ]
+          [ -f "$active_file" ]
+          [ ! -L "$active_file" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$active_file")" = '0:10050:640:1' ]
+          [ "$(wc -l < "$active_file")" -eq 1 ]
+          [ "$(sed -n '1p' "$active_file")" = "$active_commit" ]
+
+          ledger_state=retryable
+          validate_ledger() {
+            [ -f "$ledger" ]
+            [ ! -L "$ledger" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$ledger")" = '0:0:600:1' ]
+            jq -e --arg request "$request" --arg failed "$failed_commit" \
+              --argjson ci "$ci_run" --argjson build "$build_run" --argjson run "$failed_run" '
+              (keys | sort) == ["buildRunId","ciRunId","commit","completedAt","mode",
+                "requestId","schema","startedAt","status","workflowRunId"] and
+              .schema == 1 and .status == "retryable" and .requestId == $request and
+              .commit == $failed and .mode == "release" and .ciRunId == $ci and
+              .buildRunId == $build and .workflowRunId == $run and
+              .completedAt == null and (.startedAt | strings | fromdateiso8601 | type) == "number"
+            ' "$ledger" >/dev/null
+            ledger_state=retryable
+          }
+
+          active_slot=''
+          inactive_slot=''
+          validate_managed_topology() {
+            local actual expected role id candidate container
+            local active_inventory role_inventory inactive_running_inventory candidate_inventory
+            local legacy_proxy_inventory legacy_proxy_id legacy_proxy_running legacy_proxy_restart_policy
+            local -a active_ids=() role_ids=() candidate_ids=() legacy_proxy_ids=()
+            [ -f "$upstream" ]
+            [ ! -L "$upstream" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$upstream")" = '0:0:644:1' ]
+            actual=$(cat "$upstream")
+            if [ "$actual" = $'reverse_proxy app-blue:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}' ]; then
+              active_slot=blue
+              inactive_slot=green
+            elif [ "$actual" = $'reverse_proxy app-green:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}' ]; then
+              active_slot=green
+              inactive_slot=blue
+            else
+              return 1
+            fi
+            [ "$(docker inspect -f '{{.State.Running}}' kelion-proxy)" = true ]
+            [ "$(docker inspect -f '{{.State.Health.Status}}' kelion-proxy)" = healthy ]
+            [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' kelion-proxy)" = unless-stopped ]
+            legacy_proxy_inventory=$(docker ps -aq --filter 'name=^/kelion-caddy$') || return 1
+            if [ -n "$legacy_proxy_inventory" ]; then
+              mapfile -t legacy_proxy_ids <<<"$legacy_proxy_inventory"
+            fi
+            case "${#legacy_proxy_ids[@]}" in
+              0) ;;
+              1)
+                legacy_proxy_id=${legacy_proxy_ids[0]}
+                legacy_proxy_running=$(docker inspect -f '{{.State.Running}}' "$legacy_proxy_id") \
+                  || return 1
+                legacy_proxy_restart_policy=$(docker inspect \
+                  -f '{{.HostConfig.RestartPolicy.Name}}' "$legacy_proxy_id") || return 1
+                [ "$legacy_proxy_running" = false ]
+                [ "$legacy_proxy_restart_policy" = no ]
+                ;;
+              *) return 1 ;;
+            esac
+            active_inventory=$(docker ps -q --filter 'label=com.kelion.managed=true' \
+              --filter "label=com.kelion.slot=$active_slot") || return 1
+            if [ -n "$active_inventory" ]; then
+              mapfile -t active_ids <<<"$active_inventory"
+            fi
+            [ "${#active_ids[@]}" -eq 5 ]
+            for role in app browser-worker browser-egress converter-gateway converter-parser; do
+              role_inventory=$(docker ps -q --filter 'label=com.kelion.managed=true' \
+                --filter "label=com.kelion.slot=$active_slot" \
+                --filter "label=com.kelion.role=$role") || return 1
+              role_ids=()
+              if [ -n "$role_inventory" ]; then
+                mapfile -t role_ids <<<"$role_inventory"
+              fi
+              [ "${#role_ids[@]}" -eq 1 ]
+              id=${role_ids[0]}
+              [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ]
+              [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ]
+              [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$id")" = unless-stopped ]
+              [ "$(docker inspect -f '{{index .Config.Labels "com.kelion.commit"}}' "$id")" = "$active_commit" ]
+            done
+            inactive_running_inventory=$(docker ps -q --filter 'label=com.kelion.managed=true' \
+              --filter "label=com.kelion.slot=$inactive_slot") || return 1
+            [ -z "$inactive_running_inventory" ]
+            candidate_inventory=$(docker ps -aq --filter 'label=com.kelion.managed=true' \
+              --filter "label=com.kelion.slot=$inactive_slot") || return 1
+            if [ -n "$candidate_inventory" ]; then
+              mapfile -t candidate_ids <<<"$candidate_inventory"
+            fi
+            for candidate in "${candidate_ids[@]}"; do
+              [ "$(docker inspect -f '{{.State.Running}}' "$candidate")" = false ]
+            done
+          }
+
+          validate_public_proof() {
+            local proof version
+            proof=$(curl --fail --silent --show-error --max-time 15 --max-redirs 0 \
+              "$public_origin/api/release-proof")
+            jq -e --arg active "$active_commit" '
+              .ready == true and .activeCommit == $active and
+              ((.release.candidate // false) == false) and .release.sideEffectsActive == true
+            ' <<<"$proof" >/dev/null
+            version=$(curl --fail --silent --show-error --max-time 15 --max-redirs 0 \
+              "$public_origin/api/version" | jq -er '.v')
+            [ "$version" = "${active_commit:0:7}" ]
+          }
+
+          gate_transaction_count() {
+            local candidate canonical acl count=0
+            for candidate in \
+              "$runtime"/constructor-gate-txn.* \
+              "$runtime"/constructor-gate-discarded.* \
+              "$runtime"/constructor-gate-gc.*; do
+              if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then continue; fi
+              case "$candidate" in
+                "$runtime"/constructor-gate-txn.*|"$runtime"/constructor-gate-discarded.*|\
+                  "$runtime"/constructor-gate-gc.*) ;;
+                *) return 1 ;;
+              esac
+              [ -d "$candidate" ] || return 1
+              [ ! -L "$candidate" ] || return 1
+              canonical=$(realpath -e -- "$candidate") || return 1
+              [ "$canonical" = "$candidate" ] || return 1
+              acl=$(stat -Lc '%u:%g:%a' "$candidate") || return 1
+              [ "$acl" = '0:0:700' ] || return 1
+              count=$((count + 1))
+            done
+            printf '%s' "$count"
+          }
+
+          assert_no_gate_recovery_artifacts() {
+            local candidate
+            for candidate in \
+              "$runtime"/constructor-gate-txn.* \
+              "$runtime"/constructor-gate-discarded.* \
+              "$runtime"/constructor-gate-gc.*; do
+              [ ! -e "$candidate" ] || return 1
+              [ ! -L "$candidate" ] || return 1
+            done
+          }
+
+          validate_constructor_vector() {
+            local index marker timer timer_state codex_auth_status
+            local -a markers=(codex-worker constructor-publisher constructor-release)
+            local -a timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
+            marker_vector=''
+            timer_vector=''
+            for index in "${!markers[@]}"; do
+              marker=/etc/kelion/${markers[$index]}.enabled
+              timer=${timers[$index]}
+              if [ -e "$marker" ] || [ -L "$marker" ]; then
+                [ -f "$marker" ]
+                [ ! -L "$marker" ]
+                [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ]
+                systemctl is-enabled --quiet "$timer"
+                systemctl is-active --quiet "$timer"
+                marker_vector+=1
+                timer_vector+=1
+              else
+                if systemctl is-enabled --quiet "$timer"; then return 1; fi
+                timer_state=$(systemctl show "$timer" --property=ActiveState --value)
+                case "$timer_state" in inactive|failed) ;; *) return 1 ;; esac
+                marker_vector+=0
+                timer_vector+=0
+              fi
+            done
+            [ "$marker_vector" = "$timer_vector" ]
+            case "$marker_vector" in 000|100|110|111) ;; *) return 1 ;; esac
+            codex_auth_status=$(runuser -u kelion-codex -- env -i \
+              HOME=/var/lib/kelion-codex-auth \
+              CODEX_HOME=/var/lib/kelion-codex-auth \
+              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
+              /opt/kelion-codex/bin/codex \
+              -c 'forced_login_method="api"' \
+              -c 'cli_auth_credentials_store="file"' \
+              login status 2>&1)
+            [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -eq 1 ]
+            LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"
+            codex_auth_status=''
+          }
+
+          validate_rejected_journals_absent() {
+            local rejected
+            for rejected in \
+              "$runtime/destructive-cutover-recovery.json" \
+              "$runtime/constructor-upgrade.journal" \
+              "$runtime/constructor-activation.journal" \
+              "$runtime/runtime-config-cutover.journal" \
+              /run/kelion/constructor-activation.pending; do
+              [ ! -e "$rejected" ]
+              [ ! -L "$rejected" ]
+            done
+          }
+
+          validate_complete_poststate() {
+            local cleared
+            for cleared in "$outer" "$gate" "$unit_pending"; do
+              [ ! -e "$cleared" ]
+              [ ! -L "$cleared" ]
+            done
+            assert_no_gate_recovery_artifacts
+            validate_rejected_journals_absent
+            [ -f "$active_file" ]
+            [ ! -L "$active_file" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$active_file")" = '0:10050:640:1' ]
+            [ "$(wc -l < "$active_file")" -eq 1 ]
+            [ "$(sed -n '1p' "$active_file")" = "$active_commit" ]
+            [ -f "$ready_stamp" ]
+            [ ! -L "$ready_stamp" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$ready_stamp")" = '0:0:444:1' ]
+            [ "$(wc -l < "$ready_stamp")" -eq 1 ]
+            grep -qx 'schema=1' "$ready_stamp"
+            validate_ledger
+            validate_managed_topology
+            validate_public_proof
+            validate_constructor_vector
+          }
+
+          emit_complete_receipt() {
+            local recovery_mode=$1
+            jq -cn --arg hotfix "$hotfix_commit" --arg helper "$expected_helper_sha" \
+              --arg request "$request" --arg failed "$failed_commit" --arg active "$active_commit" \
+              --argjson failedRun "$failed_run" --argjson failedJob "$failed_job" \
+              --arg ledger "$ledger_state" --arg activeSlot "$active_slot" \
+              --arg inactiveSlot "$inactive_slot" --arg vector "$marker_vector" \
+              --arg mode "$recovery_mode" \
+              '{ok:true,event:"incident_recovery_complete",recovery_mode:$mode,
+                hotfix_commit:$hotfix,helper_sha256:$helper,request_id:$request,
+                failed_commit:$failed,failed_release_run_id:$failedRun,
+                failed_release_job_id:$failedJob,active_commit:$active,
+                probes:{ledger:$ledger,active_slot:$activeSlot,inactive_slot:$inactiveSlot,
+                  candidate_inactive:true,public_release_proof:true,unit_pending:"absent",
+                  gate_journal:"absent",gate_recovery_artifacts:"absent",
+                  deploy_journal:"absent",runtime_ready:true,
+                  constructor_vector:$vector,codex_auth:"ready"}}'
+          }
+
+          validate_rejected_journals_absent
+          if [ ! -e "$outer" ] && [ ! -L "$outer" ]; then
+            phase=already-complete-proof
+            validate_complete_poststate
+            sync -f "$runtime"
+            validate_complete_poststate
+            emit_complete_receipt already-complete
+            exit 0
+          fi
+
+          [ -f "$outer" ]
+          [ ! -L "$outer" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$outer")" = '0:0:600:1' ]
+          jq -e --arg request "$request" --arg failed "$failed_commit" --arg active "$active_commit" '
+            .schema == 2 and .phase == "gate-prepared" and
+            .requestId == $request and .commit == $failed and .activeBefore == $active and
+            (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+            (.targetGateSha256 | keys | sort) == ["publisher","release","worker"]
+          ' "$outer" >/dev/null
+
+          gate_root=''
+          gate_present=0
+          if [ -e "$gate" ] || [ -L "$gate" ]; then
+            [ -f "$gate" ]
+            [ ! -L "$gate" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$gate")" = '0:0:600:1' ]
+            jq -e --arg failed "$failed_commit" '
+              (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+              .schema == 1 and .commit == $failed and
+              (.helperSha256 | strings | test("^[0-9a-f]{64}$")) and
+              (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$"))
+            ' "$gate" >/dev/null
+            gate_root=$(jq -er '.transactionRoot' "$gate")
+            [ -d "$gate_root" ]
+            [ ! -L "$gate_root" ]
+            [ "$(realpath -e -- "$gate_root")" = "$gate_root" ]
+            [ "$(stat -Lc '%u:%g:%a' "$gate_root")" = '0:0:700' ]
+            gate_present=1
+          fi
+
+          pending_present=0
+          if [ -e "$unit_pending" ] || [ -L "$unit_pending" ]; then
+            [ -f "$unit_pending" ]
+            [ ! -L "$unit_pending" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$unit_pending")" = '0:0:600:1' ]
+            [ "$(wc -l < "$unit_pending")" -eq 1 ]
+            grep -qx 'schema=1' "$unit_pending"
+            pending_present=1
+          fi
+          transaction_count=$(gate_transaction_count) || {
+            phase=incident-artifact-inventory
+            on_err "$LINENO" 1
+          }
+          if [ "$gate_present" = 1 ]; then
+            [ "$pending_present" = 1 ]
+            [ "$transaction_count" -eq 1 ]
+            [ ! -e "$ready_stamp" ]
+            [ ! -L "$ready_stamp" ]
+          elif [ "$pending_present" = 1 ]; then
+            [ "$transaction_count" -le 1 ]
+            [ ! -e "$ready_stamp" ]
+            [ ! -L "$ready_stamp" ]
+          else
+            # Retry exact după unlinkul durabil al gate-ului/pending-ului, dar
+            # înainte ca unlinkul outer să rămână stabil după power-loss.
+            [ "$transaction_count" -eq 0 ]
+          fi
+
+          validate_ledger
+          validate_managed_topology
+          pre_active_slot=$active_slot
+          pre_inactive_slot=$inactive_slot
+          validate_public_proof
+          jq -cn --arg hotfix "$hotfix_commit" --arg request "$request" \
+            --arg failed "$failed_commit" --arg active "$active_commit" \
+            --arg ledger "$ledger_state" --arg activeSlot "$active_slot" \
+            --arg inactiveSlot "$inactive_slot" --argjson gatePresent "$gate_present" \
+            --argjson pendingPresent "$pending_present" --argjson gateTransactions "$transaction_count" \
+            '{ok:true,event:"gate_prepared_incident_preflight_complete",hotfix_commit:$hotfix,
+              request_id:$request,failed_commit:$failed,active_commit:$active,
+              probes:{ledger:$ledger,active_slot:$activeSlot,inactive_slot:$inactiveSlot,
+                public_release_proof:true,candidate_inactive:true,gate_present:($gatePresent==1),
+                unit_pending_present:($pendingPresent==1),gate_recovery_artifacts:$gateTransactions}}'
+
+          phase=helper-install
+          install -o root -g root -m 0500 "$incoming" "$helper"
+          [ -f "$helper" ]
+          [ ! -L "$helper" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ]
+          cmp -s -- "$incoming" "$helper"
+          [ "$(sha256sum "$helper" | awk '{print $1}')" = "$expected_helper_sha" ]
+          rm -f -- "$incoming"
+
+          phase=helper-recovery
+          KELION_CUTOVER_LOCK_HELD=1 \
+          KELION_DEPLOY_QUIESCE_PROOF=1 \
+          KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$request" \
+          KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$failed_commit" \
+            "$helper" --discard-unmutated-gate-prepared \
+              "$request" "$failed_commit" "$active_commit" "$compose"
+
+          phase=postcondition
+          validate_complete_poststate
+          [ "$active_slot" = "$pre_active_slot" ]
+          [ "$inactive_slot" = "$pre_inactive_slot" ]
+          sync -f "$runtime"
+          validate_complete_poststate
+          [ "$active_slot" = "$pre_active_slot" ]
+          [ "$inactive_slot" = "$pre_inactive_slot" ]
+          emit_complete_receipt recovered
+          REMOTE
+
+      - name: Recovery generic pe VPS
+        if: needs.classify.outputs.incident != 'true'
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$VPS_HOST" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST_KEY" ]
+          [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh -i "$key_file" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" \
+              -o HostKeyAlgorithms=ssh-ed25519 -o BatchMode=yes -o ConnectTimeout=25 \
+              "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          defer_for_destructive_journal() {
+            local journal=/root/kelion/runtime/destructive-cutover-recovery.json
+            if [ ! -e "$journal" ] && [ ! -L "$journal" ]; then
+              return 1
+            fi
+            [ -f "$journal" ] && [ ! -L "$journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$journal")" = '0:0:600:1' ] \
+              || { echo 'RECOVERY_INVALID: jurnalul distructiv are ACL sau tip nesigur' >&2; exit 1; }
+            jq -e '
+              type == "object" and
+              (keys | sort) == ([
+                "activeRuntimeContainers", "activeSlot", "caddyfileSnapshot", "commit",
+                "dbRestoreRequired", "inactiveSlot", "legacyRuntimeContainers",
+                "migrationContractBefore", "oldMarker", "oldUpstream", "oldUpstreamPresent",
+                "phase", "pointOfNoReturn", "previousVersion", "schema", "updatedAt"
+              ] | sort) and
+              .schema == 1 and
+              (.commit | strings | test("^[0-9a-f]{40}$")) and
+              (.pointOfNoReturn | type) == "boolean" and
+              (.dbRestoreRequired | type) == "boolean" and
+              ((.phase == "maintenance" and .pointOfNoReturn == false and
+                  .dbRestoreRequired == false) or
+               ((.phase == "before-migrator" or .phase == "database-migrated" or
+                  .phase == "restore-in-progress") and .pointOfNoReturn == false and
+                  .dbRestoreRequired == true) or
+               ((.phase == "database-restored" or .phase == "rolled-back") and
+                  .pointOfNoReturn == false and .dbRestoreRequired == false) or
+               (.phase == "point-of-no-return" and .pointOfNoReturn == true and
+                  .dbRestoreRequired == true) or
+               (.phase == "completed" and .pointOfNoReturn == true and
+                  .dbRestoreRequired == false)) and
+              (.previousVersion | strings | test("^[0-9a-f]{7,40}$")) and
+              (.migrationContractBefore | strings | length > 0) and
+              ((.activeSlot == "legacy" and .inactiveSlot == "blue" and
+                  .oldMarker == "legacy" and .activeRuntimeContainers == [] and
+                  (.legacyRuntimeContainers | type == "array" and length >= 1 and length <= 3 and
+                    length == (unique | length) and index("kelionai-app") != null and
+                    all(.[]; . == "kelionai-app" or . == "omniroute" or . == "kelionai-coqui"))) or
+               ((.activeSlot == "blue" or .activeSlot == "green") and
+                  (.inactiveSlot == "blue" or .inactiveSlot == "green") and
+                  .activeSlot != .inactiveSlot and
+                  (.oldMarker | strings | test("^[0-9a-f]{40}$")) and
+                  (.oldMarker as $old | .previousVersion as $version | $old | startswith($version)) and
+                  (.activeRuntimeContainers | type == "array" and length == 5 and
+                    length == (unique | length) and
+                    all(.[]; type == "string" and test("^[0-9a-f]{12,64}$"))) and
+                  .legacyRuntimeContainers == [])) and
+              (.oldUpstreamPresent | type) == "boolean" and
+              (.oldUpstream | type) == "string" and
+              (.caddyfileSnapshot | strings |
+                (. == "" or test("^/root/kelion/runtime/caddyfile-rollback\\.[A-Za-z0-9]+$"))) and
+              (.updatedAt | strings | fromdateiso8601 | type) == "number"
+            ' "$journal" >/dev/null \
+              || { echo 'RECOVERY_INVALID: jurnalul distructiv este malformat' >&2; exit 1; }
+            echo 'RECOVERY_DEFERRED: există un jurnal distructiv valid; recovery-ul generic nu mută starea.'
+            return 0
+          }
+          if defer_for_destructive_journal; then
+            exit 0
+          fi
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ] \
+            || { echo 'RECOVERY_INVALID: lock-ul de publicare nu este canonic' >&2; exit 1; }
+          # Recovery-ul nu creează, nu normalizează și nu trunchiază lock-ul.
+          # FD-ul read-only este suficient pentru flock(2) exclusiv pe Linux.
+          exec 9<"$publication_lock"
+          publication_fd_path=$(readlink "/proc/$$/fd/9") \
+            || { echo 'RECOVERY_INVALID: FD9 nu poate fi citit' >&2; exit 1; }
+          [ "$publication_fd_path" = "$publication_lock" ] \
+            && [ -f "/proc/$$/fd/9" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/9")" = '0:0:600:1' ] \
+            || { echo 'RECOVERY_INVALID: FD9 nu indică lock-ul canonic' >&2; exit 1; }
+          publication_fd_identity=$(stat -Lc '%d:%i' "/proc/$$/fd/9") \
+            || { echo 'RECOVERY_INVALID: identitatea FD9 nu poate fi citită' >&2; exit 1; }
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ] \
+            || { echo 'RECOVERY_INVALID: pathul și FD9 indică lock-uri diferite' >&2; exit 1; }
+          flock -n 9
+          [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "/proc/$$/fd/9")" = '0:0:600:1' ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ] \
+            || { echo 'RECOVERY_INVALID: lock-ul s-a schimbat înainte de recovery' >&2; exit 1; }
+          [ -f /root/kelion/bin/runtime-config-cutover.sh ]
+          [ ! -L /root/kelion/bin/runtime-config-cutover.sh ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500:1' ]
+          [ -f /root/kelion/config/compose.production.yml ]
+          [ ! -L /root/kelion/config/compose.production.yml ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /root/kelion/config/compose.production.yml)" = '0:0:444:1' ]
+          # Jurnalul poate apărea cât timp așteptăm lock-ul. Reverificarea sub
+          # lock este ultima operație înaintea helperului generic.
+          if defer_for_destructive_journal; then
+            exit 0
+          fi
+          KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+            --recover-only /root/kelion/config/compose.production.yml \
+            --leave-constructor-quiesced
+          echo RECOVERY_OK
+          REMOTE

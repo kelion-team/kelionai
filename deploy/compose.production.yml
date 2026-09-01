@@ -62,6 +62,10 @@ services:
         source: ${KELION_CODEX_AUTH_ROOT:-/root/kelion/app-codex-auth}
         target: /home/node/.codex
       - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-admin-key
+        target: /run/secrets/openai-admin-key
+        read_only: true
+      - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/session-secret
         target: /run/secrets/session-secret
         read_only: true

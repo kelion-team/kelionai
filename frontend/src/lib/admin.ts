@@ -2,9 +2,13 @@
 // PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
 // and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
 // import, so it vanishes at compile time — it adds nothing to the bundle.
-import type { MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+import type {
+  MoneyCircuit,
+  OpenAIAdminSnapshot,
+  UserActivityRow,
+} from '../../../backend/src/shared/api-types'
 import { apiFetch } from './transport'
-export type { MoneyCircuit, UserActivityRow }
+export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
 
 export const ADMIN_TABS = [
   'finance',
@@ -52,6 +56,9 @@ export interface Finance {
   masurat: number
   estimat: number
   felul: Record<string, 'masurat' | 'estimat'>
+  /** Official provider Costs/Usage measurement. Independent from inference
+   * health and from the local application journal above. */
+  providerOpenAI: OpenAIAdminSnapshot
 }
 
 
@@ -72,13 +79,29 @@ export async function fetchFinance(): Promise<Finance | null> {
 // are credit, roșu = fără (402/0), gri = nu pot verifica. `facturare` = pagina
 // de reîncărcare a furnizorului (click-ul becului duce acolo).
 export type BecCredit = 'verde' | 'rosu' | 'gri'
+export type OpenAIHealthClass =
+  | 'ok'
+  | 'invalid_key'
+  | 'invalid_credentials'
+  | 'insufficient_quota'
+  | 'rate_limited'
+  | 'model_access'
+  | 'bad_request'
+  | 'provider_5xx'
+  | 'transport'
+  | 'metering_unavailable'
+  | 'no_key'
 export interface CreditAIFurnizor {
   furnizor: string
   alimenteaza: string
   cheieConfigurata: boolean
   ramas: { masurat: boolean; valoare?: { cantitate: number; unitate: string }; motiv?: string }
   cheltuitLuna: { masurat: boolean; valoare?: { usd: number }; motiv?: string }
-  serveste?: { masurat: boolean; valoare?: { da: boolean; detaliu?: string }; motiv?: string }
+  serveste?: {
+    masurat: boolean
+    valoare?: { da: boolean; status: number | null; clasa: OpenAIHealthClass; detaliu?: string }
+    motiv?: string
+  }
   facturare?: string
   bec: BecCredit
 }

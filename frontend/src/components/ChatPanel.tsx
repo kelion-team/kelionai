@@ -76,6 +76,12 @@ import {
   type VocalLiveHandle,
   type VocalLiveState,
 } from '../lib/vocalLive'
+import {
+  cheieMesajEroareVocalLive,
+  esteEroareVocalLiveTranzitorie,
+  urmatoareaReluareVocalLive,
+  type VocalLiveFailureCode,
+} from '../lib/vocalLiveAvailability'
 import MicBargraf, { type NivelIntrare } from './MicBargraf'
 import {
   deschideCanalVoce,
@@ -1839,11 +1845,22 @@ export default function ChatPanel({
   }, [])
 
   const micManualOffRef = useRef(true)
+  // Doar clickul manual armează prima rostire fără wake-word; retry-ul poate
+  // păstra intenția cel mult 30s, apoi orice reconectare rămâne ambientală.
+  const micStartExplicitPanaLaRef = useRef(0)
   const micDoritaInainteApelRef = useRef(false)
   const apelActivRef = useRef(false)
   const micStartingRef = useRef(false)
+  const micStartControllerRef = useRef<AbortController | null>(null)
   const micRetryRef = useRef<number | null>(null)
-  const micBackoffRef = useRef(1000)
+  const micRetryAttemptsRef = useRef(0)
+  const micRetryStoppedAckedRef = useRef(false)
+
+  function anuleazaPornireMic(): void {
+    micStartControllerRef.current?.abort()
+    micStartControllerRef.current = null
+    micStartingRef.current = false
+  }
 
   const urecheaLocalaRef = useRef<MicStreamHandle | null>(null)
 
@@ -1984,10 +2001,10 @@ export default function ChatPanel({
     }
     setMenuOpen(false) // meniul „+" e demontat offline — să nu sară deschis la revenire
     vlGeneratieRef.current++ // omoară reluările/sondele programate ale sesiunii live
+    anuleazaPornireMic()
     unregisterLiveFocus()
     vlRef.current?.inchide()
     vlRef.current = null
-    micStartingRef.current = false
     setListening(false)
     setLivePhase(micManualOffRef.current ? 'idle' : 'connecting')
     // Audio deja primit poate termina redarea fără rețea. Urechea locală se
@@ -2027,14 +2044,37 @@ export default function ChatPanel({
 
   const micTerminalAckedRef = useRef(false)
 
+  const opresteMicPentruEroareTerminala = (code: VocalLiveFailureCode): void => {
+    if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+    micRetryRef.current = null
+    micTerminalAckedRef.current = true
+    if (code === 'idle_timeout') micManualOffRef.current = true
+    setLivePhase(code === 'idle_timeout' ? 'idle' : 'error')
+    if (!voiceDownAckedRef.current) {
+      voiceDownAckedRef.current = true
+      ack(t[cheieMesajEroareVocalLive(code)])
+    }
+  }
+
   const reprogrameazaMic = (): void => {
     if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+    const retry = urmatoareaReluareVocalLive(micRetryAttemptsRef.current)
+    if (!retry) {
+      micRetryRef.current = null
+      micTerminalAckedRef.current = true
+      setLivePhase('error')
+      if (!micRetryStoppedAckedRef.current) {
+        micRetryStoppedAckedRef.current = true
+        ack(t.voiceRetryStopped)
+      }
+      return
+    }
+    micRetryAttemptsRef.current = retry.nextAttempt
     setLivePhase('reconnecting')
     micRetryRef.current = window.setTimeout(
       () => void ensureMicRef.current(),
-      micBackoffRef.current,
+      retry.delayMs,
     )
-    micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
   }
   async function ensureMic(): Promise<void> {
     if (
@@ -2051,14 +2091,32 @@ export default function ChatPanel({
       window.clearTimeout(micRetryRef.current)
       micRetryRef.current = null
     }
+    // Capture ownership before the capability await. Stop/unmount/takeover
+    // increments this generation, so a stale continuation cannot start audio
+    // or clear the guard owned by a newer attempt.
+    const generatie = ++vlGeneratieRef.current
+    const startController = new AbortController()
+    micStartControllerRef.current?.abort()
+    micStartControllerRef.current = startController
     micStartingRef.current = true
     setLivePhase('connecting')
 
     try {
       const cap = await vocalLiveDisponibila()
-      if (micManualOffRef.current || voceAiureaRef.current || !online)
+      if (
+        generatie !== vlGeneratieRef.current
+        || startController.signal.aborted
+        || micManualOffRef.current
+        || voceAiureaRef.current
+        || !online
+      )
         return
       if (!cap?.disponibil) {
+        const code = cap?.code ?? 'transport'
+        if (!esteEroareVocalLiveTranzitorie(code)) {
+          opresteMicPentruEroareTerminala(code)
+          return
+        }
         if (!voiceDownAckedRef.current) {
           voiceDownAckedRef.current = true
           ack(t.voiceDownTemp)
@@ -2067,7 +2125,6 @@ export default function ChatPanel({
         return
       }
 
-      const generatie = ++vlGeneratieRef.current
       let auzit = ''
       let spus = ''
       const arataBanda = (canal: 'auzit' | 'spus'): void => {
@@ -2079,10 +2136,11 @@ export default function ChatPanel({
           activ ? semn + activ : celalalt ? semnCelalalt + celalalt : '',
         )
       }
-      const opresteDupaEroare = (motiv: string): void => {
+      const opresteDupaEroare = (motiv: string, code?: VocalLiveFailureCode): void => {
         if (generatie !== vlGeneratieRef.current) return
         console.warn(`[vocalLive] ${motiv}`)
         vlGeneratieRef.current++
+        anuleazaPornireMic()
         unregisterLiveFocus()
         const sesiune = vlRef.current
         vlRef.current = null
@@ -2107,6 +2165,7 @@ export default function ChatPanel({
           motiv.includes('nu ești autentificat')
         ) {
           setLivePhase('error')
+          micTerminalAckedRef.current = true
           if (!voiceDownAckedRef.current) {
             voiceDownAckedRef.current = true
             ack(
@@ -2117,6 +2176,10 @@ export default function ChatPanel({
           }
           return
         }
+        if (code && !esteEroareVocalLiveTranzitorie(code)) {
+          opresteMicPentruEroareTerminala(code)
+          return
+        }
         if (!voiceDownAckedRef.current) {
           voiceDownAckedRef.current = true
           ack(t.voiceDownTemp)
@@ -2125,6 +2188,8 @@ export default function ChatPanel({
       }
 
       const vl = await deschideVocalLive({
+        signal: startController.signal,
+        explicitStart: Date.now() < micStartExplicitPanaLaRef.current,
         onState: setLivePhase,
         onGata: () => {
           if (generatie !== vlGeneratieRef.current) return
@@ -2133,7 +2198,7 @@ export default function ChatPanel({
           setLiveVoice('')
           setListening(true)
           setLiveEndpointVoice(cap.voce)
-          micBackoffRef.current = 1000
+          micTerminalAckedRef.current = false
           voiceDownAckedRef.current = false
         },
         onUser: (text, final) => {
@@ -2173,12 +2238,14 @@ export default function ChatPanel({
       if (
         !vl ||
         generatie !== vlGeneratieRef.current ||
+        startController.signal.aborted ||
         micManualOffRef.current
       ) {
         vl?.inchide()
         return
       }
 
+      micStartExplicitPanaLaRef.current = 0
       vlRef.current = vl
       setFluxMicVersiune((v) => v + 1)
       registerLiveFocus({
@@ -2196,6 +2263,7 @@ export default function ChatPanel({
         `[vocalLive] OpenAI Realtime activ: ${cap.model}, voce ${cap.voce}`,
       )
     } catch (eroare) {
+      if (generatie !== vlGeneratieRef.current) return
       setLivePhase('error')
       console.error('[vocalLive] pornirea OpenAI Realtime a eșuat', eroare)
       if (!voiceDownAckedRef.current) {
@@ -2204,7 +2272,13 @@ export default function ChatPanel({
       }
       reprogrameazaMic()
     } finally {
-      micStartingRef.current = false
+      if (
+        generatie === vlGeneratieRef.current
+        && micStartControllerRef.current === startController
+      ) {
+        micStartControllerRef.current = null
+        micStartingRef.current = false
+      }
     }
   }
   const ensureMicRef = useRef(ensureMic)
@@ -2226,10 +2300,13 @@ export default function ChatPanel({
     }
     // O atingere oprește inclusiv o pornire aflată în zbor; următoarea pornește
     // exclusiv clientul OpenAI Realtime.
-    if (micStartingRef.current || vlRef.current) {
+    if (micStartingRef.current || vlRef.current || micRetryRef.current) {
       micManualOffRef.current = true
+      micStartExplicitPanaLaRef.current = 0
+      if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+      micRetryRef.current = null
       vlGeneratieRef.current++
-      micStartingRef.current = false
+      anuleazaPornireMic()
       unregisterLiveFocus()
       vlRef.current?.inchide()
       vlRef.current = null
@@ -2240,7 +2317,11 @@ export default function ChatPanel({
       return
     }
     micManualOffRef.current = false
+    micStartExplicitPanaLaRef.current = Date.now() + 30_000
     micTerminalAckedRef.current = false
+    micRetryAttemptsRef.current = 0
+    micRetryStoppedAckedRef.current = false
+    voiceDownAckedRef.current = false
     voceAiureaRef.current = false
     void ensureMicRef.current()
   }
@@ -2257,6 +2338,7 @@ export default function ChatPanel({
     const cleanupLive = (): void => {
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       vlGeneratieRef.current++
+      anuleazaPornireMic()
       unregisterLiveFocus()
       vlRef.current?.inchide()
       vlRef.current = null
@@ -2281,6 +2363,7 @@ export default function ChatPanel({
         micDoritaInainteApelRef.current = !micManualOffRef.current
         micManualOffRef.current = true // blochează re-armarea automată a urechii Kelion
         vlGeneratieRef.current++
+        anuleazaPornireMic()
         unregisterLiveFocus()
         vlRef.current?.inchide()
         vlRef.current = null
@@ -2375,6 +2458,7 @@ export default function ChatPanel({
         micRetryRef.current = null
       }
       vlGeneratieRef.current++
+      anuleazaPornireMic()
       unregisterLiveFocus()
       vlRef.current?.inchide()
       vlRef.current = null
@@ -2740,16 +2824,18 @@ export default function ChatPanel({
     return cleaned
   }
 
+  const voiceActiveOrPending = listening || livePhase === 'connecting' || livePhase === 'reconnecting'
   const micButton = (cls: string) =>
     !online && !urecheaLocalaGata ? null : (
       <button
         type="button"
-        className={`${cls} ${listening ? 'live' : ''}`}
+        className={`${cls} ${voiceActiveOrPending ? 'live' : ''}`}
         onClick={toggleMic}
-        aria-label={listening ? t.micStop : t.micTalk}
-        title={listening ? t.micStop : t.micTalk}
+        aria-label={voiceActiveOrPending ? t.micStop : t.micTalk}
+        aria-pressed={voiceActiveOrPending}
+        title={voiceActiveOrPending ? t.micStop : t.micTalk}
       >
-        {listening ? '●' : '🎤'}
+        {voiceActiveOrPending ? '●' : '🎤'}
       </button>
     )
   const hint = t.chatHint

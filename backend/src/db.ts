@@ -2001,9 +2001,18 @@ export async function citesteCrediteFolosite(email: string): Promise<Citire<numb
   if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
   try {
     const r = await getPool().query<{ used_minor: string }>(
-      `SELECT coalesce(sum(-amount_minor), 0)::text AS used_minor
-         FROM billing_events
-        WHERE user_email = $1 AND kind = 'usage' AND amount_minor < 0 AND currency = $2`,
+      `SELECT coalesce(sum(
+                CASE
+                  WHEN event.kind='usage' AND event.amount_minor < 0 THEN -event.amount_minor
+                  WHEN operation.refund_event_id=event.id
+                    AND event.kind='grant' AND event.amount_minor > 0 THEN -event.amount_minor
+                  ELSE 0
+                END
+              ), 0)::text AS used_minor
+         FROM billing_events AS event
+         LEFT JOIN voice_billing_operations AS operation
+           ON operation.refund_event_id=event.id
+        WHERE event.user_email = $1 AND event.currency = $2`,
       [walletKey(email), config.billing.currency],
     )
     const usedMinor = Number(r.rows[0]?.used_minor ?? 0)
@@ -2017,6 +2026,446 @@ export async function citesteCrediteFolosite(email: string): Promise<Citire<numb
 export type DebitWalletResult =
   | { ok: true; debitedMinor: number; duplicate: boolean }
   | { ok: false; code: 'invalid' | 'unavailable' | 'insufficient'; motiv: string }
+
+const VOICE_DEBIT_REF = /^voice-debit:v1:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):([1-9][0-9]{0,8})$/
+
+function voiceDebitIdentity(ref: string): { sessionId: string; tick: number } | null {
+  const match = VOICE_DEBIT_REF.exec(ref)
+  if (!match) return null
+  const tick = Number(match[2])
+  return Number.isSafeInteger(tick) ? { sessionId: match[1], tick } : null
+}
+
+function voiceRefundRef(ref: string): string {
+  return ref.replace(/^voice-debit:/, 'voice-refund:')
+}
+
+async function limiteazaTranzactieFacturareVocala(client: pg.PoolClient): Promise<void> {
+  await client.query("SET LOCAL statement_timeout = '4500ms'")
+  await client.query("SET LOCAL lock_timeout = '4000ms'")
+}
+
+export type VoiceDebitTransitionResult =
+  | 'ok'
+  | 'duplicate'
+  | 'expired'
+  | 'conflict'
+  | 'not_found'
+  | 'unavailable'
+
+/** Debit + coordination row commit together. A late transaction therefore
+ * remains discoverable as `charged` after the caller or process disappears. */
+export async function debiteazaVocalLiveAtomar(
+  email: string,
+  amountMinor: number,
+  ref: string,
+  consumeDeadlineEpochMs: number,
+): Promise<DebitWalletResult> {
+  const identity = voiceDebitIdentity(ref)
+  if (
+    !identity
+    || !Number.isSafeInteger(amountMinor)
+    || amountMinor <= 0
+    || !Number.isSafeInteger(consumeDeadlineEpochMs)
+    || consumeDeadlineEpochMs <= 0
+  ) return { ok: false, code: 'invalid', motiv: 'debit vocal invalid' }
+  if (esteAdminKelion(email)) return { ok: true, debitedMinor: 0, duplicate: false }
+  if (!dbEnabled()) return { ok: false, code: 'unavailable', motiv: 'baza de date nu e configurată' }
+  let client: pg.PoolClient | null = null
+  try {
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    await limiteazaTranzactieFacturareVocala(client)
+    await client.query(
+      `INSERT INTO wallets (user_email, balance_minor, currency)
+       VALUES ($1, 0, $2) ON CONFLICT (user_email) DO NOTHING`,
+      [walletKey(email), config.billing.currency],
+    )
+    const wallet = await client.query<{ balance_minor: string; debt_minor: string; frozen_reason: string | null }>(
+      `SELECT balance_minor, debt_minor, frozen_reason
+         FROM wallets WHERE user_email=$1 FOR UPDATE`,
+      [walletKey(email)],
+    )
+    if (await billingRefSeen(client, ref)) {
+      const replay = await client.query<{
+        user_email: string
+        amount_minor: string
+        currency: string
+        kind: string
+        session_id: string | null
+        tick: string | null
+      }>(
+        `SELECT event.user_email, event.amount_minor::text AS amount_minor,
+                event.currency, event.kind, operation.session_id::text AS session_id,
+                operation.tick::text AS tick
+           FROM billing_events AS event
+           LEFT JOIN voice_billing_operations AS operation
+             ON operation.debit_event_id=event.id AND operation.debit_ref=event.ref
+          WHERE event.ref=$1`,
+        [ref],
+      )
+      const row = replay.rows[0]
+      const exactReplay = row?.user_email === walletKey(email)
+        && Number(row.amount_minor) === -amountMinor
+        && row.currency === config.billing.currency
+        && row.kind === 'usage'
+        && row.session_id === identity.sessionId
+        && Number(row.tick) === identity.tick
+      await client.query(exactReplay ? 'COMMIT' : 'ROLLBACK')
+      return exactReplay
+        ? { ok: true, debitedMinor: 0, duplicate: true }
+        : { ok: false, code: 'invalid', motiv: 'referință vocală refolosită cu alt debit' }
+    }
+    const balanceMinor = Number(wallet.rows[0]?.balance_minor ?? 0)
+    const debtMinor = Number(wallet.rows[0]?.debt_minor ?? 0)
+    if (
+      !Number.isSafeInteger(balanceMinor)
+      || !Number.isSafeInteger(debtMinor)
+      || debtMinor > 0
+      || Boolean(wallet.rows[0]?.frozen_reason)
+      || balanceMinor < amountMinor
+    ) {
+      await client.query('ROLLBACK')
+      return { ok: false, code: 'insufficient', motiv: 'sold insuficient' }
+    }
+    await client.query(
+      `UPDATE wallets SET balance_minor=balance_minor-$2, updated_at=now()
+        WHERE user_email=$1`,
+      [walletKey(email), amountMinor],
+    )
+    const debit = await client.query<{ id: string }>(
+      `INSERT INTO billing_events
+         (user_email, kind, amount_minor, currency, policy_version, ref, meta)
+       VALUES ($1, 'usage', $2, $3, $4, $5, 'voice minute v2')
+       RETURNING id::text AS id`,
+      [walletKey(email), -amountMinor, config.billing.currency, config.billing.policyVersion, ref],
+    )
+    await client.query(
+      `INSERT INTO voice_billing_operations
+         (debit_ref, debit_event_id, session_id, tick, state, consume_deadline)
+       VALUES ($1, $2::bigint, $3::uuid, $4, 'pending', $5::timestamptz)`,
+      [ref, debit.rows[0]?.id, identity.sessionId, identity.tick, new Date(consumeDeadlineEpochMs).toISOString()],
+    )
+    await client.query('COMMIT')
+    return { ok: true, debitedMinor: amountMinor, duplicate: false }
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
+    console.error(`[money] debiteazaVocalLiveAtomar failed: ${String(error).slice(0, 160)}`)
+    return { ok: false, code: 'unavailable', motiv: 'debitarea vocală nu a putut fi verificată' }
+  } finally {
+    client?.release()
+  }
+}
+
+export async function confirmaDebitVocalLive(ref: string, handoffToken: string): Promise<VoiceDebitTransitionResult> {
+  if (!dbEnabled() || !voiceDebitIdentity(ref) || !uuidJurnal(handoffToken)) return 'unavailable'
+  let client: pg.PoolClient | null = null
+  try {
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    await limiteazaTranzactieFacturareVocala(client)
+    const acknowledged = await client.query(
+      `UPDATE voice_billing_operations
+          SET state='acknowledged', acknowledged_at=clock_timestamp(), updated_at=clock_timestamp()
+        WHERE debit_ref=$1 AND state='handed_off' AND handoff_token=$2::uuid
+          AND ack_deadline >= clock_timestamp()
+      RETURNING debit_ref`,
+      [ref, handoffToken],
+    )
+    if ((acknowledged.rowCount ?? 0) === 1) {
+      await client.query('COMMIT')
+      return 'ok'
+    }
+    const operation = await client.query<{ state: string; handoff_token: string | null; before_deadline: boolean }>(
+      `SELECT state, handoff_token::text AS handoff_token,
+              coalesce(clock_timestamp() <= ack_deadline, false) AS before_deadline
+         FROM voice_billing_operations WHERE debit_ref=$1 FOR UPDATE`,
+      [ref],
+    )
+    const row = operation.rows[0]
+    if (!row) {
+      await client.query('ROLLBACK')
+      return 'not_found'
+    }
+    if (row.state === 'acknowledged') {
+      await client.query(row.handoff_token === handoffToken ? 'COMMIT' : 'ROLLBACK')
+      return row.handoff_token === handoffToken ? 'duplicate' : 'conflict'
+    }
+    if (row.state !== 'handed_off' || row.handoff_token !== handoffToken) {
+      await client.query('ROLLBACK')
+      return 'conflict'
+    }
+    if (!row.before_deadline) {
+      await client.query('ROLLBACK')
+      return 'expired'
+    }
+    await client.query('ROLLBACK')
+    return 'unavailable'
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
+    console.error(`[money] confirmaDebitVocalLive failed: ${String(error).slice(0, 160)}`)
+    return 'unavailable'
+  } finally {
+    client?.release()
+  }
+}
+
+/** Durable handoff immediately before the first provider-bound input. */
+export async function consumaDebitVocalLive(
+  ref: string,
+  handoffToken: string,
+  ackDeadlineEpochMs: number,
+): Promise<VoiceDebitTransitionResult> {
+  if (
+    !dbEnabled()
+    || !voiceDebitIdentity(ref)
+    || !uuidJurnal(handoffToken)
+    || !Number.isSafeInteger(ackDeadlineEpochMs)
+    || ackDeadlineEpochMs <= 0
+  ) return 'unavailable'
+  let client: pg.PoolClient | null = null
+  try {
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    await limiteazaTranzactieFacturareVocala(client)
+    const operation = await client.query<{
+      state: string
+      handoff_token: string | null
+      before_deadline: boolean
+      ack_before_deadline: boolean
+    }>(
+      `SELECT state, handoff_token::text AS handoff_token,
+              clock_timestamp() <= consume_deadline AS before_deadline,
+              coalesce(clock_timestamp() <= ack_deadline, false) AS ack_before_deadline
+         FROM voice_billing_operations WHERE debit_ref=$1 FOR UPDATE`,
+      [ref],
+    )
+    const row = operation.rows[0]
+    const state = row?.state
+    if (!state) {
+      await client.query('ROLLBACK')
+      return 'not_found'
+    }
+    if (state === 'handed_off' || state === 'acknowledged') {
+      const sameToken = row.handoff_token === handoffToken
+      const validReplay = state === 'acknowledged' || row.ack_before_deadline
+      await client.query(sameToken && validReplay ? 'COMMIT' : 'ROLLBACK')
+      return sameToken ? (validReplay ? 'duplicate' : 'expired') : 'conflict'
+    }
+    if (state !== 'pending') {
+      await client.query('ROLLBACK')
+      return 'conflict'
+    }
+    const ackDeadline = new Date(ackDeadlineEpochMs).toISOString()
+    const ackDeadlineValid = await client.query<{ valid: boolean }>(
+      'SELECT clock_timestamp() < $1::timestamptz AS valid',
+      [ackDeadline],
+    )
+    if (!row.before_deadline || !ackDeadlineValid.rows[0]?.valid) {
+      await client.query('ROLLBACK')
+      return 'expired'
+    }
+    await client.query(
+      `UPDATE voice_billing_operations
+          SET state='handed_off', handoff_token=$2::uuid, handed_off_at=now(),
+              ack_deadline=$3::timestamptz, updated_at=now()
+        WHERE debit_ref=$1`,
+      [ref, handoffToken, ackDeadline],
+    )
+    await client.query('COMMIT')
+    return 'ok'
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
+    console.error(`[money] consumaDebitVocalLive failed: ${String(error).slice(0, 160)}`)
+    return 'unavailable'
+  } finally {
+    client?.release()
+  }
+}
+
+export type VoiceDebitRefundResult = 'refunded' | 'duplicate' | 'acknowledged' | 'not_found' | 'unavailable'
+
+/** Refund intent is committed first. The money transaction then derives every
+ * value from the locked original debit and deliberately leaves topup_ref_minor
+ * unchanged. Any failure remains `refund_pending` for the restart reconciler. */
+export async function ramburseazaDebitVocalLive(ref: string): Promise<VoiceDebitRefundResult> {
+  if (!dbEnabled() || !voiceDebitIdentity(ref)) return 'unavailable'
+  let client: pg.PoolClient | null = null
+  try {
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    await limiteazaTranzactieFacturareVocala(client)
+    const operation = await client.query<{ state: string }>(
+      `SELECT state FROM voice_billing_operations WHERE debit_ref=$1 FOR UPDATE`,
+      [ref],
+    )
+    const state = operation.rows[0]?.state
+    if (!state) {
+      await client.query('ROLLBACK')
+      return 'not_found'
+    }
+    if (state === 'refunded') {
+      await client.query('COMMIT')
+      return 'duplicate'
+    }
+    if (state === 'acknowledged') {
+      await client.query('ROLLBACK')
+      return 'acknowledged'
+    }
+    if (state !== 'refund_pending') {
+      await client.query(
+        `UPDATE voice_billing_operations
+            SET state='refund_pending', updated_at=now()
+          WHERE debit_ref=$1`,
+        [ref],
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
+    console.error(`[money] voice refund intent failed: ${String(error).slice(0, 160)}`)
+    return 'unavailable'
+  } finally {
+    client?.release()
+  }
+
+  client = null
+  try {
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    await limiteazaTranzactieFacturareVocala(client)
+    const operation = await client.query<{ state: string; refund_event_id: string | null }>(
+      `SELECT state, refund_event_id::text AS refund_event_id
+         FROM voice_billing_operations WHERE debit_ref=$1 FOR UPDATE`,
+      [ref],
+    )
+    const state = operation.rows[0]?.state
+    if (state === 'refunded') {
+      await client.query('COMMIT')
+      return 'duplicate'
+    }
+    if (state !== 'refund_pending') {
+      await client.query('ROLLBACK')
+      return state === 'acknowledged' ? 'acknowledged' : 'unavailable'
+    }
+    const debit = await client.query<{
+      user_email: string
+      amount_minor: string
+      currency: string
+      policy_version: string
+      legal_basis: string | null
+      retention_until: Date | null
+      erasure_request_id: string | null
+    }>(
+      `SELECT event.user_email, event.amount_minor::text AS amount_minor,
+              event.currency, event.policy_version, event.legal_basis,
+              event.retention_until, event.erasure_request_id::text AS erasure_request_id
+         FROM voice_billing_operations AS operation
+         JOIN billing_events AS event ON event.id=operation.debit_event_id
+        WHERE operation.debit_ref=$1
+        FOR UPDATE OF event`,
+      [ref],
+    )
+    const row = debit.rows[0]
+    const amountMinor = -Number(row?.amount_minor)
+    if (!row || !Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('voice_debit_ledger_invalid')
+    const wallet = await client.query(
+      `UPDATE wallets
+          SET balance_minor=balance_minor+$2, updated_at=now()
+        WHERE user_email=$1 AND currency=$3
+      RETURNING user_email`,
+      [row.user_email, amountMinor, row.currency],
+    )
+    if ((wallet.rowCount ?? 0) !== 1) throw new Error('voice_refund_wallet_mismatch')
+    const refund = await client.query<{ id: string }>(
+      `INSERT INTO billing_events
+         (user_email, kind, amount_minor, currency, policy_version, ref, meta,
+          legal_basis, retention_until, erasure_request_id)
+       VALUES ($1, 'grant', $2, $3, $4, $5, 'voice timeout compensation', $6, $7, $8::uuid)
+       RETURNING id::text AS id`,
+      [row.user_email, amountMinor, row.currency, row.policy_version, voiceRefundRef(ref), row.legal_basis, row.retention_until, row.erasure_request_id],
+    )
+    await client.query(
+      `UPDATE voice_billing_operations
+          SET state='refunded', refund_event_id=$2::bigint,
+              refunded_at=now(), updated_at=now()
+        WHERE debit_ref=$1`,
+      [ref, refund.rows[0]?.id],
+    )
+    await client.query('COMMIT')
+    return 'refunded'
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
+    console.error(`[money] ramburseazaDebitVocalLive failed: ${String(error).slice(0, 160)}`)
+    return 'unavailable'
+  } finally {
+    client?.release()
+  }
+}
+
+export interface VoiceDebitReconciliationResult {
+  claimed: number
+  refunded: number
+  pending: number
+}
+
+export async function reconciliazaDebitariVocale(options: {
+  ref?: string
+  staleBefore?: Date
+  limit?: number
+} = {}): Promise<VoiceDebitReconciliationResult> {
+  const specificRef = options.ref?.trim() ?? ''
+  const limit = options.limit ?? 50
+  const staleBefore = options.staleBefore ?? new Date(Date.now() - 60_000)
+  if (
+    !dbEnabled()
+    || (specificRef !== '' && !voiceDebitIdentity(specificRef))
+    || !Number.isSafeInteger(limit)
+    || limit <= 0
+    || limit > 200
+    || !Number.isFinite(staleBefore.getTime())
+  ) return { claimed: 0, refunded: 0, pending: 0 }
+  try {
+    let selectionClient: pg.PoolClient | null = null
+    let selectedRows: Array<{ debit_ref: string }> = []
+    try {
+      selectionClient = await conexiuneDb()
+      await selectionClient.query('BEGIN')
+      await limiteazaTranzactieFacturareVocala(selectionClient)
+      const rows = await selectionClient.query<{ debit_ref: string }>(
+        `SELECT debit_ref
+           FROM voice_billing_operations
+          WHERE state IN ('pending', 'handed_off', 'refund_pending')
+            AND (
+              state='refund_pending'
+              OR (state='pending' AND consume_deadline <= clock_timestamp())
+              OR (state='handed_off' AND ack_deadline <= clock_timestamp())
+              OR ($1::timestamptz IS NOT NULL AND updated_at <= $1)
+            )
+            AND ($2='' OR debit_ref=$2)
+          ORDER BY updated_at, debit_ref
+          LIMIT $3`,
+        [specificRef ? new Date(Date.now() + 60_000).toISOString() : staleBefore.toISOString(), specificRef, limit],
+      )
+      selectedRows = rows.rows
+      await selectionClient.query('COMMIT')
+    } catch (error) {
+      await selectionClient?.query('ROLLBACK').catch(() => undefined)
+      throw error
+    } finally {
+      selectionClient?.release()
+    }
+    let refunded = 0
+    for (const row of selectedRows) {
+      const result = await ramburseazaDebitVocalLive(row.debit_ref)
+      if (result === 'refunded' || result === 'duplicate') refunded++
+    }
+    return { claimed: selectedRows.length, refunded, pending: selectedRows.length - refunded }
+  } catch (error) {
+    console.error(`[money] reconciliazaDebitariVocale failed: ${String(error).slice(0, 160)}`)
+    return { claimed: 0, refunded: 0, pending: 1 }
+  }
+}
 
 /** Atomic, idempotent product charge in integer minor units. */
 export async function debitWalletMinorAtomar(
@@ -3326,8 +3775,16 @@ export async function recordProviderUsage(input: {
   const serviceTier = input.serviceTier && /^[A-Za-z0-9._:-]{1,40}$/.test(input.serviceTier)
     ? input.serviceTier
     : null
+  let client: pg.PoolClient | null = null
   try {
-    const result = await getPool().query(
+    client = await conexiuneDb()
+    await client.query('BEGIN')
+    // The caller also has a fail-closed wall-clock deadline. These server-side
+    // guards ensure that timing out the caller cannot strand a query in the
+    // pool and eventually starve unrelated application traffic.
+    await client.query("SET LOCAL statement_timeout = '4500ms'")
+    await client.query("SET LOCAL lock_timeout = '4000ms'")
+    const result = await client.query(
       `INSERT INTO provider_usage_events
          (response_id, user_email, provider, surface, session_id, model, service_tier,
           input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
@@ -3349,9 +3806,13 @@ export async function recordProviderUsage(input: {
       [input.responseId, userKey(input.userEmail), input.surface, input.sessionId ?? null, input.model, serviceTier, ...ints],
     )
     if ((result.rowCount ?? 0) !== 1) throw new Error('provider_usage_conflict')
+    await client.query('COMMIT')
   } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined)
     console.error(`[provider-usage] durable write failed: ${String(error).slice(0, 120)}`)
     throw new Error('provider_usage_write_failed')
+  } finally {
+    client?.release()
   }
 }
 
