@@ -184,11 +184,18 @@ export function CreditAICard({ brainCredit }: { brainCredit?: BrainCredit | null
   const s = brainCredit.serper
   const serperK = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
   const openaiEticheta =
-    o?.sold != null ? `${o.sold.toFixed(2)} ${o.soldMoneda ?? ''}`.trim()
-    : o?.serving ? '✓' : '·'
+    !o?.serving ? `⚠ ${o?.class ?? 'necunoscut'}`
+    : o.sold != null ? `${o.sold.toFixed(2)} ${o.soldMoneda ?? ''}`.trim()
+    : '✓'
   const openaiTitlu = [
     o?.sold != null ? `sold măsurat: ${o.sold.toFixed(2)} ${o.soldMoneda ?? ''}` : `sold necitit: ${o?.soldMotiv ?? 'motiv necunoscut'}`,
+    o?.serving
+      ? 'OpenAI servește'
+      : `${o?.class ?? 'stare necunoscută'}${o?.status != null ? ` (HTTP ${o.status})` : ''}${o?.action ? ` — ${o.action}` : ''}`,
     o?.monthUsd != null ? `cheltuit luna asta: $${o.monthUsd.toFixed(2)}` : 'cheltuiala lunii necitibilă',
+    o?.admin
+      ? `Costs/Usage Admin: ${o.admin.scope === 'project' ? 'proiect Kelion' : 'organizație întreagă'} · cost ${o.admin.costs.available ? 'citit' : `indisponibil (${o.admin.costs.class})`} · usage ${o.admin.usage.available ? `${o.admin.usage.requests ?? 0} cereri măsurate` : `indisponibil (${o.admin.usage.class})`}`
+      : 'diagnosticul Costs/Usage Admin lipsește',
   ].join(' · ')
   return (
     <div className="admin-credit-bar">

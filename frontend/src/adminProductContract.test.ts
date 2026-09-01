@@ -32,8 +32,8 @@ describe('admin product contract', () => {
 
   it('keeps Codex login in the private worker and never renders server setup secrets', () => {
     const admin = source('components/admin/AdminProductie.tsx')
-    expect(admin).toContain('codex login --device-auth')
-    expect(admin).toContain('codex login')
+    expect(admin).toContain('codex login --with-api-key')
+    expect(admin).toContain('openai-project-key')
     expect(admin).not.toContain('{codex.setupInstructions}')
     expect(admin).not.toMatch(/Conectează Codex|connectUrl|Codex.*OAuth/i)
     expect(admin).toContain('Aceeași cheie OpenAI project-scoped')

@@ -693,7 +693,7 @@ export function AdminCreier() {
               </p>
               {(codex.worker.state === 'setup_required' || codex.worker.state === 'unknown') && (
                 <p className="chat-hint">
-                  Configurarea se face exclusiv în workerul privat: într-un worker cu browser se rulează <code>codex login</code>, iar într-un worker headless se poate folosi fluxul oficial <code>codex login --device-auth</code>. Codul unic se introduce numai în pagina oficială ChatGPT; nu în Kelionai, API-ul aplicației, baza de date sau loguri.
+                  Autentificarea se reface exclusiv în workerul privat din credentiala systemd <code>openai-project-key</code>, prin clientul oficial <code>codex login --with-api-key</code>. Cheia este transmisă numai pe stdin și nu intră în browser, environment, argumente, baza de date sau loguri; pentru recuperare rulează bridge-ul VPS dedicat.
                 </p>
               )}
               {codex.worker.state === 'offline' && <p className="chat-hint">Workerul nu răspunde. Kelionai nu încearcă să refacă autentificarea Codex în browser.</p>}
@@ -716,7 +716,7 @@ export function AdminCreier() {
                   : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(codex.internalCostUsd)}</b>.
               </p>
               <p className="chat-hint" style={{ marginTop: 8 }}>
-                Abonamentul ChatGPT poate alimenta Codex pentru text, reasoning și Constructor numai în worker. Realtime, TTS, imaginea și video folosesc separat OpenAI API pe server; abonamentul ChatGPT nu este o cheie API. Aceste costuri rămân cheltuieli interne și nu debitează portofelul admin.
+                Aceeași cheie OpenAI project-scoped alimentează backendul și Constructorul prin boundary-uri separate. Realtime, TTS, imaginea, video și Codex rămân exclusiv server-side; cheia admin de control-plane nu este folosită aici. Costurile rămân cheltuieli interne și nu debitează portofelul admin.
               </p>
             </>
           )}
