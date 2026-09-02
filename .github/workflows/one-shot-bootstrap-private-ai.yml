@@ -134,7 +134,7 @@ jobs:
           state=$(systemctl show private-ai-install-bootstrap.service -p ActiveState --value 2>/dev/null || true)
           if [ "$state" = activating ] || [ "$state" = active ]; then
             current_exec=$(systemctl show private-ai-install-bootstrap.service -p ExecStart --value 2>/dev/null || true)
-            if [[ "$current_exec" == *"/opt/private-ai/installer/${expected}.sh"* ]]; then
+            if [[ "$current_exec" == *"private-ai-installer.${expected}.sh"* ]]; then
               rm -f -- "$upload"
               printf 'DETACHED_INSTALL_ALREADY_RUNNING=yes STATE=%s SHA256=%s\n' "$state" "$expected"
               exit 0
@@ -145,10 +145,50 @@ jobs:
             [ "$state" = inactive ] || [ "$state" = failed ]
           fi
 
+          # Instalarea de zero (fara /etc/private-ai/.installer-id) refuza
+          # sa reutilizeze orice tinta neinsemnata (marker absent). Un rest
+          # de instalare veche/intrerupta manual (fara marker) e curatat
+          # cu backup, nu doar sters, pentru reversibilitate.
+          if [ ! -e /etc/private-ai/.installer-id ]; then
+            stale_targets=(
+              /var/lib/private-ai
+              /opt/private-ai
+              /etc/systemd/system/private-ai-llm.service
+              /etc/systemd/system/private-ai-web.service
+              /root/private-ai-access.txt
+            )
+            stale_found=0
+            for stale_target in "${stale_targets[@]}"; do
+              if [ -e "$stale_target" ] || [ -L "$stale_target" ]; then
+                stale_found=1
+              fi
+            done
+            if [ "$stale_found" -eq 1 ]; then
+              backup_dir="/root/PRIVATE-AI-STALE-BACKUP-$(date -u +%Y%m%dT%H%M%SZ)"
+              install -d -m 0700 -o root -g root "$backup_dir"
+              for stale_target in "${stale_targets[@]}"; do
+                if [ -e "$stale_target" ] || [ -L "$stale_target" ]; then
+                  dest="$backup_dir$(dirname "$stale_target")"
+                  install -d -m 0700 -o root -g root "$dest"
+                  cp -a -- "$stale_target" "$dest"/ 2>/dev/null || true
+                  rm -rf -- "$stale_target"
+                  printf 'STALE_TARGET_CLEARED=%s BACKUP=%s\n' "$stale_target" "$backup_dir"
+                fi
+              done
+              if id -u privateai >/dev/null 2>&1; then
+                userdel privateai 2>/dev/null || true
+                printf 'STALE_USER_REMOVED=privateai\n'
+              fi
+              if getent group privateai >/dev/null 2>&1; then
+                groupdel privateai 2>/dev/null || true
+                printf 'STALE_GROUP_REMOVED=privateai\n'
+              fi
+            fi
+          fi
+
           printf 'BOOTSTRAP_MEASURED_AT=%s\n' "$(date -u +%FT%TZ)"
 
-          install -d -o root -g root -m 0700 /opt/private-ai/installer
-          release="/opt/private-ai/installer/${expected}.sh"
+          release="/root/private-ai-installer.${expected}.sh"
           install -o root -g root -m 0700 "$upload" "$release"
           rm -f -- "$upload"
           [ "$(sha256sum "$release" | awk '{print $1}')" = "$expected" ]
