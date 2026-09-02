@@ -277,17 +277,23 @@ create_isolated_account() {
 
 build_llama_cpp() {
   chown -R "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" /opt/private-ai/src
+  # http.version=HTTP/1.1: pe acest VPS, negocierea HTTP/2 cu github.com
+  # trece de handshake-ul TLS dar răspunsul propriu-zis nu mai ajunge
+  # niciodată (blocaj de rețea la fragmentare/MTU pe framurile mari HTTP/2,
+  # nu pe pachetele mici de handshake) — clonarea inițială reușește o dată,
+  # dar orice fetch ulterior eșuează consecvent cu "expected flush after
+  # ref listing". HTTP/1.1 ocolește complet problema.
   if [ ! -d "${PRIVATE_AI_SOURCE}/.git" ]; then
     runuser -u "$PRIVATE_AI_USER" -- env -i \
       HOME="$PRIVATE_AI_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin \
-      git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$PRIVATE_AI_SOURCE"
+      git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$PRIVATE_AI_SOURCE"
   fi
 
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
-    git -C "$PRIVATE_AI_SOURCE" fetch --depth 1 origin "$LLAMA_CPP_REF"
+    git -c http.version=HTTP/1.1 -C "$PRIVATE_AI_SOURCE" fetch --depth 1 origin "$LLAMA_CPP_REF"
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
