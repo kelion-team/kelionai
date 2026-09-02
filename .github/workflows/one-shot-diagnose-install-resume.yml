@@ -1,0 +1,86 @@
+name: one-shot-diagnose-install-resume
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  guard-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validează sursa canonică fără secrete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+
+  diagnose:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Diagnostichează private-ai-install-resume.service (read-only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== marker files ==='
+          for f in /etc/private-ai/.installer-id /etc/private-ai/.install-complete; do
+            if [ -e "$f" ]; then printf 'EXISTS=%s content=%s\n' "$f" "$(cat "$f" 2>/dev/null | head -c 200)"; else printf 'ABSENT=%s\n' "$f"; fi
+          done
+          echo '=== unit file present? ==='
+          systemctl cat private-ai-install-resume.service 2>&1 | head -60 || true
+          echo '=== systemctl show ==='
+          systemctl show private-ai-install-resume.service -p ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,LoadState,UnitFileState,ConditionResult,ConditionTimestamp 2>&1 || true
+          echo '=== journalctl (last 80 lines) ==='
+          journalctl -u private-ai-install-resume.service --no-pager -n 80 2>&1 || true
+          echo '=== resume log tail ==='
+          tail -n 100 /root/private-ai-install-resume.log 2>&1 || echo 'NO_LOG_FILE'
+          echo '=== /etc/private-ai dir ==='
+          ls -la /etc/private-ai 2>&1 || echo 'NO_DIR'
+          echo '=== /opt/private-ai/installer dir ==='
+          ls -la /opt/private-ai/installer 2>&1 || echo 'NO_INSTALLER_DIR'
+          echo 'DIAG_DONE=yes'
+          REMOTE
