@@ -394,6 +394,12 @@ Ask for confirmation before destructive actions, publication, deployment, creden
 Reply in Romanian unless Adrian asks for another language.
 INSTRUCTIONS
 
+  # agent.private-ai-smoke.steps=2: măsurat empiric, steps=1 declanșează
+  # avertismentul intern al OpenCode "MAXIMUM STEPS REACHED" înaintea
+  # generării propriu-zise a răspunsului, deci proba eșua mereu înainte să
+  # apuce să răspundă "OK". steps=2 rămâne la fel de mărginit (fără unelte,
+  # permission "*": "deny"), doar cu o unitate de rezervă ca generarea reală
+  # să apuce să se termine.
   cat > "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" <<'JSON'
 {
   "$schema": "https://opencode.ai/config.json",
@@ -427,7 +433,7 @@ INSTRUCTIONS
       "description": "Bounded installation probe for the pinned local provider",
       "mode": "primary",
       "prompt": "This is a bounded installation probe. Use no tools and reply with exactly OK.",
-      "steps": 1,
+      "steps": 2,
       "permission": {"*": "deny"}
     }
   },
