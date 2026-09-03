@@ -380,7 +380,7 @@ test('helperul persistent fail-closed este comis durabil înainte de repair', ()
     'db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de',
     'ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e',
     '4730d9f189770fafd23b4dec1807e889a62bbe357fc8e8b3f153e216bf71eaad',
-    '9911772ecf8507ead236255d6b1d342ce855f478ed80c73d0ec2019e16ccb153',
+    'bb852ba09260b628c1fa27b3f00556ea9ebbdf8047b0e9764d3729eca7cff2b7',
   ]) {
     assert.match(finalizer, new RegExp(predecessor))
   }
