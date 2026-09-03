@@ -1,0 +1,79 @@
+name: one-shot-restore-codex-worker-env
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  guard-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validează sursa canonică fără secrete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+
+  restore:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Restaurează codex-worker.env din backup-ul de la curatare
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          backup_file=/root/CONSTRUCTOR-BACKUP-20260902T170430Z/root/kelion/config/codex-worker.env
+          target=/root/kelion/config/codex-worker.env
+          [ -f "$backup_file" ] && [ ! -L "$backup_file" ]
+          [ ! -e "$target" ] && [ ! -L "$target" ]
+          install -o root -g root -m 0640 "$backup_file" "$target"
+          echo '=== restored content (redacted) ==='
+          sed -E 's/(password|token|secret|key)=.*/\1=[REDACTED]/Ig' "$target"
+          echo '=== metadata ==='
+          stat -Lc '%U:%G:%a' "$target"
+          echo 'RESTORE_DONE=yes'
+          REMOTE
