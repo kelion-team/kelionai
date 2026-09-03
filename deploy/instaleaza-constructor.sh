@@ -1981,6 +1981,26 @@ for logical in \
   publish_install_candidate "$logical"
 done
 
+# /run se goleste la fiecare boot, iar unitatea controllerului cere ca
+# /run/private-ai si dropin-ul runtime al llama-server sa existe INAINTE ca
+# systemd sa construiasca namespace-ul (ReadWritePaths). Fara o regula
+# tmpfiles persistenta, kelion-constructor-model-control.service esueaza dupa
+# fiecare repornire cu 226/NAMESPACE, iar Constructorul ramane oprit.
+publish_private_ai_runtime_tmpfiles() {
+  local candidate
+  candidate=$(mktemp "$RUNTIME_ROOT/tmpfiles-private-ai.XXXXXX") || return 1
+  printf '%s\n' \
+    'd /run/private-ai 0755 root root -' \
+    'd /run/systemd/system/private-ai-llm.service.d 0755 root root -' \
+    > "$candidate" || return 1
+  install -o root -g root -m 0644 -- "$candidate" /etc/tmpfiles.d/kelion-private-ai.conf || return 1
+  rm -f -- "$candidate"
+  systemd-tmpfiles --create /etc/tmpfiles.d/kelion-private-ai.conf || return 1
+  [ -d /run/private-ai ] && [ -d /run/systemd/system/private-ai-llm.service.d ]
+}
+publish_private_ai_runtime_tmpfiles \
+  || { echo 'regula tmpfiles pentru directoarele runtime private-ai nu a putut fi publicata' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+
 set_constructor_install_phase unit-validation
 verify_candidate_units \
   || { echo 'tupla systemd Constructor candidată este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
