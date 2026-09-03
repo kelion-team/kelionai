@@ -1246,7 +1246,8 @@ validate_live_constructor_sync_unit() {
     && [ "$(grep -c '^ConditionPathExists=!/run/kelion/constructor-activation.pending$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^Type=oneshot$' "$path")" -eq 1 ] \
-    && [ "$(grep -c '^User=root$' "$path")" -eq 1 ] \
+    && [ "$(grep -c '^User=kelion-codex$' "$path")" -eq 1 ] \
+    && [ "$(grep -c '^Group=kelion-codex$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ExecStart=/opt/kelion-constructor/constructor-sync-worker.sh$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^WantedBy=' "$path")" -eq 0 ] \
     && [ "$(grep -c '^\[Install\]$' "$path")" -eq 0 ] \
