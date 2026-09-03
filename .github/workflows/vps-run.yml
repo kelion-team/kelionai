@@ -204,6 +204,7 @@ jobs:
           [ "$(stat -Lc '%d:%i' "$snapshot_root")" = "$snapshot_identity" ]
           printf '%s\n' "$source_commit"
           REMOTE
+          )
           [ "$(printf '%s\n' "$journal_source" | wc -l)" -eq 1 ]
 
           recovery=0
