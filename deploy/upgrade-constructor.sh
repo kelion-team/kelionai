@@ -628,7 +628,7 @@ validate_private_ai_executor() {
   [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
   [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
-    bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0 ] || return 1
+    b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e ] || return 1
   [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
     && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
   [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1

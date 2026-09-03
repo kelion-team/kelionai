@@ -133,7 +133,7 @@ jobs:
           readonly expected_model_file=Qwen3.6-35B-A3B-Q4_K_M.gguf
           readonly expected_model_bytes=20419565568
           readonly expected_model_sha=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7
-          readonly expected_llama_server_sha=bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0
+          readonly expected_llama_server_sha=b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e
           readonly expected_opencode_bin_sha=d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb
 
           require_regular() {
