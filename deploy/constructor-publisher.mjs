@@ -557,9 +557,10 @@ async function validateProtection(token) {
     || reviews.require_code_owner_reviews !== false
     || reviews.require_last_push_approval !== false
     || !emptyNamedActorSet(dismissalRestrictions)
-    || !Array.isArray(bypass?.users) || bypass.users.length !== 0
-    || !Array.isArray(bypass?.teams) || bypass.teams.length !== 0
-    || !Array.isArray(bypass?.apps) || bypass.apps.length !== 0
+    // Pe repository-urile personale GitHub nu expune deloc bypass allowances:
+    // campul vine null, iar mecanismul nu exista, deci nimeni nu poate ocoli.
+    // emptyNamedActorSet trateaza deja null ca set gol, ca la dismissal.
+    || !emptyNamedActorSet(bypass)
     || protection?.required_conversation_resolution?.enabled !== true
     || protection?.required_linear_history?.enabled !== true
     || requiredSignatures?.enabled !== true
