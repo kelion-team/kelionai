@@ -488,9 +488,7 @@ function hasExactRequiredCheckNames(contexts, requiredChecks) {
 }
 
 function emptyNamedActorSet(value) {
-  // GitHub omite complet aceste campuri pe repository-urile personale: ajung
-  // undefined, nu null. Absenta mecanismului este echivalenta cu setul gol.
-  if (value === null || value === undefined) return true
+  if (value === null) return true
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   return ['users', 'teams', 'apps'].every((key) => Array.isArray(value[key]) && value[key].length === 0)
 }
@@ -547,8 +545,12 @@ async function validateProtection(token) {
     return { name, appId }
   })
   const reviews = protection?.required_pull_request_reviews
-  const bypass = reviews?.bypass_pull_request_allowances
-  const dismissalRestrictions = reviews?.dismissal_restrictions
+  // Pe repository-urile personale GitHub nu trimite deloc aceste campuri:
+  // mecanismul de ocolire nu exista acolo, deci absenta lui este echivalenta
+  // cu setul gol. Normalizam explicit aici; emptyNamedActorSet ramane
+  // fail-closed pentru orice alt undefined neasteptat.
+  const bypass = reviews?.bypass_pull_request_allowances ?? null
+  const dismissalRestrictions = reviews?.dismissal_restrictions ?? null
   if (
     protection?.required_status_checks?.strict !== true
     || !hasExactRequiredCheckNames(contexts, REQUIRED_CHECKS)
