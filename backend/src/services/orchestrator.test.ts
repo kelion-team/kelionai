@@ -169,7 +169,7 @@ describe('runOrchestrator — escaladarea ușor→greu la mijloc (owner 20 aug)'
     const escaladare: { model?: string; reasoning?: 'low' | 'medium' | 'high' } = {}
     const execTool = async (name: string): Promise<string> => {
       if (name === 'ask_brain') {
-        escaladare.model = 'openai/gpt-5.6-sol'
+        escaladare.model = 'openai/gpt-6-astra'
         escaladare.reasoning = 'high'
       }
       return 'ok'
@@ -182,7 +182,7 @@ describe('runOrchestrator — escaladarea ușor→greu la mijloc (owner 20 aug)'
       { escaladare, maxRounds: 3 },
     )
     expect(modeleFolosite[0]).toBe('openai/gpt-5.6-luna') // runda 1 pe treapta ușoară
-    expect(modeleFolosite[1]).toBe('openai/gpt-5.6-sol') // runda 2 a URCAT pe creierul greu
+    expect(modeleFolosite[1]).toBe('openai/gpt-6-astra') // runda 2 a URCAT pe creierul superior
     expect(res.text).toContain('gata')
     expect(conversatii[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({

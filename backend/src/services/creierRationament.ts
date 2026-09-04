@@ -32,7 +32,7 @@ export interface OptiuniRationament {
   onCost?: (usd: number) => void
   temperature?: number
   reasoning?: BrainCallOpts['reasoning']
-  /** Forțează un model permis din familia GPT-5.6. Fără el = treapta. */
+  /** Forțează un model OpenAI permis (inclusiv GPT-6 Astra). Fără el = treapta. */
   model?: string
   toolChoice?: BrainCallOpts['toolChoice']
   allowedFunctionNames?: string[]
