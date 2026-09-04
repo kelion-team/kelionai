@@ -29,8 +29,8 @@ export function canonicalJson(value: unknown): string {
 function authFor(domain: ConstructorServiceDomain): DomainAuth {
   if (domain === 'codex-worker') {
     return {
-      enabled: config.codexWorker.enabled,
-      secret: config.codexWorker.secret,
+      enabled: config.constructorWorker.enabled,
+      secret: config.constructorWorker.secret,
       headerPrefix: 'x-codex',
       windowMs: 5 * 60_000,
     }
@@ -102,7 +102,7 @@ export async function verifyConstructorServiceRequest(
   }
 }
 
-export async function verifyCodexWorkerRequest(req: FastifyRequest, now = Date.now()): Promise<ConstructorServiceAuthResult> {
+export async function verifyConstructorWorkerRequest(req: FastifyRequest, now = Date.now()): Promise<ConstructorServiceAuthResult> {
   return verifyConstructorServiceRequest(req, 'codex-worker', now)
 }
 

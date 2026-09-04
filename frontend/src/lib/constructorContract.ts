@@ -19,6 +19,7 @@ export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode + Qwen local (llama.cpp)'
 export function constructorActorLabel(actor: string | null | undefined): string | null {
   const value = actor?.trim()
   if (!value) return null
+  // 'codex-worker' este identitatea de audit istorica pastrata in randurile deja scrise.
   return value === 'codex-worker' ? CONSTRUCTOR_LOCAL_ACTOR : value
 }
 

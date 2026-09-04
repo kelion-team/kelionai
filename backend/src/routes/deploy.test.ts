@@ -28,7 +28,7 @@ const BASE_JOB = {
   ci: null,
   brain: 'OpenCode + Qwen local (llama.cpp)',
   costUsd: null,
-  codexTaskId: 'codex-task',
+  constructorTaskId: 'codex-task',
   constructorStage: 'working',
   commit: null,
   liveVersion: null,

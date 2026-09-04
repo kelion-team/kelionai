@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { dbEnabled, loadKv, saveKvStrict } from '../db.js'
-import { getCodexWorkerStatus, type CodexWorkerPublicState } from './codexWorker.js'
+import { getConstructorWorkerStatus, type ConstructorWorkerPublicState } from './constructorWorker.js'
 
 export type ConstructorPipelineService = 'publisher' | 'release'
 export type ConstructorLegState = 'ready' | 'busy' | 'degraded' | 'offline' | 'setup_required' | 'unknown'
@@ -18,7 +18,7 @@ export interface ConstructorChainLeg {
 }
 
 export interface ConstructorChainStatus {
-  state: CodexWorkerPublicState
+  state: ConstructorWorkerPublicState
   reason: string
   lastHeartbeat: string | null
   legs: {
@@ -113,7 +113,7 @@ function oldestHeartbeat(legs: readonly ConstructorChainLeg[]): string | null {
 }
 
 export async function getConstructorChainStatus(now = Date.now()): Promise<ConstructorChainStatus> {
-  const workerStatus = await getCodexWorkerStatus(now)
+  const workerStatus = await getConstructorWorkerStatus(now)
   const publisherConfigured = config.constructorPublisher.enabled
     && config.constructorPublisher.secret.length >= 32
   const releaseConfigured = config.constructorRelease.enabled
@@ -134,7 +134,7 @@ export async function getConstructorChainStatus(now = Date.now()): Promise<Const
   const offline = Object.entries(legs).filter(([, leg]) => leg.state === 'offline').map(([name]) => name)
   const degraded = Object.entries(legs).filter(([, leg]) => leg.state === 'degraded').map(([name]) => name)
   const busy = all.some((leg) => leg.state === 'busy')
-  const state: CodexWorkerPublicState = setup.length
+  const state: ConstructorWorkerPublicState = setup.length
     ? 'setup_required'
     : unknown.length
       ? 'unknown'

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 const aici = dirname(fileURLToPath(import.meta.url))
 const cod = (rel: string): string => readFileSync(join(aici, rel), 'utf8')
 
-describe('lanțul unic Admin → Codex worker → gates → master → live', () => {
+describe('lanțul unic Admin → worker Constructor → gates → master → live', () => {
   it('web-ul doar pune ordinul validat în DB și întoarce același jobId', () => {
     const route = cod('routes/constructor.ts')
     expect(route).toMatch(/evalueazaOrdin\(order\)[\s\S]{0,1000}createBuildJob\(user\.email, orderCuPlan\)/)
@@ -14,8 +14,8 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
     expect(route).not.toContain('/api/constructor/tool')
   })
 
-  it('workerul are HMAC fix cu replay durabil, fără shell/repo/credentiale Codex', () => {
-    const worker = cod('services/codexWorker.ts')
+  it('workerul are HMAC fix cu replay durabil, fără shell/repo/credențiale de provider', () => {
+    const worker = cod('services/constructorWorker.ts')
     const auth = cod('services/constructorServiceAuth.ts')
     const pipeline = cod('services/constructorPipeline.ts')
     expect(auth).toContain("createHmac('sha256'")
@@ -36,7 +36,7 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
     expect(route).toContain("'/api/internal/codex/jobs/:id/event'")
     expect(db).toContain('claimNextBuildJob(')
     expect(db).toContain('executionProfile: ConstructorExecutionProfile')
-    expect(db).toContain('advanceCodexBuildJob')
+    expect(db).toContain('advanceConstructorBuildJob')
     expect(db).toMatch(/codex_task_id=\$2/)
     expect(db).toContain("pg_advisory_xact_lock(hashtext('constructor:claim-build-job'))")
     expect(db).toContain('retry_not_before')
@@ -48,7 +48,7 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
   it('workerul local și endpointul lui acceptă numai taxonomia locală curentă', () => {
     const db = cod('db.ts')
     const worker = cod('../../deploy/codex-worker.mjs')
-    const dbCatalogStart = db.indexOf('export const CODEX_WORKER_FAILURE_CODES = [')
+    const dbCatalogStart = db.indexOf('export const CONSTRUCTOR_WORKER_FAILURE_CODES = [')
     const dbCatalog = db.slice(dbCatalogStart, db.indexOf('] as const', dbCatalogStart))
     const workerCatalogStart = worker.indexOf('const WORKER_FAILURE_CODES = new Set([')
     const workerCatalog = worker.slice(workerCatalogStart, worker.indexOf('])', workerCatalogStart))
@@ -79,7 +79,7 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
     const route = cod('routes/constructor.ts')
     const worker = cod('../../deploy/codex-worker.mjs')
     const transition = db.slice(
-      db.indexOf('export async function advanceCodexBuildJob'),
+      db.indexOf('export async function advanceConstructorBuildJob'),
       db.indexOf('export interface BuildJobMutationExpectation'),
     )
     const workerEvent = route.slice(
@@ -123,8 +123,8 @@ describe('lanțul unic Admin → Codex worker → gates → master → live', ()
   it('unresolved cere dovada accepted/working, dar claimed poate eșua tehnic', () => {
     const db = cod('db.ts')
     const transition = db.slice(
-      db.indexOf('export async function advanceCodexBuildJob'),
-      db.indexOf('// Leagă identificatorul opac', db.indexOf('export async function advanceCodexBuildJob')),
+      db.indexOf('export async function advanceConstructorBuildJob'),
+      db.indexOf('// Leagă identificatorul opac', db.indexOf('export async function advanceConstructorBuildJob')),
     )
     expect(transition).toContain("unresolved: ['accepted', 'working']")
     expect(transition).toContain("failed: ['claimed', 'accepted', 'working']")
