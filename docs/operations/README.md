@@ -35,6 +35,7 @@ Documente canonice:
 PR-uri, Actions și Deployments. Nu se adaugă aici chei, tokenuri, valori de
 mediu, IP-uri, dumpuri, loguri brute, date personale sau rezultate neverificate.
 
-Un upgrade Codex poate opri procesele și agenții activi. După redeschidere,
-agentul reia din acest checkpoint, nu presupune că o comandă aflată în execuție
-a continuat și nu declară succes fără dovezi noi.
+O actualizare a OpenCode, llama.cpp ori Qwen poate opri workerul Constructor și
+jobul activ. După repornire, operarea se reia din acest checkpoint, nu presupune
+că o comandă aflată în execuție a continuat și nu declară succes fără dovezi
+noi.

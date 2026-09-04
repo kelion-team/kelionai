@@ -25,6 +25,7 @@ vi.mock('./config.js', () => ({
       nativeRedirects: {
         ios: 'https://app.example.test/auth/native/complete',
         desktop: 'kelionai://auth/native/complete',
+        constructorDesktop: 'kelion-constructor://auth/native/complete',
       },
     },
     nativeAuth: { requestTtlSeconds: 600, exchangeTtlSeconds: 120, channelTicketTtlSeconds: 30 },
@@ -114,6 +115,17 @@ describe('native OAuth exchange', () => {
     expect(new URL(body.authorizeUrl).pathname).toBe('/auth/native/authorize')
     expect(body.state).toMatch(/^[A-Za-z0-9_-]{32}$/)
     expect(memory.created).toMatchObject({ platform: 'ios', installId, clientCodeChallenge: challenge })
+  })
+
+  it('accepts the dedicated Constructor desktop identity without creating a second API trust path', async () => {
+    const server = await app()
+    const response = await server.inject({
+      method: 'POST', url: '/auth/native/start',
+      headers: { origin: 'http://tauri.localhost' },
+      payload: { platform: 'constructor-desktop', installId, codeChallenge: challenge },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(memory.created).toMatchObject({ platform: 'constructor-desktop', installId, clientCodeChallenge: challenge })
   })
 
   it('rejects unlisted or cross-platform shell origins', async () => {
