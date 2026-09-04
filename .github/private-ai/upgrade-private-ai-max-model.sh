@@ -67,6 +67,19 @@ readonly -a SHARD_SHA256=(
 fail() { printf 'max-model: ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf 'max-model: %s\n' "$*"; }
 
+# Orice comandă care pică sub `set -e` fără să treacă prin `fail` (test `[ … ]`,
+# `jq -e`, `grep -q`, `!`, pipeline sub pipefail, helper extern) ajungea în
+# journal doar ca `MAX_MODEL_ROLLBACK=yes EXIT=N`, fără nicio explicație.
+# Trapul ERR de mai jos scrie comanda, linia și statusul ÎNAINTE de rollback,
+# ca fiecare cădere să fie explicabilă din jurnal. `set -E` (linia 2) face ca
+# trapul să fie moștenit și în funcții/subshell-uri.
+report_silent_failure() {
+  local status=$1 line=$2 command=$3
+  printf "max-model: ERROR: comanda '%s' a picat la linia %s cu status %s\n" \
+    "$command" "$line" "$status" >&2
+}
+trap 'report_silent_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
 require_regular() {
   local path=$1
   [ -f "$path" ] && [ ! -L "$path" ] || fail "fișier lipsă sau nesigur: $path"
@@ -969,6 +982,13 @@ publish_canonical() {
 }
 
 rollback() {
+  # GARANȚIE: rollback-ul restaurează NUMAI runtime-ul (config OpenCode, worker,
+  # unitate, helper switch, drop-in-uri LLM și receiptul final). Nu atinge
+  # niciodată `$MODEL_ROOT`, shardurile `.gguf` verificate prin SHA-256 sau
+  # receiptul sigilat: 76,5 GB descărcați și autentificați rămân pe disc pentru
+  # reluare, indiferent de etapa în care a picat cutover-ul. Singurele ștergeri
+  # din acest installer vizează cache-ul neautentificat (`.part`, chunkuri
+  # HTTP Range) și numai după un SHA-256 invalid.
   local status=${1:-$?} fast_rollback=failed deadline alias
   trap - ERR EXIT HUP INT TERM
   if [ "$rollback_armed" = 1 ]; then
@@ -1024,7 +1044,9 @@ rollback() {
   fi
   exit "$status"
 }
-trap 'rollback $?' ERR EXIT
+# ERR: raportăm comanda mută înainte de rollback; EXIT acoperă `fail` (exit 1).
+trap 'max_model_status=$?; report_silent_failure "$max_model_status" "$LINENO" "$BASH_COMMAND"; rollback "$max_model_status"' ERR
+trap 'rollback $?' EXIT
 trap 'rollback 129' HUP
 trap 'rollback 130' INT
 trap 'rollback 143' TERM
@@ -1053,6 +1075,10 @@ systemd-analyze verify "$WORKER_UNIT"
 
 set_stage 'activate-powerful-profile'
 llm_cutover_attempted=1
+# Receiptul final `$RECEIPT` nu există încă (este scris abia după probele de
+# inferență). Helperul acceptă `powerful` fără receipt final numai cât timp
+# jurnalul max-model `$MAX_MODEL_JOURNAL` este deschis, verificând în schimb
+# receiptul sigilat și metadatele shardurilor.
 "$SWITCH_BIN" powerful
 ! systemctl is-active --quiet private-ai-web.service
 ! systemctl is-active --quiet kelion-codex-worker.timer
