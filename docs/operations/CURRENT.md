@@ -1,101 +1,121 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T14:35:00Z`
+Actualizat: `2026-08-27T04:10:00Z`
 
-## Stare verificată
+## Current verified state
 
-- `origin/master` este la `f57c77b395e1f17ff3d498b120173971442a5f6e`;
-  PR-ul liniar `#1571` a fost îmbinat prin rebase.
-- AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
-  `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
-- Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
-  instalat are `20,419,565,568` bytes și SHA-256
-  `671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7`.
-- Run-ul `33364953572` a verificat baza AI, accesul full-host, executorul
-  OpenCode și heartbeat-ul HMAC, apoi a făcut rollback deoarece
-  `kelion-constructor-sync.service` a încercat un `runuser` blocat de sandbox.
-- Laptopul nu găzduiește modelul. Clientul Windows trebuie să folosească
-  `https://kelionai.app` și aceeași coadă procesată de workerul Contabo.
-- Proba read-only `private-ai-active-model-benchmark`, run `33497637524`, a
-  măsurat `private-ai-llm.service` ca inactiv înainte de inferență; nu există o
-  măsurătoare validă de viteză pentru niciun model în starea curentă.
-- Re-rularea #2 a runului `33339737404` pentru vechiul workflow de reparare a
-  eșuat la `resume-install` în 19 secunde și nu a restaurat serviciul.
-- Artefactele GGUF sigilate au exact `20.419.565.568` bytes pentru 35B și
-  `76.536.964.608` bytes pentru 122B, în total `96.956.530.176` bytes.
-- Freeze-ul local final este verde: backend `1.539/1.539`, frontend `321/321`,
-  manifestul static exact `332/332`, în total `2.192/2.192` teste. Au trecut
-  separat 11 porți statice, 3 self-testuri, Gitleaks pe 50,32 MB fără secrete,
-  jscpd pe 316 fișiere fără clone, sintaxa Bash `19/19`, YAML `25/25`, Node
-  `97/97` și verificarea staged a 12 unități systemd.
-- Re-auditul pe hashurile finale a dat `GO` pentru deployul safe. Publicarea
-  are `114/114` teste verzi; reluarea configurării leagă byte-exact aceeași
-  tuplă ordonată de 25 artefacte și refuză înainte de mutații o generație veche.
-- Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
-  frontend. Poarta statică a identificat că proba reală `flock` era lansată de
-  runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
-  Pasul PR CI activează explicit numai acea probă prin boundary-ul `sudo` deja
-  obligatoriu în workflow. Gate-ul container rămâne portabil fără `sudo`, iar un
-  test static sigilează diferența; validatorul și codul de producție nu au fost
-  relaxate.
-- Planul de migrare pentru starea live măsurată are exact versiunile
-  `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
-  sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
+- Repo: `kelion-team/kelionai`.
+- `origin/master`: `16eecd83470e1ff27f2fce5d1cf6204975a6b4d5`, verificat prin `git fetch`.
+- Live: `baf00ae`, verificat prin `/api/version`.
+- Readiness live: `ready=true` (verificat prin `/readyz`).
+- 9 commit-uri `master` sunt ahead de live (`baf00ae..16eecd83`), nedeployate.
 
-## Schimbarea în curs
+## Arhitectura curentă (verificată în cod)
 
-- Ownerul a respins al doilea VPS și orice cost nou. Ambele modele rămân pe
-  discul Contabo existent, dar numai unul este încărcat în RAM: 35B implicit la
-  instalare/reboot și 122B numai după comutarea manuală a ownerului din Admin.
-- Workerul nu schimbă modelul și nu reîncearcă/reexecută automat. Numai dacă o
-  execuție FAST validă se termină `unresolved`, produsul recomandă explicit
-  comutarea manuală la POWERFUL; ownerul decide separat comutarea și comanda
-  `Reia`. O cădere tehnică este terminală și raportată separat, fără recomandare
-  de model. POWERFUL nerezolvat este terminal, fără alt model recomandat.
-- Backendul și interfața Admin pentru starea/comanda manuală sunt verzi local.
-  Controllerul privilegiat UDS/HMAC, comutatorul systemd, workerul cu un singur
-  profil activ și cablarea installer/upgrade au teste locale verzi. Controllerul
-  este blocat fail-closed de recovery/ready și de toate jurnalele persistente,
-  iar ACK-ul de switch este serializat cu lockul canonic de publicare.
-- Instalarea 122B este reluabilă sub lockurile host + GitHub, păstrează profilul
-  manual la rerun și nu pornește controllerul înainte de receiptul final.
-  Workflowurile mutatoare Contabo folosesc aceeași coadă `production-release`,
-  iar configurarea Constructor poate aștepta bounded dovada release-images
-  exactă a noului master.
-- Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
-  măsurători valide de inferență sau de durată a comutării; în această etapă nu
-  este cerut și nu este pretins niciun benchmark valid de viteză.
-- Prima rotație post-merge a refuzat corect markerul live
-  `constructor-unit-migration.pending` înainte de mutațiile runtime. Calea
-  owner-aware următoare este `configure-constructor`, iar `vps-set-env` poate fi
-  reluat numai după succesul complet al configurării.
-- Buildul release exact pentru `f57c77b` a oprit publicarea imaginilor la proba
-  read-only: self-testul workerului folosea două căi `/tmp` literale, iar testul
-  boundary elimina `TMPDIR=/work/tmp` din mediul allowlist al copilului. Fixul
-  în curs folosește `node:os.tmpdir()` pentru ambele directoare și transmite
-  explicit `TMPDIR`; manifestul static exact este local `332/332` verde.
-- Ownerul a aprobat explicit publicarea urgentă pe Contabo existent, fără cost
-  nou. Nu mai este necesară o altă aprobare pentru commit, merge și deploy în
-  limitele acestui contract; orice extindere de cost sau schimbare a profilurilor
-  rămâne exclusiv decizia ownerului.
-- Helperul de restore distructiv are defecte preexistente de reluare după
-  SIGKILL între jurnalul intern și receiptul exterior, precum și după eșecul
-  fazei `restoring`; un workdir decriptat poate rămâne și orfan. Nu sunt pe
-  calea acestui pilot safe; orice release viitor clasificat `destructive`
-  rămâne blocat până la remedierea și testarea acelor cazuri.
+- OpenAI Responses este singurul creier online. Gemini, Jules, Devin, LiveKit,
+  Coqui, OpenRouter și toate fallback-urile cloud sunt șterse din cod, config
+  și documentație activă. Poarta `verifica-creier-unic.mjs` confirmă 0 abateri.
+- Vocea live folosește OpenAI Realtime (`wss://api.openai.com/v1/realtime`).
+- Modelele vin din env (`OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+  `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL`), validate prin catalogul
+  live `/v1/models`. Cheile project-scoped sunt refuzate pentru runtime.
+- Constructorul rulează ca worker Codex separat; web-ul pune job-uri în coadă
+  și afișează starea. Flux: `queued → claimed → accepted → working →
+  gates_passed → pr_opened → merged → deployed`.
+- `backend/.env` local are secțiunea OpenAI completă (9 env-uri, goale).
+  Gemini, Jules și LiveKit au fost șterse din `.env`.
 
-## Prag de finalizare
+## Audit complet (27 aug 2026)
 
-Nu se raportează finalizat până când finalizerul Contabo, claimul real al
-workerului și verificarea clientului Windows nu sunt toate verzi pentru același
-commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este PR-ul liniar al fixului read-only, CI/buildul canonic și
-merge-ul prin rebase. După buildul verde se reia `configure-constructor`; numai
-după succesul lui se reia `vps-set-env`, apoi deployul serializat pe Contabo.
-Până la dovada live exactă nu se raportează instalat sau finalizat.
+### Porți AGENTS.md — rezultate
 
-## Legături canonice
+| Poartă | Rezultat |
+|---|---|
+| `typecheck` | ✓ 0 erori |
+| `backend test` | ✓ 1332/1332 trec (200 suite-uri) |
+| `frontend build` | ✓ build reușit |
+| `frontend lint` | ✓ 0 erori |
+| `verifica-hardcodari` | ✓ 0 abateri |
+| `verifica-creier-unic` | ✓ 0 furnizori retrași |
+| `verifica-exporturi` | ✓ 0 cod mort |
+| `verifica-sintaxa` | ✓ curat |
+| `verifica-workflow-uri-sigure` | ✓ curat |
+| `identifica-teste-moarte` | ✓ 0 teste moarte |
+| `inventar-audit` | ✓ curat |
+| `jscpd` | ✓ 0 duplicate |
 
-- Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
-- PR operațional: <https://github.com/kelion-team/kelionai/pull/1571>
-- Aplicație: <https://kelionai.app>
+### Chat local verificat
+
+- Backend pornește pe `:8080` cu env OpenAI local.
+- Auth prin bearer token (sesiune nativă în `auth_sessions`) — funcțional.
+- `POST /api/chat` cu `idempotencyKey` — SSE streaming, `heard`, `lang`,
+  răspuns. Cu cheie OpenAI falsă, răspunsul e mesajul de epuizare (corect).
+- Cu cheie OpenAI reală, chat-ul ar funcționa complet.
+
+### Flux Admin → Constructor → Deploy verificat
+
+- `POST /api/admin/constructor` — poartă de calitate + `createBuildJob`.
+- `GET /api/admin/constructor` — status + work cards + observability.
+- `POST /api/admin/constructor/release/action` — aprobă release.
+- Worker Codex: `/api/internal/constructor-publisher/jobs/claim`.
+- Deploy: `deploy.ts` citește `build_jobs` și expune `DeployState`.
+- Testele `constructorPipeline`, `constructorOrdineSterse`, `deploy` trec.
+
+### Migrații DB locale
+
+- 27 migrații aplicate pe DB local (`postgresql://postgres@localhost:5432/kelionai`).
+- `auth_sessions` și toate tabelele există.
+- Backup proof generat și verificat (protecție anti-distrugere funcțională).
+
+## Fixuri aplicate în sesiunea asta
+
+1. `backend/.env` — șters `GEMINI_API_KEY`, `JULES_API_KEY`, `LIVEKIT_*`;
+   adăugat secțiune OpenAI completă.
+2. `scripts/billing-check.cjs` — re-scris pe OpenAI Responses (folosea `geminiKey` inexistent).
+3. `scripts/listeaza-modelle-imagine.mjs` — re-scris pe catalog OpenAI.
+4. `scripts/ping-gemini.cjs` — șters (mort, referia `geminiKey` inexistent).
+5. `scripts/probe-live.mjs` — URL din `PUBLIC_APP_ORIGIN`/`FRONTEND_ORIGIN` env.
+6. `backend/src/agentiA2a.test.ts` — `https://kelionai.app` hardcodat → `config.publicOrigin`.
+7. `scripts/autovedere-screenshot*.png` — șterse (duplicate locale negit-tracked).
+8. Migrații DB locale rulate (27 migrații, DB recreat de la zero).
+
+## Unfinished work
+
+- Deploy `16eecd83` la live (9 commit-uri ahead de `baf00ae`).
+- Configurare env OpenAI pe VPS (cheie project-scoped + modele validate).
+- Verificare E2E live: chat text + voce + vedere + admin + constructor.
+- `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` necesită scope `SSH signing keys: write`.
+- Profilul `kelion-codex` pe VPS trebuie să finalizeze `codex login` interactiv.
+
+## Blockers / owner action
+
+1. Cheia OpenAI de runtime pe VPS trebuie să fie project-scoped.
+2. Modelele OpenAI pe VPS: `OPENAI_LUNA_MODEL`, `OPENAI_MEDIUM_MODEL`,
+   `OPENAI_HEAVY_MODEL`, `OPENAI_REALTIME_MODEL` — toate validate în catalog.
+3. Credențiala GitHub Actions `CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN` — scope
+   `SSH signing keys: write`.
+4. `codex login` interactiv pe VPS pentru profilul `kelion-codex`.
+
+## Next ordered steps
+
+1. Configurează env OpenAI pe VPS (cheie + modele);
+2. Deploy `16eecd83` prin traseul protejat;
+3. Verifică live: `/api/version` = `16eecd83`, `/readyz` = true;
+4. Testează chat text live cu auth real;
+5. Testează voce live (OpenAI Realtime);
+6. Testează flux Admin → Constructor → PR → Deploy cu un ordin benign;
+7. Confirmă refresh client și cache update.
+
+## Canonical links
+
+- Repo: <https://github.com/kelion-team/kelionai>
+- Live: <https://kelionai.app>
+- Contract livrare: [`DELIVERY-RULES-AND-ROADMAP.md`](DELIVERY-RULES-AND-ROADMAP.md)
+- Inventar Admin: [`ADMIN-CAPABILITY-INVENTORY.md`](ADMIN-CAPABILITY-INVENTORY.md)
+
+## Handoff pentru sesiunea următoare
+
+Prezintă proactiv secțiunile de mai sus înainte de a cere ownerului să repete
+contextul. Verifică din nou `origin/master`, runurile GitHub și sondele live;
+orice diferență se actualizează aici înainte de o mutație. Nu declara
+Constructor, fișa de lucru sau Live Voice drept live până la dovezile E2E.
