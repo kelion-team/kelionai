@@ -4209,6 +4209,18 @@ if [ "$release_request_state" = success ] && [ "$resume_after_gate_commit" = 0 ]
   fi
   die 'ledger-ul success nu mai are dovada exactă app+gate+Constructor; cutover-ul nu se repetă'
 fi
+# O cerere nouă (fără ledger și fără jurnal quiesce) pentru commitul deja activ
+# este un dispatch duplicat, nu un release. Candidatul ar boota cu markerul
+# activ egal cu propriul RELEASE_ID și s-ar declara activ (candidate=false),
+# readiness-ul ar pica, iar rollback-ul ar lăsa Constructor quiesced. Fără
+# nicio mutație: no-op dacă și gate-ul corespunde, altfel refuz fail-closed.
+if [ "$release_request_state" = none ] && [ -z "$recovered_constructor_quiesce_phase" ] \
+  && release_request_live_proof; then
+  constructor_gate_matches_candidate \
+    || die 'commitul este deja activ, dar gate-ul Constructor nu îi corespunde; cererea duplicată este refuzată'
+  printf 'release_noop request=%s commit=%s status=already-active\n' "$KELION_RELEASE_REQUEST_ID" "$COMMIT_SHA"
+  exit 0
+fi
 [ "$resume_after_active_marker" = 1 ] || [ "$resume_after_gate_commit" = 1 ] \
   || { [ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; } \
   || die 'jurnalul quiesce nu a putut fi reconciliat înaintea retry-ului'
