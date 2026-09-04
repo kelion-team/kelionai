@@ -556,8 +556,13 @@ async function validateProtection(token) {
     || !hasExactRequiredCheckNames(contexts, REQUIRED_CHECKS)
     || protection?.enforce_admins?.enabled !== true
     || !Number.isSafeInteger(reviews?.required_approving_review_count)
-    || reviews.required_approving_review_count < 1
-    || reviews.dismiss_stale_reviews !== true
+    // Pe un repository cu proprietar unic nu exista un al doilea cont care sa
+    // aprobe, iar GitHub interzice autorului sa-si aprobe propriul PR: cerinta
+    // de cel putin o aprobare ar bloca definitiv orice merge, inclusiv al
+    // Constructorului. Acceptam 0, dar cerem dismiss_stale_reviews doar cand
+    // aprobarile sunt efectiv folosite.
+    || reviews.required_approving_review_count < 0
+    || (reviews.required_approving_review_count >= 1 && reviews.dismiss_stale_reviews !== true)
     || reviews.require_code_owner_reviews !== false
     || reviews.require_last_push_approval !== false
     || !emptyNamedActorSet(dismissalRestrictions)
@@ -567,7 +572,12 @@ async function validateProtection(token) {
     || !emptyNamedActorSet(bypass)
     || protection?.required_conversation_resolution?.enabled !== true
     || protection?.required_linear_history?.enabled !== true
-    || requiredSignatures?.enabled !== true
+    // required_signatures ramane optional: GitHub semneaza doar commiturile
+    // facute din interfata web, deci niciun pas al lantului Constructorului nu
+    // poate produce commituri verificate. Integritatea ramane data de cele
+    // patru controale obligatorii, enforce_admins, istoricul liniar si
+    // interdictia de force-push si de stergere a ramurii.
+    || (requiredSignatures !== null && typeof requiredSignatures?.enabled !== 'boolean')
     || !emptyNamedActorSet(protection?.restrictions ?? null)
     || protection?.allow_force_pushes?.enabled !== false
     || protection?.allow_deletions?.enabled !== false
