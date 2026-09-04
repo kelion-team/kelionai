@@ -488,7 +488,9 @@ function hasExactRequiredCheckNames(contexts, requiredChecks) {
 }
 
 function emptyNamedActorSet(value) {
-  if (value === null) return true
+  // GitHub omite complet aceste campuri pe repository-urile personale: ajung
+  // undefined, nu null. Absenta mecanismului este echivalenta cu setul gol.
+  if (value === null || value === undefined) return true
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   return ['users', 'teams', 'apps'].every((key) => Array.isArray(value[key]) && value[key].length === 0)
 }
