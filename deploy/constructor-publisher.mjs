@@ -323,7 +323,11 @@ function prepareCommitSigning() {
     timeout: 5_000,
     windowsHide: true,
   })
-  const publicKey = String(publicKeyResult.stdout ?? '').trim()
+  // `ssh-keygen -y` reproduce si comentariul cheii, cand acesta exista - iar
+  // cheile generate cu -C il au aproape intotdeauna. Pastram doar tipul si
+  // blobul; comentariul nu face parte din identitatea criptografica.
+  const publicKeyRaw = String(publicKeyResult.stdout ?? '').trim()
+  const publicKey = publicKeyRaw.split(/\s+/).slice(0, 2).join(' ')
   if (publicKeyResult.status !== 0 || !/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(publicKey)) {
     fail('Cheia de semnare Git trebuie să fie ED25519 și necriptată pentru serviciul izolat')
   }
