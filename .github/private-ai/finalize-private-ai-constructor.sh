@@ -73,6 +73,9 @@ readonly RUNTIME_ROOT=/root/kelion/runtime
 readonly RUNTIME_READY_ROOT=/run/kelion
 readonly RUNTIME_READY_STAMP=$RUNTIME_READY_ROOT/runtime-config-recovery.ready
 readonly RUNTIME_CUTOVER_JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
+readonly ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
+readonly ACTIVATION_PENDING=$RUNTIME_READY_ROOT/constructor-activation.pending
+readonly UNIT_MIGRATION_PENDING=$RUNTIME_ROOT/constructor-unit-migration.pending
 readonly MAX_MODEL_JOURNAL=$RUNTIME_ROOT/constructor-max-model.journal
 readonly REACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-reactivation.journal
 readonly FINALIZER_REACTIVATION_OWNER=$RUNTIME_ROOT/private-ai-finalize-reactivation.owner
@@ -982,6 +985,66 @@ install_persistent_runtime_helper() {
 }
 
 install_persistent_runtime_helper
+
+# Un retry al activării etapizate poate lăsa Constructorul în faza `quiesced`
+# exact când finalizerul trebuie să instaleze controllerul manual. Un cutover
+# normal nu are voie să ghicească această tranziție: helperul o reia numai cu
+# ownerul explicit `activate-worker-publisher`, o comite `applied` și păstrează
+# toate unitățile oprite. Jurnalul activării este consumat aici, după dovada
+# applied, astfel încât următorul cutover al gate-ului să nu îl reinterpreteze
+# ca pe o nouă barieră quiesced.
+resume_pending_constructor_activation() {
+  local operation phase
+  if [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ]; then
+    return 0
+  fi
+  require_regular "$ACTIVATION_JOURNAL" root:root:600
+  jq -e '
+    .schema == 2 and
+    (.phase == "prepared" or .phase == "quiesced" or .phase == "applied") and
+    .operation == "activate-worker-publisher" and
+    (.activationRoot | strings |
+      test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))
+  ' "$ACTIVATION_JOURNAL" >/dev/null \
+    || fail 'jurnalul activării pending nu este reluarea worker/publisher exactă'
+  operation=$(jq -er '.operation' "$ACTIVATION_JOURNAL")
+
+  # Dacă o reluare anterioară a trecut deja de applied, nu o executăm a doua
+  # oară. Păstrăm însă toate dovezile înainte de consumarea jurnalului.
+  phase=$(jq -er '.phase' "$ACTIVATION_JOURNAL")
+  if [ "$phase" = applied ] && [ -f "$UNIT_MIGRATION_PENDING" ]; then
+    require_regular "$UNIT_MIGRATION_PENDING" root:root:600
+    [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] \
+      || fail 'bariera pending a activării applied nu a fost consumată'
+    [ ! -e "$RUNTIME_READY_STAMP" ] && [ ! -L "$RUNTIME_READY_STAMP" ] \
+      || fail 'stamp-ul runtime este prezent peste activarea applied quiesced'
+  else
+    [ ! -e "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ] \
+      || fail 'jurnalele Constructor applied și unit-only coexistă neașteptat'
+    KELION_CUTOVER_LOCK_HELD=1 \
+    KELION_ACTIVATION_RESUME_OPERATION="$operation" \
+      bash "$RUNTIME_CUTOVER_SOURCE" \
+        --recover-only "$COMPOSE_SOURCE" --leave-constructor-quiesced
+    require_regular "$ACTIVATION_JOURNAL" root:root:600
+    jq -e --arg operation "$operation" '
+      .schema == 2 and .phase == "applied" and .operation == $operation
+    ' "$ACTIVATION_JOURNAL" >/dev/null \
+      || fail 'reluarea activării nu a ajuns durabil în faza applied'
+    require_regular "$UNIT_MIGRATION_PENDING" root:root:600
+    [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] \
+      || fail 'bariera pending a activării nu a fost retrasă după applied'
+    [ ! -e "$RUNTIME_READY_STAMP" ] && [ ! -L "$RUNTIME_READY_STAMP" ] \
+      || fail 'stamp-ul runtime a fost publicat înaintea controllerului'
+  fi
+
+  rm -f -- "$ACTIVATION_JOURNAL"
+  sync -f "$RUNTIME_ROOT"
+  [ ! -e "$ACTIVATION_JOURNAL" ] && [ ! -L "$ACTIVATION_JOURNAL" ] \
+    || fail 'jurnalul activării applied nu a putut fi consumat durabil'
+  printf 'PENDING_CONSTRUCTOR_ACTIVATION_RESUMED=yes\\n'
+}
+
+resume_pending_constructor_activation
 
 repair_stale_committed_gate_journal() {
   local recovery_root rollback_manifest recovery_compose backups_root observed expected
