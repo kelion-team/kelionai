@@ -2,21 +2,14 @@
 // Un ton scurt „ring-ring" repetat cât sună un apel primit, generat cu WebAudio
 // (fără fișier de sunet). Best-effort: dacă AudioContext-ul e blocat (fără gest
 // prealabil pe pagină), rămâne doar anunțul vocal + interfața — nu stricăm nimic.
-let ctx: AudioContext | null = null
+import { obtineAudioContext } from './audioContextPartajat'
+
 let timer: number | null = null
 
+// Contextul e cel PARTAJAT al aplicației (audioContextPartajat.ts) — soneria
+// nu mai ține un AudioContext propriu deschis pe veci.
 function acum(): AudioContext | null {
-  const AC =
-    globalThis.AudioContext ??
-    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AC) return null
-  try {
-    ctx = ctx ?? new AC()
-  } catch {
-    return null
-  }
-  if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
-  return ctx
+  return obtineAudioContext()
 }
 
 function bip(): void {

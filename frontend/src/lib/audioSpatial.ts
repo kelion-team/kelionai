@@ -8,15 +8,21 @@
 // Poziția avatarului se actualizează din Stage.tsx (când avatarul se mută
 // în colț la chat, sau în centru la dans).
 
+import { obtineAudioContext } from './audioContextPartajat'
+
+// Contextul e cel PARTAJAT al aplicației (audioContextPartajat.ts); dacă a fost
+// închis între timp, panner-ul se reconstruiește pe contextul nou.
 let ctx: AudioContext | null = null
 let panner: PannerNode | null = null
 let listener: AudioListener | null = null
 
 /** Inițializează contextul audio spațial. */
 export function initiazaAudioSpatial(): void {
-  if (ctx) return
+  const partajat = obtineAudioContext()
+  if (!partajat) return
+  if (ctx === partajat && panner) return
   try {
-    ctx = new AudioContext()
+    ctx = partajat
     panner = ctx.createPanner()
     panner.panningModel = 'HRTF' // Head-Related Transfer Functions — realism maxim pe căști
     panner.distanceModel = 'inverse'

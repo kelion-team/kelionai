@@ -1,4 +1,4 @@
-import { deblocheazaAudioLaGest } from './audioGraph'
+import { obtineAudioContext } from './audioContextPartajat'
 import { inscrieVoceaLuiKelion } from './vociKelion'
 
 // Redare vocală partajată. Captura cloud full-duplex este exclusiv în
@@ -19,11 +19,13 @@ let ctxRetryTimer: number | null = null // reîncercare mărginită a redării p
 
 // ── LIP-SYNC: nivelul (0..1) al amplitudinii vocii redate acum ──────────────
 // Golden rule: it's a visual bonus — if the analysis fails for any reason,
-// the voice must stay audible, unchanged. A single AudioContext,
-// reutilizat, creat lazy la prima redare (nevoie de gest de utilizator).
+// the voice must stay audible, unchanged. Contextul e cel PARTAJAT al
+// aplicației (audioContextPartajat.ts) — nu unul propriu ținut deschis pe veci;
+// analizorul se reconstruiește dacă contextul partajat a fost re-creat.
 let levelCtx: AudioContext | null = null
 let levelAnalyser: AnalyserNode | null = null
 let levelSource: MediaElementAudioSourceNode | null = null
+let radiazaVoceaClasica: (() => void) | null = null
 let levelBuf: Uint8Array<ArrayBuffer> | null = null
 let levelRaf = 0
 let voiceLevel = 0
@@ -52,12 +54,14 @@ function stopLevelLoop(): void {
 // audio.play() above stays the only one responsible for sound.
 function attachLevelAnalysis(audio: HTMLAudioElement): void {
   try {
-    const AC =
-      globalThis.AudioContext ??
-      (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AC) return
-    if (!levelCtx) {
-      levelCtx = new AC()
+    const partajat = obtineAudioContext()
+    if (!partajat) return
+    if (levelCtx !== partajat) {
+      // Context nou (prima redare sau re-creat după close): nodurile vechi
+      // aparțin unui context mort — le reconstruim pe cel viu.
+      levelCtx = partajat
+      levelSource = null
+      radiazaVoceaClasica?.()
       levelAnalyser = levelCtx.createAnalyser()
       levelAnalyser.fftSize = 256
       levelAnalyser.smoothingTimeConstant = 0.5
@@ -68,14 +72,12 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
       // O dată pe viața paginii; nu se radiază (gura clasică e permanentă).
       const destInreg = levelCtx.createMediaStreamDestination()
       levelAnalyser.connect(destInreg)
-      inscrieVoceaLuiKelion(destInreg.stream)
-      // DEBLOCAJ PE GEST pentru contextul de REDARE (owner, 13 aug: „audio nu
-      // merge, nu-l aud"). createMediaElementSource de mai jos MUTĂ tot sunetul
-      // elementului <audio> în levelCtx — dacă el e 'suspended' (politica autoplay,
-      // context creat în afara unui gest), vocea devine INAUDIBILĂ deși play() a
-      // reușit. E exact bug-ul microfonului din 5 aug, dar la IEȘIRE, unde
-      // deblocajul pe gest lipsea. Îl armăm și aici, refolosind aceeași funcție.
-      deblocheazaAudioLaGest(levelCtx)
+      radiazaVoceaClasica = inscrieVoceaLuiKelion(destInreg.stream)
+      // DEBLOCAJUL PE GEST pentru contextul de REDARE (owner, 13 aug: „audio nu
+      // merge, nu-l aud") îl armează acum obtineAudioContext() — o dată per
+      // context, pentru toți consumatorii. createMediaElementSource de mai jos
+      // MUTĂ tot sunetul elementului <audio> în levelCtx — dacă el e 'suspended',
+      // vocea devine INAUDIBILĂ deși play() a reușit; garda de mai jos o apără.
     }
     if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
     if (!levelAnalyser || !levelBuf) return

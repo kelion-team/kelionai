@@ -18,6 +18,8 @@ interface ConfigMuzicala {
   durataNota: number // secunde
 }
 
+import { obtineAudioContext } from './audioContextPartajat'
+
 let ctx: AudioContext | null = null
 let inMers = false
 let timer: ReturnType<typeof setInterval> | null = null
@@ -81,10 +83,9 @@ function configPentruDispozitie(d: DispozitieMuzicala): ConfigMuzicala {
 /** Pornește compoziția pentru o dispoziție. */
 export function pornesteMuzica(dispozitie: DispozitieMuzicala): void {
   if (inMers) opresteMuzica()
-  if (!ctx) {
-    try { ctx = new AudioContext() } catch { return }
-  }
-  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  // Contextul PARTAJAT al aplicației (audioContextPartajat.ts) — nu unul propriu.
+  ctx = obtineAudioContext()
+  if (!ctx) return
   inMers = true
 
   const cfg = configPentruDispozitie(dispozitie)
