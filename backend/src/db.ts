@@ -5307,8 +5307,9 @@ export interface BuildJob {
   // Worker execution tier and measured cost; null means unreported, not zero.
   brain: string | null
   costUsd: number | null
-  /** Identificator opac emis de workerul Codex separat; nu este un token. */
-  codexTaskId: string | null
+  /** Identificator opac emis de workerul Constructor separat; nu este un token.
+   * Coloana din schema ramane codex_task_id: nume inghetat, nu executor. */
+  constructorTaskId: string | null
   /** Profilul local selectat manual și persistat la claim pentru ciclul curent. */
   executionProfile: ConstructorExecutionProfile | null
   constructorStage: string
@@ -5372,7 +5373,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: constructorActorLabel(r.brain),
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
-    codexTaskId: r.codex_task_id ?? null,
+    constructorTaskId: r.codex_task_id ?? null,
     executionProfile: r.execution_profile === 'fast' || r.execution_profile === 'powerful'
       ? r.execution_profile
       : null,
@@ -5825,11 +5826,11 @@ export type ClaimNextBuildJobResult =
   | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
 
 export async function claimNextBuildJob(
-  codexTaskId: string,
+  constructorTaskId: string,
   executionProfile: ConstructorExecutionProfile,
 ): Promise<ClaimNextBuildJobResult> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
-  if (!codexTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
+  if (!constructorTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
     throw new Error('constructor_claim_profile_invalid')
   }
   await deblocheazaJoburileClaimate()
@@ -5855,7 +5856,7 @@ export async function claimNextBuildJob(
          ORDER BY candidate.created_at LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
        )
        RETURNING *`,
-      [codexTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
+      [constructorTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
     )
     if (r.rows[0]) {
       // Un probe programat după backoff nu mai este descris ca „așteaptă
@@ -6151,24 +6152,24 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
   }
 }
 
-export type CodexBuildEvent =
+export type ConstructorBuildEvent =
   | { event: 'accepted'; progress?: string }
   | { event: 'progress'; progress: string }
-  | { event: 'failed'; progress?: string; code: CodexWorkerFailureCode; profile: ConstructorExecutionProfile }
+  | { event: 'failed'; progress?: string; code: ConstructorWorkerFailureCode; profile: ConstructorExecutionProfile }
   | { event: 'unresolved'; progress?: string; reason: ConstructorExecutionUnresolvedReason; profile: ConstructorExecutionProfile }
 
-export const CODEX_WORKER_FAILURE_CODES = [
+export const CONSTRUCTOR_WORKER_FAILURE_CODES = [
   'execution_timeout',
   'brain_unavailable',
   'worker_internal_failure',
 ] as const
-export type CodexWorkerFailureCode = typeof CODEX_WORKER_FAILURE_CODES[number]
+export type ConstructorWorkerFailureCode = typeof CONSTRUCTOR_WORKER_FAILURE_CODES[number]
 
-export function isCodexWorkerFailureCode(value: string): value is CodexWorkerFailureCode {
-  return (CODEX_WORKER_FAILURE_CODES as readonly string[]).includes(value)
+export function isConstructorWorkerFailureCode(value: string): value is ConstructorWorkerFailureCode {
+  return (CONSTRUCTOR_WORKER_FAILURE_CODES as readonly string[]).includes(value)
 }
 
-const CODEx_STAGE_ORDER: Record<string, number> = {
+const CONSTRUCTOR_STAGE_ORDER: Record<string, number> = {
   claimed: 1,
   accepted: 2,
   working: 3,
@@ -6180,7 +6181,7 @@ const CODEx_STAGE_ORDER: Record<string, number> = {
  * Avansează exclusiv etapele de execuție ale workerului. Handoff-ul, PR-ul,
  * merge-ul și release-ul au tranzacții și identități HMAC separate.
  */
-export async function advanceCodexBuildJob(id: number, taskId: string, input: CodexBuildEvent): Promise<BuildJob | null> {
+export async function advanceConstructorBuildJob(id: number, taskId: string, input: ConstructorBuildEvent): Promise<BuildJob | null> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0 || !taskId) return null
   const client = await conexiuneDb()
   try {
@@ -6202,9 +6203,9 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       return null
     }
     const target = input.event === 'progress' ? 'working' : input.event
-    const prevRank = CODEx_STAGE_ORDER[previous] ?? 0
-    const targetRank = CODEx_STAGE_ORDER[target] ?? 0
-    const exactPredecessor: Partial<Record<CodexBuildEvent['event'], string[]>> = {
+    const prevRank = CONSTRUCTOR_STAGE_ORDER[previous] ?? 0
+    const targetRank = CONSTRUCTOR_STAGE_ORDER[target] ?? 0
+    const exactPredecessor: Partial<Record<ConstructorBuildEvent['event'], string[]>> = {
       accepted: ['claimed'],
       progress: ['accepted', 'working'],
       // Un rezultat `unresolved` dovedește o execuție reală numai după ACK-ul
@@ -6288,7 +6289,7 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
 
 // Leagă identificatorul opac al workerului separat de ordin. Valoarea nu este
 // secret și nu poate fi folosită pentru autentificare.
-export async function setCodexTaskId(id: number, taskId: string): Promise<void> {
+export async function setConstructorTaskId(id: number, taskId: string): Promise<void> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
   try {
     await getPool().query(
@@ -6297,7 +6298,7 @@ export async function setCodexTaskId(id: number, taskId: string): Promise<void> 
       [id, taskId.slice(0, 200)],
     )
   } catch (e) {
-    console.error('[codex-worker] setCodexTaskId a picat:', String(e).slice(0, 160))
+    console.error('[constructor-worker] setConstructorTaskId a picat:', String(e).slice(0, 160))
   }
 }
 

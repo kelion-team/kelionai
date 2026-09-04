@@ -562,10 +562,10 @@ const CONSTRUCTOR_WORKER_STATES = new Set([
   'unknown',
 ])
 
-/** Starea workerului local; calea API păstrează numele vechi pentru compatibilitate. */
+/** Starea workerului local al Constructorului (OpenCode + Qwen local). */
 export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAdmin | null> {
   try {
-    const r = await apiFetch('/api/admin/codex', { cache: 'no-store' })
+    const r = await apiFetch('/api/admin/constructor/worker', { cache: 'no-store' })
     if (!r.ok) return null
     const raw = (await r.json()) as Record<string, unknown>
     const workerRaw = raw.worker && typeof raw.worker === 'object'

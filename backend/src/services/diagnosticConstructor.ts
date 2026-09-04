@@ -153,7 +153,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   const releaseReady = legReady(chain.legs.release.state)
   if (!workerReady) {
     probleme.push({
-      cod: 'codex_worker_offline',
+      cod: 'constructor_worker_offline',
       severitate: 'critic',
       ce: 'Workerul Constructor OpenCode + Qwen local (llama.cpp) nu are un heartbeat recent de stare ready; ordinele rămân în build_jobs.',
       recomandare: 'Verifică preflightul OpenCode 1.18.25, modelul Qwen local din endpointul loopback llama.cpp și autentificarea HMAC a cozii build_jobs.',
@@ -244,7 +244,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
     : null
   if (workerReady && metrics.running === 0 && queuedEligible.length > 0 && (oldestEligibleQueuedSec ?? 0) > 10 * 60) {
     probleme.push({
-      cod: 'codex_queue_stalled',
+      cod: 'constructor_queue_stalled',
       severitate: 'critic',
       ce: `${queuedEligible.length} ordin(e) eligibile așteaptă de peste ${Math.round((oldestEligibleQueuedSec ?? 0) / 60)} minute fără unul în lucru.`,
       recomandare: 'Verifică jurnalul workerului separat și semnarea HMAC a cererii de claim.',
@@ -252,7 +252,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   }
   if (running.length && (runningSec ?? 0) > 2 * 3600) {
     probleme.push({
-      cod: 'codex_job_long_running',
+      cod: 'constructor_job_long_running',
       severitate: 'atentie',
       ce: `Cel mai vechi ordin rulează de peste ${Math.round((runningSec ?? 0) / 3600)} ore.`,
       recomandare: 'Verifică worktree-ul executorului OpenCode + Qwen local (llama.cpp) și etapa persistată; anulează numai dacă workerul confirmă oprirea.',

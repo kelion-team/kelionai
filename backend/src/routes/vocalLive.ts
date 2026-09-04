@@ -1552,7 +1552,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         })
       }
       const instructiune = construiesteInstructiune(
-        PERSONA_KELION + (isAdminSession ? ancoraConstructor(config.codexWorker.enabled) : ''),
+        PERSONA_KELION + (isAdminSession ? ancoraConstructor(config.constructorWorker.enabled) : ''),
         nume,
         istoric,
         ancora,

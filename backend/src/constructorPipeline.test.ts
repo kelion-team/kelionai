@@ -257,7 +257,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     'keeps $label terminal without automatic retry',
     async ({ input, expectedStage, expectedProgress, evidence }) => {
       await database.query('UPDATE build_jobs SET execution_profile=$2 WHERE id=$1', [1, input.profile])
-      await expect(buildJobs.advanceCodexBuildJob(1, taskId, input))
+      await expect(buildJobs.advanceConstructorBuildJob(1, taskId, input))
         .resolves.toMatchObject({
           id: 1,
           status: 'failed',
@@ -341,7 +341,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
   })
 
   it('rejects a terminal event that claims a different profile than the signed claim', async () => {
-    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'failed', code: 'worker_internal_failure', profile: 'powerful',
     })).resolves.toBeNull()
     await expect(database.query<{ status: string; execution_profile: string }>(
@@ -351,14 +351,14 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
 
   it('rejects unresolved directly from claimed while preserving a technical terminal exit', async () => {
     await database.query("UPDATE build_jobs SET constructor_stage='claimed' WHERE id=1")
-    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'unresolved', reason: 'no_changes', profile: 'fast',
     })).resolves.toBeNull()
     await expect(database.query<{ status: string; constructor_stage: string; log: string | null }>(
       'SELECT status, constructor_stage, log FROM build_jobs WHERE id=1',
     )).resolves.toMatchObject({ rows: [{ status: 'running', constructor_stage: 'claimed', log: null }] })
 
-    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'failed', code: 'worker_internal_failure', profile: 'fast',
     })).resolves.toMatchObject({
       status: 'failed',
@@ -369,7 +369,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
 
   it('captures the signed terminal profile for an in-flight pre-migration claim', async () => {
     await database.query('UPDATE build_jobs SET execution_profile=NULL WHERE id=1')
-    await expect(buildJobs.advanceCodexBuildJob(1, taskId, {
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'failed', code: 'worker_internal_failure', profile: 'powerful',
     })).resolves.toMatchObject({
       status: 'failed',
