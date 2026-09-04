@@ -99,8 +99,8 @@ jobs:
               ($entry.previous_filename != null and ($allowed | index($entry.previous_filename)) != null)
             )
           ' <<<"$file_entries")
-          if [ "$is_vps" = true ]; then
-            [[ "$head_ref" == chore/* ]]
+          if [[ "$head_ref" == chore/* ]]; then
+            [ "$is_vps" = true ]
             jq -e 'all(.[]; .status != "renamed" and .previous_filename == null)' <<<"$file_entries" >/dev/null
             jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
           fi
