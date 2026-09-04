@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { projectConstructorWorkCard } from './constructorWorkCard.js'
+import { CONSTRUCTOR_LOCAL_ACTOR } from './constructorIdentity.js'
 
 describe('Constructor canonical work card', () => {
   it('projects every required field from its existing canonical authority', () => {
@@ -35,7 +36,7 @@ describe('Constructor canonical work card', () => {
       canonicalLink: '#constructor-work-card-42',
       objective: 'Publica rezultatul verificat',
       owner: 'owner@example.test',
-      actor: 'codex-worker',
+      actor: CONSTRUCTOR_LOCAL_ACTOR,
       currentStep: 'Executie',
       heartbeatAt: '2026-08-25T20:00:00.000Z',
       escalationCondition: 'Numai autoritate externa',
@@ -74,5 +75,24 @@ describe('Constructor canonical work card', () => {
       closedAt: '2026-08-25T20:00:00.000Z',
     })
     expect(card.finalResult).toBeNull()
+  })
+
+  it('maps only the retired codex-worker actor while preserving unknown audit identities', () => {
+    const observation = {
+      progress: { percent: 0, completed: 0, total: 1, currentStage: 'În coadă', resolved: false, source: 'constructor_activity_events' as const },
+      activity: [],
+      eventCount: 0,
+    }
+    const metadata = {
+      acceptanceCriteria: [], contextLinks: [], decisions: [], approvals: [], risks: [], dependencies: [], escalationCondition: '',
+    }
+    const stages = [{ key: 'queued', sequence: 0, label: 'În coadă' }]
+
+    expect(projectConstructorWorkCard({
+      id: 44, orderText: 'Legacy', status: 'queued', brain: 'codex-worker',
+    }, observation, metadata, stages).actor).toBe(CONSTRUCTOR_LOCAL_ACTOR)
+    expect(projectConstructorWorkCard({
+      id: 45, orderText: 'Alt executor', status: 'queued', brain: 'executor-auditat',
+    }, observation, metadata, stages).actor).toBe('executor-auditat')
   })
 })

@@ -26,7 +26,6 @@ import {
 } from './services/jurnalOperational.js'
 import {
   classifyConstructorFailure,
-  constructorIncidentLesson,
   type ConstructorCauseCode,
   type ConstructorIncident,
   type ConstructorIncidentState,
@@ -35,6 +34,16 @@ import {
   parseConstructorStrategy,
   type ConstructorStrategy,
 } from './services/constructorStrategist.js'
+import {
+  CONSTRUCTOR_LOCAL_ACTOR,
+  constructorActorLabel,
+} from './services/constructorIdentity.js'
+import {
+  constructorWorkerTechnicalFailureRecord,
+  constructorWorkerUnresolvedRecord,
+  type ConstructorExecutionProfile,
+  type ConstructorExecutionUnresolvedReason,
+} from './services/constructorContinuity.js'
 import { getPool, conexiuneDb, starePool, inchidePool } from './dbPool.js'
 import {
   mediaByteLimit,
@@ -365,17 +374,45 @@ function valoareAudit(value: unknown, max: number): string {
     .replace(/\b(?:\+?\d[ .()-]*){7,15}\b/g, '[redacted-phone]')
 }
 
+function valoriAudit(
+  actor: string,
+  actiune: string,
+  tabel: string,
+  cheie: string,
+  vechi: string,
+  nou: string,
+): [string, string, string, string, string, string] {
+  return [
+    etichetaAudit(actor, 120),
+    etichetaAudit(actiune, 80),
+    etichetaAudit(tabel, 60),
+    valoareAudit(cheie, 200),
+    valoareAudit(vechi, 400),
+    valoareAudit(nou, 400),
+  ]
+}
+
+/** Operațiile privilegiate care nu pot exista fără urmă așteaptă confirmarea
+ * registrului înainte să atingă control-plane-ul. Restul apelanților păstrează
+ * semantica best-effort a lui `noteazaAudit`. */
+export async function noteazaAuditStrict(
+  actor: string,
+  actiune: string,
+  tabel: string,
+  cheie: string,
+  vechi = '',
+  nou = '',
+): Promise<void> {
+  if (!dbEnabled()) throw new Error('audit_store_unavailable')
+  await getPool().query(
+    `INSERT INTO audit_log (actor, actiune, tabel, cheie, vechi, nou) VALUES ($1,$2,$3,$4,$5,$6)`,
+    valoriAudit(actor, actiune, tabel, cheie, vechi, nou),
+  )
+}
+
 export function noteazaAudit(actor: string, actiune: string, tabel: string, cheie: string, vechi = '', nou = ''): void {
   if (!dbEnabled()) return
-  void getPool()
-    .query(`INSERT INTO audit_log (actor, actiune, tabel, cheie, vechi, nou) VALUES ($1,$2,$3,$4,$5,$6)`, [
-      etichetaAudit(actor, 120),
-      etichetaAudit(actiune, 80),
-      etichetaAudit(tabel, 60),
-      valoareAudit(cheie, 200),
-      valoareAudit(vechi, 400),
-      valoareAudit(nou, 400),
-    ])
+  void noteazaAuditStrict(actor, actiune, tabel, cheie, vechi, nou)
     .catch((e) => console.error('[audit] urma NU s-a putut scrie:', String(e).slice(0, 160)))
 }
 
@@ -908,7 +945,7 @@ export async function getOrCreateClientStorageId(email: string): Promise<string>
   return r.rows[0].storage_id
 }
 
-export type NativePlatform = 'ios' | 'desktop'
+export type NativePlatform = 'ios' | 'desktop' | 'constructor-desktop'
 
 export interface NativeAuthRequestRecord {
   id: string
@@ -946,9 +983,14 @@ export async function createNativeAuthRequest(input: {
 
 function nativeAuthRecord(row: Record<string, unknown> | undefined): NativeAuthRequestRecord | null {
   if (!row) return null
+  const platform = row.platform === 'ios'
+    ? 'ios'
+    : row.platform === 'constructor-desktop'
+      ? 'constructor-desktop'
+      : 'desktop'
   return {
     id: String(row.id),
-    platform: row.platform === 'ios' ? 'ios' : 'desktop',
+    platform,
     installId: String(row.install_id),
     clientState: String(row.client_state),
     clientCodeChallenge: String(row.client_code_challenge),
@@ -5265,8 +5307,11 @@ export interface BuildJob {
   // Worker execution tier and measured cost; null means unreported, not zero.
   brain: string | null
   costUsd: number | null
-  /** Identificator opac emis de workerul Codex separat; nu este un token. */
-  codexTaskId: string | null
+  /** Identificator opac emis de workerul Constructor separat; nu este un token.
+   * Coloana din schema ramane codex_task_id: nume inghetat, nu executor. */
+  constructorTaskId: string | null
+  /** Profilul local selectat manual și persistat la claim pentru ciclul curent. */
+  executionProfile: ConstructorExecutionProfile | null
   constructorStage: string
   commit: string | null
   liveVersion: string | null
@@ -5299,6 +5344,7 @@ interface BuildJobDbRow {
   brain?: string | null
   cost_usd?: string | number | null
   codex_task_id?: string | null
+  execution_profile?: string | null
   constructor_stage?: string | null
   commit_sha?: string | null
   live_version?: string | null
@@ -5325,9 +5371,12 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     log: r.log,
     progress: r.progress ?? null,
     ci: r.ci ?? null,
-    brain: r.brain ?? null,
+    brain: constructorActorLabel(r.brain),
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
-    codexTaskId: r.codex_task_id ?? null,
+    constructorTaskId: r.codex_task_id ?? null,
+    executionProfile: r.execution_profile === 'fast' || r.execution_profile === 'powerful'
+      ? r.execution_profile
+      : null,
     constructorStage: r.constructor_stage ?? 'queued',
     commit: r.commit_sha ?? null,
     liveVersion: r.live_version ?? null,
@@ -5450,8 +5499,8 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
       return { id: Number(geaman.id), created: false, status: geaman.status }
     }
     const r = await client.query<{ id: string | number }>(
-      'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
-      [accountKey, orderText],
+      'INSERT INTO build_jobs (ordered_by, order_text, brain) VALUES ($1, $2, $3) RETURNING id',
+      [accountKey, orderText, CONSTRUCTOR_LOCAL_ACTOR],
     )
     await client.query('COMMIT')
     const id = Number(r.rows[0]?.id ?? 0)
@@ -5751,38 +5800,6 @@ export async function updateConstructorIncident(
   }
 }
 
-async function advanceIncidentAfterSuccess(
-  client: pg.PoolClient,
-  jobId: number,
-  fields: { ci?: string; branch?: string; prUrl?: string },
-): Promise<void> {
-  const current = await client.query<ConstructorIncidentDbRow>(
-    `SELECT * FROM constructor_incidents WHERE job_id=$1 AND state <> 'closed' FOR UPDATE`,
-    [jobId],
-  )
-  const row = current.rows[0]
-  if (!row) return
-  if (fields.ci !== 'green') {
-    await client.query(
-      `UPDATE constructor_incidents SET state='verifying',
-         next_action='Obține verdict CI verde pe o mașină curată; done fără CI verde nu închide incidentul.',
-         updated_at=now() WHERE id=$1`,
-      [row.id],
-    )
-    return
-  }
-  const verification =
-    `order #${jobId} done; CI verde${fields.branch ? `; branch ${fields.branch}` : ''}` +
-    `${fields.prUrl ? `; PR ${fields.prUrl}` : ''}`
-  const incident = rowToConstructorIncident(row)
-  await client.query(
-    `UPDATE constructor_incidents SET state='closed', verification=$2, lesson=$3,
-       next_action='Monitorizează reapariția aceleiași amprente; redeschide cazul la recurență.',
-       closed_at=now(), updated_at=now() WHERE id=$1`,
-    [row.id, verification, constructorIncidentLesson(incident, verification)],
-  )
-}
-
 // Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
 // „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
 // 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
@@ -5793,34 +5810,30 @@ async function advanceIncidentAfterSuccess(
 // pe VPS (un singur worker odată) apără oricum de dubla-execuție.
 const MIN_JOB_BLOCAT = 15
 
-function constructorRetrySeconds(name: string, fallback: number, minimum: number, maximum: number): number {
-  const parsed = Number.parseInt(process.env[name] ?? '', 10)
-  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
-    ? parsed
-    : fallback
-}
-
-// Politica de retry aparține runtime-ului, nu interfeței. Valorile implicite
-// sunt fallback-uri sigure și pot fi schimbate fără rebuild.
-const CONSTRUCTOR_RETRY_BASE_SECONDS = constructorRetrySeconds('CONSTRUCTOR_RETRY_BASE_SECONDS', 60, 5, 3600)
-const CONSTRUCTOR_RETRY_MAX_SECONDS = constructorRetrySeconds('CONSTRUCTOR_RETRY_MAX_SECONDS', 1800, 30, 86_400)
-const CONSTRUCTOR_EXTERNAL_RETRY_SECONDS = constructorRetrySeconds('CONSTRUCTOR_EXTERNAL_RETRY_SECONDS', 900, 60, 86_400)
-
-function constructorRetryDelay(attempts: number, external: boolean): number {
-  if (external) return CONSTRUCTOR_EXTERNAL_RETRY_SECONDS
-  const exponent = Math.min(10, Math.max(0, attempts - 1))
-  return Math.min(CONSTRUCTOR_RETRY_MAX_SECONDS, CONSTRUCTOR_RETRY_BASE_SECONDS * (2 ** exponent))
-}
+// Câte reluări automate primește un ordin înainte să fie declarat mort. Cauzele
+// tehnice ale workerului sunt trecătoare (modelul local se reîncarcă, un deploy
+// oprește unitatea, procesul e omorât la depășirea memoriei), iar până acum
+// fiecare dintre ele omora ordinul definitiv, cerând reluare manuală de la owner.
+// Trei încercări acoperă pana obișnuită fără să ascundă un defect real: dacă un
+// ordin pică de trei ori la rând, cauza nu mai este trecătoare.
+const CONSTRUCTOR_WORKER_MAX_ATTEMPTS = 3
 
 // Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
-// la dovada live. Joburile tăcute sunt repuse separat de watchdog; claim-ul nu
-// revendică niciodată un `running` și nu oprește fluxul la un număr de încercări.
+// la dovada live sau un rezultat terminal. Claim-ul persistă profilul ales
+// manual înainte de execuție; watchdog-ul nu schimbă profilul, dar repune
+// ordinul în coadă dacă lucrătorul a murit, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS.
 export type ClaimNextBuildJobResult =
   | { state: 'claimed'; job: BuildJob }
   | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
 
-export async function claimNextBuildJob(codexTaskId?: string): Promise<ClaimNextBuildJobResult> {
+export async function claimNextBuildJob(
+  constructorTaskId: string,
+  executionProfile: ConstructorExecutionProfile,
+): Promise<ClaimNextBuildJobResult> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
+  if (!constructorTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
+    throw new Error('constructor_claim_profile_invalid')
+  }
   await deblocheazaJoburileClaimate()
   const client = await conexiuneDb()
   try {
@@ -5831,9 +5844,10 @@ export async function claimNextBuildJob(codexTaskId?: string): Promise<ClaimNext
     const r = await client.query<BuildJobDbRow>(
        `UPDATE build_jobs SET status='running', attempts = attempts + 1,
           codex_task_id=$1, constructor_stage='claimed', retry_not_before=NULL,
+          execution_profile=$3,
           progress=CASE WHEN progress='external_action_required'
             THEN 'external_probe_started' ELSE 'worker_claimed' END,
-          progress_at=now(), updated_at = now()
+          progress_at=now(), brain=$2, updated_at = now()
        WHERE id = (
          SELECT candidate.id FROM build_jobs candidate
          WHERE candidate.status='queued'
@@ -5843,7 +5857,7 @@ export async function claimNextBuildJob(codexTaskId?: string): Promise<ClaimNext
          ORDER BY candidate.created_at LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
        )
        RETURNING *`,
-      [codexTaskId?.slice(0, 200) || null],
+      [constructorTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
     )
     if (r.rows[0]) {
       // Un probe programat după backoff nu mai este descris ca „așteaptă
@@ -5885,135 +5899,77 @@ export async function claimNextBuildJob(codexTaskId?: string): Promise<ClaimNext
   }
 }
 
-// ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR (owner, 20 aug: „de la preluare
-// tot se blochează, nu se execută real nimic… pune în soft ce trebuie să nu se mai
-// blocheze la acești pași"). CAUZA: singura eliberare a unui 'running' înțepenit
-// trăia în `claimNextBuildJob` (`abandoneazaJoburileBlocate` + re-preluarea), deci se
-// declanșa DOAR când lucrătorul de pe VPS cerea ordin — exact ce moare în cazul ăsta
-// (lucrătorul a trecut jobul pe 'running' apoi a murit fix după claim → nimeni nu mai
-// atinge jobul → „Preluat · 0%" pe veci). În plus `abandoneazaJoburileBlocate` cere
-// attempts≥3, deci un job claimat O DATĂ (attempts=1) de un lucrător mort nu se
-// abandona niciodată singur. Watchdog-ul ăsta rulează pe TIMER-ul APP-ului (bucla de
-// autonomie), NU pe pulsul lucrătorului: repune în coadă joburile 'running' tăcute
-// (inclusiv attempts=1), cu backoff persistat; nicio limită de încercări nu îl
-// transformă într-un terminal fals. Coada nu mai rămâne blocată la „Preluat".
-export async function deblocheazaJoburileClaimate(): Promise<{ repuse: number; abandonate: number }> {
+// ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR ───────────────────────────
+// Un worker tăcut nu este o invitație la o a doua execuție SIMULTANĂ: revendicarea
+// este serializată de advisory lock și de flock-ul de pe mașină. Dar un lucrător
+// mort nu este vina ordinului — se întâmplă la fiecare deploy, care oprește
+// unitatea. După pragul măsurat ordinul se repune în coadă pe ACELAȘI profil
+// persistat la claim, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS; codex_task_id se
+// eliberează, ca revendicarea următoare să fie curată, iar execution_cycle și
+// attempts rămân dovezi. Abia la epuizarea plafonului ordinul devine terminal și
+// se deschide incidentul pentru owner.
+export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: number }> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
-  const requeue = await getPool().query(
-      `UPDATE build_jobs SET status='queued', constructor_stage='queued',
-         execution_cycle=execution_cycle + 1,
-         codex_task_id=NULL, progress='worker_retry_scheduled',
-         retry_not_before=now()
-           + LEAST(
-               $2::double precision,
-               $1::double precision * power(2::double precision, LEAST(10, GREATEST(0, attempts - 1)))
-             ) * interval '1 second',
-         log = COALESCE(log,'') || E'\\n[watchdog: executia tacuta a fost repusa automat in coada]',
-         progress_at=now(), updated_at=now()
-       WHERE status='running'
-         AND constructor_stage IN ('claimed','accepted','working')
-         AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'`,
-      [CONSTRUCTOR_RETRY_BASE_SECONDS, CONSTRUCTOR_RETRY_MAX_SECONDS],
-  )
-  return { repuse: requeue.rowCount ?? 0, abandonate: 0 }
-}
-// ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
-// fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
-// sau se escaladeaza sau se raporteaza la kelion") ───────────────────────────
-// Ușa unică a subiectului e mai sus (createBuildJob + amprentaOrdin). Aici e
-// restul legii, măsurat pe jurnalul #324: „Your credit balance is too low"
-// reîncercat ORBEȘTE de 6 ori — bani arși pe aceeași piatră. O eroare
-// PERMANENTĂ (punga goală, cheia respinsă) nu se vindecă prin repetare:
-// ordinul moare la PRIMUL raport, cu verdictul PE NUME, și se RAPORTEAZĂ lui
-// Kelion (triajul golurilor + panoul). Doar „reia"-ul deliberat al ownerului
-// (retryBuildJob, attempts=0) îl mai pornește.
-export const MARCAJ_P27 = '[P27: eroare PERMANENTĂ'
-
-/** Verdictul pe nume — sau null dacă eroarea NU e sigur permanentă. */
-export function eEroarePermanenta(log: string): string | null {
-  if (/FĂRĂ CREDIT API|credit balance is too low/i.test(log))
-    return 'contul furnizorului nu are credit; configurația financiară trebuie remediată'
-  if (/invalid x-api-key|authentication_error|API key not valid|API_KEY_INVALID/i.test(log))
-    return 'cheie API respinsă de furnizor — config, nu codul'
-  return null
-}
-
-export async function reportBuildJob(
-  id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
-): Promise<void> {
-  if (!dbEnabled()) return
-  let log = (fields.log ?? '').slice(-20000)
-  let externalActionRequired = false
-  if (fields.status === 'failed') {
-    const verdict = eEroarePermanenta(log)
-    if (verdict && !log.includes(MARCAJ_P27)) {
-      log = `${log}\n${MARCAJ_P27} — ${verdict}; reîncercarea NU ajută]`.slice(-20000)
-      // Contorul rămâne factual. O dependență externă este reprezentată prin
-      // checkpoint/incident, niciodată printr-o valoare-sentinelă care arată ca
-      // un număr real de încercări și poate bloca definitiv reconcilierea.
-      externalActionRequired = true
-      // RAPORTAT LA KELION (legea P27): golul intră în triajul lui + panoul —
-      // fire-and-forget, iar EȘECUL raportării se strigă (un raport mut nu e raport).
-      void (async () => {
-        await logCapabilityGap('constructor', `Ordinul #${id} BLOCAT pe eroare permanentă: ${verdict}`, log.slice(-300))
-        const { notifyAdmin } = await import('./services/adminNotification.js')
-        await notifyAdmin(
-          'scris',
-          `Ordinul #${id} OPRIT din prima — eroare permanentă`,
-          `${verdict}. Reîncercarea NU ajută; repornește-l (Reia) doar după ce cauza e scoasă.`,
-          { jobId: id },
-        )
-      })().catch((e) => console.error('[P27] raportarea la Kelion a picat:', String(e).slice(0, 160)))
-    }
-  }
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
-    const updated = await client.query<BuildJobDbRow>(
-      `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-         tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
-         progress = CASE WHEN $10 THEN 'external_action_required' ELSE progress END,
-         progress_at = CASE WHEN $10 THEN now() ELSE progress_at END,
-         updated_at = now() WHERE id = $1 RETURNING *`,
-      [
-        id,
-        fields.status,
-        fields.branch ?? null,
-        fields.prUrl ?? null,
-        fields.tokens ?? 0,
-        log || null,
-        fields.ci ?? null,
-        fields.brain ?? null,
-        fields.costUsd ?? null,
-        externalActionRequired,
-      ],
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('constructor:claim-build-job'))")
+    const stale = await client.query<BuildJobDbRow>(
+      `SELECT * FROM build_jobs
+        WHERE status='running'
+          AND constructor_stage IN ('claimed','accepted','working')
+          AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
+        ORDER BY id
+        FOR UPDATE`,
     )
-    const row = updated.rows[0]
-    if (row && fields.status === 'failed') {
+    let terminalizate = 0
+    for (const row of stale.rows) {
+      const profile = row.execution_profile === 'fast' || row.execution_profile === 'powerful'
+        ? row.execution_profile
+        : null
+      const failure = profile
+        ? constructorWorkerTechnicalFailureRecord('execution_timeout', profile)
+        : {
+            evidence: 'worker_failure:worker_internal_failure;profile=unrecorded',
+            progress: 'technical_failure',
+          }
+      // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy,
+      // care oprește unitatea, și la fiecare depășire de memorie. Îl repunem în
+      // coadă cu backoff, până la plafon. Handoff-ul este idempotent, deci
+      // re-revendicarea este sigură.
+      const updated = await client.query<BuildJobDbRow>(
+        `UPDATE build_jobs SET
+           status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           constructor_stage=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           codex_task_id=CASE WHEN attempts < $4 THEN NULL ELSE codex_task_id END,
+           progress=$2,
+           retry_not_before=CASE WHEN attempts < $4 THEN now() + interval '2 minutes' ELSE NULL END,
+           log=$3, progress_at=now(), updated_at=now()
+         WHERE id=$1 AND status='running'
+         RETURNING *`,
+        [row.id, failure.progress, failure.evidence, CONSTRUCTOR_WORKER_MAX_ATTEMPTS],
+      )
+      const failedRow = updated.rows[0]
+      if (!failedRow) continue
+      if (failedRow.status !== 'failed') continue
       await upsertConstructorIncident(client, {
-        id: Number(row.id),
-        orderText: row.order_text,
-        log: row.log ?? '[failure report contained no log]',
-        progress: row.progress ?? '',
-        attempts: row.attempts,
+        id: Number(failedRow.id),
+        orderText: failedRow.order_text,
+        log: failedRow.log ?? failure.evidence,
+        progress: failedRow.progress ?? failure.progress,
+        attempts: Number(failedRow.attempts),
       })
-    } else if (row && fields.status === 'done') {
-      await advanceIncidentAfterSuccess(client, Number(row.id), {
-        ci: row.ci ?? undefined,
-        branch: row.branch ?? undefined,
-        prUrl: row.pr_url ?? undefined,
-      })
+      terminalizate++
     }
     await client.query('COMMIT')
+    return { terminalizate }
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client.query('ROLLBACK').catch(() => undefined)
     throw error
   } finally {
     client.release()
   }
 }
-
 // AUDIT ADMIN (3 aug, Constructor): eroarea de DB colapsa în [] cu 200 →
 // coada apărea „goală" deși nu fusese citită. null la eșec; consumatorii
 // best-effort (audit, health, dovezi) cad explicit pe `?? []`, iar ruta
@@ -6155,53 +6111,6 @@ export async function getBuildJobById(id: number): Promise<BuildJob | null> {
   return result.rows[0] ? rowToBuildJob(result.rows[0]) : null
 }
 
-/** Cât a cheltuit constructorul AZI — suma `cost_usd` MĂSURATĂ a joburilor de
- *  azi (UTC). Pentru plafonul zilnic de ardere (B8/K15). Doar cifre reale de la
- *  furnizor; joburile fără cost raportat (ex. RunPod pe timp-GPU) nu se numără —
- *  nu inventăm o cheltuială. */
-/** P10 (owner, 15 aug — plafonul „$0.00 măsurat"): cheltuiala de azi CU
- *  CONTEXT. Două minciuni tăiate: (1) `catch → 0` prezenta o citire PICATĂ
- *  drept „$0.00 măsurat" — exact forma „citirea eșuată ca fapt" (regula #1);
- *  (2) un zero adevărat dar fără context pretindea „nu s-a cheltuit" când de
- *  fapt joburile de azi n-au RAPORTAT cost (cost_usd NULL nu înseamnă gratis).
- *  Bucla de plafon rămâne pe cheltuitAziConstructor (suma măsurată, by
- *  design); ASTA e citirea pentru afișaj, cu tot ce trebuie spus lângă cifră. */
-export async function cheltuialaAziConstructor(): Promise<
-  { citit: true; usd: number; joburiAzi: number; faraCost: number } | { citit: false; motiv: string }
-> {
-  if (!dbEnabled()) return { citit: false, motiv: 'baza de date nu e configurată' }
-  try {
-    const r = await getPool().query<{ usd: string | null; joburi: string; faracost: string }>(
-      `SELECT COALESCE(SUM(cost_usd), 0)::text AS usd,
-              COUNT(*)::text AS joburi,
-              COUNT(*) FILTER (WHERE cost_usd IS NULL)::text AS faracost
-         FROM build_jobs WHERE updated_at::date = (now() AT TIME ZONE 'UTC')::date`,
-    )
-    const rand = r.rows[0]
-    return {
-      citit: true,
-      usd: Number(rand?.usd ?? 0) || 0,
-      joburiAzi: Number(rand?.joburi ?? 0) || 0,
-      faraCost: Number(rand?.faracost ?? 0) || 0,
-    }
-  } catch (e) {
-    return { citit: false, motiv: String((e as Error)?.message ?? e).slice(0, 120) }
-  }
-}
-
-export async function cheltuitAziConstructor(): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const r = await getPool().query<{ s: string | null }>(
-      `SELECT COALESCE(SUM(cost_usd), 0)::text AS s FROM build_jobs
-        WHERE cost_usd IS NOT NULL AND updated_at::date = (now() AT TIME ZONE 'UTC')::date`,
-    )
-    return Number(r.rows[0]?.s ?? 0) || 0
-  } catch {
-    return 0
-  }
-}
-
 /** AUTO-ARHIVARE (K9 + K13): ordinele TERMINATE (done/failed) mai vechi de
  *  `zile` se marchează arhivate — ies din panou, rămân în DB. Nu atinge niciodată
  *  ordinele vii (queued/running). Întoarce câte a arhivat. Rulată de bucla de
@@ -6248,36 +6157,28 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
   }
 }
 
-export type CodexBuildEvent =
+export type ConstructorBuildEvent =
   | { event: 'accepted'; progress?: string }
   | { event: 'progress'; progress: string }
-  | { event: 'failed'; progress?: string; code: CodexWorkerFailureCode }
+  | { event: 'failed'; progress?: string; code: ConstructorWorkerFailureCode; profile: ConstructorExecutionProfile }
+  | { event: 'unresolved'; progress?: string; reason: ConstructorExecutionUnresolvedReason; profile: ConstructorExecutionProfile }
 
-export const CODEX_WORKER_FAILURE_CODES = [
-  'provider_auth',
-  'provider_credit',
+export const CONSTRUCTOR_WORKER_FAILURE_CODES = [
   'execution_timeout',
-  'test_failure',
-  'quality_gate_failure',
-  'no_changes',
   'brain_unavailable',
-  'codex_exec_failed',
   'worker_internal_failure',
 ] as const
-export type CodexWorkerFailureCode = typeof CODEX_WORKER_FAILURE_CODES[number]
+export type ConstructorWorkerFailureCode = typeof CONSTRUCTOR_WORKER_FAILURE_CODES[number]
 
-export function isCodexWorkerFailureCode(value: string): value is CodexWorkerFailureCode {
-  return (CODEX_WORKER_FAILURE_CODES as readonly string[]).includes(value)
+export function isConstructorWorkerFailureCode(value: string): value is ConstructorWorkerFailureCode {
+  return (CONSTRUCTOR_WORKER_FAILURE_CODES as readonly string[]).includes(value)
 }
 
-function codexWorkerFailureEvidence(code: CodexWorkerFailureCode): string {
-  return `worker_failure:${code}`
-}
-
-const CODEx_STAGE_ORDER: Record<string, number> = {
+const CONSTRUCTOR_STAGE_ORDER: Record<string, number> = {
   claimed: 1,
   accepted: 2,
   working: 3,
+  unresolved: 99,
   failed: 99,
 }
 
@@ -6285,7 +6186,7 @@ const CODEx_STAGE_ORDER: Record<string, number> = {
  * Avansează exclusiv etapele de execuție ale workerului. Handoff-ul, PR-ul,
  * merge-ul și release-ul au tranzacții și identități HMAC separate.
  */
-export async function advanceCodexBuildJob(id: number, taskId: string, input: CodexBuildEvent): Promise<BuildJob | null> {
+export async function advanceConstructorBuildJob(id: number, taskId: string, input: ConstructorBuildEvent): Promise<BuildJob | null> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0 || !taskId) return null
   const client = await conexiuneDb()
   try {
@@ -6297,12 +6198,25 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       return null
     }
     const previous = row.constructor_stage ?? 'claimed'
+    if (
+      (input.event === 'failed' || input.event === 'unresolved')
+      && row.execution_profile !== null
+      && row.execution_profile !== undefined
+      && row.execution_profile !== input.profile
+    ) {
+      await client.query('ROLLBACK')
+      return null
+    }
     const target = input.event === 'progress' ? 'working' : input.event
-    const prevRank = CODEx_STAGE_ORDER[previous] ?? 0
-    const targetRank = CODEx_STAGE_ORDER[target] ?? 0
-    const exactPredecessor: Partial<Record<CodexBuildEvent['event'], string[]>> = {
+    const prevRank = CONSTRUCTOR_STAGE_ORDER[previous] ?? 0
+    const targetRank = CONSTRUCTOR_STAGE_ORDER[target] ?? 0
+    const exactPredecessor: Partial<Record<ConstructorBuildEvent['event'], string[]>> = {
       accepted: ['claimed'],
       progress: ['accepted', 'working'],
+      // Un rezultat `unresolved` dovedește o execuție reală numai după ACK-ul
+      // claimului sau după heartbeatul de lucru. Din `claimed`, singura ieșire
+      // terminală permisă rămâne eșecul tehnic/watchdog.
+      unresolved: ['accepted', 'working'],
       failed: ['claimed', 'accepted', 'working'],
     }
     const allowedPrevious = exactPredecessor[input.event]
@@ -6312,36 +6226,54 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       return null
     }
     const progress = (input.progress ?? target).trim().slice(0, 500)
-    const failed = input.event === 'failed'
-    const failureEvidence = failed ? codexWorkerFailureEvidence(input.code) : null
-    const analysis = failed ? classifyConstructorFailure(failureEvidence!, progress) : null
-    const external = analysis?.state === 'blocked'
-    const retryDelay = failed ? constructorRetryDelay(Number(row.attempts), external) : 0
+    const terminal = input.event === 'failed' || input.event === 'unresolved'
+    const failure = input.event === 'failed'
+      ? constructorWorkerTechnicalFailureRecord(input.code, input.profile)
+      : input.event === 'unresolved'
+        ? constructorWorkerUnresolvedRecord(input.reason, input.profile)
+        : null
+    // Cele trei coduri tehnice ale workerului sunt tranzitorii prin natura lor:
+    // modelul local se reîncarcă, execuția depășește fereastra, procesul moare.
+    // Până acum fiecare dintre ele omora ordinul definitiv. Îl repunem în coadă
+    // cu backoff, până la plafon; codul rămâne prima linie din log și ajunge la
+    // worker ca recoveryCode. `unresolved` NU se reia: acela este un verdict
+    // despre conținutul ordinului, nu o pană.
+    const reluabil = input.event === 'failed'
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
-         status=CASE WHEN $3 THEN 'queued' ELSE status END,
-         execution_cycle=execution_cycle + CASE WHEN $3 THEN 1 ELSE 0 END,
-         constructor_stage=CASE WHEN $3 THEN 'queued' ELSE $2 END,
-         codex_task_id=CASE WHEN $3 THEN NULL ELSE codex_task_id END,
-         progress=CASE WHEN $3 THEN $6 ELSE $4 END,
-         retry_not_before=CASE WHEN $3 THEN now() + ($7::text || ' seconds')::interval ELSE retry_not_before END,
+         status=CASE
+           WHEN $8 AND attempts < $9 THEN 'queued'
+           WHEN $3 THEN 'failed'
+           ELSE status END,
+         constructor_stage=CASE WHEN $8 AND attempts < $9 THEN 'queued' ELSE $2 END,
+         codex_task_id=CASE WHEN $8 AND attempts < $9 THEN NULL ELSE codex_task_id END,
+         progress=$4,
+         retry_not_before=CASE
+           WHEN $8 AND attempts < $9 THEN now() + (interval '1 minute' * power(2, least(attempts, 4)))
+           WHEN $3 THEN NULL
+           ELSE retry_not_before END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
-         brain='codex-worker',
+         brain=$6,
+         execution_profile=CASE WHEN $3 AND execution_profile IS NULL THEN $7 ELSE execution_profile END,
          updated_at=now()
        WHERE id=$1 RETURNING *`,
       [
         id,
         target,
-        failed,
-        progress,
-        failureEvidence,
-        external ? 'external_action_required' : 'worker_retry_scheduled',
-        retryDelay,
+        terminal,
+        failure?.progress ?? progress,
+        failure?.evidence ?? null,
+        CONSTRUCTOR_LOCAL_ACTOR,
+        input.event === 'failed' || input.event === 'unresolved' ? input.profile : null,
+        reluabil,
+        CONSTRUCTOR_WORKER_MAX_ATTEMPTS,
       ],
     )
     const failedRow = updated.rows[0]
-    if (failed && failedRow) {
+    // Incidentul se deschide numai când ordinul chiar a murit. Dacă a fost repus
+    // în coadă, nu există încă nimic de raportat ownerului.
+    if (terminal && failedRow && failedRow.status === 'failed') {
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
         orderText: failedRow.order_text,
@@ -6362,7 +6294,7 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
 
 // Leagă identificatorul opac al workerului separat de ordin. Valoarea nu este
 // secret și nu poate fi folosită pentru autentificare.
-export async function setCodexTaskId(id: number, taskId: string): Promise<void> {
+export async function setConstructorTaskId(id: number, taskId: string): Promise<void> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
   try {
     await getPool().query(
@@ -6371,7 +6303,7 @@ export async function setCodexTaskId(id: number, taskId: string): Promise<void> 
       [id, taskId.slice(0, 200)],
     )
   } catch (e) {
-    console.error('[codex-worker] setCodexTaskId a picat:', String(e).slice(0, 160))
+    console.error('[constructor-worker] setConstructorTaskId a picat:', String(e).slice(0, 160))
   }
 }
 
@@ -6573,9 +6505,12 @@ export async function archiveBuildJobsByScope(
  *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Întoarce
  *  jobul actualizat sau null.
  *
- *  Numai un rezultat terminal poate fi reluat explicit. Un job viu se recuperează
- *  automat prin lease/watchdog; resetarea lui din Admin ar crea doi executori pe
- *  aceeași cerere și ar putea muta înapoi un job deja publicat. */
+ *  Numai un rezultat terminal poate fi reluat explicit. Un job viu nu poate fi
+ *  resetat concurent din Admin: dacă workerul tace, watchdogul îl repune întâi
+ *  în coadă, iar la epuizarea plafonului îl închide terminal; abia atunci
+ *  ownerul poate folosi Reia. Cât ordinul este `queued` nu are nevoie de Reia,
+ *  fiindcă va fi revendicat automat. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
+ *  un job deja publicat. */
 export type RetryBuildJobResult =
   | { ok: true; job: BuildJob }
   | { ok: false; error: 'not_retryable' | 'duplicate_active' | 'stale_state'; conflictJobId?: number }
@@ -6639,6 +6574,7 @@ export async function retryBuildJob(
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs
           SET status='queued', attempts=0, execution_cycle=execution_cycle + 1, codex_task_id=NULL,
+              execution_profile=NULL,
               constructor_stage='queued', ci=NULL, progress='owner_retry_scheduled',
               progress_at=now(), branch=NULL, pr_url=NULL, commit_sha=NULL,
               live_version=NULL, brain=NULL, retry_not_before=NULL,
@@ -6716,41 +6652,6 @@ export async function cancelBuildJob(
     )
     return { ok: true }
   })
-}
-
-// AUTOMATIC HEALING OF ORDERS THAT FAILED ON MONEY (Adrian, 27 Jul: "why
-// doesn't the healing system see it, fix it? — automatically?"): an order that
-// failed because the brain had no credit (402/credits) is not an impossible
-// order — it's an order that FELL TO POVERTY. When the pocket is positive
-// again, we requeue it OURSELVES, once only (a marker in the log so we don't
-// cycle), with the attempts counter reset.
-export async function requeueMoneyFailedBuildJobs(): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const r = await getPool().query<{ id: string | number }>(
-      `UPDATE build_jobs
-         SET status='queued', attempts=0, execution_cycle=execution_cycle + 1,
-             constructor_stage='queued', codex_task_id=NULL,
-             progress='worker_retry_scheduled', progress_at=now(), retry_not_before=NULL,
-             log = COALESCE(log,'') || E'\\n[healer: requeued — it had failed on lack of credit, the pocket is full again]',
-             updated_at = now()
-       WHERE status='failed'
-         AND arhivat=false
-         AND erasure_request_id IS NULL
-         AND updated_at > now() - interval '72 hours'
-         AND log ~* '(402|requires more credits|insufficient credits)'
-         AND log NOT LIKE '%[healer: requeued%'
-         AND NOT EXISTS (
-           SELECT 1
-             FROM constructor_pipeline p
-            WHERE p.job_id = build_jobs.id
-         )
-        RETURNING id`,
-    )
-    return r.rowCount ?? 0
-  } catch {
-    return 0
-  }
 }
 
 // ── KELION'S PROJECT MEMORY (his own request, Aug 2) ────────────────────────

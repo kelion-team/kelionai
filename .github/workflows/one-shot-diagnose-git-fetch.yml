@@ -1,0 +1,87 @@
+name: one-shot-diagnose-git-fetch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  guard-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validează sursa canonică fără secrete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+
+  diagnose:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Diagnostichează fetch-ul git către GitHub de pe VPS (read-only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== llama.cpp .git state ==='
+          ls -la /opt/private-ai/src/llama.cpp/.git 2>&1 | head -5 || echo 'NO_GIT_DIR'
+          echo '=== remote url ==='
+          runuser -u privateai -- env -i HOME=/home/privateai PATH=/usr/local/bin:/usr/bin:/bin \
+            git -C /opt/private-ai/src/llama.cpp config --get remote.origin.url 2>&1 || true
+          echo '=== raw curl to github info/refs (as privateai, no env) ==='
+          runuser -u privateai -- env -i HOME=/home/privateai PATH=/usr/local/bin:/usr/bin:/bin \
+            curl -v --max-time 20 'https://github.com/ggml-org/llama.cpp.git/info/refs?service=git-upload-pack' 2>&1 | head -60 || true
+          echo '=== direct git ls-remote test ==='
+          runuser -u privateai -- env -i HOME=/home/privateai PATH=/usr/local/bin:/usr/bin:/bin \
+            git ls-remote https://github.com/ggml-org/llama.cpp.git HEAD 2>&1 || true
+          echo '=== git version + http backend ==='
+          runuser -u privateai -- env -i HOME=/home/privateai PATH=/usr/local/bin:/usr/bin:/bin \
+            git --version 2>&1 || true
+          echo '=== outbound IP as seen by an external service ==='
+          curl -s --max-time 10 https://api.ipify.org 2>&1 || true
+          echo
+          echo 'DIAG_DONE=yes'
+          REMOTE

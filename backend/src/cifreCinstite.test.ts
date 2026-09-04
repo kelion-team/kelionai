@@ -50,12 +50,11 @@ describe('scutirea ownerului pe TOATE căile de debit — soldul lui nu se mai m
   })
 })
 
-describe('costul Constructorului vine numai din măsurarea workerului', () => {
-  it('contractul păstrează micro-USD și răspunde null când nu există măsurătoare', () => {
-    const worker = citeste('services/codexWorker.ts')
-    expect(worker).toContain('internalCostUsdMicros')
-    expect(worker).toContain('internalCostUsd:')
-    expect(worker).toMatch(/internalCostUsdMicros \/ 1_000_000/)
-    expect(worker).not.toMatch(/estimate|estimare/i)
+describe('Constructorul local nu pretinde cost sau task de furnizor cloud', () => {
+  it('contractul public expune numai executorul local, coada și heartbeatul', () => {
+    const worker = citeste('services/constructorWorker.ts')
+    expect(worker).toContain("CONSTRUCTOR_EXECUTOR = 'OpenCode + Qwen local (llama.cpp)'")
+    expect(worker).toContain("CONSTRUCTOR_QUEUE = 'build_jobs'")
+    expect(worker).not.toMatch(/internalCostUsd|taskUrl|openai-project-key|codex login/i)
   })
 })

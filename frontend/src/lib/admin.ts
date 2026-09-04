@@ -7,6 +7,11 @@ import type {
   OpenAIAdminSnapshot,
   UserActivityRow,
 } from '../../../backend/src/shared/api-types'
+import {
+  parseAdminConstructorModelSnapshot,
+  type AdminConstructorModelSnapshot,
+  type ConstructorModelProfile,
+} from './adminConstructorContract'
 import { apiFetch } from './transport'
 export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
 
@@ -126,23 +131,22 @@ export function clasaBec(bec: string): string {
 
 // ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
 export interface EvalRandAI {
-  cheie: 'openai' | 'codex_worker'
+  cheie: 'opencode_qwen_local'
   nume: string
   descriere: string
   scor: number
   potrivire: string
-  bec: 'verde' | 'rosu' | 'gri' | null
 }
 export interface EvalConstructor {
   trece: boolean
   motiv: string
   capacitatiNecesare: string[]
   clasament: EvalRandAI[]
-  aiRecomandat: 'openai' | 'codex_worker' | null
+  aiRecomandat: 'opencode_qwen_local' | null
 }
 
-/** Evaluează cerința ÎNAINTE de trimitere: poarta de calitate + AI-urile potrivite
- *  pe capacitate, cu credit live. `null` dacă apelul pică (nu inventăm verdict). */
+/** Evaluează cerința ÎNAINTE de trimitere pentru executorul local canonic.
+ *  `null` dacă apelul pică (nu inventăm verdict). */
 export async function evalueazaOrdinConstructor(order: string): Promise<EvalConstructor | null> {
   try {
     const r = await apiFetch('/api/admin/constructor/evalueaza', {
@@ -538,35 +542,18 @@ export async function fetchCreier(): Promise<CreierAdmin | null> {
   }
 }
 
-export interface CodexAdmin {
+export interface ConstructorWorkerAdmin {
   worker: {
     state: 'ready' | 'busy' | 'offline' | 'setup_required' | 'degraded' | 'unknown'
     lastHeartbeat: string | null
   }
   setupInstructions: string | null
-  taskUrl: string | null
   status: string | null
-  internalCostUsd: number | null
+  executor: 'OpenCode + Qwen local (llama.cpp)' | null
+  queue: 'build_jobs' | null
 }
 
-export function codexTaskUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  try {
-    const u = new URL(value)
-    if (
-      u.protocol !== 'https:' ||
-      u.username ||
-      u.password ||
-      u.hostname !== 'chatgpt.com' ||
-      !u.pathname.startsWith('/codex/')
-    ) return null
-    return u.toString()
-  } catch {
-    return null
-  }
-}
-
-const CODEX_WORKER_STATES = new Set([
+const CONSTRUCTOR_WORKER_STATES = new Set([
   'ready',
   'busy',
   'offline',
@@ -575,21 +562,18 @@ const CODEX_WORKER_STATES = new Set([
   'unknown',
 ])
 
-/** Starea workerului Codex separat. Loginul și credentialele rămân în worker. */
-export async function fetchCodexAdmin(): Promise<CodexAdmin | null> {
+/** Starea workerului local al Constructorului (OpenCode + Qwen local). */
+export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAdmin | null> {
   try {
-    const r = await apiFetch('/api/admin/codex', { cache: 'no-store' })
+    const r = await apiFetch('/api/admin/constructor/worker', { cache: 'no-store' })
     if (!r.ok) return null
     const raw = (await r.json()) as Record<string, unknown>
     const workerRaw = raw.worker && typeof raw.worker === 'object'
       ? raw.worker as Record<string, unknown>
       : {}
-    const state = typeof workerRaw.state === 'string' && CODEX_WORKER_STATES.has(workerRaw.state)
-      ? workerRaw.state as CodexAdmin['worker']['state']
+    const state = typeof workerRaw.state === 'string' && CONSTRUCTOR_WORKER_STATES.has(workerRaw.state)
+      ? workerRaw.state as ConstructorWorkerAdmin['worker']['state']
       : 'unknown'
-    const internalCost = typeof raw.internalCostUsd === 'number'
-      ? raw.internalCostUsd
-      : null
     const heartbeat = typeof workerRaw.lastHeartbeat === 'string' &&
       Number.isFinite(Date.parse(workerRaw.lastHeartbeat))
       ? workerRaw.lastHeartbeat.slice(0, 64)
@@ -602,14 +586,58 @@ export async function fetchCodexAdmin(): Promise<CodexAdmin | null> {
       setupInstructions: typeof raw.setupInstructions === 'string'
         ? raw.setupInstructions.slice(0, 1_000)
         : null,
-      taskUrl: codexTaskUrl(raw.taskUrl),
       status: typeof raw.status === 'string' ? raw.status.slice(0, 240) : null,
-      internalCostUsd: internalCost !== null && Number.isFinite(internalCost) && internalCost >= 0
-        ? internalCost
-        : null,
+      executor: raw.executor === 'OpenCode + Qwen local (llama.cpp)' ? raw.executor : null,
+      queue: raw.queue === 'build_jobs' ? raw.queue : null,
     }
   } catch {
     return null
+  }
+}
+
+export async function fetchConstructorModelAdmin(
+  signal?: AbortSignal,
+): Promise<AdminConstructorModelSnapshot | null> {
+  try {
+    const response = await apiFetch('/api/admin/constructor/model', {
+      credentials: 'include',
+      cache: 'no-store',
+      signal,
+    })
+    if (!response.ok) return null
+    return parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
+  } catch {
+    return null
+  }
+}
+
+export type ConstructorModelSwitchResult =
+  | { kind: 'confirmed' | 'accepted'; snapshot: AdminConstructorModelSnapshot }
+  | { kind: 'conflict' | 'unavailable' | 'failed' }
+
+/** Trimite numai alegerea explicită a adminului; nu selectează și nu repetă automat. */
+export async function switchConstructorModelAdmin(
+  profile: ConstructorModelProfile,
+): Promise<ConstructorModelSwitchResult> {
+  try {
+    const response = await apiFetch('/api/admin/constructor/model', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profile }),
+    })
+    if (response.status === 200 || response.status === 202) {
+      const snapshot = parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
+      if (!snapshot) return { kind: 'failed' }
+      if (response.status === 200 && snapshot.state !== 'ready') return { kind: 'failed' }
+      if (response.status === 202 && snapshot.state !== 'switching') return { kind: 'failed' }
+      return { kind: response.status === 202 ? 'accepted' : 'confirmed', snapshot }
+    }
+    if (response.status === 409) return { kind: 'conflict' }
+    if (response.status === 503) return { kind: 'unavailable' }
+    return { kind: 'failed' }
+  } catch {
+    return { kind: 'failed' }
   }
 }
 

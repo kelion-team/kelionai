@@ -16,9 +16,10 @@ vi.mock('./config.js', () => ({
     googleTokenEncryptionKey: ['GOOGLE_TOKEN_ENCRYPTION_KEY'],
     serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
     mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
-    codexWorkerSecret: ['CODEX_WORKER_SECRET'],
+    constructorWorkerSecret: ['CODEX_WORKER_SECRET'],
     constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
     constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
+    constructorModelControlSecret: ['CONSTRUCTOR_MODEL_CONTROL_SECRET'],
     githubReleaseOAuthToken: ['GITHUB_RELEASE_OAUTH_TOKEN'],
     revolutMerchantSecretKey: ['REVOLUT_MERCHANT_SECRET_KEY'],
     revolutWebhookSigningSecret: ['REVOLUT_WEBHOOK_SIGNING_SECRET'],
@@ -45,6 +46,7 @@ describe('env-check secret minimisation', () => {
     delete process.env.CODEX_WORKER_SECRET_FILE
     delete process.env.CONSTRUCTOR_PUBLISHER_SECRET_FILE
     delete process.env.CONSTRUCTOR_RELEASE_SECRET_FILE
+    delete process.env.CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE
     delete process.env.GITHUB_RELEASE_OAUTH_TOKEN_FILE
   })
 
@@ -78,6 +80,7 @@ describe('env-check secret minimisation', () => {
       CODEX_WORKER_SECRET_FILE: join(secretDir, 'codex-worker-secret'),
       CONSTRUCTOR_PUBLISHER_SECRET_FILE: join(secretDir, 'constructor-publisher-secret'),
       CONSTRUCTOR_RELEASE_SECRET_FILE: join(secretDir, 'constructor-release-secret'),
+      CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE: join(secretDir, 'constructor-model-control-secret'),
       GITHUB_RELEASE_OAUTH_TOKEN_FILE: join(secretDir, 'github-release-oauth-token'),
     }
     try {

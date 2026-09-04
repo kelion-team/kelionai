@@ -1,5 +1,10 @@
 import { dbEnabled, getPool } from '../db.js'
 import { getConstructorChainStatus } from './constructorChainStatus.js'
+import {
+  constructorModelOutcome,
+  constructorModelOutcomeNextAction,
+  type ConstructorModelOutcome,
+} from './constructorContinuity.js'
 
 export interface ProblemaConstructor {
   cod: string
@@ -40,6 +45,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
     id: number
     status: string
     constructorStage: string
+    log: string | null
     updatedAt: string
     incidentState: string | null
     incidentNextAction: string | null
@@ -70,6 +76,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
         id: string | number
         status: string
         constructor_stage: string
+        log: string | null
         updated_at: Date
         incident_state: string | null
         next_action: string | null
@@ -79,7 +86,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
         release_retry_not_before: Date | null
         release_lease_until: Date | null
       }>(
-        `SELECT b.id, b.status, b.constructor_stage, b.updated_at,
+        `SELECT b.id, b.status, b.constructor_stage, b.log, b.updated_at,
                 b.retry_not_before,
                 p.publisher_retry_not_before, p.publisher_lease_until,
                 p.release_retry_not_before, p.release_lease_until,
@@ -90,7 +97,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
              SELECT state, next_action FROM constructor_incidents
               WHERE job_id=b.id ORDER BY updated_at DESC, id DESC LIMIT 1
            ) incident ON true
-          WHERE b.arhivat=false AND b.status IN ('queued','running')`,
+          WHERE b.arhivat=false AND b.status IN ('queued','running','failed')`,
       ),
     ])
     const row = aggregate.rows[0]
@@ -105,6 +112,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
       id: Number(job.id),
       status: job.status,
       constructorStage: job.constructor_stage,
+      log: job.log,
       updatedAt: job.updated_at.toISOString(),
       incidentState: job.incident_state,
       incidentNextAction: job.next_action,
@@ -120,6 +128,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   const chain = await getConstructorChainStatus(now)
   const queued = jobs.filter((j) => j.status === 'queued')
   const running = jobs.filter((j) => j.status === 'running')
+  const failed = jobs.filter((j) => j.status === 'failed')
   const age = (iso: string): number => Math.max(0, Math.round((now - Date.parse(iso)) / 1000))
   const future = (iso: string | null): boolean => Boolean(iso && Date.parse(iso) > now)
   const activeLease = (iso: string | null): boolean => Boolean(iso && Date.parse(iso) > now)
@@ -144,10 +153,10 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   const releaseReady = legReady(chain.legs.release.state)
   if (!workerReady) {
     probleme.push({
-      cod: 'codex_worker_offline',
+      cod: 'constructor_worker_offline',
       severitate: 'critic',
-      ce: 'Workerul Codex separat nu are un heartbeat recent de stare ready; comenzile rămân în coadă.',
-      recomandare: 'Verifică credentiala systemd `openai-project-key` și reînnoiește cache-ul prin bridge-ul VPS; loginul Codex primește cheia numai pe stdin, iar procesul web nu o primește.',
+      ce: 'Workerul Constructor OpenCode + Qwen local (llama.cpp) nu are un heartbeat recent de stare ready; ordinele rămân în build_jobs.',
+      recomandare: 'Verifică preflightul OpenCode 1.18.25, modelul Qwen local din endpointul loopback llama.cpp și autentificarea HMAC a cozii build_jobs.',
     })
   }
   if (!publisherReady) {
@@ -166,12 +175,47 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
       recomandare: 'Verifică activarea, secretul HMAC și timerul release; un merge nu este dovadă live.',
     })
   }
-  if (metrics.failed > 0) {
+  const failedOutcomes = failed
+    .map((job) => ({ job, outcome: constructorModelOutcome(job.log) }))
+    .filter((entry): entry is { job: typeof failed[number]; outcome: ConstructorModelOutcome } => Boolean(entry.outcome))
+  const fastUnresolved = failedOutcomes.filter(({ outcome }) =>
+    outcome.result === 'unresolved' && outcome.profile === 'fast',
+  )
+  const powerfulUnresolved = failedOutcomes.filter(({ outcome }) =>
+    outcome.result === 'unresolved' && outcome.profile === 'powerful',
+  )
+  const technicalFailures = failedOutcomes.filter(({ outcome }) => outcome.result === 'technical_failure')
+  if (fastUnresolved.length) {
+    probleme.push({
+      cod: 'constructor_fast_unresolved',
+      severitate: 'critic',
+      ce: `${fastUnresolved.length} ordin(e) FAST nearhivate au un rezultat canonic nerezolvat.`,
+      recomandare: constructorModelOutcomeNextAction(fastUnresolved[0].outcome),
+    })
+  }
+  if (powerfulUnresolved.length) {
+    probleme.push({
+      cod: 'constructor_powerful_unresolved',
+      severitate: 'critic',
+      ce: `${powerfulUnresolved.length} ordin(e) POWERFUL nearhivate au încheiat terminal ciclul curent fără rezultat publicabil.`,
+      recomandare: constructorModelOutcomeNextAction(powerfulUnresolved[0].outcome),
+    })
+  }
+  if (technicalFailures.length) {
+    probleme.push({
+      cod: 'constructor_technical_failure',
+      severitate: 'critic',
+      ce: `${technicalFailures.length} ordin(e) nearhivate s-au oprit cu un outcome tehnic canonic.`,
+      recomandare: constructorModelOutcomeNextAction(technicalFailures[0].outcome),
+    })
+  }
+  const unclassifiedFailed = Math.max(0, metrics.failed - failedOutcomes.length)
+  if (unclassifiedFailed > 0) {
     probleme.push({
       cod: 'constructor_failed_jobs',
       severitate: 'critic',
-      ce: `${metrics.failed} ordin(e) nearhivate sunt în stare failed și cer o decizie explicită.`,
-      recomandare: 'Deschide ordinul eșuat, verifică incidentul și folosește reluarea Admin numai dacă nu există un ledger de publicare/release.',
+      ce: `${unclassifiedFailed} ordin(e) nearhivate sunt failed fără un outcome canonic și cer diagnostic.`,
+      recomandare: 'Deschide incidentul și stabilește cauza; lipsa unui outcome canonic nu recomandă automat un model sau Reia.',
     })
   }
   const blocked = jobs.filter((job) => job.incidentState === 'blocked')
@@ -200,7 +244,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
     : null
   if (workerReady && metrics.running === 0 && queuedEligible.length > 0 && (oldestEligibleQueuedSec ?? 0) > 10 * 60) {
     probleme.push({
-      cod: 'codex_queue_stalled',
+      cod: 'constructor_queue_stalled',
       severitate: 'critic',
       ce: `${queuedEligible.length} ordin(e) eligibile așteaptă de peste ${Math.round((oldestEligibleQueuedSec ?? 0) / 60)} minute fără unul în lucru.`,
       recomandare: 'Verifică jurnalul workerului separat și semnarea HMAC a cererii de claim.',
@@ -208,10 +252,10 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   }
   if (running.length && (runningSec ?? 0) > 2 * 3600) {
     probleme.push({
-      cod: 'codex_job_long_running',
+      cod: 'constructor_job_long_running',
       severitate: 'atentie',
       ce: `Cel mai vechi ordin rulează de peste ${Math.round((runningSec ?? 0) / 3600)} ore.`,
-      recomandare: 'Verifică taskul Codex și etapa raportată; anulează numai dacă workerul confirmă oprirea.',
+      recomandare: 'Verifică worktree-ul executorului OpenCode + Qwen local (llama.cpp) și etapa persistată; anulează numai dacă workerul confirmă oprirea.',
     })
   }
   const stalledPublisher = running.find((job) =>

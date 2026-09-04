@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import ConstructorDesktopApp from './ConstructorDesktopApp.tsx'
 import { startErrorReporting } from './lib/errorReport'
 import { initiazaGestiuneaEnergiei } from './lib/energie'
 import { initialiseNativeAuth, installNativeFetchBoundary } from './lib/nativeAuth'
@@ -27,4 +28,7 @@ if (
 startErrorReporting()
 initiazaGestiuneaEnergiei()
 
-createRoot(document.getElementById('root')!).render(<App />)
+const nativePlatform = document.querySelector<HTMLMetaElement>('meta[name="kelion-native-platform"]')?.content
+createRoot(document.getElementById('root')!).render(
+  nativePlatform === 'constructor-desktop' ? <ConstructorDesktopApp /> : <App />,
+)

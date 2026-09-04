@@ -8,11 +8,10 @@ import { spawnSync } from 'node:child_process'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (path) => readFileSync(resolve(ROOT, path), 'utf8')
 
-test('Codex folosește exclusiv cheia project-scoped prin login CLI pe stdin', () => {
-  const profile = read('deploy/codex-worker.profile.toml')
+test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentificare AI cloud', () => {
   const worker = read('deploy/codex-worker.mjs')
   const service = read('deploy/systemd/kelion-codex-worker.service')
-  const loginWorkflow = read('.github/workflows/vps-codex-login.yml')
+  const localPreflightWorkflow = read('.github/workflows/vps-codex-login.yml')
   const controlWorkflow = read('.github/workflows/vps-run.yml')
 
   const localOpenCode = worker.includes("const OPENCODE_VERSION = '1.18.25'")
@@ -58,7 +57,10 @@ test('Codex folosește exclusiv cheia project-scoped prin login CLI pe stdin', (
 
   const result = spawnSync(process.execPath, [resolve(ROOT, 'deploy/codex-worker.mjs'), '--self-test'], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH ?? '' },
+    env: {
+      PATH: process.env.PATH ?? '',
+      ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    },
   })
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.stdout.trim(), 'codex-worker self-test: TRECE')
@@ -75,22 +77,21 @@ test('activarea Constructorului este dublu fail-closed', () => {
   assert.match(workflow, /CODEX_WORKER_ENABLED:\s*\$\{\{ vars\.CODEX_WORKER_ENABLED \|\| '0' \}\}/)
   assert.match(service, /^ConditionPathExists=\/etc\/kelion\/codex-worker\.enabled$/m)
   assert.match(service, /^EnvironmentFile=\/root\/kelion\/config\/codex-worker\.env$/m)
-  if (service.includes('Environment=OPENCODE_BIN=')) {
-    assert.ok(service.includes('LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret'))
-    assert.match(service, /^Requires=private-ai-llm\.service /m)
-  } else {
-  assert.match(service, /^LoadCredential=openai-project-key:\/root\/kelion\/secrets\/openai-project-key$/m)
-  }
-  assert.doesNotMatch(service, /host\.env|kelionai\.env|OPENAI_ADMIN|openai-admin|CODEX_ACCESS_TOKEN|^Environment=.*OPENAI/m)
+  assert.match(service, /^LoadCredential=codex-worker-secret:\/root\/kelion\/secrets\/codex-worker-secret$/m)
+  assert.doesNotMatch(service, /^Requires=.*private-ai-llm\.service/m)
+  assert.match(service, /^Wants=.*private-ai-llm\.service$/m)
+  assert.doesNotMatch(service, /^ExecStopPost=.*constructor-model-switch/m)
+  assert.doesNotMatch(service, /host\.env|kelionai\.env|OPENAI_ADMIN|openai-admin|CODEX_ACCESS_TOKEN|openai-project-key|^Environment=.*OPENAI/m)
 })
 
-test('backendul primește admin key numai ca fișier, niciodată cache-ul Codex', () => {
+test('backendul primește admin key numai ca fișier, niciodată executorul Constructor', () => {
   const compose = read('deploy/compose.production.yml')
   const provision = read('.github/workflows/vps-set-env.yml')
   const worker = read('deploy/codex-worker.mjs')
-  const parentEnv = worker.slice(worker.indexOf('function codexParentEnv()'), worker.indexOf('function sandboxSupervisorEnv()'))
+  const parentEnv = worker.slice(worker.indexOf('export function openCodeParentEnv()'), worker.indexOf('function openCodeRootEnvironmentArgs('))
   const workerService = read('deploy/systemd/kelion-codex-worker.service')
-  const loginWorkflow = read('.github/workflows/vps-codex-login.yml')
+  const localPreflightWorkflow = read('.github/workflows/vps-codex-login.yml')
+  const recoveryWorkflow = read('.github/workflows/vps-recovery.yml')
 
   for (const forbidden of [
     '/var/lib/kelion-codex-auth',
@@ -107,7 +108,9 @@ test('backendul primește admin key numai ca fișier, niciodată cache-ul Codex'
   assert.doesNotMatch(provision, /CODEX_ACCESS_TOKEN|chatgptAuthTokens/)
   assert.doesNotMatch(parentEnv, /OPENAI_ADMIN|OPENAI_API_KEY|CREDENTIALS_DIRECTORY/)
   assert.doesNotMatch(workerService, /OPENAI_ADMIN|openai-admin-key/)
-  assert.doesNotMatch(loginWorkflow, /OPENAI_ADMIN|openai-admin-key/)
+  assert.doesNotMatch(localPreflightWorkflow, /OPENAI_ADMIN|openai-admin-key|login status/)
+  assert.doesNotMatch(recoveryWorkflow, /OPENAI_ADMIN|openai-admin-key|login status/)
+  assert.match(localPreflightWorkflow, /! grep -Eqi '[^']*login\[\[:space:\]\]\+--with-api-key\|openai-project-key[^']*' "\$unit_snapshot"/)
   assert.match(compose, /^\s+CODEX_WORKER_SECRET_FILE: \/run\/secrets\/codex-worker-secret$/m)
 })
 
@@ -119,6 +122,18 @@ test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   assert.match(gates, /^export GIT_CONFIG_KEY_0=safe\.directory$/m)
   assert.match(gates, /^export GIT_CONFIG_VALUE_0="\$WORK"$/m)
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
+})
+
+test('entrypointul porților emite verdictul măsurat folosit de clasificarea workerului', () => {
+  const gates = read('deploy/gates/run-gates.sh')
+  const worker = read('deploy/codex-worker.mjs')
+
+  assert.match(gates, /trap gate_verdict EXIT/)
+  assert.match(gates, /codex-gates: START schema=1/)
+  assert.match(gates, /codex-gates: VERDICT schema=1 exit=%s/)
+  assert.match(worker, /measuredGateVerdict/)
+  assert.match(worker, /\[125, 126, 127, 137\]\.includes\(result\.code\)/)
+  assert.match(worker, /GATE_INFRASTRUCTURE_FAILURE/)
 })
 
 test('imaginea de porți include runtime-urile cerute de testele de publicare și recovery', () => {

@@ -1,6 +1,7 @@
 import { bindClientStateToAccount, clearClientAccountScope } from './clientState'
 import { apiFetch, authUrl } from './transport'
 import { isNativeShell, logoutNativeSession, startNativeGoogleLogin } from './nativeAuth'
+import { marcheazaPlecarea } from './errorReport'
 
 export interface User {
   email: string
@@ -156,6 +157,9 @@ export function startGoogleLogin(next = '/'): void {
 
 export async function logout(): Promise<void> {
   await forgetCachedUser()
+  // `GET /` din jurnalul serverului trebuie să poată fi atribuit: marcăm
+  // plecarea, ca post-mortemul să nu o confunde cu o moarte a tabului.
+  marcheazaPlecarea('navigare:logout')
   if (await logoutNativeSession()) {
     window.location.href = '/'
     return

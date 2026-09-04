@@ -1,8 +1,6 @@
 name: VPS Recovery
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 permissions: {}
@@ -526,7 +524,9 @@ jobs:
           }
 
           validate_constructor_vector() {
-            local index marker timer timer_state codex_auth_status
+            local index marker timer timer_state
+            local opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
+            local opencode_instructions=/srv/private-ai/home/.config/opencode/instructions.md
             local -a markers=(codex-worker constructor-publisher constructor-release)
             local -a timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
             marker_vector=''
@@ -552,17 +552,34 @@ jobs:
             done
             [ "$marker_vector" = "$timer_vector" ]
             case "$marker_vector" in 000|100|110|111) ;; *) return 1 ;; esac
-            codex_auth_status=$(runuser -u kelion-codex -- env -i \
-              HOME=/var/lib/kelion-codex-auth \
-              CODEX_HOME=/var/lib/kelion-codex-auth \
-              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex \
-              -c 'forced_login_method="api"' \
-              -c 'cli_auth_credentials_store="file"' \
-              login status 2>&1)
-            [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -eq 1 ]
-            LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"
-            codex_auth_status=''
+            [ -x /opt/private-ai/bin/opencode ]
+            [ ! -L /opt/private-ai/bin/opencode ]
+            [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
+            [ -f "$opencode_instructions" ] && [ ! -L "$opencode_instructions" ]
+            [ "$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
+              HOME=/var/lib/kelion-codex \
+              XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+              PATH=/opt/private-ai/bin:/usr/bin:/bin \
+              /opt/private-ai/bin/opencode --version 2>/dev/null)" = '1.18.25' ]
+            jq -e '
+              .autoupdate == false and .share == "disabled" and
+              .enabled_providers == ["llama.cpp"] and
+              (.provider | keys) == ["llama.cpp"] and
+              .model == "llama.cpp/qwen3.6-35b-a3b-local" and
+              (.provider["llama.cpp"].options | has("apiKey") | not) and
+              .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+              .instructions == ["instructions.md"] and
+              .server == {hostname:"127.0.0.1",port:24096,mdns:false}
+            ' "$opencode_config" >/dev/null
+            systemctl is-active --quiet private-ai-llm.service
+            systemctl is-active --quiet private-ai-web.service
+            curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:24080/health >/dev/null
+            curl --fail --silent --show-error --max-time 30 \
+              http://127.0.0.1:24080/v1/models \
+              | jq -e '.data | type == "array" and length == 1 and .[0].id == "qwen3.6-35b-a3b-local"' >/dev/null
+            [ ! -e /var/lib/kelion-codex-auth ] && [ ! -L /var/lib/kelion-codex-auth ]
+            [ ! -e /opt/kelion-codex/profile-home ] && [ ! -L /opt/kelion-codex/profile-home ]
           }
 
           validate_rejected_journals_absent() {
@@ -570,12 +587,24 @@ jobs:
             for rejected in \
               "$runtime/destructive-cutover-recovery.json" \
               "$runtime/constructor-upgrade.journal" \
+              "$runtime/constructor-reactivation.journal" \
               "$runtime/constructor-activation.journal" \
               "$runtime/runtime-config-cutover.journal" \
               /run/kelion/constructor-activation.pending; do
               [ ! -e "$rejected" ]
               [ ! -L "$rejected" ]
             done
+          }
+
+          validate_runtime_control_plane() {
+            local recovery_unit=kelion-runtime-config-recovery.service
+            local controller_unit=kelion-constructor-model-control.service
+            local controller_socket=/run/kelion-constructor-model-control/control.sock
+            [ "$(systemctl show "$recovery_unit" --property=ActiveState --value)" = active ]
+            [ "$(systemctl show "$controller_unit" --property=ActiveState --value)" = active ]
+            [ -S "$controller_socket" ]
+            [ ! -L "$controller_socket" ]
+            [ "$(stat -Lc '%u:%g:%a' "$controller_socket")" = '0:10050:660' ]
           }
 
           validate_complete_poststate() {
@@ -600,6 +629,7 @@ jobs:
             validate_managed_topology
             validate_public_proof
             validate_constructor_vector
+            validate_runtime_control_plane
           }
 
           emit_complete_receipt() {
@@ -617,7 +647,9 @@ jobs:
                 probes:{ledger:$ledger,active_slot:$activeSlot,inactive_slot:$inactiveSlot,
                   candidate_inactive:true,public_release_proof:true,unit_pending:"absent",
                   gate_journal:"absent",gate_recovery_artifacts:"absent",
-                  deploy_journal:"absent",runtime_ready:true,
+                  deploy_journal:"absent",reactivation_journal:"absent",runtime_ready:true,
+                  runtime_recovery:"active",model_control:"active",
+                  model_control_socket:"root:10050:660",
                   constructor_vector:$vector,codex_auth:"ready"}}'
           }
 
@@ -811,7 +843,7 @@ jobs:
               (.updatedAt | strings | fromdateiso8601 | type) == "number"
             ' "$journal" >/dev/null \
               || { echo 'RECOVERY_INVALID: jurnalul distructiv este malformat' >&2; exit 1; }
-            echo 'RECOVERY_DEFERRED: există un jurnal distructiv valid; recovery-ul generic nu mută starea.'
+            echo 'RECOVERY_DEFERRED_QUIESCED: există un jurnal distructiv valid; recovery-ul generic nu mută starea și nu declară succes.'
             return 0
           }
           if defer_for_destructive_journal; then
@@ -850,8 +882,60 @@ jobs:
           if defer_for_destructive_journal; then
             exit 0
           fi
+          validate_runtime_control_plane() {
+            local recovery_unit=kelion-runtime-config-recovery.service
+            local controller_unit=kelion-constructor-model-control.service
+            local controller_socket=/run/kelion-constructor-model-control/control.sock
+            local state metadata
+            state=$(systemctl show "$recovery_unit" --property=ActiveState --value) \
+              || { echo 'RECOVERY_INVALID: starea serviciului recovery nu poate fi citită' >&2; return 1; }
+            [ "$state" = active ] \
+              || { echo 'RECOVERY_INVALID: serviciul recovery nu este active' >&2; return 1; }
+            state=$(systemctl show "$controller_unit" --property=ActiveState --value) \
+              || { echo 'RECOVERY_INVALID: starea controllerului nu poate fi citită' >&2; return 1; }
+            [ "$state" = active ] \
+              || { echo 'RECOVERY_INVALID: controllerul nu este active' >&2; return 1; }
+            [ -S "$controller_socket" ] && [ ! -L "$controller_socket" ] \
+              || { echo 'RECOVERY_INVALID: socketul controllerului lipsește sau nu este canonic' >&2; return 1; }
+            metadata=$(stat -Lc '%u:%g:%a' "$controller_socket") \
+              || { echo 'RECOVERY_INVALID: metadatele socketului nu pot fi citite' >&2; return 1; }
+            [ "$metadata" = '0:10050:660' ] \
+              || { echo 'RECOVERY_INVALID: ownerul sau modul socketului sunt incorecte' >&2; return 1; }
+          }
+          rearm_runtime_recovery_after_unlock() {
+            local recovery_unit=kelion-runtime-config-recovery.service
+            local recovery_state
+            if { true <&9; } 2>/dev/null; then
+              echo 'RECOVERY_INVALID: FD9 este încă deschis înaintea rearmării recovery' >&2
+              return 1
+            fi
+            recovery_state=$(systemctl show "$recovery_unit" --property=ActiveState --value) \
+              || { echo 'RECOVERY_INVALID: starea serviciului recovery nu poate fi citită înainte de rearmare' >&2; return 1; }
+            case "$recovery_state" in
+              active) ;;
+              inactive|failed)
+                systemctl reset-failed "$recovery_unit" \
+                  || { echo 'RECOVERY_INVALID: serviciul recovery nu poate fi rearmat' >&2; return 1; }
+                systemctl start "$recovery_unit" \
+                  || { echo 'RECOVERY_INVALID: serviciul recovery nu poate fi repornit' >&2; return 1; }
+                ;;
+              *)
+                echo "RECOVERY_INVALID: starea serviciului recovery este ambiguă: $recovery_state" >&2
+                return 1
+                ;;
+            esac
+          }
           KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
-            --recover-only /root/kelion/config/compose.production.yml \
-            --leave-constructor-quiesced
+            --recover-only /root/kelion/config/compose.production.yml
+          # Serviciul oneshot poate fi failed/inactive chiar dacă helperul direct
+          # a reparat runtime-ul. Închidem mai întâi FD-ul care deține publication
+          # lock; abia apoi serviciul își poate relua helperul fără deadlock.
+          exec 9<&-
+          if { true <&9; } 2>/dev/null; then
+            echo 'RECOVERY_INVALID: publication lock nu a fost eliberat înainte de rearmare' >&2
+            exit 1
+          fi
+          rearm_runtime_recovery_after_unlock
+          validate_runtime_control_plane
           echo RECOVERY_OK
           REMOTE

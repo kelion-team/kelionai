@@ -4,10 +4,11 @@ import { alimenteazaNivelVoce } from './audioIO'
 import { pornesteCulesPcm, type CulesPcm } from './pcmWorklet'
 import { pasVad, stareVadInitiala, rmsDin, zcrDin, PARAM_VAD_IMPLICIT, type StareVad } from './vad'
 import { inscrieVoceaLuiKelion } from './vociKelion'
-import { deblocheazaAudioLaGest } from './audioGraph'
+import { obtineAudioContext } from './audioContextPartajat'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
 import { faraBluetoothSigur } from './rutaAudio'
 import { apiFetch, openApiWebSocket } from './transport'
+import { marcheazaFaza } from './errorReport'
 import {
   clasificaInchidereVocalLive,
   esteCodEroareVocalLive,
@@ -104,6 +105,9 @@ export interface VocalLiveOpts {
   onState?(state: VocalLiveState): void
   /** Sesiunea e deschisă și modelul e gata să asculte. */
   onGata?(): void
+  /** Serverul a închis CURAT (cod 1000, fără motiv de eroare): nu e eroare,
+   * nu se reia — interfața doar se întoarce la repaus. */
+  onInchis?(): void
   /** Ce AUDE (subtitrarea userului), în flux. */
   onUser?(text: string, final: boolean): void
   /** Ce SPUNE Kelion, în flux. */
@@ -265,6 +269,10 @@ function clampPreamp(v: unknown): number {
 let sesiuneActiva: { inchide: () => void } | null = null
 
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
+  // FAZA, pentru cutia neagra din errorReport: daca tabul moare fara `pagehide`
+  // (crash de randare/OOM), post-mortemul de la pornirea urmatoare spune EXACT
+  // in ce punct al caii vocale a murit.
+  marcheazaFaza('voce:pornire')
   opts.onState?.('connecting')
   if (opts.signal?.aborted) return null
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -347,10 +355,19 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   let procesareActiva = false
   let curataDispozitive: (() => void) | null = null
   let curataAnulareExterna: (() => void) | null = null
+  // Nodurile sesiunii pe contextul PARTAJAT — se deconectează la închidere
+  // (contextul rămâne viu pentru restul aplicației).
+  let sursaMic: MediaStreamAudioSourceNode | null = null
+  let destInregistrare: MediaStreamAudioDestinationNode | null = null
+  let destBoxe: MediaStreamAudioDestinationNode | null = null
+  let analizor: AnalyserNode | null = null
+  let bufAnalizor: Uint8Array<ArrayBuffer> | null = null
+  let rafGura = 0
 
   const inchide = (): void => {
     if (inchis) return
     inchis = true
+    marcheazaFaza('voce:inchisa')
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
@@ -384,8 +401,22 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
       }
       boxe = null
     }
-    void ctxIn?.close().catch(() => {})
-    void ctxOut?.close().catch(() => {})
+    // Contextul e PARTAJAT (audioContextPartajat.ts) — NU se închide aici.
+    // Îi deconectăm doar nodurile noastre, ca graful să nu rețină sesiunea.
+    surseActive = golesteSurseAudio(surseActive)
+    for (const nod of [sursaMic, analizor, destInregistrare, destBoxe]) {
+      try {
+        nod?.disconnect()
+      } catch {
+        /* deja deconectat */
+      }
+    }
+    sursaMic = null
+    analizor = null
+    destInregistrare = null
+    destBoxe = null
+    // ctxIn/ctxOut rămân referite (nu se închid): un cadru întârziat din
+    // worklet mai poate citi `sampleRate` după închidere, fără să arunce.
     try {
       ws.close()
     } catch {
@@ -420,9 +451,8 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // de redarea <audio> a căii vechi. Aici redarea e WebAudio, deci nivelul se
   // calculează dintr-un analizor pus pe drumul sunetului și se împinge în
   // același loc — gura mișcă la fel, indiferent de cale.
-  let analizor: AnalyserNode | null = null
-  let bufAnalizor: Uint8Array<ArrayBuffer> | null = null
-  let rafGura = 0
+  // (analizor/bufAnalizor/rafGura sunt declarate mai sus, lângă nodurile
+  // sesiunii — `inchide()` le atinge și poate rula înainte de linia asta.)
   const pornesteGura = (): void => {
     if (rafGura || !analizor || !bufAnalizor) return
     const pas = (): void => {
@@ -543,6 +573,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (nextState) opts.onState?.(nextState)
     switch (m.type) {
       case 'gata':
+        marcheazaFaza('voce:gata')
         // AUDIOCONTEXT gata ÎNAINTE să spunem „Kelion te așteaptă". Pe mobil/
         // desktop, contextul poate rămâne 'suspended' dacă începi să vorbești
         // imediat — primele cuvinte se pierd (userul repetă și a doua oară merge).
@@ -688,6 +719,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
           : 'sesiune vocală indisponibilă',
         failure,
       )
+    } else {
+      // Închidere CURATĂ (1000 fără motiv): nu e eroare, nu urcă în
+      // console.error, nu pornește plasa de reluare. Interfața află doar ca
+      // să se întoarcă la repaus.
+      console.log('[vocalLive] sesiune închisă curat de server')
+      opts.onInchis?.()
     }
     inchide()
   }
@@ -778,8 +815,24 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     return null
   }
 
-  ctxIn = new AudioContext()
-  ctxOut = new AudioContext()
+  // UN SINGUR CONTEXT, PARTAJAT (4 sept: „chatul audio live rupe aplicația").
+  // Chrome refuză peste 6 AudioContext-uri per document; aplicația ținea patru
+  // deschise permanent (nivel, sonerie, spațial, companion) și sesiunea vocală
+  // mai deschidea DOUĂ la fiecare pornire — la al șaptelea constructorul ARUNCA,
+  // sesiunea murea imediat după „session ready" și reluarea o lua de la capăt,
+  // în buclă. Acum intrarea (microfonul) și ieșirea (vocea) merg pe același
+  // context partajat cu restul aplicației (audioContextPartajat.ts): bufferele
+  // de ieșire se creează la RATA_IESIRE și contextul le reeșantionează singur,
+  // iar intrarea se reduce la 16 kHz din `sampleRate`-ul contextului (ca înainte).
+  // Dacă totuși nu se poate deschide, eșecul e raportat curat și sesiunea se închide.
+  const ctxPartajat = obtineAudioContext()
+  if (!ctxPartajat) {
+    urcaEroarea('nu pot deschide ieșirea audio: Web Audio indisponibil', 'transport')
+    inchide()
+    return null
+  }
+  ctxIn = ctxPartajat
+  ctxOut = ctxPartajat
   // MOBIL — CONTEXTUL PORNIT 'suspended' (owner, 13 aug: „primul cuvânt nu-l aude
   // corect"). Contextele astea se creează DUPĂ două await-uri (deschiderea
   // socketului + getUserMedia), deci nasc SUSPENDATE pe iOS/Android — gestul care
@@ -789,12 +842,12 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // audioGraph.ts — `resume()` fără gest „nu ajută" pe mobil. Armăm deci
   // deblocajul pe PRIMUL tap, exact cum face deja cealaltă cale (openMicGraph):
   // additiv (pe desktop contextul e deja 'running' → practic no-op, iar ascultătorii
-  // se auto-retrag la prima trezire). Verificat: nu pot proba efectul de mobil din
-  // headless — se confirmă LIVE pe telefonul ownerului.
-  if (ctxIn.state !== 'running') deblocheazaAudioLaGest(ctxIn)
-  if (ctxOut.state !== 'running') deblocheazaAudioLaGest(ctxOut)
+  // se auto-retrag la prima trezire). Deblocajul pe gest îl armează
+  // obtineAudioContext() o dată per context; aici rămâne doar auto-resume-ul
+  // legat de viața sesiunii (un singur set — contextul e unul).
+  // Verificat: nu pot proba efectul de mobil din headless — se confirmă LIVE.
   curataAutoResumeIn = setupAudioContextAutoResume(ctxIn, () => !inchis)
-  curataAutoResumeOut = setupAudioContextAutoResume(ctxOut, () => !inchis)
+  curataAutoResumeOut = null
   // Lanțul de ieșire se ridică ACUM, nu leneș la primul cadru: analizorul
   // (gura avatarului) → <audio> media → boxe/Bluetooth (vezi antetul de mai sus:
   // media, nu WebRTC, ca să ajungă în mașină).
@@ -807,13 +860,13 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   // WebRTC a AEC-ului, iar captura de tab EXCLUDE audio-ul sosit prin WebRTC.
   // De-aia gura se înscrie în registrul vocilor: recorder.ts o amestecă
   // DIRECT în pistă, ocolind complet captura de tab.
-  const destInregistrare = ctxOut.createMediaStreamDestination()
+  destInregistrare = ctxOut.createMediaStreamDestination()
   analizor.connect(destInregistrare)
   radiazaVocea = inscrieVoceaLuiKelion(destInregistrare.stream)
   // BOXA MEDIA: analizor → MediaStreamDestination → <audio> obișnuit. Fiind un
   // flux WebAudio (NU WebRTC), Android îl clasează drept MEDIA (A2DP) → vocea
   // urmează ruta de muzică pe Bluetooth/mașină (vezi antetul de sus).
-  const destBoxe = ctxOut.createMediaStreamDestination()
+  destBoxe = ctxOut.createMediaStreamDestination()
   analizor.connect(destBoxe)
   boxe = new Audio()
   boxe.srcObject = destBoxe.stream
@@ -863,6 +916,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     /* API absent (browser vechi) — regula rămâne cea aleasă la pornire */
   }
   const sursa = ctxIn.createMediaStreamSource(stream)
+  sursaMic = sursa
   // Culesul microfonului (9 aug, „scoate alertele prin rezolvări reale"):
   // ÎNTÂI AudioWorklet (API-ul curent, pe firul audio — fără [Deprecation] și
   // fără să țină firul principal); doar dacă browserul nu poate, cădem pe
@@ -1117,6 +1171,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
   }, 1200)
 
+  marcheazaFaza('voce:activa')
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
   return {
     inchide,

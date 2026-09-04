@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '../..')
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8')
 
 describe('Git credential boundary', () => {
-  it('workerul Codex nu poate primi credentiale sau publica', () => {
+  it('workerul Constructor nu poate primi credentiale sau publica', () => {
     const worker = read('deploy/codex-worker.mjs')
     const service = read('deploy/systemd/kelion-codex-worker.service')
     const workerConfig = read('deploy/codex-worker.env.example')

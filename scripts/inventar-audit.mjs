@@ -44,6 +44,14 @@ export function clasificaFisier(caleInitiala) {
     || cale === 'android/gradle/verification-keyring.keys'
   ) return 'dependente-blocate'
 
+  // Aceste politici privilegiate sunt configurație de deploy cu nume impuse
+  // de sudoers/systemd. Căile rămân exacte ca auditul să nu accepte automat
+  // alte fișiere privilegiate fără extensie sau cu extensia `.conf`.
+  if (
+    cale === 'deploy/sudoers/kelion-codex-full-access'
+    || cale === 'deploy/systemd/private-ai-web-full-access.conf'
+  ) return 'configuratie'
+
   if (/(^|\/)(?:node_modules|dist|build|coverage|target|\.gradle)(?:\/|$)/.test(cale)) {
     return 'generat-sau-cache'
   }

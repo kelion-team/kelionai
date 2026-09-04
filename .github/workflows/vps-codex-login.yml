@@ -1,4 +1,4 @@
-name: VPS Codex Login Bridge
+name: VPS Constructor Local Preflight
 
 on:
   workflow_dispatch:
@@ -6,24 +6,89 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: constructor-local-preflight
+  cancel-in-progress: false
+
 jobs:
-  login:
+  guard-source:
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    env:
-      VPS_HOST: ${{ vars.VPS_HOST }}
-      VPS_USER: ${{ vars.VPS_USER }}
-      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
-      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    timeout-minutes: 2
     steps:
-      - name: Reînnoiește cache-ul Codex din cheia project-scoped
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuză orice sursă în afara masterului canonic
+        shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+
+  preflight:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verifică executorul local OpenCode/Qwen fără mutații
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
           umask 077
+
+          [ "$GITHUB_REPOSITORY" = 'kelion-team/kelionai' ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = 'refs/heads/master' ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+
+          expected_worker_sha=$(sha256sum deploy/codex-worker.mjs | awk '{print $1}')
+          expected_worker_unit_sha=$(sha256sum deploy/systemd/kelion-codex-worker.service | awk '{print $1}')
+          expected_sudoers_sha=$(sha256sum deploy/sudoers/kelion-codex-full-access | awk '{print $1}')
+          expected_config_sha=$(sha256sum deploy/opencode-constructor.json | awk '{print $1}')
+          expected_instructions_sha=$(sha256sum deploy/opencode-constructor-instructions.md | awk '{print $1}')
+          expected_web_dropin_sha=$(sha256sum deploy/systemd/private-ai-web-full-access.conf | awk '{print $1}')
+          for digest in "$expected_worker_sha" "$expected_worker_unit_sha" "$expected_sudoers_sha" \
+            "$expected_config_sha" "$expected_instructions_sha" "$expected_web_dropin_sha"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
+          grep -qx "const OPENCODE_VERSION = '1.18.25'" deploy/codex-worker.mjs
+          grep -qx "const OPENCODE_MODEL_ID = 'qwen3.6-35b-a3b-local'" deploy/codex-worker.mjs
+          jq -e '
+            . as $config |
+            $config.autoupdate == false and
+            $config.share == "disabled" and
+            $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
+            ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
+            $config.enabled_providers == ["llama.cpp"] and
+            ($config.provider | keys) == ["llama.cpp"] and
+            $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            ($config.provider["llama.cpp"].options | has("apiKey") | not) and
+            (["*", "read", "glob", "grep", "edit", "bash", "task", "skill",
+              "webfetch", "websearch", "external_directory"]
+             | all(.[]; $config.permission[.] == "allow"))
+          ' deploy/opencode-constructor.json >/dev/null
+
+          current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
+          [ "$current_host_key" = "$VPS_HOST_KEY" ]
+
           key_file=$(mktemp)
           known_hosts=$(mktemp)
-          trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
           printf '%s\n' "$SSH_KEY" > "$key_file"
           printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
           chmod 0600 "$key_file" "$known_hosts"

@@ -46,6 +46,43 @@ describe('diagnostic privacy', () => {
     expect(recentClientErrors('owner@example.com').join(' ')).toContain(String(state.saved[0]?.message))
   })
 
+  // Fără linia asta, textul erorii de browser exista NUMAI în tabela
+  // `client_errors` din baza externă: cine se uita la `docker logs` vedea doar
+  // că a sosit un POST, nu și ce scria în el — exact orbirea care a ținut
+  // diagnosticul „chatul audio live crapă aplicația" pe loc.
+  it('scrie eroarea (redactată) și în jurnalul serverului, nu doar în tabelă', async () => {
+    const linii: string[] = []
+    const app = Fastify({
+      logger: {
+        level: 'warn',
+        stream: { write: (linie: string) => { linii.push(linie) } },
+      },
+    })
+    await app.register(clientErrorRoutes)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/client-errors',
+      payload: { errors: ['[voce] sesiune vocala indisponibila la owner@example.com'] },
+    })
+    expect(response.statusCode).toBe(200)
+    const jurnal = linii.join('\n')
+    expect(jurnal).toContain('client-error: [voce] sesiune vocala indisponibila')
+    // Jurnalul primește exact textul REDACTAT, nu cel brut.
+    expect(jurnal).not.toContain('owner@example.com')
+  })
+
+  it('păstrează stiva trimisă de browser (plafon peste vechii 400 de caractere)', async () => {
+    const app = Fastify()
+    await app.register(clientErrorRoutes)
+    const stiva = `TypeError: boom | ${'at redaFloat32 (vocalLive.ts) '.repeat(30)}`
+    expect(stiva.length).toBeGreaterThan(400)
+    const response = await app.inject({
+      method: 'POST', url: '/api/client-errors', payload: { errors: [stiva] },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(String(state.saved[0]?.message).length).toBeGreaterThan(400)
+  })
+
   it('rejects oversized batches instead of silently truncating them', async () => {
     const app = Fastify()
     await app.register(clientErrorRoutes)

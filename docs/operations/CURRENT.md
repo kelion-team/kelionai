@@ -43,7 +43,6 @@ Actualizat: `2026-08-30T10:18:20Z`
 
 ## Legături canonice
 
-- Workflow secrete producție: <https://github.com/kelion-team/kelionai/actions/workflows/vps-set-env.yml>
-- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Workflow release: <https://github.com/kelion-team/kelionai/actions/workflows/deploy.yml>
-- Versiune live: <https://kelionai.app/api/release-proof>
+- Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
+- PR operațional: <https://github.com/kelion-team/kelionai/pull/1571>
+- Aplicație: <https://kelionai.app>

@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
+  constants,
   createReadStream,
+  fstatSync,
   lstatSync,
+  openSync,
   readFileSync,
   readdirSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const PROOF_KEYS = [
@@ -19,10 +23,28 @@ const PROOF_KEYS = [
   'signatureHmacSha256',
 ]
 const MANIFEST_KEYS = ['ciphertextSha256', 'format', 'hmacSha256']
+const RESTORE_JOURNAL_KEYS = [
+  'backupPath',
+  'backupSha256',
+  'backupSizeBytes',
+  'destinationDatabase',
+  'failedDatabase',
+  'host',
+  'kind',
+  'phase',
+  'port',
+  'quarantineDatabase',
+  'schema',
+  'scratchDatabase',
+  'scratchOid',
+  'targetOid',
+  'user',
+]
 const BACKUP_NAME = /^kelion-\d{4}-\d{2}-\d{2}_\d{6}\.dump\.enc$/
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/
 const HEX_SHA256 = /^[a-f0-9]{64}$/
 const PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const RESTORE_PHASES = new Set(['restoring', 'swapping', 'rolling_back', 'committed'])
 
 function failure(code) {
   throw new Error(code)
@@ -212,6 +234,62 @@ export function requireUniqueBackup(matches) {
   return matches[0]
 }
 
+export function deriveRestoreNames({ backupPath, backupSha256, database, user }) {
+  if (
+    typeof backupPath !== 'string'
+    || backupPath !== resolve(backupPath)
+    || !BACKUP_NAME.test(basename(backupPath))
+    || !HEX_SHA256.test(backupSha256)
+    || !IDENTIFIER.test(database)
+    || !IDENTIFIER.test(user)
+  ) failure('restore_identity_invalid')
+  const intent = createHash('sha256')
+    .update(`kelion:restore-database-intent:v1\n${backupPath}\n${backupSha256}\n${database}\n${user}`)
+    .digest('hex')
+    .slice(0, 12)
+  return {
+    failedDatabase: `kelion_restore_failed_${intent}`,
+    quarantineDatabase: `kelion_quarantine_${intent}`,
+    scratchDatabase: `kelion_restore_${intent}`,
+  }
+}
+
+export function validateRestoreJournal(journal, { backupDirectory, identity }) {
+  exactKeys(journal, RESTORE_JOURNAL_KEYS, 'restore_journal_shape_invalid')
+  const backupRoot = resolve(backupDirectory)
+  const backupPath = typeof journal.backupPath === 'string' ? journal.backupPath : ''
+  const names = deriveRestoreNames({
+    backupPath,
+    backupSha256: String(journal.backupSha256 ?? ''),
+    database: String(journal.destinationDatabase ?? ''),
+    user: String(journal.user ?? ''),
+  })
+  if (
+    journal.schema !== 1
+    || journal.kind !== 'restore-verified-backup'
+    || !RESTORE_PHASES.has(journal.phase)
+    || dirname(backupPath) !== backupRoot
+    || backupPath !== join(backupRoot, basename(backupPath))
+    || !Number.isSafeInteger(journal.backupSizeBytes)
+    || journal.backupSizeBytes <= 0
+    || !Number.isSafeInteger(journal.targetOid)
+    || journal.targetOid <= 0
+    || !(
+      journal.scratchOid === null
+      || (Number.isSafeInteger(journal.scratchOid) && journal.scratchOid > 0)
+    )
+    || (['swapping', 'committed'].includes(journal.phase) && journal.scratchOid === null)
+    || journal.destinationDatabase !== identity.database
+    || journal.host !== identity.host
+    || journal.port !== identity.port
+    || journal.user !== identity.user
+    || journal.scratchDatabase !== names.scratchDatabase
+    || journal.quarantineDatabase !== names.quarantineDatabase
+    || journal.failedDatabase !== names.failedDatabase
+  ) failure('restore_journal_invalid')
+  return journal
+}
+
 export async function findAuthenticatedBackup({ backupDirectory, backupSha256, masterKey }) {
   assertSecureDirectory(backupDirectory)
   const matches = []
@@ -240,6 +318,46 @@ function readSecureFile(path, options) {
   return readFileSync(path)
 }
 
+function readSecureJournal(path) {
+  let before
+  let fd
+  try {
+    before = lstatSync(path)
+    assertSecureFileStat(before, {
+      label: 'restore_journal',
+      maxBytes: 4096,
+      modes: [0o600],
+    })
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = fstatSync(fd)
+    assertSecureFileStat(opened, {
+      label: 'restore_journal',
+      maxBytes: 4096,
+      modes: [0o600],
+    })
+    if (opened.dev !== before.dev || opened.ino !== before.ino) {
+      failure('restore_journal_file_security_invalid')
+    }
+    const value = readFileSync(fd)
+    const after = lstatSync(path)
+    if (
+      after.dev !== opened.dev
+      || after.ino !== opened.ino
+      || after.nlink !== 1
+      || after.uid !== 0
+      || after.gid !== 0
+      || (after.mode & 0o777) !== 0o600
+    ) failure('restore_journal_file_security_invalid')
+    return value
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (/^restore_journal_[a-z0-9_]+$/.test(message)) throw error
+    failure('restore_journal_file_security_invalid')
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
 function writeExclusive(path, value, mode) {
   writeFileSync(path, value, { flag: 'wx', mode })
   chmodSync(path, mode)
@@ -260,21 +378,23 @@ export async function main() {
     backupKey: process.env.KELION_BACKUP_KEY_FILE?.trim() ?? '',
     databaseUrl: process.env.KELION_DATABASE_URL_FILE?.trim() ?? '',
     encryptionKey: process.env.KELION_RESTORE_ENCRYPTION_KEY_FILE?.trim() ?? '',
+    journal: process.env.KELION_RESTORE_JOURNAL_FILE?.trim() ?? '',
     pgpass: process.env.KELION_RESTORE_PGPASS_FILE?.trim() ?? '',
     plan: process.env.KELION_RESTORE_PLAN_FILE?.trim() ?? '',
     proof: process.env.KELION_RESTORE_PROOF_FILE?.trim() ?? '',
     proofKey: process.env.KELION_PROOF_KEY_FILE?.trim() ?? '',
   }
-  if (Object.values(paths).some((value) => !value || /[\0\r\n]/.test(value))) failure('restore_paths_invalid')
+  const journalMode = paths.journal.length > 0
+  const requiredPaths = journalMode
+    ? [paths.backupDirectory, paths.backupKey, paths.databaseUrl, paths.encryptionKey, paths.journal, paths.pgpass, paths.plan]
+    : [paths.backupDirectory, paths.backupKey, paths.databaseUrl, paths.encryptionKey, paths.pgpass, paths.plan, paths.proof, paths.proofKey]
+  if (
+    requiredPaths.some((value) => !value || /[\0\r\n]/.test(value))
+    || Object.values(paths).some((value) => /[\0\r\n]/.test(value))
+  ) failure('restore_paths_invalid')
 
   const databaseUrl = readSecureFile(paths.databaseUrl, {
     label: 'database_url',
-    maxBytes: 65_536,
-    modes: [0o400, 0o440, 0o600],
-    rootGroup: false,
-  }).toString('utf8').trim()
-  const proofKey = readSecureFile(paths.proofKey, {
-    label: 'restore_proof_key',
     maxBytes: 65_536,
     modes: [0o400, 0o440, 0o600],
     rootGroup: false,
@@ -284,32 +404,67 @@ export async function main() {
     maxBytes: 65_536,
     modes: [0o600],
   }).toString('utf8').trim()
-  const proof = parseCanonicalJson(readSecureFile(paths.proof, {
-    label: 'restore_proof',
-    maxBytes: 65_536,
-    modes: [0o600],
-  }).toString('ascii'), 'restore_proof_json_invalid')
-
   const identity = parseLocalSocketDatabaseUrl(databaseUrl)
-  const backupSha256 = verifyRestoreProof(proof, identity, proofKey)
+  let backupSha256
+  let expectedBackupPath = ''
+  let expectedBackupSize = 0
+  let targetOid = null
+  let scratchOid = null
+  if (journalMode) {
+    const journal = validateRestoreJournal(
+      parseCanonicalJson(readSecureJournal(paths.journal).toString('ascii'), 'restore_journal_json_invalid'),
+      { backupDirectory: paths.backupDirectory, identity },
+    )
+    backupSha256 = journal.backupSha256
+    expectedBackupPath = journal.backupPath
+    expectedBackupSize = journal.backupSizeBytes
+    targetOid = journal.targetOid
+    scratchOid = journal.scratchOid
+  } else {
+    const proofKey = readSecureFile(paths.proofKey, {
+      label: 'restore_proof_key',
+      maxBytes: 65_536,
+      modes: [0o400, 0o440, 0o600],
+      rootGroup: false,
+    }).toString('utf8').trim()
+    const proof = parseCanonicalJson(readSecureFile(paths.proof, {
+      label: 'restore_proof',
+      maxBytes: 65_536,
+      modes: [0o600],
+    }).toString('ascii'), 'restore_proof_json_invalid')
+    backupSha256 = verifyRestoreProof(proof, identity, proofKey)
+  }
   const { backupPath, encryption } = await findAuthenticatedBackup({
     backupDirectory: paths.backupDirectory,
     backupSha256,
     masterKey,
   })
-  const nonce = randomBytes(6).toString('hex')
-  const timestamp = new Date().toISOString().replaceAll(/[-:TZ.]/g, '').slice(0, 14)
+  const resolvedBackupPath = resolve(backupPath)
+  const backupSizeBytes = lstatSync(resolvedBackupPath).size
+  if (
+    journalMode
+    && (resolvedBackupPath !== expectedBackupPath || backupSizeBytes !== expectedBackupSize)
+  ) failure('restore_journal_backup_identity_changed')
+  const names = deriveRestoreNames({
+    backupPath: resolvedBackupPath,
+    backupSha256,
+    database: identity.database,
+    user: identity.user,
+  })
   const plan = {
     schema: 1,
-    backupPath: resolve(backupPath),
+    backupPath: resolvedBackupPath,
     backupSha256,
+    backupSizeBytes,
     database: identity.database,
     host: identity.host,
     port: identity.port,
     user: identity.user,
-    scratchDatabase: `kelion_restore_${nonce}`,
-    quarantineDatabase: `kelion_quarantine_${timestamp}_${nonce.slice(0, 6)}`,
-    failedDatabase: `kelion_restore_failed_${nonce}`,
+    scratchDatabase: names.scratchDatabase,
+    scratchOid,
+    quarantineDatabase: names.quarantineDatabase,
+    failedDatabase: names.failedDatabase,
+    targetOid,
   }
   if (basename(plan.backupPath) !== basename(backupPath)) failure('backup_path_invalid')
   writeExclusive(paths.plan, `${JSON.stringify(plan)}\n`, 0o600)

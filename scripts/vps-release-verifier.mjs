@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
-import { evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, parseDeployTitle } from './lib/vps-release-verification.mjs'
+import { evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, parseDeployTitle, selectDeployEvidence } from './lib/vps-release-verification.mjs'
 
 const repository = process.env.GITHUB_REPOSITORY ?? ''
 const token = process.env.GH_TOKEN ?? ''
@@ -116,13 +116,11 @@ async function snapshot(commit) {
     const identity = parseDeployTitle(run.display_title)
     return identity?.commit === commit && identity?.ciRunId === ci?.id && identity?.buildRunId === build?.id
   })
-  const deploy = matchingDeploys.sort((left, right) => Number(left.id) - Number(right.id))[0]
+  const deploySelection = await selectDeployEvidence(matchingDeploys, runJobs)
+  const deploy = deploySelection.run
   const identity = parseDeployTitle(deploy?.display_title)
   let deployIdentityValid = Boolean(identity && deploy?.event === 'workflow_dispatch' && deploy?.head_branch === 'master')
-  if (deploy?.conclusion === 'success') {
-    const jobs = await runJobs(deploy.id)
-    deployIdentityValid &&= jobs.some((job) => job.name === 'release' && job.conclusion === 'success')
-  }
+  if (deploy?.conclusion === 'success') deployIdentityValid &&= deploySelection.releaseJobQualified
   return { commit, masterHead, branchProtection: protection, ci: ci ? { id: ci.id, status: ci.status, conclusion: ci.conclusion } : null, build: build ? { id: build.id, status: build.status, conclusion: build.conclusion } : null, artifactVerified, deploy: deploy ? { id: deploy.id, status: deploy.status, conclusion: deploy.conclusion } : null, deployIdentityValid }
 }
 

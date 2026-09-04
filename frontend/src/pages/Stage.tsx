@@ -73,6 +73,7 @@ import { productConfig } from '../lib/productConfig'
 import { scopedClientKey } from '../lib/clientState'
 import { trustedTradingMessage } from '../lib/tradingBridge'
 import {
+  constructorActorLabel,
   constructorCiText,
   constructorHasVerifiedLiveResult,
   constructorJobsFromSnapshot,
@@ -672,7 +673,10 @@ const isBuildLiveJob = (input: unknown): input is BuildLiveJob => {
     && Number.isFinite(Date.parse(value.updatedAt))
     && (value.pct === undefined || value.pct === null || (typeof value.pct === 'number'
       && Number.isFinite(value.pct) && value.pct >= 0 && value.pct <= 100))
-    && (value.continuity === undefined || isConstructorContinuity(value.continuity))
+    && (value.continuity === undefined || (
+      isConstructorContinuity(value.continuity)
+      && (value.continuity.modelOutcome === null || value.status === 'failed')
+    ))
     && (value.workCard === undefined || value.workCard === null || isConstructorWorkCard(value.workCard))
 }
 
@@ -881,7 +885,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   {j.workCard.heartbeatAt && <time dateTime={j.workCard.heartbeatAt}> · heartbeat {new Date(j.workCard.heartbeatAt).toLocaleTimeString()}</time>}
                   <details>
                     <summary>Fisa canonica de lucru</summary>
-                    <div>Actor: {j.workCard.actor ?? 'in asteptare'}</div>
+                    <div>Actor: {constructorActorLabel(j.workCard.actor) ?? 'in asteptare'}</div>
                     <div>Acceptare: {j.workCard.acceptanceCriteria.join(' · ')}</div>
                     <div>Plan: {j.workCard.plan.map((step) => `${step.label} [${step.state}]`).join(' · ')}</div>
                     {j.workCard.contextLinks.map((link) => <div key={link}><a href={link} target="_blank" rel="noreferrer">Sursa</a></div>)}

@@ -27,6 +27,7 @@ import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
 import { constructorRoutes } from './routes/constructor.js'
+import { constructorModelControlRoutes } from './routes/constructorModelControl.js'
 import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
@@ -337,6 +338,7 @@ await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
 await app.register(browserRoutes)
 await app.register(constructorRoutes)
+await app.register(constructorModelControlRoutes)
 await app.register(offlineRoutes)
 await app.register(auzRoutes)
 await app.register(authLocalRoutes)
@@ -446,8 +448,8 @@ try {
     })
     const constructorWatchdog = async (): Promise<void> => {
       const result = await deblocheazaJoburileClaimate()
-      if (result.repuse > 0 || result.abandonate > 0) {
-        app.log.warn(result, 'constructor watchdog recovered stale jobs')
+      if (result.terminalizate > 0) {
+        app.log.warn(result, 'constructor watchdog terminalized stale jobs')
       }
     }
     void constructorWatchdog().catch((error) => {

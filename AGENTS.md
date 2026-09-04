@@ -15,10 +15,11 @@ secrete sau presupuneri din conversație.
 
 ## Invariante de produs
 
-- OpenAI Responses este singurul creier online al produsului. OpenAI Realtime,
-  transcrierea, imaginea și video pot fi folosite numai prin backend, cu modele
-  validate din configurare. Nu reintroduce Gemini, Jules, Devin, Kimi, GLM,
-  Ollama, OpenRouter sau alt fallback cloud.
+- OpenAI Responses este singurul creier online al conversației Kelion. OpenAI
+  Realtime, transcrierea, imaginea și video pot fi folosite numai prin backend,
+  cu modele validate din configurare. Constructorul este excepția explicită:
+  rulează separat, exclusiv cu OpenCode și modelul Qwen local prin llama.cpp;
+  nu este fallback pentru chat și nu folosește provider AI plătit sau cloud.
 - Modul avion rulează exclusiv pe dispozitiv. Modelele/runtime-urile locale
   offline sunt permise, nu primesc chei și nu devin fallback online de server.
 - Browserul nu primește niciodată chei OpenAI, tokenuri Codex, refresh-tokenuri
@@ -26,12 +27,12 @@ secrete sau presupuneri din conversație.
 - Adminul este determinat doar din identitatea Google verificată pe server și
   emailul configurat. Vocea și fața sunt funcții opționale de personalizare,
   nu factori de autentificare sau autorizare.
-- Cheia project-scoped `OPENAI_API_KEY` este unica identitate de inferență:
-  alimentează Responses, Realtime și media prin backend și autentifică
-  Constructorul prin clientul oficial `codex login --with-api-key`, cu cheia
-  transmisă numai pe stdin. Constructorul rulează într-un worker separat;
-  web-ul doar pune joburi validate în coadă și afișează starea, fără chei,
-  OAuth OpenAI sau execuție shell/Git în procesul aplicației.
+- Cheia project-scoped `OPENAI_API_KEY` este unica identitate pentru inferența
+  cloud a aplicației și alimentează Responses, Realtime și media prin backend.
+  Nu ajunge la Constructor. Constructorul rulează într-un worker separat cu
+  OpenCode/Qwen local; web-ul și clientul Constructor pentru laptop pun aceleași
+  joburi validate în aceeași coadă și afișează starea, fără chei AI, OAuth
+  OpenAI sau execuție shell/Git în procesul aplicației.
 - `OPENAI_ADMIN_KEY` este o credențială distinctă, montată numai în backend-ul
   Kelion Admin pentru endpointurile OpenAI de administrare (costuri, usage și
   diagnostic). Nu poate fi folosită pentru inferență, Realtime, media sau
@@ -53,6 +54,9 @@ secrete sau presupuneri din conversație.
 - Nicio rută publică nu primește căi de fișiere, SQL, shell, URL-uri arbitrare,
   PAN/CVC sau tokenuri. Orice input extern are schemă, limită de mărime și
   autorizare la obiectul utilizatorului.
+- Taskurile pentru agentul Copilot rămân strict în repository-ul curent; nu
+  includ comenzi de acces pe hosturi externe (SSH/VPS), mutații pe sisteme
+  private sau instrucțiuni în afara sandboxului de CI.
 - Mutațiile pe cookie cer protecție CSRF și verificare strictă Origin. Cookie-ul
   de sesiune este Secure, HttpOnly, host-only și nu conține tokenuri OAuth.
 - HTML generat/iframe este sandboxat cu CSP minim; autentificarea Google se
@@ -69,7 +73,14 @@ Fluxul unic este:
 
 1. admin Google autentificat creează un job validat;
 2. workerul HMAC îl revendică într-un checkout/worktree dedicat;
-3. `codex exec --ephemeral --sandbox workspace-write` produce schimbarea;
+3. OpenCode 1.18.25 folosește prin llama.cpp profilul local ales manual de
+   owner: Qwen3.6-35B-A3B implicit sau Qwen3.5-122B-A10B. Workerul nu schimbă
+   profilul și nu reexecută automat ordinul. Numai un rezultat FAST
+   `unresolved` real poate recomanda POWERFUL; o eroare tehnică nu recomandă
+   alt model, iar POWERFUL `unresolved` este terminal. Un singur model este
+   servit în RAM, iar orice boot revine la FAST. Executorul are acces complet
+   la host prin sudo, conform cerinței ownerului; ordinul, lease-ul, worktree-ul
+   și jurnalul rămân controlate de worker, iar secretele nu se publică în output;
 4. schimbările dependente intră într-un singur release train bazat pe ultimul
    `origin/master`; rulează `node scripts/release-train-preflight.mjs` și toate
    porțile locale înainte de PR;
