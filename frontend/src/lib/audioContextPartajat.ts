@@ -77,22 +77,3 @@ export function obtineAudioContext(): AudioContext | null {
   armeazaDeblocajul(nou)
   return nou
 }
-
-/** Contextul viu, dacă există deja — fără să creeze unul. */
-export function audioContextCurent(): AudioContext | null {
-  return esteViu(ctx) ? ctx : null
-}
-
-/** Închide contextul partajat (rar: teste, oprirea completă a audio-ului).
- *  Următorul `obtineAudioContext()` va crea unul nou. */
-export async function inchideAudioContextPartajat(): Promise<void> {
-  const c = ctx
-  ctx = null
-  deblocajArmat = false
-  if (!esteViu(c)) return
-  try {
-    await c.close()
-  } catch {
-    /* deja închis */
-  }
-}

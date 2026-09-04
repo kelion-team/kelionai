@@ -68,23 +68,22 @@ describe('audioContextPartajat', () => {
   it('creează leneș un singur context și îl reutilizează', async () => {
     const m = await modul()
     expect(AudioContextFals.create).toBe(0)
-    expect(m.audioContextCurent()).toBeNull()
     const a = m.obtineAudioContext()
     const b = m.obtineAudioContext()
     const c = m.obtineAudioContext()
     expect(a).not.toBeNull()
     expect(b).toBe(a)
     expect(c).toBe(a)
-    expect(m.audioContextCurent()).toBe(a)
     expect(AudioContextFals.create).toBe(1)
   })
 
   it('după close re-creează un context nou, o singură dată', async () => {
     const m = await modul()
     const a = m.obtineAudioContext()
-    await m.inchideAudioContextPartajat()
+    // Închiderea vine din afara modulului — exact cum o face browserul sau un
+    // consumator care termină; modulul trebuie s-o observe și să uite contextul.
+    await a!.close()
     expect(a!.state).toBe('closed')
-    expect(m.audioContextCurent()).toBeNull()
     const b = m.obtineAudioContext()
     expect(b).not.toBe(a)
     expect(b!.state).not.toBe('closed')
@@ -96,7 +95,6 @@ describe('audioContextPartajat', () => {
     const m = await modul()
     const a = m.obtineAudioContext()
     await a!.close() // ex. browserul sau un consumator vechi
-    expect(m.audioContextCurent()).toBeNull()
     const b = m.obtineAudioContext()
     expect(b).not.toBe(a)
     expect(AudioContextFals.create).toBe(2)
@@ -137,7 +135,6 @@ describe('audioContextPartajat', () => {
     vi.stubGlobal('AudioContext', ContextCarePica)
     const m2 = await modul()
     expect(m2.obtineAudioContext()).toBeNull()
-    expect(m2.audioContextCurent()).toBeNull()
   })
 })
 
