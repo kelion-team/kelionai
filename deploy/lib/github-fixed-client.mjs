@@ -10,7 +10,12 @@ export async function githubRequest(token, repository, path, method = 'GET', bod
   validateRepository(repository)
   if (token.length < 32 || /[\r\n]/.test(token)) fail('Credentială GitHub invalidă')
   const prefix = `/repos/${repository}`
-  if (!path.startsWith(`${prefix}/`) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(path.split('?')[0])) fail('Cale GitHub nepermisă')
+  // Preflightul publisherului interogheaza si radacina repository-ului
+  // (/repos/owner/repo), fara slash final. Ramanem strict la acelasi
+  // repository, dar acceptam si calea exacta, nu doar sub-caile ei.
+  const requested = path.split('?')[0]
+  if ((requested !== prefix && !requested.startsWith(`${prefix}/`))
+    || /(?:^|\/)\.{1,2}(?:\/|$)/.test(requested)) fail('Cale GitHub nepermisă')
   const response = await fetch(new URL(path, 'https://api.github.com'), {
     method,
     headers: {
