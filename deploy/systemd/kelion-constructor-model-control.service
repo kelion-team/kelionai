@@ -28,6 +28,9 @@ Restart=on-failure
 RestartSec=3s
 RuntimeDirectory=kelion-constructor-model-control
 RuntimeDirectoryMode=0750
+# Keep the bind-mounted runtime directory inode stable across controller
+# restarts so the live app never retains a stale control-socket mount.
+RuntimeDirectoryPreserve=yes
 BindReadOnlyPaths=/root/kelion/runtime:/run/kelion-constructor-model-control/deploy-journals
 BindReadOnlyPaths=/root/kelion/publicare.lock:/run/kelion-constructor-model-control/publicare.lock
 NoNewPrivileges=true
