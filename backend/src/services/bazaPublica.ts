@@ -3,9 +3,9 @@ import { config } from '../config.js'
 // ── BAZA PUBLICĂ A LINKURILOR DE ECRAN (10 aug, ownerul: „nu poate afișa
 // hărți") ────────────────────────────────────────────────────────────────────
 // MĂSURAT: cadrele de monitor cu URL absolut se construiau din Host-ul
-// cererii. Pe calea VOCALĂ, creierul e chemat INTERN (turaCreierului →
-// http://127.0.0.1:8080/api/chat), deci Host = 127.0.0.1:8080 → harta pleca
-// spre browserul omului ca https://127.0.0.1:8080/api/route?… — browserul LUI
+// cererii. Pe calea VOCALĂ, creierul e chemat INTERN (turaCreierului apelează
+// ruta internă /api/chat cu Host = loopback:8080) → harta pleca spre browserul
+// omului ca https://loopback:8080/api/route?… — browserul LUI
 // încerca să ia harta de pe propriul calculator → nimic, întotdeauna. Pe chatul
 // scris (Host = kelionai.app) mergea — de-aia bug-ul a trăit atât: se ascundea
 // exact pe calea pe care o folosește ownerul (vocea).

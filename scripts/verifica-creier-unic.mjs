@@ -20,6 +20,15 @@ function tiparNumeFurnizor(nume) {
 const TIPARE_RETRASE = [
   ...['gemini', 'jules', 'devin', 'kimi', 'glm', 'openrouter', 'ollama', 'anthropic', 'claude', 'mistral', 'groq', 'deepseek']
     .map((nume) => ({ nume, re: tiparNumeFurnizor(nume) })),
+  // Prinde și cablajul Ollama mascat sub un nume generic: portul implicit sau
+  // API-ul local specific. Numele furnizorului poate lipsi complet din cod.
+  // „version" este exclus din potrivirea bazată pe URL, deoarece /api/version
+  // este și endpoint-ul de health al aplicației proprii (port 8080 / 18080);
+  // portul 11434 rămâne prins prin \b11434\b, indiferent de cale.
+  {
+    nume: 'ollama-transport',
+    re: /\b11434\b|(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|\[::1\]|host\.docker\.internal)(?::\d+)?\/api\/(?:chat|generate|tags|show|pull|push|create|copy|delete|embed|embeddings|ps|blobs)\b/i,
+  },
   // Nume ambigue în limbaj natural: le prindem numai în forma de produs/config.
   { nume: 'together-ai', re: /\btogether\.ai\b|\bTOGETHER_(?:API|KEY|MODEL)\b|\bprovider[^\n]{0,30}\btogether\b/i },
   { nume: 'veo', re: /\bveo[-_]\d|\bVEO_(?:API|KEY|MODEL)\b|\bGoogle[^\n]{0,30}\bVeo\b|\bveoModel\b/i },
