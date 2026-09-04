@@ -1839,9 +1839,27 @@ fi
 CONSTRUCTOR_UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
 [ ! -e "$CONSTRUCTOR_UPGRADE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_UPGRADE_JOURNAL" ] \
   || die 'un upgrade Constructor exterior este pending; release-ul este refuzat'
-[ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
-  && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
-  || die 'o barieră unit-only Constructor este pending; release-ul este refuzat'
+# O barieră unit-only rămasă după rollback-ul pre-PONR al ACESTEI cereri nu mai
+# blochează circular deploy/boot/activare: jurnalul quiesce aparține tuplei
+# curente, este într-o fază de dinaintea markerului, iar helperul owner-aware o
+# consumă numai după dovada exactă a generației vechi. Orice altă barieră
+# (upgrade exterior, alt request, fază post-marker) rămâne fail-closed.
+if [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ]; then
+  [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
+    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending" \
+    || die 'bariera unit-only Constructor pending este nesigură; release-ul este refuzat'
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg requestId "$KELION_RELEASE_REQUEST_ID" --arg commit "$COMMIT_SHA" '
+      (.schema == 1 or .schema == 2) and .requestId == $requestId and .commit == $commit and
+      (.phase == "armed" or .phase == "quiesced" or .phase == "active-prepared")
+    ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'o barieră unit-only Constructor este pending fără rollback-ul pre-PONR al acestei cereri; release-ul este refuzat'
+fi
 
 # Repetăm dovada sub publication lock: preflightul anterior este numai bariera
 # timpurie, iar acest punct închide TOCTOU înainte de recovery sau primul jurnal.
@@ -1956,7 +1974,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=22c6cf4e8b8dd2f0abdaad24370661065323a46228c116b2bd577588e3476708
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=829687d4571805244134feb721375cdc2f3f0b19d297daf11ad40c8c40b46057
 
 validate_compatible_activation_blocker() {
   local blocker=$1

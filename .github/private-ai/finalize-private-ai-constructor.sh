@@ -56,7 +56,7 @@ readonly LEGACY_ACTIVATION_GC_RUNTIME_CUTOVER_SHA256=ce136f70aa3c9672f1491605564
 # hashul este autentificat de istoricul canonic al aceluiași fișier.
 readonly UPGRADE_RUNTIME_CUTOVER_SHA256=4730d9f189770fafd23b4dec1807e889a62bbe357fc8e8b3f153e216bf71eaad
 readonly PREVIOUS_RUNTIME_CUTOVER_SHA256=bb852ba09260b628c1fa27b3f00556ea9ebbdf8047b0e9764d3729eca7cff2b7
-readonly EXPECTED_RUNTIME_CUTOVER_SHA256=22c6cf4e8b8dd2f0abdaad24370661065323a46228c116b2bd577588e3476708
+readonly EXPECTED_RUNTIME_CUTOVER_SHA256=829687d4571805244134feb721375cdc2f3f0b19d297daf11ad40c8c40b46057
 readonly RETIRED_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
 readonly LEGACY_WORKER_DROPIN=/etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
 readonly LEGACY_CODEX_REAL=/opt/kelion-codex/bin/codex-real
