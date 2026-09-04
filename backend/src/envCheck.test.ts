@@ -16,7 +16,7 @@ vi.mock('./config.js', () => ({
     googleTokenEncryptionKey: ['GOOGLE_TOKEN_ENCRYPTION_KEY'],
     serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
     mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
-    codexWorkerSecret: ['CODEX_WORKER_SECRET'],
+    constructorWorkerSecret: ['CODEX_WORKER_SECRET'],
     constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
     constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
     constructorModelControlSecret: ['CONSTRUCTOR_MODEL_CONTROL_SECRET'],

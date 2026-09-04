@@ -9,7 +9,7 @@ const secrets = {
 
 vi.mock('./config.js', () => ({
   config: {
-    codexWorker: { enabled: true, secret: secrets.worker },
+    constructorWorker: { enabled: true, secret: secrets.worker },
     constructorPublisher: { enabled: true, secret: secrets.publisher },
     constructorRelease: { enabled: true, secret: secrets.release },
   },

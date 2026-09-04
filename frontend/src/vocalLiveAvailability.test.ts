@@ -82,4 +82,18 @@ describe('OpenAI Live — verdict terminal și retry mărginit', () => {
     expect(clasificaInchidereVocalLive(1008, 'session_invalid')).toBe('unauthorized')
     expect(clasificaInchidereVocalLive(1000, 'idle_timeout')).toBe('idle_timeout')
   })
+
+  it('închiderea curată (1000 fără motiv de eroare) NU e eroare — null, nu transport', () => {
+    // Înainte: orice 1000 devenea 'transport' → console.error → reluare inutilă.
+    expect(clasificaInchidereVocalLive(1000, '')).toBeNull()
+    expect(clasificaInchidereVocalLive(1000, 'bye')).toBeNull()
+    expect(clasificaInchidereVocalLive(1000, 'text liber de la server')).toBeNull()
+  })
+
+  it('închiderile anormale rămân erori clasificate', () => {
+    expect(clasificaInchidereVocalLive(1006, '')).toBe('transport')
+    expect(clasificaInchidereVocalLive(1011, 'vocal_live_indisponibil')).toBe('not_configured')
+    expect(clasificaInchidereVocalLive(1011, 'altceva')).toBe('provider_5xx')
+    expect(clasificaInchidereVocalLive(4000, '')).toBe('transport')
+  })
 })

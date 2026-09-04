@@ -9,6 +9,7 @@ import {
   exactCanonicalArtifactId,
   exactCanonicalBuildRunId,
   genericReleaseRequestId,
+  releasedProductionRunId,
 } from './release-dispatch-owner.mjs'
 import { GITHUB_ACTIONS_APP_ID, RELEASE_QA_GATES, REQUIRED_MERGE_CHECKS, evaluateBranchProtection, evaluateLiveSample, evaluateReleaseEvidence, matrixIsFailClosed, parseDeployTitle, selectDeployEvidence } from './lib/vps-release-verification.mjs'
 
@@ -173,6 +174,44 @@ test('guardul deploy ignoră runul off-master și execută numai primul run mast
   const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
   assert.match(workflow, /CANONICAL_WORKFLOW_SHA: \$\{\{ github\.sha \}\}/)
   assert.match(workflow, /canonical-production-run[\s\S]*"\$CANONICAL_WORKFLOW_SHA" "\$GITHUB_RUN_ID"/)
+})
+
+test('guardul deploy refuză un request nou pentru o tuplă commit+CI+build deja publicată cu succes', () => {
+  const uuid = '123e4567-e89b-42d3-a456-426614174000'
+  const other = '7575dffc-068f-4628-973f-1f0813f9de5e'
+  const released = {
+    id: 20,
+    event: 'workflow_dispatch',
+    status: 'completed',
+    conclusion: 'success',
+    display_title: `production-${uuid}-${sha}-123-456`,
+    head_branch: 'master',
+    head_sha: sha,
+  }
+  const duplicate = { ...released, id: 30, conclusion: 'failure', display_title: `production-${other}-${sha}-123-456` }
+  assert.equal(releasedProductionRunId([{ workflow_runs: [released, duplicate] }], sha, 123, 456, duplicate.id), released.id,
+    'un alt UUID pentru aceeași tuplă publicată este un duplicat')
+  assert.equal(releasedProductionRunId([{ workflow_runs: [released] }], sha, 123, 456, released.id), 0,
+    'runul care a publicat tupla nu se vede pe sine ca duplicat')
+  assert.equal(releasedProductionRunId([{ workflow_runs: [{ ...released, conclusion: 'failure' }] }], sha, 123, 456, 30), 0,
+    'un run picat nu dovedește publicarea')
+  assert.equal(releasedProductionRunId([{ workflow_runs: [{ ...released, status: 'in_progress', conclusion: null }] }], sha, 123, 456, 30), 0,
+    'un run încă în curs nu dovedește publicarea')
+  assert.equal(releasedProductionRunId([{ workflow_runs: [{ ...released, head_branch: 'codex/vechi' }] }], sha, 123, 456, 30), 0)
+  assert.equal(releasedProductionRunId([{ workflow_runs: [{ ...released, display_title: `production-${uuid}-${sha}-124-456` }] }], sha, 123, 456, 30), 0,
+    'alt CI canonic este altă tuplă')
+  assert.equal(releasedProductionRunId([{ workflow_runs: [{ ...released, head_sha: 'b'.repeat(40) }] }], sha, 123, 456, 30), 0)
+
+  const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /RELEASE_MODE: \$\{\{ inputs\.release_mode \}\}[\s\S]*canonical-production-run/)
+  const canonical = workflow.indexOf('canonical-production-run')
+  const releasedGuard = workflow.indexOf('released-production-run', canonical)
+  const execute = workflow.indexOf("echo 'execute=true'", releasedGuard)
+  assert.ok(canonical >= 0 && releasedGuard > canonical && execute > releasedGuard,
+    'guardul tuplei publicate precede execute=true')
+  assert.match(workflow, /"\$RELEASE_MODE" = release \] && \[ -n "\$CI_RUN_ID" \] && \[ -n "\$BUILD_RUN_ID" \]/)
+  assert.match(workflow, /"\$work\/deploy-runs-pages\.json" "\$CANDIDATE_SHA" "\$CI_RUN_ID" "\$BUILD_RUN_ID" "\$GITHUB_RUN_ID"/)
+  assert.match(workflow, /if \[ "\$released" != 0 \]; then\n\s*echo 'execute=false'/)
 })
 
 test('dispatcherul generic cere exact un build și un artefact canonic pentru același SHA și CI', () => {

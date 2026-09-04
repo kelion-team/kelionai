@@ -3838,7 +3838,7 @@ async function runTool(
       }
       // Conversația validează ordinul; adaptorul determinist îl normalizează,
       // apoi aceeași cerere intră direct în build_jobs pentru OpenCode + Qwen local (llama.cpp).
-      const { planificaOrdinConstructor } = await import('../services/codexWorker.js')
+      const { planificaOrdinConstructor } = await import('../services/constructorWorker.js')
       const orderCuPlan = await planificaOrdinConstructor(order)
       let intake: Awaited<ReturnType<typeof createBuildJob>>
       try {
@@ -3889,7 +3889,7 @@ async function runTool(
       const incidents = await getConstructorIncidentsForJobs(jobs.map((job) => job.id))
       if (!incidents) return JSON.stringify({ error: 'registru_incidente_necitibil' })
       return JSON.stringify({
-        constructor: config.codexWorker.enabled
+        constructor: config.constructorWorker.enabled
           ? 'OpenCode + Qwen local (llama.cpp) activ — ordinele sunt revendicate exclusiv din build_jobs'
           : 'OpenCode + Qwen local (llama.cpp) este dezactivat; ordinele rămân în build_jobs',
         // `progress` = the constructor's current step (Stage 4) — Kelion can

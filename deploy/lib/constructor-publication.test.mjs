@@ -239,7 +239,7 @@ test('publisherul raportează coduri deterministe și tratează schimbarea bazei
   assert.match(publisher, /hasExactRequiredCheckNames\(contexts, REQUIRED_CHECKS\)/)
   assert.match(publisher, /Protecția cu un control obligatoriu suplimentar a fost acceptată/)
   assert.match(publisher, /matching\.length !== 1/)
-  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*bypass\.users\.length !== 0[\s\S]*bypass\.teams\.length !== 0[\s\S]*bypass\.apps\.length !== 0/)
+  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*!emptyNamedActorSet\(bypass\)/)
   assert.match(publisher, /collaborators\/[$][{]encodeURIComponent\(login\)[}]\/permission[\s\S]*\['write', 'maintain', 'admin'\]/)
   assert.match(publisher, /Recovery-ul a acceptat o asociere explicită la un PR străin/)
   assert.doesNotMatch(publisher, /policy\.appId === null/)
@@ -2711,6 +2711,21 @@ test('ledger-ul release permite retry numai după rollback dovedit și oprește 
   assert.match(cutover, /quiesce_units_for_recovery[\s\S]*publish_runtime_ready_stamp[\s\S]*restore_constructor_timers[\s\S]*clear_deploy_quiesce_journal/)
 })
 
+test('o cerere nouă pentru commitul deja activ este no-op fără nicio mutație pe VPS', () => {
+  const deploy = read('deploy/deploy.sh')
+  const successNoop = deploy.indexOf('status=already-succeeded')
+  const activeNoop = deploy.indexOf('status=already-active', successNoop)
+  const arm = deploy.indexOf('write_constructor_deploy_quiesce_journal armed', activeNoop)
+  assert.ok(successNoop >= 0 && activeNoop > successNoop && arm > activeNoop,
+    'no-op-ul already-active precede armarea jurnalului quiesce și ledger-ul started')
+  const guard = deploy.slice(deploy.lastIndexOf('\nif [', activeNoop), activeNoop)
+  assert.match(guard, /release_request_state" = none/)
+  assert.match(guard, /-z "\$recovered_constructor_quiesce_phase"/)
+  assert.match(guard, /release_request_live_proof; then/)
+  assert.match(guard, /constructor_gate_matches_candidate \\\n\s*\|\| die 'commitul este deja activ, dar gate-ul Constructor nu îi corespunde/)
+  assert.doesNotMatch(guard, /reconcile_constructor_after_completed_release|write_release_request_ledger|write_constructor_deploy_quiesce_journal/)
+})
+
 test('jurnalul deploy leagă markerul activ de gate și nu poate fi consumat de recovery generic', () => {
   const deploy = read('deploy/deploy.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
@@ -5016,21 +5031,31 @@ ${executableFlow}
     'apelantul generic fără owner trebuie refuzat și pentru committed după quiesce')
 })
 
-test('cutover-ul final al upgrade-ului restage-uiește numai configul worker byte-identic, fără restart backend', () => {
+test('cutover-ul final al upgrade-ului restage-uiește toate cele trei configuri byte-identic, fără restart backend', () => {
   const upgrade = read('deploy/upgrade-constructor.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
-  assert.match(recommit, /config_file=\$CONFIG_ROOT\/codex-worker\.env/)
+  // Cutover-ul acceptă zero sau trei configuri, niciodată una: o stagiere
+  // parțială era refuzată și lăsa upgrade-ul blocat. Toate cele trei se
+  // stagiază împreună, fiecare verificată byte cu byte după copiere.
+  for (const logical of [
+    'constructor-config.codex-worker.env',
+    'constructor-config.constructor-publisher.env',
+    'constructor-config.constructor-release.env',
+  ]) assert.ok(recommit.includes(logical), `configul ${logical} trebuie stageat`)
+  assert.match(recommit, /for config_file in "\$\{config_files\[@\]\}"/)
   assert.match(recommit,
     /--recover-only "\$compose" --leave-constructor-quiesced[\s\S]*restore_snapshot_markers/)
   assert.match(recommit,
-    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/\$logical"/)
   assert.match(recommit,
-    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/\$logical"/)
+  // Manifestul se scrie o linie per config și trebuie să aibă exact trei:
+  // asta este chiar regula pe care cutover-ul o impune la primire.
+  assert.match(recommit, /printf '%s\\n' "\$logical" >> "\$cutover_stage\/manifest"/)
+  assert.match(recommit, /\[ "\$\(wc -l < "\$cutover_stage\/manifest"\)" \] *-eq 3|-eq 3/)
   assert.match(recommit,
-    /printf [^\n]*constructor-config\.codex-worker\.env[^\n]*> "\$cutover_stage\/manifest"/)
-  assert.match(recommit,
-    /fsync_path "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
+    /fsync_path "\$cutover_stage\/files\/\$logical"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
   assert.match(recommit,
     /KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1[\s\\]*KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"[\s\\]*"\$helper" "\$cutover_stage" "\$compose"/)
   assert.doesNotMatch(recommit,
@@ -6325,4 +6350,45 @@ false
   assert.ok(Number.isInteger(event.line) && event.line > 0)
   assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
   assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
+})
+
+// Instalatorul si controllerul valideaza aceleasi artefacte private-ai, dar prin
+// mecanisme diferite: primul dupa nume de cont, al doilea numeric. Cand cele doua
+// contracte diverg, detectInstalledProfiles intoarce [] pe orice gazda unde
+// `privateai` nu are exact uid-ul hardcodat, controllerul raporteaza `unavailable`
+// si claim-ul raspunde 503 constructor_model_not_ready - fara ca vreun test sa cada,
+// pentru ca suita controllerului injecteaza un dublu peste fastArtifactsInstalled.
+// Testul de fata compara direct cele doua contracte, nu logica fiecaruia separat.
+test('contractul de proprietate al artefactelor private-ai este acelasi in installer si in controller', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const controller = read('deploy/constructor-model-control.mjs')
+
+  // Installerul ramane sursa de adevar si valideaza dupa nume de cont.
+  assert.match(installer, /privateai:privateai:600:1/)
+  assert.match(installer, /privateai:privateai:20419565568:1/)
+
+  const fastArtifacts = controller.slice(
+    controller.indexOf('function fastArtifactsInstalled('),
+    controller.indexOf('function discoverFastModelPath('),
+  )
+  assert.ok(fastArtifacts.length > 0, 'fastArtifactsInstalled nu a putut fi izolata')
+
+  // Controllerul nu are voie sa compare proprietarul cu un uid/gid literal:
+  // identitatile conturilor difera de la o gazda la alta, iar 10050 este gid-ul
+  // grupului kelion-app, nu al contului privateai.
+  const numericOwnerComparison = /\b(?:uid|gid)\s*===\s*\d+/
+  assert.doesNotMatch(
+    fastArtifacts,
+    numericOwnerComparison,
+    'proprietarul artefactelor private-ai este comparat cu un identificator numeric fix',
+  )
+
+  // Trebuie rezolvat la rulare, exact contul pe care il cere installerul.
+  assert.match(fastArtifacts, /privateAiIdentity\(\)/)
+  const identity = controller.slice(
+    controller.indexOf('function privateAiIdentity('),
+    controller.indexOf('function fastArtifactsInstalled('),
+  )
+  assert.match(identity, /\/etc\/passwd[\s\S]*privateai:/)
+  assert.match(identity, /\/etc\/group[\s\S]*privateai:/)
 })

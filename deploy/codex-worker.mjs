@@ -88,6 +88,9 @@ const RECOVERY_GUIDANCE = Object.freeze({
   ci_failed: 'Versiunea anterioară a fost respinsă de un control CI obligatoriu. Auditează cauza probabilă și produce o remediere nouă, verificată complet.',
   local_gate_failed: 'Revalidarea izolată a publisherului a respins versiunea anterioară. Reproduce toate porțile și repară orice diferență deterministă.',
   pr_closed: 'PR-ul anterior a fost închis fără merge. Reexecută ordinul curat și produce un handoff nou, fără a reutiliza branch-ul anterior.',
+  execution_timeout: 'Execuția anterioară a depășit fereastra de timp. Lucrează concentrat pe ordin, fără explorare inutilă, și oprește-te când ordinul este îndeplinit.',
+  brain_unavailable: 'Execuția anterioară a căzut fiindcă modelul local era indisponibil, nu din vina ordinului. Reia lucrul de la zero, fără a presupune nimic despre starea anterioară.',
+  worker_internal_failure: 'Execuția anterioară a căzut dintr-o cauză tehnică a lucrătorului, nu din vina ordinului. Reia lucrul de la zero, pe worktree curat.',
 })
 const WORKER_FAILURE_CODES = new Set([
   'execution_timeout',
@@ -140,7 +143,7 @@ const GATE_TEST_FAILURE = /(?:\b(?:vitest|jest|pytest)\b[^\n]{0,160}\b(?:failed|
 // Numai diagnostice bounded ale porților de cod pot demonstra un rezultat
 // nepublicabil. Un exit 1/2 cu receipt, dar cu text necunoscut (de exemplu o
 // dependență lipsă în imagine), rămâne eșec tehnic și nu recomandă alt model.
-const GATE_QUALITY_FAILURE = /(?:\berror TS\d{3,5}\b|\b(?:eslint|oxlint|lint)\b[^\n]{0,160}\b(?:failed|failure|errors?)\b|\b(?:vite|webpack|rollup|build)\b[^\n]{0,160}\b(?:build failed|failed to build|error during build)\b|SEMNE GREȘIT PUSE|APELURI FĂRĂ RUTĂ|RUTE FĂRĂ CONSUMATOR|RUTE DUBLATE|DDL ÎN CODUL RUNTIME|NUME MIGRĂRI INVALIDE|MIGRĂRI FĂRĂ EXACT|TABELE CREATE ÎN MAI MULTE|Workflow-uri nesigure|Creier unic:|Hardcodări operaționale\/comerciale|FIȘIERE DE PRODUCȚIE INACCESIBILE|EXPORTURI PUBLICE NECONSUMATE|Fișiere neclasificate|Active binare duplicate|(?:jscpd|duplicate code|duplication)[^\n]{0,160}(?:threshold|failed|detected))/i
+const GATE_QUALITY_FAILURE = /(?:\berror TS\d{3,5}\b|\b(?:eslint|oxlint|lint)\b[^\n]{0,160}\b(?:failed|failure|errors?)\b|\b(?:vite|webpack|rollup|build)\b[^\n]{0,160}\b(?:build failed|failed to build|error during build)\b|SEMNE GREȘIT PUSE|APELURI FĂRĂ RUTĂ|RUTE FĂRĂ CONSUMATOR|RUTE DUBLATE|DDL ÎN CODUL RUNTIME|NUME MIGRĂRI INVALIDE|MIGRĂRI FĂRĂ EXACT|TABELE CREATE ÎN MAI MULTE|Workflow-uri nesigure|Creier unic:|Hardcodări operaționale\/comerciale|FIȘIERE DE PRODUCȚIE INACCESIBILE|EXPORTURI PUBLICE NECONSUMATE|Fișiere neclasificate|Active binare duplicate|(?:jscpd|duplicate code|duplication)[^\n]{0,160}(?:threshold|failed|detected)|dependințele (?:backend|frontend) diferă de imaginea gate)/i
 
 function measuredGateVerdict(source, result) {
   if (!Number.isInteger(result?.code) || ![1, 2].includes(result.code)) return false
@@ -800,19 +803,39 @@ function assertEnabledLayout(expectedModelId) {
     undefined,
     podmanSupervisorEnv(),
   )
-  if (gateRevision !== expectedCommit) fail('Imaginea gate nu a fost construită din același commit ca origin/master')
+  // Imaginea gate se improspateaza abia la deploy, dar clona dedicata urmareste
+  // origin/master imediat. Intre un merge si deployul urmator cele doua diverg,
+  // iar o comparatie cu varful mobil al lui master respinge orice ordin din acel
+  // interval — inclusiv ordinele deja pornite, care mor la jumatatea executiei.
+  // Ordinul se ancoreaza deci in commitul din care a fost construita imaginea
+  // gate: acelasi cod ruleaza in container si in worktree. Cerem doar ca acel
+  // commit sa existe in clona si sa fie stramos al lui origin/master, adica sa
+  // fie cod chiar ajuns pe master, nu unul arbitrar.
+  if (!/^[0-9a-f]{40}$/.test(gateRevision ?? '')) fail('Imaginea gate nu declară commitul din care a fost construită')
+  if (gateRevision !== expectedCommit) {
+    if (!commandOk('/usr/bin/git', ['rev-parse', '--verify', `${gateRevision}^{commit}`], REPO, gitSupervisorEnv())) {
+      fail('Commitul imaginii gate nu există în clona dedicată')
+    }
+    if (!commandOk('/usr/bin/git', ['merge-base', '--is-ancestor', gateRevision, expectedCommit], REPO, gitSupervisorEnv())) {
+      fail('Imaginea gate nu a fost construită dintr-un commit aflat pe origin/master')
+    }
+  }
+  return gateRevision
 }
 
 async function preflight() {
   if (!EXEC_ENABLED) return { problem: 'Execuția locală este dezactivată explicit', profile: null }
   try {
     const profile = activeConstructorProfile()
-    assertEnabledLayout(profile.modelId)
-    return { problem: null, profile }
+    // Commitul imaginii gate este si baza pe care se executa ordinul: containerul
+    // de porti si worktree-ul trebuie sa contina exact acelasi cod.
+    const gateCommit = assertEnabledLayout(profile.modelId)
+    return { problem: null, profile, gateCommit }
   } catch (error) {
     return {
       problem: error instanceof Error ? error.message : 'Preflightul OpenCode a eșuat',
       profile: null,
+      gateCommit: null,
     }
   }
 }
@@ -1297,13 +1320,14 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
 async function runOnce() {
   assertLoopbackApi()
   const secret = loadSecret()
-  const { problem, profile } = await preflight()
+  const { problem, profile, gateCommit } = await preflight()
   if (problem) {
     await heartbeat(secret, 'setup_required', problem)
     if (!EXEC_ENABLED) return
     fail(problem)
   }
   if (!profile) fail('Preflightul nu a furnizat modelul selectat manual')
+  if (!/^[0-9a-f]{40}$/.test(gateCommit ?? '')) fail('Preflightul nu a furnizat commitul imaginii gate')
 
   const claimed = await prepareWorkerClaim(secret, { profile: profile.tier })
   if (!claimed) return
@@ -1327,14 +1351,16 @@ async function runOnce() {
     mkdirSync(jobStateDir, { recursive: false, mode: 0o700 })
     const added = spawnSync(
       '/usr/bin/git',
-      ['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--detach', jobDir, 'origin/master'],
+      ['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--detach', jobDir, gateCommit],
       { cwd: REPO, env: gitSupervisorEnv(), stdio: 'ignore', timeout: 60_000 },
     )
     if (added.status !== 0) fail('Nu am putut crea worktree-ul dedicat')
     worktreeAdded = true
     const baseCommit = exactOutput('/usr/bin/git', ['rev-parse', 'HEAD'], jobDir, gitSupervisorEnv())
-    const expectedCommit = exactOutput('/usr/bin/git', ['rev-parse', 'origin/master^{commit}'], REPO, gitSupervisorEnv())
-    if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== expectedCommit) fail('Worktree-ul nu corespunde exact origin/master')
+    // Baza este commitul imaginii gate, verificat in preflight ca fiind stramos
+    // al lui origin/master. Nu folosim varful lui master: acesta se poate muta
+    // in timpul executiei, iar ordinul ar muri fara vina lui.
+    if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== gateCommit) fail('Worktree-ul nu corespunde commitului imaginii gate')
     writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-local-qwen', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
     const orderPath = join(jobStateDir, 'order.md')
     writeFileSync(orderPath, `${effectiveOrder}\n`, { flag: 'wx', mode: 0o600 })

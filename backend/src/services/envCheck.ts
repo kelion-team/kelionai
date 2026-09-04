@@ -60,7 +60,7 @@ const ASTEPTATE_BAZA: VariabilaAsteptata[] = [
   // MAIL_PASS. Cu MAIL_USER absent mailurile merg normal — ⚠-ul de aici era
   // o alarmă falsă care-l trimitea pe owner să seteze o cheie inutilă.)
   { alias: cuFisier(ENV_ALIASES.mailPass), name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
-  { alias: cuFisier(ENV_ALIASES.codexWorkerSecret), name: 'CODEX_WORKER_SECRET', what: 'autentificarea HMAC a cozii Constructor', breaks: 'workerul separat nu poate revendica joburi' },
+  { alias: cuFisier(ENV_ALIASES.constructorWorkerSecret), name: 'CODEX_WORKER_SECRET', what: 'autentificarea HMAC a cozii Constructor', breaks: 'workerul separat nu poate revendica joburi' },
   { alias: cuFisier(ENV_ALIASES.constructorPublisherSecret), name: 'CONSTRUCTOR_PUBLISHER_SECRET', what: 'autentificarea HMAC a publicării Constructor', breaks: 'publisherul separat nu poate prelua și publica handoff-uri' },
   { alias: cuFisier(ENV_ALIASES.constructorReleaseSecret), name: 'CONSTRUCTOR_RELEASE_SECRET', what: 'autentificarea HMAC a release-ului Constructor', breaks: 'releaserul separat nu poate prelua și urmări deploy-uri' },
   { alias: cuFisier(ENV_ALIASES.constructorModelControlSecret), name: 'CONSTRUCTOR_MODEL_CONTROL_SECRET', what: 'comutarea manuală autentificată a modelului Constructor', breaks: 'Admin poate doar citi eroarea de control indisponibil; profilul activ nu poate fi schimbat' },

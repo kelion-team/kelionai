@@ -477,6 +477,23 @@ function readPowerfulCompletion() {
   return { fastPath }
 }
 
+
+// Artefactele private-ai apartin contului privateai, ale carui uid/gid difera
+// de la o gazda la alta. Instalatorul le valideaza dupa nume; aici rezolvam
+// aceleasi identitati la rulare, in loc sa comparam cu gid-ul kelion-app.
+function privateAiIdentity() {
+  try {
+    const user = readFileSync('/etc/passwd', 'utf8').split('\n').find((line) => line.startsWith('privateai:'))
+    const group = readFileSync('/etc/group', 'utf8').split('\n').find((line) => line.startsWith('privateai:'))
+    const uid = Number.parseInt(user?.split(':')[2] ?? '', 10)
+    const gid = Number.parseInt(group?.split(':')[2] ?? '', 10)
+    if (!Number.isInteger(uid) || !Number.isInteger(gid)) return null
+    return { uid, gid }
+  } catch {
+    return null
+  }
+}
+
 function fastArtifactsInstalled(fastPath) {
   if (
     !fastPath
@@ -504,10 +521,12 @@ function fastArtifactsInstalled(fastPath) {
   } catch {
     return false
   }
-  return ready.uid === 10050
-    && ready.gid === 10050
-    && model.uid === 10050
-    && model.gid === 10050
+  const identity = privateAiIdentity()
+  if (!identity) return false
+  return ready.uid === identity.uid
+    && ready.gid === identity.gid
+    && model.uid === identity.uid
+    && model.gid === identity.gid
     && model.isFile()
     && !model.isSymbolicLink()
     && model.nlink === 1

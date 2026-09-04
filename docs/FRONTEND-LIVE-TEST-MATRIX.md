@@ -76,7 +76,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 
 - `chat.ts`: stream chat și idempotency; `chatReplayPolicy.ts`: oprirea retry-ului ambiguu; `offlineStore.ts`: istoric/outbox tranzacțional account-scoped; `coadaOffline.ts`: compatibilitate și ACK strict; `offlineSync.ts`: drenare mutex la mount/reconnect în batch-uri de maximum 100; `contextOffline.ts`: context local minim; `callMedia.ts`: envelope și segmentare media pentru apel.
 - `vocalLive.ts`: client unic OpenAI Realtime prin backend; `vocalLiveAvailability.ts`: coduri publice fără body provider, terminale fără retry și maximum cinci reluări tranzitorii; `voiceHeartbeat.ts`, `voceUnica.ts`, `rutaAudio.ts`, `audioFocus.ts`: o singură voce și ownership audio.
-- `micStream.ts`, `vad.ts`, `pcm.ts`, `pcmWorklet.ts`, `opusVoce.ts`, `audioGraph.ts`, `audioIO.ts`: captură, VAD, codec și redare.
+- `micStream.ts`, `vad.ts`, `pcm.ts`, `pcmWorklet.ts`, `opusVoce.ts`, `audioGraph.ts`, `audioContextPartajat.ts`, `audioIO.ts`: captură, VAD, codec și redare (un singur AudioContext partajat de toată aplicația).
 - `apel.ts`, `apelMic.ts`, `apelSonerie.ts`: apel și semnalizare; `voceBrowser.ts`, `vociKelion.ts`: fallback senzorial local.
 - `camera.ts`, `cameraConsent.ts`, `avatarCamera.ts`: cameră și consimțământ; `auzAmbiental.ts`: indicii FFT neconcludente pe streamul comun.
 - `facialQueue.ts`, `gestures.ts`: animații comandate ale avatarului; `audioSpatial.ts`, `companionCreativ.ts`, `dansMuzica.ts`, `motorBit.ts`, `carMode.ts`, `recorder.ts`: media locală și mod mașină.

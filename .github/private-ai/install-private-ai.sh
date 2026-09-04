@@ -277,17 +277,23 @@ create_isolated_account() {
 
 build_llama_cpp() {
   chown -R "$PRIVATE_AI_USER:$PRIVATE_AI_GROUP" /opt/private-ai/src
+  # http.version=HTTP/1.1: pe acest VPS, negocierea HTTP/2 cu github.com
+  # trece de handshake-ul TLS dar răspunsul propriu-zis nu mai ajunge
+  # niciodată (blocaj de rețea la fragmentare/MTU pe framurile mari HTTP/2,
+  # nu pe pachetele mici de handshake) — clonarea inițială reușește o dată,
+  # dar orice fetch ulterior eșuează consecvent cu "expected flush after
+  # ref listing". HTTP/1.1 ocolește complet problema.
   if [ ! -d "${PRIVATE_AI_SOURCE}/.git" ]; then
     runuser -u "$PRIVATE_AI_USER" -- env -i \
       HOME="$PRIVATE_AI_HOME" \
       PATH=/usr/local/bin:/usr/bin:/bin \
-      git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$PRIVATE_AI_SOURCE"
+      git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$PRIVATE_AI_SOURCE"
   fi
 
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
-    git -C "$PRIVATE_AI_SOURCE" fetch --depth 1 origin "$LLAMA_CPP_REF"
+    git -c http.version=HTTP/1.1 -C "$PRIVATE_AI_SOURCE" fetch --depth 1 origin "$LLAMA_CPP_REF"
   runuser -u "$PRIVATE_AI_USER" -- env -i \
     HOME="$PRIVATE_AI_HOME" \
     PATH=/usr/local/bin:/usr/bin:/bin \
@@ -388,6 +394,12 @@ Ask for confirmation before destructive actions, publication, deployment, creden
 Reply in Romanian unless Adrian asks for another language.
 INSTRUCTIONS
 
+  # agent.private-ai-smoke.steps=2: măsurat empiric, steps=1 declanșează
+  # avertismentul intern al OpenCode "MAXIMUM STEPS REACHED" înaintea
+  # generării propriu-zise a răspunsului, deci proba eșua mereu înainte să
+  # apuce să răspundă "OK". steps=2 rămâne la fel de mărginit (fără unelte,
+  # permission "*": "deny"), doar cu o unitate de rezervă ca generarea reală
+  # să apuce să se termine.
   cat > "${PRIVATE_AI_HOME}/.config/opencode/opencode.json" <<'JSON'
 {
   "$schema": "https://opencode.ai/config.json",
@@ -421,7 +433,7 @@ INSTRUCTIONS
       "description": "Bounded installation probe for the pinned local provider",
       "mode": "primary",
       "prompt": "This is a bounded installation probe. Use no tools and reply with exactly OK.",
-      "steps": 1,
+      "steps": 2,
       "permission": {"*": "deny"}
     }
   },

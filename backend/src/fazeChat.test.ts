@@ -81,7 +81,10 @@ describe('faza de vorbire nu cară nimic scump', () => {
     // adminului) au intrat pe vorbire — „kelion e un admin secund cu toate
     // drepturile, mereu sub observație". Lista nu mai e „scurtă", dar rămâne
     // mărginită (schemele costă tokeni) și DISJUNCTĂ de cea interzisă.
-    expect(UNELTE_VORBIRE.length).toBeLessThanOrEqual(24)
+    // +3 (24→27): get_monitor/evenimente_sonore/maps_search/lookup_address
+    // erau chat:true în brainCapabilities.ts dar lipseau de-aici — o întrebare
+    // simplă nu putea ajunge la ele fără escaladare prin ask_brain.
+    expect(UNELTE_VORBIRE.length).toBeLessThanOrEqual(27)
     for (const u of UNELTE_VORBIRE) {
       expect(INTERZISE_LA_VORBIRE.includes(u), `„${u}" e și permisă și interzisă — listele s-au contrazis`).toBe(false)
     }

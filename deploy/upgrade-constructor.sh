@@ -28,7 +28,10 @@ cleanup_unpublished_stage() {
       && [ "$(stat -Lc '%u:%g:%a' "$cutover_stage")" = '0:0:700' ] || return 1
     [ -d "$cutover_stage/files" ] && [ ! -L "$cutover_stage/files" ] \
       && [ "$(stat -Lc '%u:%g:%a:%h' "$cutover_stage/files")" = '0:0:700:2' ] || return 1
-    rm -f -- "$cutover_stage/files/constructor-config.codex-worker.env" "$cutover_stage/manifest"
+    rm -f -- "$cutover_stage/files/constructor-config.codex-worker.env" \
+      "$cutover_stage/files/constructor-config.constructor-publisher.env" \
+      "$cutover_stage/files/constructor-config.constructor-release.env" \
+      "$cutover_stage/manifest"
     rmdir -- "$cutover_stage/files" "$cutover_stage"
     sync -f /root/kelion/runtime
   fi
@@ -628,7 +631,7 @@ validate_private_ai_executor() {
   [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
   [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
-    bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0 ] || return 1
+    b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e ] || return 1
   [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
     && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
   [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
@@ -804,10 +807,27 @@ validate_installed_generation_quiesced() {
 }
 
 strict_constructor_config_recommit() {
-  local config_file=$CONFIG_ROOT/codex-worker.env helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  local helper=$ROOT/bin/runtime-config-cutover.sh compose=$CONFIG_ROOT/compose.production.yml
+  local index config_file logical
+  # Cutover-ul strict care consumă bariera unit-only cere fie 0, fie exact 3
+  # configuri Constructor stagiate; un singur config este refuzat de helper ca
+  # „staging parțial". Recomitem byte-identic toate cele trei copii live.
+  local -a config_files=(
+    "$CONFIG_ROOT/codex-worker.env"
+    "$CONFIG_ROOT/constructor-publisher.env"
+    "$CONFIG_ROOT/constructor-release.env"
+  )
+  local -a config_logicals=(
+    constructor-config.codex-worker.env
+    constructor-config.constructor-publisher.env
+    constructor-config.constructor-release.env
+  )
   [ -f "$helper" ] && [ ! -L "$helper" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$helper")" = '0:0:500:1' ] || return 1
   [ -f "$compose" ] && [ ! -L "$compose" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$compose")" = '0:0:444:1' ] || return 1
-  [ -f "$config_file" ] && [ ! -L "$config_file" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$config_file")" = '0:0:640:1' ] || return 1
+  for config_file in "${config_files[@]}"; do
+    [ -f "$config_file" ] && [ ! -L "$config_file" ] && [ "$(stat -Lc '%u:%g:%a:%h' "$config_file")" = '0:0:640:1' ] \
+      || { echo "upgrade-ul cere toate cele trei configuri Constructor live; lipsește $config_file" >&2; return 1; }
+  done
 
   # Normalizează orice retry al cutover-ului strict în starea quiesced. Helperul
   # live este deja candidatul autentificat/publicat de installer.
@@ -820,12 +840,18 @@ strict_constructor_config_recommit() {
   chown root:root "$cutover_stage"
   chmod 0700 "$cutover_stage"
   install -d -o root -g root -m 0700 "$cutover_stage/files"
-  install -o root -g root -m 0600 "$config_file" "$cutover_stage/files/constructor-config.codex-worker.env"
-  cmp -s -- "$config_file" "$cutover_stage/files/constructor-config.codex-worker.env" || return 1
-  printf 'constructor-config.codex-worker.env\n' > "$cutover_stage/manifest"
+  : > "$cutover_stage/manifest"
   chown root:root "$cutover_stage/manifest"
   chmod 0600 "$cutover_stage/manifest"
-  fsync_path "$cutover_stage/files/constructor-config.codex-worker.env"
+  for index in "${!config_files[@]}"; do
+    config_file=${config_files[$index]}
+    logical=${config_logicals[$index]}
+    install -o root -g root -m 0600 "$config_file" "$cutover_stage/files/$logical"
+    cmp -s -- "$config_file" "$cutover_stage/files/$logical" || return 1
+    printf '%s\n' "$logical" >> "$cutover_stage/manifest"
+    fsync_path "$cutover_stage/files/$logical"
+  done
+  [ "$(wc -l < "$cutover_stage/manifest")" -eq 3 ] || return 1
   fsync_path "$cutover_stage/manifest"
   fsync_path "$cutover_stage/files"
   fsync_path "$cutover_stage"

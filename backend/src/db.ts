@@ -5307,8 +5307,9 @@ export interface BuildJob {
   // Worker execution tier and measured cost; null means unreported, not zero.
   brain: string | null
   costUsd: number | null
-  /** Identificator opac emis de workerul Codex separat; nu este un token. */
-  codexTaskId: string | null
+  /** Identificator opac emis de workerul Constructor separat; nu este un token.
+   * Coloana din schema ramane codex_task_id: nume inghetat, nu executor. */
+  constructorTaskId: string | null
   /** Profilul local selectat manual și persistat la claim pentru ciclul curent. */
   executionProfile: ConstructorExecutionProfile | null
   constructorStage: string
@@ -5372,7 +5373,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: constructorActorLabel(r.brain),
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
-    codexTaskId: r.codex_task_id ?? null,
+    constructorTaskId: r.codex_task_id ?? null,
     executionProfile: r.execution_profile === 'fast' || r.execution_profile === 'powerful'
       ? r.execution_profile
       : null,
@@ -5809,19 +5810,28 @@ export async function updateConstructorIncident(
 // pe VPS (un singur worker odată) apără oricum de dubla-execuție.
 const MIN_JOB_BLOCAT = 15
 
+// Câte reluări automate primește un ordin înainte să fie declarat mort. Cauzele
+// tehnice ale workerului sunt trecătoare (modelul local se reîncarcă, un deploy
+// oprește unitatea, procesul e omorât la depășirea memoriei), iar până acum
+// fiecare dintre ele omora ordinul definitiv, cerând reluare manuală de la owner.
+// Trei încercări acoperă pana obișnuită fără să ascundă un defect real: dacă un
+// ordin pică de trei ori la rând, cauza nu mai este trecătoare.
+const CONSTRUCTOR_WORKER_MAX_ATTEMPTS = 3
+
 // Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
 // la dovada live sau un rezultat terminal. Claim-ul persistă profilul ales
-// manual înainte de execuție; watchdog-ul nu îl schimbă și nu îl reîncearcă.
+// manual înainte de execuție; watchdog-ul nu schimbă profilul, dar repune
+// ordinul în coadă dacă lucrătorul a murit, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS.
 export type ClaimNextBuildJobResult =
   | { state: 'claimed'; job: BuildJob }
   | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
 
 export async function claimNextBuildJob(
-  codexTaskId: string,
+  constructorTaskId: string,
   executionProfile: ConstructorExecutionProfile,
 ): Promise<ClaimNextBuildJobResult> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
-  if (!codexTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
+  if (!constructorTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
     throw new Error('constructor_claim_profile_invalid')
   }
   await deblocheazaJoburileClaimate()
@@ -5847,7 +5857,7 @@ export async function claimNextBuildJob(
          ORDER BY candidate.created_at LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
        )
        RETURNING *`,
-      [codexTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
+      [constructorTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
     )
     if (r.rows[0]) {
       // Un probe programat după backoff nu mai este descris ca „așteaptă
@@ -5890,10 +5900,14 @@ export async function claimNextBuildJob(
 }
 
 // ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR ───────────────────────────
-// Un worker tăcut nu este o invitație la o a doua execuție. După pragul măsurat
-// jobul devine un eșec tehnic terminal pe ACELAȘI profil persistat la claim.
-// execution_cycle, attempts și codex_task_id rămân dovezi ale acelei execuții;
-// numai comanda explicită Reia poate crea ciclul următor.
+// Un worker tăcut nu este o invitație la o a doua execuție SIMULTANĂ: revendicarea
+// este serializată de advisory lock și de flock-ul de pe mașină. Dar un lucrător
+// mort nu este vina ordinului — se întâmplă la fiecare deploy, care oprește
+// unitatea. După pragul măsurat ordinul se repune în coadă pe ACELAȘI profil
+// persistat la claim, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS; codex_task_id se
+// eliberează, ca revendicarea următoare să fie curată, iar execution_cycle și
+// attempts rămân dovezi. Abia la epuizarea plafonului ordinul devine terminal și
+// se deschide incidentul pentru owner.
 export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: number }> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   const client = await conexiuneDb()
@@ -5919,16 +5933,25 @@ export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: nu
             evidence: 'worker_failure:worker_internal_failure;profile=unrecorded',
             progress: 'technical_failure',
           }
+      // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy,
+      // care oprește unitatea, și la fiecare depășire de memorie. Îl repunem în
+      // coadă cu backoff, până la plafon. Handoff-ul este idempotent, deci
+      // re-revendicarea este sigură.
       const updated = await client.query<BuildJobDbRow>(
         `UPDATE build_jobs SET
-           status='failed', constructor_stage='failed', progress=$2,
-           retry_not_before=NULL, log=$3, progress_at=now(), updated_at=now()
+           status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           constructor_stage=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           codex_task_id=CASE WHEN attempts < $4 THEN NULL ELSE codex_task_id END,
+           progress=$2,
+           retry_not_before=CASE WHEN attempts < $4 THEN now() + interval '2 minutes' ELSE NULL END,
+           log=$3, progress_at=now(), updated_at=now()
          WHERE id=$1 AND status='running'
          RETURNING *`,
-        [row.id, failure.progress, failure.evidence],
+        [row.id, failure.progress, failure.evidence, CONSTRUCTOR_WORKER_MAX_ATTEMPTS],
       )
       const failedRow = updated.rows[0]
       if (!failedRow) continue
+      if (failedRow.status !== 'failed') continue
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
         orderText: failedRow.order_text,
@@ -6134,24 +6157,24 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
   }
 }
 
-export type CodexBuildEvent =
+export type ConstructorBuildEvent =
   | { event: 'accepted'; progress?: string }
   | { event: 'progress'; progress: string }
-  | { event: 'failed'; progress?: string; code: CodexWorkerFailureCode; profile: ConstructorExecutionProfile }
+  | { event: 'failed'; progress?: string; code: ConstructorWorkerFailureCode; profile: ConstructorExecutionProfile }
   | { event: 'unresolved'; progress?: string; reason: ConstructorExecutionUnresolvedReason; profile: ConstructorExecutionProfile }
 
-export const CODEX_WORKER_FAILURE_CODES = [
+export const CONSTRUCTOR_WORKER_FAILURE_CODES = [
   'execution_timeout',
   'brain_unavailable',
   'worker_internal_failure',
 ] as const
-export type CodexWorkerFailureCode = typeof CODEX_WORKER_FAILURE_CODES[number]
+export type ConstructorWorkerFailureCode = typeof CONSTRUCTOR_WORKER_FAILURE_CODES[number]
 
-export function isCodexWorkerFailureCode(value: string): value is CodexWorkerFailureCode {
-  return (CODEX_WORKER_FAILURE_CODES as readonly string[]).includes(value)
+export function isConstructorWorkerFailureCode(value: string): value is ConstructorWorkerFailureCode {
+  return (CONSTRUCTOR_WORKER_FAILURE_CODES as readonly string[]).includes(value)
 }
 
-const CODEx_STAGE_ORDER: Record<string, number> = {
+const CONSTRUCTOR_STAGE_ORDER: Record<string, number> = {
   claimed: 1,
   accepted: 2,
   working: 3,
@@ -6163,7 +6186,7 @@ const CODEx_STAGE_ORDER: Record<string, number> = {
  * Avansează exclusiv etapele de execuție ale workerului. Handoff-ul, PR-ul,
  * merge-ul și release-ul au tranzacții și identități HMAC separate.
  */
-export async function advanceCodexBuildJob(id: number, taskId: string, input: CodexBuildEvent): Promise<BuildJob | null> {
+export async function advanceConstructorBuildJob(id: number, taskId: string, input: ConstructorBuildEvent): Promise<BuildJob | null> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0 || !taskId) return null
   const client = await conexiuneDb()
   try {
@@ -6185,9 +6208,9 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       return null
     }
     const target = input.event === 'progress' ? 'working' : input.event
-    const prevRank = CODEx_STAGE_ORDER[previous] ?? 0
-    const targetRank = CODEx_STAGE_ORDER[target] ?? 0
-    const exactPredecessor: Partial<Record<CodexBuildEvent['event'], string[]>> = {
+    const prevRank = CONSTRUCTOR_STAGE_ORDER[previous] ?? 0
+    const targetRank = CONSTRUCTOR_STAGE_ORDER[target] ?? 0
+    const exactPredecessor: Partial<Record<ConstructorBuildEvent['event'], string[]>> = {
       accepted: ['claimed'],
       progress: ['accepted', 'working'],
       // Un rezultat `unresolved` dovedește o execuție reală numai după ACK-ul
@@ -6209,12 +6232,26 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       : input.event === 'unresolved'
         ? constructorWorkerUnresolvedRecord(input.reason, input.profile)
         : null
+    // Cele trei coduri tehnice ale workerului sunt tranzitorii prin natura lor:
+    // modelul local se reîncarcă, execuția depășește fereastra, procesul moare.
+    // Până acum fiecare dintre ele omora ordinul definitiv. Îl repunem în coadă
+    // cu backoff, până la plafon; codul rămâne prima linie din log și ajunge la
+    // worker ca recoveryCode. `unresolved` NU se reia: acela este un verdict
+    // despre conținutul ordinului, nu o pană.
+    const reluabil = input.event === 'failed'
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
-         status=CASE WHEN $3 THEN 'failed' ELSE status END,
-         constructor_stage=$2,
+         status=CASE
+           WHEN $8 AND attempts < $9 THEN 'queued'
+           WHEN $3 THEN 'failed'
+           ELSE status END,
+         constructor_stage=CASE WHEN $8 AND attempts < $9 THEN 'queued' ELSE $2 END,
+         codex_task_id=CASE WHEN $8 AND attempts < $9 THEN NULL ELSE codex_task_id END,
          progress=$4,
-         retry_not_before=CASE WHEN $3 THEN NULL ELSE retry_not_before END,
+         retry_not_before=CASE
+           WHEN $8 AND attempts < $9 THEN now() + (interval '1 minute' * power(2, least(attempts, 4)))
+           WHEN $3 THEN NULL
+           ELSE retry_not_before END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
          brain=$6,
@@ -6229,10 +6266,14 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
         failure?.evidence ?? null,
         CONSTRUCTOR_LOCAL_ACTOR,
         input.event === 'failed' || input.event === 'unresolved' ? input.profile : null,
+        reluabil,
+        CONSTRUCTOR_WORKER_MAX_ATTEMPTS,
       ],
     )
     const failedRow = updated.rows[0]
-    if (terminal && failedRow) {
+    // Incidentul se deschide numai când ordinul chiar a murit. Dacă a fost repus
+    // în coadă, nu există încă nimic de raportat ownerului.
+    if (terminal && failedRow && failedRow.status === 'failed') {
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
         orderText: failedRow.order_text,
@@ -6253,7 +6294,7 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
 
 // Leagă identificatorul opac al workerului separat de ordin. Valoarea nu este
 // secret și nu poate fi folosită pentru autentificare.
-export async function setCodexTaskId(id: number, taskId: string): Promise<void> {
+export async function setConstructorTaskId(id: number, taskId: string): Promise<void> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
   try {
     await getPool().query(
@@ -6262,7 +6303,7 @@ export async function setCodexTaskId(id: number, taskId: string): Promise<void> 
       [id, taskId.slice(0, 200)],
     )
   } catch (e) {
-    console.error('[codex-worker] setCodexTaskId a picat:', String(e).slice(0, 160))
+    console.error('[constructor-worker] setConstructorTaskId a picat:', String(e).slice(0, 160))
   }
 }
 
@@ -6465,9 +6506,10 @@ export async function archiveBuildJobsByScope(
  *  jobul actualizat sau null.
  *
  *  Numai un rezultat terminal poate fi reluat explicit. Un job viu nu poate fi
- *  resetat concurent din Admin: dacă workerul tace, watchdogul îl închide mai
- *  întâi ca eșec tehnic terminal, fără retry; abia apoi ownerul poate folosi
- *  Reia. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
+ *  resetat concurent din Admin: dacă workerul tace, watchdogul îl repune întâi
+ *  în coadă, iar la epuizarea plafonului îl închide terminal; abia atunci
+ *  ownerul poate folosi Reia. Cât ordinul este `queued` nu are nevoie de Reia,
+ *  fiindcă va fi revendicat automat. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
  *  un job deja publicat. */
 export type RetryBuildJobResult =
   | { ok: true; job: BuildJob }

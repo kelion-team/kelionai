@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { adminSiId, cerAdmin, getSessionUser } from '../session.js'
-import { advanceCodexBuildJob, claimNextBuildJob, createBuildJob, getBuildJobById, listBuildJobs, listArchivedBuildJobs, listMonitorBuildJobs, deleteBuildJob, archiveBuildJobsByScope, retryBuildJob, cancelBuildJob, restoreArchivedBuildJob, getConstructorIncidentsForJobs, isArchivedBuildJobsCursorTimestamp, isCodexWorkerFailureCode, noteazaAudit, type BuildJobMutationExpectation, type CodexBuildEvent } from '../db.js'
+import { advanceConstructorBuildJob, claimNextBuildJob, createBuildJob, getBuildJobById, listBuildJobs, listArchivedBuildJobs, listMonitorBuildJobs, deleteBuildJob, archiveBuildJobsByScope, retryBuildJob, cancelBuildJob, restoreArchivedBuildJob, getConstructorIncidentsForJobs, isArchivedBuildJobsCursorTimestamp, isConstructorWorkerFailureCode, noteazaAudit, type BuildJobMutationExpectation, type ConstructorBuildEvent } from '../db.js'
 import { numeleOrdinului, cineACerut } from '../services/numeOrdin.js'
 import { evalueazaOrdin, AI_CONSTRUCTORI } from '../services/evalOrdinConstructor.js'
-import { getCodexWorkerStatus, newCodexTaskId, planificaOrdinConstructor, recordCodexWorkerStatus, verifyCodexWorkerRequest, type CodexWorkerState } from '../services/codexWorker.js'
+import { getConstructorWorkerStatus, newConstructorTaskId, planificaOrdinConstructor, recordConstructorWorkerStatus, verifyConstructorWorkerRequest, type ConstructorWorkerState } from '../services/constructorWorker.js'
 import {
   claimPublisherJob,
   claimReleaseJob,
@@ -94,7 +94,9 @@ function internalJobIdentity(idRaw: string, body: Record<string, unknown>): { id
 // panel). Execution belongs to the separate OpenCode + Qwen local (llama.cpp)
 // worker. The public web process owns no worktree, shell or GitHub credential;
 // it only writes build_jobs and records signed lifecycle events. The `codex_*`
-// route/task names below are compatibility identifiers.
+// internal route, column and task-id names below are frozen runtime identifiers
+// kept for wire compatibility with the installed worker; they no longer imply
+// any Codex involvement in execution.
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   const readChain = async (): Promise<ConstructorChainStatus> => {
     try {
@@ -236,10 +238,10 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  app.get('/api/admin/codex', async (req, reply) => {
+  app.get('/api/admin/constructor/worker', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    return reply.send(await getCodexWorkerStatus())
+    return reply.send(await getConstructorWorkerStatus())
   })
 
   // ── DIAGNOSTICUL AUTONOM AL CONSTRUCTORULUI (owner, 19 aug: „nu are autonomie…
@@ -459,13 +461,13 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // Contract fix, semnat, pentru workerul separat. Nu există un endpoint generic
   // de unelte/shell: workerul poate doar revendica un ordin și raporta etape.
   app.post<{ Body: { status?: string; detail?: string } }>('/api/internal/codex/status', async (req, reply) => {
-    if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
+    if (!await internalConstructorAuthorized(verifyConstructorWorkerRequest(req), reply)) return
     if (!exactKeys(req.body, ['status', 'detail'])) return reply.code(400).send({ error: 'invalid_status' })
-    const allowed: CodexWorkerState[] = ['offline', 'setup_required', 'ready', 'busy', 'degraded']
-    const status = String(req.body?.status ?? '') as CodexWorkerState
+    const allowed: ConstructorWorkerState[] = ['offline', 'setup_required', 'ready', 'busy', 'degraded']
+    const status = String(req.body?.status ?? '') as ConstructorWorkerState
     if (!allowed.includes(status)) return reply.code(400).send({ error: 'invalid_status' })
     try {
-      await recordCodexWorkerStatus({
+      await recordConstructorWorkerStatus({
         status,
         detail: req.body.detail,
       })
@@ -476,7 +478,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{ Body: Record<string, unknown> }>('/api/internal/codex/jobs/claim', async (req, reply) => {
-    if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
+    if (!await internalConstructorAuthorized(verifyConstructorWorkerRequest(req), reply)) return
     if (!exactKeys(req.body, ['profile'])) return reply.code(400).send({ error: 'invalid_body' })
     const profile = req.body?.profile
     if (profile !== 'fast' && profile !== 'powerful') {
@@ -495,7 +497,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       return reply.code(503).send({ error: 'constructor_model_control_unavailable' })
     }
-    const taskId = newCodexTaskId()
+    const taskId = newConstructorTaskId()
     let claim: Awaited<ReturnType<typeof claimNextBuildJob>>
     try {
       // Persistăm exclusiv profilul activ măsurat de controller, niciodată
@@ -508,8 +510,17 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ state: claim.state, job: null })
     }
     const job = claim.job
-    const recoveryCodes = new Set(['stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed'])
-    const persistedFailureCode = job.log?.split('\n', 1)[0] ?? null
+    const recoveryCodes = new Set([
+      'stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed',
+      // Codurile tehnice ale workerului: de când ordinul se reia automat după o
+      // pană trecătoare, execuția următoare trebuie să știe de ce a căzut cea
+      // dinainte. Dovada persistată are forma worker_failure:COD;profile=...
+      'execution_timeout', 'brain_unavailable', 'worker_internal_failure',
+    ])
+    const persistedLine = job.log?.split('\n', 1)[0] ?? null
+    const persistedFailureCode = persistedLine?.startsWith('worker_failure:')
+      ? persistedLine.slice('worker_failure:'.length).split(';', 1)[0]
+      : persistedLine
     const recoveryCode = persistedFailureCode && recoveryCodes.has(persistedFailureCode)
       ? persistedFailureCode
       : null
@@ -528,13 +539,13 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/internal/codex/jobs/:id/event', async (req, reply) => {
-    if (!await internalConstructorAuthorized(verifyCodexWorkerRequest(req), reply)) return
+    if (!await internalConstructorAuthorized(verifyConstructorWorkerRequest(req), reply)) return
     const id = Number(req.params.id)
     const taskId = String(req.body?.taskId ?? '')
     const event = String(req.body?.event ?? '')
     if (!Number.isSafeInteger(id) || id <= 0 || !taskId.startsWith('codex-') || !UUID.test(taskId.slice(6))) return reply.code(400).send({ error: 'invalid_job' })
     const progress = typeof req.body?.progress === 'string' ? req.body.progress.trim().slice(0, 500) : undefined
-    let payload: CodexBuildEvent
+    let payload: ConstructorBuildEvent
     if (event === 'accepted') payload = { event, progress }
     else if (event === 'progress' && progress) payload = { event, progress }
     else if (event === 'gates_passed' && req.body?.ci === 'local_gates') {
@@ -574,14 +585,14 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       if (!exactKeys(req.body, ['taskId', 'event', 'code', 'profile', 'progress'])) return reply.code(400).send({ error: 'invalid_body' })
       const code = String(req.body?.code ?? '')
       const profile = req.body?.profile
-      if (!isCodexWorkerFailureCode(code) || (profile !== 'fast' && profile !== 'powerful')) {
+      if (!isConstructorWorkerFailureCode(code) || (profile !== 'fast' && profile !== 'powerful')) {
         return reply.code(400).send({ error: 'invalid_failure' })
       }
       payload = { event, code, profile, progress }
     } else return reply.code(400).send({ error: 'invalid_event' })
-    let job: Awaited<ReturnType<typeof advanceCodexBuildJob>>
+    let job: Awaited<ReturnType<typeof advanceConstructorBuildJob>>
     try {
-      job = await advanceCodexBuildJob(id, taskId, payload)
+      job = await advanceConstructorBuildJob(id, taskId, payload)
     } catch {
       return reply.code(503).send({ error: 'constructor_state_unreadable' })
     }

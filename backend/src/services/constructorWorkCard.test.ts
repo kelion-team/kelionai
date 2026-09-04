@@ -77,7 +77,7 @@ describe('Constructor canonical work card', () => {
     expect(card.finalResult).toBeNull()
   })
 
-  it('maps only the retired Codex actor while preserving unknown audit identities', () => {
+  it('maps only the retired codex-worker actor while preserving unknown audit identities', () => {
     const observation = {
       progress: { percent: 0, completed: 0, total: 1, currentStage: 'În coadă', resolved: false, source: 'constructor_activity_events' as const },
       activity: [],

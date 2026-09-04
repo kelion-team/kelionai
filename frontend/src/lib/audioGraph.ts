@@ -45,15 +45,42 @@ function getAudioContextCtor(): typeof AudioContext | null {
  *  și, dacă nu prinde, îl reluăm la PRIMUL gest (tap/touch/tastă) — apoi ne
  *  retragem singuri. Un singur tap al ownerului deblochează urechea. */
 export function deblocheazaAudioLaGest(ctx: AudioContext): void {
-  void ctx.resume().catch(() => {})
   const evenimente = ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown']
-  const reia = (): void => {
-    void ctx.resume().catch(() => {})
-    if (ctx.state === 'running') {
-      for (const ev of evenimente) window.removeEventListener(ev, reia, true)
+  let retras = false
+  const retrage = (): void => {
+    if (retras) return
+    retras = true
+    for (const ev of evenimente) window.removeEventListener(ev, reia, true)
+    try {
+      ctx.removeEventListener('statechange', laSchimbareStare)
+    } catch {
+      /* fără EventTarget */
     }
   }
+  // Ascultătoarele se scot și când contextul e ÎNCHIS (nu doar când ajunge
+  // 'running'): înainte, un context închis între timp le lăsa pe `window` pe
+  // veci — cinci ascultătoare scurse la fiecare sesiune eșuată, care mai
+  // și chemau `resume()` pe un cadavru la fiecare tap.
+  const laSchimbareStare = (): void => {
+    if (ctx.state === 'running' || ctx.state === 'closed') retrage()
+  }
+  const reia = (): void => {
+    if (ctx.state === 'closed') {
+      retrage()
+      return
+    }
+    void ctx.resume().catch(() => {})
+    if (ctx.state === 'running') retrage()
+  }
+  if (ctx.state === 'closed') return
+  void ctx.resume().catch(() => {})
+  if (ctx.state === 'running') return
   for (const ev of evenimente) window.addEventListener(ev, reia, { capture: true, passive: true })
+  try {
+    ctx.addEventListener('statechange', laSchimbareStare)
+  } catch {
+    /* fără EventTarget — rămâne retragerea la gest */
+  }
 }
 
 /**

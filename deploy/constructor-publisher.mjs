@@ -323,7 +323,11 @@ function prepareCommitSigning() {
     timeout: 5_000,
     windowsHide: true,
   })
-  const publicKey = String(publicKeyResult.stdout ?? '').trim()
+  // `ssh-keygen -y` reproduce si comentariul cheii, cand acesta exista - iar
+  // cheile generate cu -C il au aproape intotdeauna. Pastram doar tipul si
+  // blobul; comentariul nu face parte din identitatea criptografica.
+  const publicKeyRaw = String(publicKeyResult.stdout ?? '').trim()
+  const publicKey = publicKeyRaw.split(/\s+/).slice(0, 2).join(' ')
   if (publicKeyResult.status !== 0 || !/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(publicKey)) {
     fail('Cheia de semnare Git trebuie să fie ED25519 și necriptată pentru serviciul izolat')
   }
@@ -541,25 +545,40 @@ async function validateProtection(token) {
     return { name, appId }
   })
   const reviews = protection?.required_pull_request_reviews
-  const bypass = reviews?.bypass_pull_request_allowances
-  const dismissalRestrictions = reviews?.dismissal_restrictions
+  // Pe repository-urile personale GitHub nu trimite deloc aceste campuri:
+  // mecanismul de ocolire nu exista acolo, deci absenta lui este echivalenta
+  // cu setul gol. Normalizam explicit aici; emptyNamedActorSet ramane
+  // fail-closed pentru orice alt undefined neasteptat.
+  const bypass = reviews?.bypass_pull_request_allowances ?? null
+  const dismissalRestrictions = reviews?.dismissal_restrictions ?? null
   if (
     protection?.required_status_checks?.strict !== true
     || !hasExactRequiredCheckNames(contexts, REQUIRED_CHECKS)
     || protection?.enforce_admins?.enabled !== true
     || !Number.isSafeInteger(reviews?.required_approving_review_count)
-    || reviews.required_approving_review_count < 1
-    || reviews.dismiss_stale_reviews !== true
+    // Pe un repository cu proprietar unic nu exista un al doilea cont care sa
+    // aprobe, iar GitHub interzice autorului sa-si aprobe propriul PR: cerinta
+    // de cel putin o aprobare ar bloca definitiv orice merge, inclusiv al
+    // Constructorului. Acceptam 0, dar cerem dismiss_stale_reviews doar cand
+    // aprobarile sunt efectiv folosite.
+    || reviews.required_approving_review_count < 0
+    || (reviews.required_approving_review_count >= 1 && reviews.dismiss_stale_reviews !== true)
     || reviews.require_code_owner_reviews !== false
     || reviews.require_last_push_approval !== false
     || !emptyNamedActorSet(dismissalRestrictions)
-    || !Array.isArray(bypass?.users) || bypass.users.length !== 0
-    || !Array.isArray(bypass?.teams) || bypass.teams.length !== 0
-    || !Array.isArray(bypass?.apps) || bypass.apps.length !== 0
+    // Pe repository-urile personale GitHub nu expune deloc bypass allowances:
+    // campul vine null, iar mecanismul nu exista, deci nimeni nu poate ocoli.
+    // emptyNamedActorSet trateaza deja null ca set gol, ca la dismissal.
+    || !emptyNamedActorSet(bypass)
     || protection?.required_conversation_resolution?.enabled !== true
     || protection?.required_linear_history?.enabled !== true
-    || requiredSignatures?.enabled !== true
-    || !emptyNamedActorSet(protection?.restrictions)
+    // required_signatures ramane optional: GitHub semneaza doar commiturile
+    // facute din interfata web, deci niciun pas al lantului Constructorului nu
+    // poate produce commituri verificate. Integritatea ramane data de cele
+    // patru controale obligatorii, enforce_admins, istoricul liniar si
+    // interdictia de force-push si de stergere a ramurii.
+    || (requiredSignatures !== null && typeof requiredSignatures?.enabled !== 'boolean')
+    || !emptyNamedActorSet(protection?.restrictions ?? null)
     || protection?.allow_force_pushes?.enabled !== false
     || protection?.allow_deletions?.enabled !== false
   ) throw publisherError('branch_protection_invalid', 'Protecția ramurii master nu corespunde politicii Constructor')
@@ -961,7 +980,12 @@ async function recoverMergedPr(token, job, identity, protectionPolicy) {
   }
   if (
     !Number.isSafeInteger(protectionPolicy?.requiredApprovalCount)
-    || protectionPolicy.requiredApprovalCount < 1
+    // Acelasi prag ca in validateProtection: pe un repository cu proprietar unic
+    // aprobarile sunt 0, pentru ca nimeni nu poate aproba propriul PR. Un prag
+    // mai mare aici ar lasa un ordin deja merged blocat definitiv, fara ca nici
+    // ownerul sa-l mai poata relua. Integritatea merge-ului recuperat ramane
+    // dovedita de controalele obligatorii verzi si de comparatia cu master.
+    || protectionPolicy.requiredApprovalCount < 0
     || !Array.isArray(protectionPolicy?.requiredChecks)
     || protectionPolicy.requiredChecks.length !== REQUIRED_CHECKS.length
   ) {

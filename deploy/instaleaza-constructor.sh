@@ -190,7 +190,7 @@ validate_private_ai_base() {
   [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
   [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
-    bc27b0436ccf37e04135acede4acb25c0cb377272bc52219b9c0df2f1211dbc0 ] || return 1
+    b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e ] || return 1
   [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
     && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
   [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
@@ -1819,7 +1819,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=bb852ba09260b628c1fa27b3f00556ea9ebbdf8047b0e9764d3729eca7cff2b7
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=829687d4571805244134feb721375cdc2f3f0b19d297daf11ad40c8c40b46057
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
@@ -1980,6 +1980,26 @@ for logical in \
   runtime-helper compose-production; do
   publish_install_candidate "$logical"
 done
+
+# /run se goleste la fiecare boot, iar unitatea controllerului cere ca
+# /run/private-ai si dropin-ul runtime al llama-server sa existe INAINTE ca
+# systemd sa construiasca namespace-ul (ReadWritePaths). Fara o regula
+# tmpfiles persistenta, kelion-constructor-model-control.service esueaza dupa
+# fiecare repornire cu 226/NAMESPACE, iar Constructorul ramane oprit.
+publish_private_ai_runtime_tmpfiles() {
+  local candidate
+  candidate=$(mktemp "$RUNTIME_ROOT/tmpfiles-private-ai.XXXXXX") || return 1
+  printf '%s\n' \
+    'd /run/private-ai 0755 root root -' \
+    'd /run/systemd/system/private-ai-llm.service.d 0755 root root -' \
+    > "$candidate" || return 1
+  install -o root -g root -m 0644 -- "$candidate" /etc/tmpfiles.d/kelion-private-ai.conf || return 1
+  rm -f -- "$candidate"
+  systemd-tmpfiles --create /etc/tmpfiles.d/kelion-private-ai.conf || return 1
+  [ -d /run/private-ai ] && [ -d /run/systemd/system/private-ai-llm.service.d ]
+}
+publish_private_ai_runtime_tmpfiles \
+  || { echo 'regula tmpfiles pentru directoarele runtime private-ai nu a putut fi publicata' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 
 set_constructor_install_phase unit-validation
 verify_candidate_units \

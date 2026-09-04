@@ -666,7 +666,13 @@ strict_pending_deploy_recovery_owner() {
     return
   fi
   if [ "$leave_constructor_quiesced" = 1 ]; then
-    [ "$deploy_quiesce_proof" = 0 ] && [ "$phase" = gate-prepared ] \
+    [ "$deploy_quiesce_proof" = 0 ] || return 1
+    # Ownerul își reia propriul deploy căzut înainte de marker: pending-ul
+    # rămâne, unitățile rămân oprite, iar generația veche trebuie să fie exact
+    # cea jurnalizată. Fără această cale, deploy-ul retry ar fi refuzat chiar de
+    # bariera pe care tot el a publicat-o.
+    if deploy_quiesce_pre_ponr_rollback_proof; then return 0; fi
+    [ "$phase" = gate-prepared ] \
       && { { [ -f "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
             && [ "$(stat -Lc '%u:%g:%a:%h' "$GATE_JOURNAL")" = '0:0:600:1' ] \
             && jq -e --arg commit "$deploy_owner_commit" '
@@ -678,7 +684,12 @@ strict_pending_deploy_recovery_owner() {
             && deploy_quiesce_generation_proof target; }; }
     return
   fi
-  [ "$deploy_quiesce_proof" = 1 ] && [ "$phase" = gate-committed ] \
+  [ "$deploy_quiesce_proof" = 1 ] || return 1
+  # Reactivarea owner-aware acceptă fie commitul app+gate (roll-forward), fie
+  # rollback-ul pre-PONR verificat (generația veche exactă). În ambele cazuri
+  # pending-ul unit-only al aceluiași deploy este consumat de helper.
+  if deploy_quiesce_pre_ponr_rollback_proof; then return 0; fi
+  [ "$phase" = gate-committed ] \
     && [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] \
     && deploy_quiesce_generation_proof committed
 }
@@ -736,6 +747,22 @@ deploy_quiesce_generation_proof() {
       [ "$actual" = "$expected" ] || return 1
     fi
   done
+}
+
+# Rollback-ul pre-PONR al deploy-ului owner: jurnalul nu a trecut de publicarea
+# markerului (armed/quiesced/active-prepared), nu există refresh gate început,
+# iar markerul activ și hashurile celor trei configuri sunt exact generația de
+# dinaintea quiesce-ului. Numai atunci pending-ul unit-only publicat de același
+# deploy poate fi consumat fără cutover strict; altfel deploy-ul retry, boot-ul
+# și activarea s-ar refuza reciproc pe aceeași barieră, fără cale automată.
+deploy_quiesce_pre_ponr_rollback_proof() {
+  local phase
+  [ -f "$DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$DEPLOY_QUIESCE_JOURNAL" ] || return 1
+  deploy_quiesce_owned_by_caller || return 1
+  phase=$(jq -er '.phase' "$DEPLOY_QUIESCE_JOURNAL") || return 1
+  case "$phase" in armed|quiesced|active-prepared) ;; *) return 1 ;; esac
+  [ ! -e "$GATE_JOURNAL" ] && [ ! -L "$GATE_JOURNAL" ] || return 1
+  deploy_quiesce_generation_proof old
 }
 
 if [ -f "$UNIT_MIGRATION_PENDING" ] && [ "$constructor_upgrade_owner" != 1 ] \
@@ -1246,7 +1273,8 @@ validate_live_constructor_sync_unit() {
     && [ "$(grep -c '^ConditionPathExists=!/run/kelion/constructor-activation.pending$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^Type=oneshot$' "$path")" -eq 1 ] \
-    && [ "$(grep -c '^User=root$' "$path")" -eq 1 ] \
+    && [ "$(grep -c '^User=kelion-codex$' "$path")" -eq 1 ] \
+    && [ "$(grep -c '^Group=kelion-codex$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^ExecStart=/opt/kelion-constructor/constructor-sync-worker.sh$' "$path")" -eq 1 ] \
     && [ "$(grep -c '^WantedBy=' "$path")" -eq 0 ] \
     && [ "$(grep -c '^\[Install\]$' "$path")" -eq 0 ] \
@@ -3299,9 +3327,11 @@ if [ -e "$DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$DEPLOY_QUIESCE_JOURNAL" ]; then
     && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
           && deploy_quiesce_generation_proof old; } \
       || { [ "$discard_unmutated_gate_prepared" = 0 ] \
-          && deploy_quiesce_generation_proof committed; }; }; then
+          && { deploy_quiesce_generation_proof committed \
+            || deploy_quiesce_pre_ponr_rollback_proof; }; }; }; then
     # Numai ownerul tuplei poate publica stamp-ul și șterge jurnalul, după ce
-    # active+gate corespund exact snapshotului vechi sau commitului gate nou.
+    # active+gate corespund exact snapshotului vechi (rollback pre-PONR sau
+    # discard gate) ori commitului gate nou.
     deploy_quiesce_authorized=1
   elif [ "$recover_only" = 0 ] && [ "$leave_constructor_quiesced" = 1 ] \
     && deploy_quiesce_owned_by_caller; then
@@ -3394,7 +3424,8 @@ if [ "$recover_only" = 1 ]; then
         && { { [ "$discard_unmutated_gate_prepared" = 1 ] \
               && deploy_quiesce_generation_proof old; } \
           || { [ "$discard_unmutated_gate_prepared" = 0 ] \
-              && deploy_quiesce_generation_proof committed; }; } \
+              && { deploy_quiesce_generation_proof committed \
+                || deploy_quiesce_pre_ponr_rollback_proof; }; }; } \
         && validate_live_runtime_contract; then
         clear_unit_migration_pending \
           || die 'bariera unit-only nu a putut fi consumată după dovada strictă a deploy-ului'
