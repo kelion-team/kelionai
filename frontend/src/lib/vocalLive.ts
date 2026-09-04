@@ -785,8 +785,27 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     return null
   }
 
-  ctxIn = new AudioContext()
-  ctxOut = new AudioContext()
+  // Chrome refuză peste 6 AudioContext-uri per document, iar aplicația ține
+  // patru deschise permanent (nivel, sonerie, spațial, companion). La al șaptelea
+  // constructorul ARUNCĂ. Până acum excepția scăpa din funcție fără `inchide()`:
+  // socketul rămânea deschis pe server și microfonul viu, la fiecare încercare —
+  // de aceea serverul părea sănătos în timp ce pagina se prăbușea. Acum eșecul
+  // este raportat curat și sesiunea se închide.
+  try {
+    ctxIn = new AudioContext()
+    ctxOut = new AudioContext()
+  } catch (eroare) {
+    try { ctxIn?.close() } catch { /* contextul poate fi deja mort */ }
+    try { ctxOut?.close() } catch { /* idem */ }
+    ctxIn = null
+    ctxOut = null
+    urcaEroarea(
+      `nu pot deschide ieșirea audio: ${eroare instanceof Error ? eroare.message : 'motiv necunoscut'}`,
+      'transport',
+    )
+    inchide()
+    return null
+  }
   // MOBIL — CONTEXTUL PORNIT 'suspended' (owner, 13 aug: „primul cuvânt nu-l aude
   // corect"). Contextele astea se creează DUPĂ două await-uri (deschiderea
   // socketului + getUserMedia), deci nasc SUSPENDATE pe iOS/Android — gestul care
