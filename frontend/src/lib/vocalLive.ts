@@ -8,6 +8,7 @@ import { deblocheazaAudioLaGest } from './audioGraph'
 import { ensureAudioContextRunning, setupAudioContextAutoResume, startVoiceHeartbeat } from './voiceHeartbeat'
 import { faraBluetoothSigur } from './rutaAudio'
 import { apiFetch, openApiWebSocket } from './transport'
+import { marcheazaFaza } from './errorReport'
 import {
   clasificaInchidereVocalLive,
   esteCodEroareVocalLive,
@@ -265,6 +266,10 @@ function clampPreamp(v: unknown): number {
 let sesiuneActiva: { inchide: () => void } | null = null
 
 export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveHandle | null> {
+  // FAZA, pentru cutia neagra din errorReport: daca tabul moare fara `pagehide`
+  // (crash de randare/OOM), post-mortemul de la pornirea urmatoare spune EXACT
+  // in ce punct al caii vocale a murit.
+  marcheazaFaza('voce:pornire')
   opts.onState?.('connecting')
   if (opts.signal?.aborted) return null
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -351,6 +356,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
   const inchide = (): void => {
     if (inchis) return
     inchis = true
+    marcheazaFaza('voce:inchisa')
     if (sesiuneActiva?.inchide === inchide) sesiuneActiva = null // zăvorul se predă curat
     if (rafGura) cancelAnimationFrame(rafGura)
     alimenteazaNivelVoce(0)
@@ -543,6 +549,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     if (nextState) opts.onState?.(nextState)
     switch (m.type) {
       case 'gata':
+        marcheazaFaza('voce:gata')
         // AUDIOCONTEXT gata ÎNAINTE să spunem „Kelion te așteaptă". Pe mobil/
         // desktop, contextul poate rămâne 'suspended' dacă începi să vorbești
         // imediat — primele cuvinte se pierd (userul repetă și a doua oară merge).
@@ -1117,6 +1124,7 @@ export async function deschideVocalLive(opts: VocalLiveOpts): Promise<VocalLiveH
     }
   }, 1200)
 
+  marcheazaFaza('voce:activa')
   console.info(`[vocalLive] sesiune deschisă — microfon ${RATA_INTRARE} Hz → server, redare ${RATA_IESIRE} Hz`)
   return {
     inchide,

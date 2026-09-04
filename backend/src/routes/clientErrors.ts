@@ -9,6 +9,10 @@ interface ClientErr {
 }
 
 const rings = new Map<string, ClientErr[]>()
+// Trebuie să încapă și primele cadre ale stivei trimise de browser (errorReport
+// taie tot acolo, la aceeași valoare). Cu vechiul plafon de 400 stiva se tăia
+// exact înainte de linia care numea funcția vinovată.
+const MAX_CARACTERE_RAPORT = 1_200
 const MAX_PER_USER = 50
 const MAX_RING_USERS = 1_000
 const RING_RETENTION_MS = 30 * 60_000
@@ -54,10 +58,15 @@ export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
     const key = ringKey(user.email)
     const ring = rings.get(key) ?? []
     for (const raw of list) {
-      const msg = redactDiagnostic(raw, 400)
+      const msg = redactDiagnostic(raw, MAX_CARACTERE_RAPORT)
       if (!msg || ring.some((entry) => entry.msg === msg && now - entry.ts < 60_000)) continue
       ring.push({ ts: now, msg })
       const type = msg.includes('[PERF]') ? 'perf' : 'f12'
+      // ȘI ÎN JURNALUL SERVERULUI, nu doar în tabelă: până acum textul erorii de
+      // browser exista EXCLUSIV în `client_errors` din baza externă, iar cine se
+      // uita la `docker logs` vedea doar că a sosit un POST — simptomul fără
+      // conținut. Mesajul e deja redactat aici, deci jurnalul nu capătă secrete.
+      req.log.warn({ tip: type, rol: user.role }, `client-error: ${msg}`)
       void saveClientError({ type, message: msg, accountId })
     }
     while (ring.length > MAX_PER_USER) ring.shift()
