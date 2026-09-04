@@ -28,6 +28,7 @@ const STATIC_GATE_TESTS = [
   'ios/appstore-build.test.mjs',
   'deploy/constructor-model-control.test.mjs',
   'deploy/constructor-model-switch.test.mjs',
+  'deploy/codex-worker-timeout.test.mjs',
   'deploy/lib/create-migration-proof.test.mjs',
   'deploy/lib/backup-schedule.test.mjs',
   'deploy/lib/restore-verified-backup.test.mjs',
