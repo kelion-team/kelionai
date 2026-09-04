@@ -6326,3 +6326,44 @@ false
   assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
   assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
 })
+
+// Instalatorul si controllerul valideaza aceleasi artefacte private-ai, dar prin
+// mecanisme diferite: primul dupa nume de cont, al doilea numeric. Cand cele doua
+// contracte diverg, detectInstalledProfiles intoarce [] pe orice gazda unde
+// `privateai` nu are exact uid-ul hardcodat, controllerul raporteaza `unavailable`
+// si claim-ul raspunde 503 constructor_model_not_ready - fara ca vreun test sa cada,
+// pentru ca suita controllerului injecteaza un dublu peste fastArtifactsInstalled.
+// Testul de fata compara direct cele doua contracte, nu logica fiecaruia separat.
+test('contractul de proprietate al artefactelor private-ai este acelasi in installer si in controller', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const controller = read('deploy/constructor-model-control.mjs')
+
+  // Installerul ramane sursa de adevar si valideaza dupa nume de cont.
+  assert.match(installer, /privateai:privateai:600:1/)
+  assert.match(installer, /privateai:privateai:20419565568:1/)
+
+  const fastArtifacts = controller.slice(
+    controller.indexOf('function fastArtifactsInstalled('),
+    controller.indexOf('function discoverFastModelPath('),
+  )
+  assert.ok(fastArtifacts.length > 0, 'fastArtifactsInstalled nu a putut fi izolata')
+
+  // Controllerul nu are voie sa compare proprietarul cu un uid/gid literal:
+  // identitatile conturilor difera de la o gazda la alta, iar 10050 este gid-ul
+  // grupului kelion-app, nu al contului privateai.
+  const numericOwnerComparison = /\b(?:uid|gid)\s*===\s*\d+/
+  assert.doesNotMatch(
+    fastArtifacts,
+    numericOwnerComparison,
+    'proprietarul artefactelor private-ai este comparat cu un identificator numeric fix',
+  )
+
+  // Trebuie rezolvat la rulare, exact contul pe care il cere installerul.
+  assert.match(fastArtifacts, /privateAiIdentity\(\)/)
+  const identity = controller.slice(
+    controller.indexOf('function privateAiIdentity('),
+    controller.indexOf('function fastArtifactsInstalled('),
+  )
+  assert.match(identity, /\/etc\/passwd[\s\S]*privateai:/)
+  assert.match(identity, /\/etc\/group[\s\S]*privateai:/)
+})
