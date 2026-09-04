@@ -5031,21 +5031,31 @@ ${executableFlow}
     'apelantul generic fără owner trebuie refuzat și pentru committed după quiesce')
 })
 
-test('cutover-ul final al upgrade-ului restage-uiește numai configul worker byte-identic, fără restart backend', () => {
+test('cutover-ul final al upgrade-ului restage-uiește toate cele trei configuri byte-identic, fără restart backend', () => {
   const upgrade = read('deploy/upgrade-constructor.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
-  assert.match(recommit, /config_file=\$CONFIG_ROOT\/codex-worker\.env/)
+  // Cutover-ul acceptă zero sau trei configuri, niciodată una: o stagiere
+  // parțială era refuzată și lăsa upgrade-ul blocat. Toate cele trei se
+  // stagiază împreună, fiecare verificată byte cu byte după copiere.
+  for (const logical of [
+    'constructor-config.codex-worker.env',
+    'constructor-config.constructor-publisher.env',
+    'constructor-config.constructor-release.env',
+  ]) assert.ok(recommit.includes(logical), `configul ${logical} trebuie stageat`)
+  assert.match(recommit, /for config_file in "\$\{config_files\[@\]\}"/)
   assert.match(recommit,
     /--recover-only "\$compose" --leave-constructor-quiesced[\s\S]*restore_snapshot_markers/)
   assert.match(recommit,
-    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/\$logical"/)
   assert.match(recommit,
-    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"/)
+    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/\$logical"/)
+  // Manifestul se scrie o linie per config și trebuie să aibă exact trei:
+  // asta este chiar regula pe care cutover-ul o impune la primire.
+  assert.match(recommit, /printf '%s\\n' "\$logical" >> "\$cutover_stage\/manifest"/)
+  assert.match(recommit, /\[ "\$\(wc -l < "\$cutover_stage\/manifest"\)" \] *-eq 3|-eq 3/)
   assert.match(recommit,
-    /printf [^\n]*constructor-config\.codex-worker\.env[^\n]*> "\$cutover_stage\/manifest"/)
-  assert.match(recommit,
-    /fsync_path "\$cutover_stage\/files\/constructor-config\.codex-worker\.env"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
+    /fsync_path "\$cutover_stage\/files\/\$logical"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
   assert.match(recommit,
     /KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1[\s\\]*KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"[\s\\]*"\$helper" "\$cutover_stage" "\$compose"/)
   assert.doesNotMatch(recommit,
