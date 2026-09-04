@@ -239,7 +239,7 @@ test('publisherul raportează coduri deterministe și tratează schimbarea bazei
   assert.match(publisher, /hasExactRequiredCheckNames\(contexts, REQUIRED_CHECKS\)/)
   assert.match(publisher, /Protecția cu un control obligatoriu suplimentar a fost acceptată/)
   assert.match(publisher, /matching\.length !== 1/)
-  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*bypass\.users\.length !== 0[\s\S]*bypass\.teams\.length !== 0[\s\S]*bypass\.apps\.length !== 0/)
+  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*!emptyNamedActorSet\(bypass\)/)
   assert.match(publisher, /collaborators\/[$][{]encodeURIComponent\(login\)[}]\/permission[\s\S]*\['write', 'maintain', 'admin'\]/)
   assert.match(publisher, /Recovery-ul a acceptat o asociere explicită la un PR străin/)
   assert.doesNotMatch(publisher, /policy\.appId === null/)
