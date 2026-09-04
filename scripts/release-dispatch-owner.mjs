@@ -6,6 +6,7 @@ import { deterministicUuid } from '../deploy/lib/github-fixed-client.mjs'
 const SHA = /^[0-9a-f]{40}$/
 const TASK_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 const TASK = new RegExp(`^codex-(${TASK_UUID})$`)
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/
 const CONSTRUCTOR_PR_BODY = 'Patch produs în sandbox, revalidat de publisherul izolat și supus tuturor controalelor obligatorii.'
 const BUILD_PATH = '.github/workflows/build-images.yml'
@@ -69,14 +70,17 @@ export function releasedProductionRunId(workflowRunPages, candidateSha, ciRunId,
   const build = positiveRunId(buildRunId, 'Build run ID')
   const current = positiveRunId(currentRunId, 'Runul production curent')
   if (!SHA.test(normalizedSha)) fail('Identitatea production-release este invalidă')
-  const title = new RegExp(`^production-${TASK_UUID}-${normalizedSha}-${ci}-${build}$`)
+  const titlePrefix = 'production-'
+  const titleSuffix = `-${normalizedSha}-${ci}-${build}`
   const released = paginatedEntries(workflowRunPages, 'workflow_runs', 'runurilor production-release')
     .filter((run) => run?.event === 'workflow_dispatch'
       && run?.status === 'completed'
       && run?.conclusion === 'success'
       && run?.head_branch === 'master'
       && String(run?.head_sha ?? '').toLowerCase() === normalizedSha
-      && title.test(String(run?.display_title ?? '')))
+      && String(run?.display_title ?? '').startsWith(titlePrefix)
+      && String(run?.display_title ?? '').endsWith(titleSuffix)
+      && UUID.test(String(run?.display_title ?? '').slice(titlePrefix.length, -titleSuffix.length)))
     .map((run) => positiveRunId(run?.id, 'Runul production publicat'))
     .filter((id) => id !== current)
   return released.length > 0 ? Math.min(...released) : 0
@@ -96,9 +100,13 @@ export function canonicalCiRunIdFromBuild(buildRun, candidateSha, buildRunId) {
     || buildRun.conclusion !== 'success'
     || !exactWorkflowPath(buildRun.path, BUILD_PATH)
   ) fail('Buildul curent nu este buildul canonic al candidatului')
-  const match = new RegExp(`^build-release-([1-9][0-9]*)-${normalizedSha}$`).exec(String(buildRun.display_title ?? ''))
-  if (!match) fail('Titlul buildului canonic este invalid')
-  return positiveRunId(match[1], 'CI run ID')
+  const prefix = 'build-release-'
+  const suffix = `-${normalizedSha}`
+  const displayTitle = String(buildRun.display_title ?? '')
+  if (!displayTitle.startsWith(prefix) || !displayTitle.endsWith(suffix)) {
+    fail('Titlul buildului canonic este invalid')
+  }
+  return positiveRunId(displayTitle.slice(prefix.length, -suffix.length), 'CI run ID')
 }
 
 export function exactCanonicalBuildRunId(workflowRunPages, candidateSha, ciRunId, buildRunId) {

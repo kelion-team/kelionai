@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: refs/heads/master
           persist-credentials: false
       - name: Verifică buildul și lansează release-ul pentru vârful master
         run: |
@@ -42,6 +42,7 @@ jobs:
 
           current_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
           [[ "$current_master" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$current_master" ]
           if [ "$CANDIDATE_SHA" != "$current_master" ]; then
             echo "::notice::Buildul $BUILD_RUN_ID este pentru $CANDIDATE_SHA, dar master este $current_master; nu public un candidat stale."
             exit 0
