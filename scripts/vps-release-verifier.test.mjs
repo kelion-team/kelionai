@@ -261,7 +261,8 @@ test('dispatcherul generic folosește un request id stabil pe repository, SHA ș
 
 test('workflow-ul dovedește ownerul Constructor înainte să genereze UUID-ul generic', () => {
   const workflow = readFileSync(new URL('../.github/workflows/release-dispatch.yml', import.meta.url), 'utf8')
-  assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}[\s\S]*persist-credentials: false/)
+  assert.match(workflow, /ref: refs\/heads\/master[\s\S]*persist-credentials: false/)
+  assert.match(workflow, /\[ "\$\(git rev-parse HEAD\)" = "\$CANDIDATE_SHA" \][\s\S]*\[ "\$\(git rev-parse HEAD\)" = "\$current_master" \]/)
   assert.match(workflow, /permissions:[\s\S]*contents: read[\s\S]*actions: write[\s\S]*pull-requests: read/)
   const buildIdentity = workflow.indexOf('release-dispatch-owner.mjs build-ci')
   const uniqueBuild = workflow.indexOf('release-dispatch-owner.mjs canonical-build', buildIdentity)
