@@ -54,6 +54,29 @@ describe('OpenAI Responses adapter', () => {
     expect(body).not.toHaveProperty('temperature')
   })
 
+  it('trimite reasoning pentru GPT-6 Astra și nu trimite temperature', () => {
+    const body = toResponsesBody(
+      'gpt-6-astra',
+      [{ role: 'user', content: 'analizează și execută' }],
+      [],
+      { reasoning: 'high', temperature: 0.2 },
+      false,
+    ) as { reasoning?: { effort?: string }; temperature?: number }
+    expect(body.reasoning).toEqual({ effort: 'high' })
+    expect(body).not.toHaveProperty('temperature')
+  })
+
+  it('omite effort=none pentru GPT-6 Astra', () => {
+    const body = toResponsesBody(
+      'gpt-6-astra',
+      [{ role: 'user', content: 'ok' }],
+      [],
+      { reasoning: 'none' },
+      false,
+    )
+    expect(body).not.toHaveProperty('reasoning')
+  })
+
   it('refuză o rundă required a cărei allowlist nu conține nicio unealtă oferită', () => {
     expect(() => toResponsesBody(
       'model-configurat',

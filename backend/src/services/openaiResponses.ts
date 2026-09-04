@@ -222,12 +222,19 @@ export function toResponsesBody(
   if (converted.instructions) body.instructions = converted.instructions
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   // Reasoning models reject temperature. Keep it only for explicitly
-  // non-reasoning legacy models configured by an operator.
-  if (opts.temperature != null && !/^gpt-5(?:\.|-|$)/i.test(model)) body.temperature = opts.temperature
+  // non-reasoning legacy models configured by an operator. GPT-6 Astra is
+  // reasoning-only too, so it must follow the same transport contract.
+  const esteModelDeRationament = /^(?:o[0-9]|gpt-(?:5|6)(?:\.|-|$))/i.test(model)
+  if (opts.temperature != null && !esteModelDeRationament) body.temperature = opts.temperature
   // gpt-4.1, gpt-4.1-mini, gpt-4o etc. NU suportă reasoning.effort —
-  // doar modelele o-series (o3, o4-mini) și gpt-5 îl acceptă. Dacă
-  // trimitem reasoning pe un model care nu-l suportă, OpenAI dă 400.
-  if (body.reasoning && !/^(o[0-9]|gpt-5)/i.test(model)) delete body.reasoning
+  // doar modelele o-series, GPT-5 și GPT-6 îl acceptă. Dacă trimitem
+  // reasoning pe un model care nu-l suportă, OpenAI dă 400.
+  // GPT-6 Astra nu acceptă effort=none; omiterea câmpului este echivalentul
+  // corect pentru o probă fără reasoning.
+  if (body.reasoning && !esteModelDeRationament) delete body.reasoning
+  if (model.match(/^gpt-6(?:\.|-|$)/i) && (body.reasoning as { effort?: string } | undefined)?.effort === 'none') {
+    delete body.reasoning
+  }
   const responseTools = toolsToResponses(tools, opts)
   if (responseTools.length) {
     body.tools = responseTools

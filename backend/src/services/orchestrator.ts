@@ -93,7 +93,7 @@ const ANALIZA_CLAIM_RE =
   /\b(?:o\s+s[ăa]\s+)?(?:analizez|verific|investighez|cercetez|examinez|studiez|inspectez)\b|\b(?:m[ăa]\s+uit|arunc\s+o\s+privire|dau\s+o\s+cautare|caut\s+prin|sap\s+in)\b|\b(?:let\s+me\s+)?(?:analy[sz]e|investigate|examine|inspect|look\s+into|take\s+a\s+look|check\s+the)\b|\bi(?:'|’)?ll\s+(?:analy[sz]e|check|look|investigate|examine)\b/i
 
 /**
- * @param model      internal OpenAI id (e.g. openai/gpt-5.6-terra)
+ * @param model      internal OpenAI id (e.g. openai/gpt-5.6-terra or openai/gpt-6-astra)
  * @param messages   the conversation (system + history + current turn)
  * @param tools      the canonical function-tool definitions from chat.ts
  * @param execTool   runs a tool: (name, argsJson) → text result
