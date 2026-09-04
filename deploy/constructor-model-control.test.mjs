@@ -912,6 +912,7 @@ test('unitatea și sursa fixează socketul, credentiala și spawn fără shell s
   assert.match(unit, /^Group=10050$/m)
   assert.match(unit, /^LoadCredential=constructor-model-control-secret:\/root\/kelion\/secrets\/constructor-model-control-secret$/m)
   assert.match(unit, /^RuntimeDirectory=kelion-constructor-model-control$/m)
+  assert.match(unit, /^RuntimeDirectoryPreserve=yes$/m)
   assert.doesNotMatch(unit, /^(?:After|Requires)=.*kelion-runtime-config-recovery[.]service$/m)
   assert.match(unit, /^Wants=private-ai-llm[.]service$/m)
   assert.match(unit, /^ConditionPathExists=\/run\/kelion\/runtime-config-recovery[.]ready$/m)
