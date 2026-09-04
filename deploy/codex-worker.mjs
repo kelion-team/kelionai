@@ -375,80 +375,11 @@ function secretLocation() {
   if (process.env.CODEX_WORKER_SECRET_FILE && process.env.CREDENTIALS_DIRECTORY) {
     fail('Sursele credentialei worker sunt ambigue')
   }
-  return logicalLength > API_LOGIN_STATUS_PREFIX.length
-}
-
-function codexProjectKeyStatusReady() {
-  const result = spawnSync(CODEX_BIN, codexLoginStatusArgs(), {
-    env: codexParentEnv(),
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 30_000,
-    maxBuffer: 4 * 1024,
-    windowsHide: true,
-  })
-  const output = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.alloc(0)
-  try {
-    return !result.error && result.status === 0 && isCodexProjectKeyStatus(output)
-  } finally {
-    output.fill(0)
+  if (process.env.CODEX_WORKER_SECRET_FILE) {
+    return { path: resolve(process.env.CODEX_WORKER_SECRET_FILE), systemd: false }
   }
-}
-
-function cachedProjectKeyFingerprint() {
-  const path = join(AUTH_HOME, PROJECT_KEY_FINGERPRINT)
-  if (!existsSync(path)) return null
-  const info = lstatSync(path)
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
-    fail('Fingerprintul credentialei Codex nu este un fișier regulat unic')
-  }
-  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
-    fail('Fingerprintul credentialei Codex are permisiuni prea largi')
-  }
-  const value = readFileSync(path, 'ascii')
-  return /^[0-9a-f]{64}\n?$/.test(value) ? value.trim() : null
-}
-
-function publishProjectKeyFingerprint(fingerprint) {
-  if (!/^[0-9a-f]{64}$/.test(fingerprint)) fail('Fingerprint OpenAI invalid')
-  const target = join(AUTH_HOME, PROJECT_KEY_FINGERPRINT)
-  const temporary = join(AUTH_HOME, `.${PROJECT_KEY_FINGERPRINT}.${randomUUID()}.tmp`)
-  let descriptor = null
-  try {
-    descriptor = openSync(temporary, 'wx', 0o600)
-    writeFileSync(descriptor, `${fingerprint}\n`, { encoding: 'ascii' })
-    fsyncSync(descriptor)
-    closeSync(descriptor)
-    descriptor = null
-    renameSync(temporary, target)
-    fsyncPath(AUTH_HOME)
-  } finally {
-    if (descriptor !== null) closeSync(descriptor)
-    if (existsSync(temporary)) unlinkSync(temporary)
-  }
-}
-
-function assertCodexAuthCacheMetadata(required) {
-  const path = join(AUTH_HOME, 'auth.json')
-  if (!existsSync(path)) {
-    if (required) fail('Cache-ul Codex auth.json lipsește după login')
-    return false
-  }
-  const info = lstatSync(path)
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
-    fail('Cache-ul Codex auth.json nu este un fișier regulat unic')
-  }
-  const uid = process.getuid?.()
-  if (process.platform !== 'win32' && (info.uid !== uid || (info.mode & 0o077) !== 0)) {
-    fail('Cache-ul Codex auth.json are owner sau permisiuni necanonice')
-  }
-  return true
-}
-
-function refreshCodexApiLogin() {
-  const projectKey = loadProjectKeyCredential()
-  try {
-    const fingerprint = createHash('sha256').update(projectKey).digest('hex')
-    assertCodexAuthCacheMetadata(false)
+  if (process.env.CREDENTIALS_DIRECTORY) {
+    const directory = resolve(process.env.CREDENTIALS_DIRECTORY)
     if (
       !directory.startsWith('/run/credentials/')
       || realpathSync(directory) !== directory
@@ -1625,38 +1556,76 @@ async function selfTest() {
   if (headers['x-codex-signature'] !== 'v1=83247cf65f03be7abb1d82cc36c18e341fd9ba399e07e9706e0c116e2ebbe8ee') {
     fail('Semnătura HMAC diferă de vectorul cunoscut')
   }
-  const args = codexExecArgs('/var/lib/kelion-codex/jobs/codex-test/worktree')
-  for (const flag of ['--strict-config', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--profile']) {
-    if (!args.includes(flag)) fail(`Lipsește flagul Codex fix ${flag}`)
+  const args = openCodeExecArgs(
+    '/var/lib/kelion-codex/jobs/codex-test/worktree',
+    '/var/lib/kelion-codex/jobs/codex-test/order.md',
+  )
+  if (
+    args[0] !== '--pure'
+    || args[1] !== 'run'
+    || args[2] !== OPENCODE_PROMPT
+    || args[3] !== '--model'
+    || args[4] !== 'llama.cpp/qwen3.6-35b-a3b-local'
+    || args[5] !== '--file'
+    || args[6] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
+    || args.some((value) => ['--attach', '--auto', '--dir', 'codex', 'login'].includes(value))
+  ) fail('Argumentele OpenCode nu fixează execuția locală și ordinul privat')
+  const powerfulArgs = openCodeExecArgs(
+    '/var/lib/kelion-codex/jobs/codex-test/worktree',
+    '/var/lib/kelion-codex/jobs/codex-test/order.md',
+    POWERFUL_OPENCODE_MODEL,
+  )
+  if (powerfulArgs[4] !== 'llama.cpp/qwen3.5-122b-a10b-local') fail('Selecția manuală POWERFUL nu fixează modelul local 122B')
+  const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')
+  if (
+    rootArgs.slice(0, 6).join(' ') !== '-n -u root -- /usr/bin/env -i'
+    || !rootArgs.includes('HOME=/srv/private-ai/home')
+    || !rootArgs.includes('OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json')
+    || !rootArgs.includes('OPENCODE_DISABLE_MODELS_FETCH=true')
+    || !rootArgs.includes('GIT_CONFIG_COUNT=1')
+    || !rootArgs.includes('GIT_CONFIG_KEY_0=safe.directory')
+    || !rootArgs.includes('GIT_CONFIG_VALUE_0=/var/lib/kelion-codex/jobs/codex-test/worktree')
+    || !rootArgs.includes('/opt/private-ai/bin/opencode')
+  ) fail('Lansatorul OpenCode root nu fixează mediul local curat')
+  const validOpenCodeConfig = {
+    autoupdate: false,
+    share: 'disabled',
+    model: 'llama.cpp/qwen3.6-35b-a3b-local',
+    small_model: 'llama.cpp/qwen3.6-35b-a3b-local',
+    enabled_providers: ['llama.cpp'],
+    provider: {
+      'llama.cpp': {
+        npm: '@ai-sdk/openai-compatible',
+        options: { baseURL: 'http://127.0.0.1:24080/v1' },
+        models: {
+          'qwen3.6-35b-a3b-local': {},
+          'qwen3.5-122b-a10b-local': {},
+        },
+      },
+    },
+    permission: Object.fromEntries(['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory'].map((key) => [key, 'allow'])),
   }
-  if (args.includes('--sandbox') || args.at(-1) !== '-') fail('Argumentele Codex nu selectează exclusiv profilul fix și stdin')
-  const loginArgs = codexApiLoginArgs()
-  if (loginArgs.join(' ') !== '-c forced_login_method="api" -c cli_auth_credentials_store="file" login --with-api-key') {
-    fail('Loginul Codex nu fixează API-key și cache-ul file înainte de subcomandă')
+  validateOpenCodeConfig(validOpenCodeConfig)
+  let externalProviderRejected = false
+  try {
+    validateOpenCodeConfig({ ...validOpenCodeConfig, enabled_providers: ['openai'] })
+  } catch {
+    externalProviderRejected = true
   }
-  const loginStatusArgs = codexLoginStatusArgs()
-  if (loginStatusArgs.join(' ') !== '-c forced_login_method="api" -c cli_auth_credentials_store="file" login status') {
-    fail('Statusul Codex nu citește determinist cache-ul API-key din fișier')
-  }
-  if (!isCodexProjectKeyStatus(Buffer.from('Logged in using an API key - sk-proj-***xxxxx\n', 'ascii'))) {
-    fail('Statusul API-key Codex valid nu este recunoscut')
-  }
-  if (isCodexProjectKeyStatus(Buffer.from('Logged in using ChatGPT\n', 'ascii'))) {
-    fail('Statusul ChatGPT nu poate valida loginul API-key')
-  }
-  assertProjectKeyCredential(Buffer.from(`sk-proj-${'x'.repeat(32)}`, 'ascii'))
-  for (const invalid of [
-    Buffer.from(`sk-admin-${'x'.repeat(32)}`, 'ascii'),
-    Buffer.from(`sk-proj-${'x'.repeat(16)}\nextra`, 'ascii'),
-    Buffer.from('disabled-placeholder-openai', 'ascii'),
-  ]) {
-    let rejected = false
-    try {
-      assertProjectKeyCredential(invalid)
-    } catch {
-      rejected = true
-    }
-    if (!rejected) fail('Validatorul credentialei Codex acceptă o valoare necanonică')
+  if (!externalProviderRejected) fail('Configurația OpenCode acceptă un provider extern')
+  let incompleteDualConfigRejected = false
+  try {
+    validateOpenCodeConfig({
+      ...validOpenCodeConfig,
+      provider: {
+        'llama.cpp': {
+          ...validOpenCodeConfig.provider['llama.cpp'],
+          models: { 'qwen3.6-35b-a3b-local': {} },
+        },
+      },
+    })
+  } catch {
+    incompleteDualConfigRejected = true
   }
   if (!incompleteDualConfigRejected) fail('Configurația OpenCode acceptă lipsa treptei POWERFUL')
   const gateArgs = gateContainerArgs(

@@ -2106,18 +2106,11 @@ jobs:
                 printf '%s=disabled\n' "$marker"
               fi
             done
-            codex_auth_status=$(runuser -u kelion-codex -- env -i \
-              HOME=/var/lib/kelion-codex-auth \
-              CODEX_HOME=/var/lib/kelion-codex-auth \
-              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex \
-              -c 'forced_login_method="api"' \
-              -c 'cli_auth_credentials_store="file"' \
-              login status 2>/dev/null || :)
-            case "$codex_auth_status" in
-              'Logged in using an API key - sk-proj-'*) echo 'codex-auth=ready' ;;
-              *) echo 'codex-auth=required' ;;
-            esac
+            if validate_constructor_model_status; then
+              echo 'opencode-qwen-local=ready'
+            else
+              echo 'opencode-qwen-local=required'
+            fi
             assert_backend_side_effects_active
           }
           case "$operation" in
