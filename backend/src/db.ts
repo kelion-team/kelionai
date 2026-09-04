@@ -5809,6 +5809,14 @@ export async function updateConstructorIncident(
 // pe VPS (un singur worker odată) apără oricum de dubla-execuție.
 const MIN_JOB_BLOCAT = 15
 
+// Câte reluări automate primește un ordin înainte să fie declarat mort. Cauzele
+// tehnice ale workerului sunt trecătoare (modelul local se reîncarcă, un deploy
+// oprește unitatea, procesul e omorât la depășirea memoriei), iar până acum
+// fiecare dintre ele omora ordinul definitiv, cerând reluare manuală de la owner.
+// Trei încercări acoperă pana obișnuită fără să ascundă un defect real: dacă un
+// ordin pică de trei ori la rând, cauza nu mai este trecătoare.
+const CONSTRUCTOR_WORKER_MAX_ATTEMPTS = 3
+
 // Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
 // la dovada live sau un rezultat terminal. Claim-ul persistă profilul ales
 // manual înainte de execuție; watchdog-ul nu îl schimbă și nu îl reîncearcă.
@@ -5919,16 +5927,25 @@ export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: nu
             evidence: 'worker_failure:worker_internal_failure;profile=unrecorded',
             progress: 'technical_failure',
           }
+      // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy,
+      // care oprește unitatea, și la fiecare depășire de memorie. Îl repunem în
+      // coadă cu backoff, până la plafon. Handoff-ul este idempotent, deci
+      // re-revendicarea este sigură.
       const updated = await client.query<BuildJobDbRow>(
         `UPDATE build_jobs SET
-           status='failed', constructor_stage='failed', progress=$2,
-           retry_not_before=NULL, log=$3, progress_at=now(), updated_at=now()
+           status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           constructor_stage=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
+           codex_task_id=CASE WHEN attempts < $4 THEN NULL ELSE codex_task_id END,
+           progress=$2,
+           retry_not_before=CASE WHEN attempts < $4 THEN now() + interval '2 minutes' ELSE NULL END,
+           log=$3, progress_at=now(), updated_at=now()
          WHERE id=$1 AND status='running'
          RETURNING *`,
-        [row.id, failure.progress, failure.evidence],
+        [row.id, failure.progress, failure.evidence, CONSTRUCTOR_WORKER_MAX_ATTEMPTS],
       )
       const failedRow = updated.rows[0]
       if (!failedRow) continue
+      if (failedRow.status !== 'failed') continue
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
         orderText: failedRow.order_text,
@@ -6209,12 +6226,26 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
       : input.event === 'unresolved'
         ? constructorWorkerUnresolvedRecord(input.reason, input.profile)
         : null
+    // Cele trei coduri tehnice ale workerului sunt tranzitorii prin natura lor:
+    // modelul local se reîncarcă, execuția depășește fereastra, procesul moare.
+    // Până acum fiecare dintre ele omora ordinul definitiv. Îl repunem în coadă
+    // cu backoff, până la plafon; codul rămâne prima linie din log și ajunge la
+    // worker ca recoveryCode. `unresolved` NU se reia: acela este un verdict
+    // despre conținutul ordinului, nu o pană.
+    const reluabil = input.event === 'failed'
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
-         status=CASE WHEN $3 THEN 'failed' ELSE status END,
-         constructor_stage=$2,
+         status=CASE
+           WHEN $8 AND attempts < $9 THEN 'queued'
+           WHEN $3 THEN 'failed'
+           ELSE status END,
+         constructor_stage=CASE WHEN $8 AND attempts < $9 THEN 'queued' ELSE $2 END,
+         codex_task_id=CASE WHEN $8 AND attempts < $9 THEN NULL ELSE codex_task_id END,
          progress=$4,
-         retry_not_before=CASE WHEN $3 THEN NULL ELSE retry_not_before END,
+         retry_not_before=CASE
+           WHEN $8 AND attempts < $9 THEN now() + (interval '1 minute' * power(2, least(attempts, 4)))
+           WHEN $3 THEN NULL
+           ELSE retry_not_before END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
          brain=$6,
@@ -6229,10 +6260,14 @@ export async function advanceCodexBuildJob(id: number, taskId: string, input: Co
         failure?.evidence ?? null,
         CONSTRUCTOR_LOCAL_ACTOR,
         input.event === 'failed' || input.event === 'unresolved' ? input.profile : null,
+        reluabil,
+        CONSTRUCTOR_WORKER_MAX_ATTEMPTS,
       ],
     )
     const failedRow = updated.rows[0]
-    if (terminal && failedRow) {
+    // Incidentul se deschide numai când ordinul chiar a murit. Dacă a fost repus
+    // în coadă, nu există încă nimic de raportat ownerului.
+    if (terminal && failedRow && failedRow.status === 'failed') {
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
         orderText: failedRow.order_text,

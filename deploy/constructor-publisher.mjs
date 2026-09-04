@@ -980,7 +980,12 @@ async function recoverMergedPr(token, job, identity, protectionPolicy) {
   }
   if (
     !Number.isSafeInteger(protectionPolicy?.requiredApprovalCount)
-    || protectionPolicy.requiredApprovalCount < 1
+    // Acelasi prag ca in validateProtection: pe un repository cu proprietar unic
+    // aprobarile sunt 0, pentru ca nimeni nu poate aproba propriul PR. Un prag
+    // mai mare aici ar lasa un ordin deja merged blocat definitiv, fara ca nici
+    // ownerul sa-l mai poata relua. Integritatea merge-ului recuperat ramane
+    // dovedita de controalele obligatorii verzi si de comparatia cu master.
+    || protectionPolicy.requiredApprovalCount < 0
     || !Array.isArray(protectionPolicy?.requiredChecks)
     || protectionPolicy.requiredChecks.length !== REQUIRED_CHECKS.length
   ) {
