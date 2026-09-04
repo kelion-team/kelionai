@@ -325,6 +325,28 @@ test('repair-ul rulează înaintea cutover-ului gate normal', () => {
   assert.ok(normalCutover > normalStage, 'cutover-ul normal nu urmează staging-ului')
 })
 
+test('finalizerul reia explicit bariera worker/publisher înaintea primului cutover', () => {
+  const resume = finalizer.indexOf('resume_pending_constructor_activation() {')
+  const invocation = finalizer.indexOf('\nresume_pending_constructor_activation\n', resume)
+  const repair = finalizer.indexOf('\nrepair_stale_committed_gate_journal() {')
+  const helper = finalizer.indexOf('KELION_ACTIVATION_RESUME_OPERATION="$operation"', resume)
+  const applied = finalizer.indexOf('.phase == "applied"', helper)
+  const clear = finalizer.indexOf('rm -f -- "$ACTIVATION_JOURNAL"', applied)
+
+  assert.ok(resume >= 0 && invocation > resume && repair > invocation,
+    'reluarea barierei trebuie să fie invocată înaintea repair-ului și a cutover-ului gate')
+  assert.ok(helper > resume, 'reluarea trebuie să folosească ownerul explicit worker/publisher')
+  assert.ok(applied > helper && clear > applied,
+    'jurnalul activării poate fi consumat numai după dovada fazei applied')
+  assert.match(
+    finalizer.slice(resume, invocation),
+    /--recover-only[\s\\]*\n?[^\n]*--leave-constructor-quiesced/,
+    'reluarea trebuie să păstreze Constructorul quiesced până la instalarea controllerului',
+  )
+  assert.match(finalizer.slice(resume, invocation), /UNIT_MIGRATION_PENDING/)
+  assert.match(finalizer.slice(resume, invocation), /RUNTIME_READY_STAMP/)
+})
+
 test('unitatea de recovery rămâne enabled pentru validatorul ambelor cutover-uri', () => {
   const repair = shellFunction('repair_stale_committed_gate_journal')
   const repairRecovery = repair.indexOf('--recover-only')
