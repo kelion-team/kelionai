@@ -67,6 +67,7 @@ jobs:
             ".github/workflows/vps-release-verifier.yml",
             ".github/workflows/vps-set-env.yml",
             "Dockerfile.gates",
+            "deploy/RUNBOOKS.md",
             "deploy/constructor-release.mjs",
             "deploy/constructor-publisher.mjs",
             "deploy/deploy.sh",
@@ -79,6 +80,7 @@ jobs:
             "deploy/lib/constructor-publication.test.mjs",
             "deploy/lib/release-rollback.test.mjs",
             "deploy/lib/runtime-config-cutover.sh",
+            "deploy/upgrade-constructor.sh",
             "docs/operations/CURRENT.md",
             "scripts/lib/vps-pr-remediation.mjs",
             "scripts/lib/vps-release-verification.mjs",
@@ -88,10 +90,18 @@ jobs:
             "scripts/vps-release-verifier.test.mjs",
             "scripts/verifica-workflow-uri-sigure.mjs"
           ]'
-          files=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate --jq '.[].filename' | jq -R -s 'split("\n") | map(select(length > 0))')
-          is_vps=$(jq -r --argjson allowed "$allowed" 'any(.[]; . as $file | $allowed | index($file) != null)' <<<"$files")
+          file_entries=$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/$pr_number/files?per_page=100" --paginate \
+            --jq '.[] | {filename, status, previous_filename: (.previous_filename // null)}' | jq -s '.')
+          files=$(jq '[.[].filename]' <<<"$file_entries")
+          is_vps=$(jq -r --argjson allowed "$allowed" '
+            length > 0 and all(.[]; . as $entry |
+              ($allowed | index($entry.filename)) != null or
+              ($entry.previous_filename != null and ($allowed | index($entry.previous_filename)) != null)
+            )
+          ' <<<"$file_entries")
           if [ "$is_vps" = true ]; then
             [[ "$head_ref" == chore/* ]]
+            jq -e 'all(.[]; .status != "renamed" and .previous_filename == null)' <<<"$file_entries" >/dev/null
             jq -e --argjson allowed "$allowed" 'length > 0 and all(.[]; . as $file | $allowed | index($file) != null)' <<<"$files" >/dev/null
           fi
 

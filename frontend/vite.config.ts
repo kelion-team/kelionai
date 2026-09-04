@@ -10,7 +10,7 @@ const productOrigin = new URL(String(productConfig.publicAppOrigin ?? ''))
 if (productOrigin.protocol !== 'https:' || productOrigin.username || productOrigin.password || productOrigin.pathname !== '/' || productOrigin.search || productOrigin.hash) {
   throw new Error('config/product.json: publicAppOrigin invalid')
 }
-for (const field of ['appName', 'appVersion', 'githubRepository', 'supportEmail', 'nativeScheme', 'androidApplicationId', 'iosBundleId', 'iosTeamId', 'desktopBundleId']) {
+for (const field of ['appName', 'appVersion', 'githubRepository', 'supportEmail', 'nativeScheme', 'constructorNativeScheme', 'androidApplicationId', 'iosBundleId', 'iosTeamId', 'desktopBundleId', 'constructorDesktopBundleId']) {
   if (typeof productConfig[field] !== 'string' || !productConfig[field]) throw new Error(`config/product.json: ${field} invalid`)
 }
 if (!Array.isArray(productConfig.nativeOrigins) || typeof productConfig.nativeRedirects !== 'object' || productConfig.nativeRedirects === null) {

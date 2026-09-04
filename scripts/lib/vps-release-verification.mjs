@@ -39,6 +39,45 @@ export function parseDeployTitle(title) {
   return { requestId: match[1], commit: match[2], ciRunId: Number(match[3]), buildRunId: Number(match[4]) }
 }
 
+export async function selectDeployEvidence(runs, loadJobs) {
+  if (!Array.isArray(runs)) return { run: null, releaseJobQualified: false }
+  if (typeof loadJobs !== 'function') throw new Error('invalid_deploy_jobs_loader')
+  if (runs.some((run) => !Number.isSafeInteger(Number(run?.id)) || Number(run.id) <= 0)) {
+    throw new Error('invalid_deploy_run_identity')
+  }
+  const ordered = [...runs].sort((left, right) => {
+    const leftId = Number(left?.id)
+    const rightId = Number(right?.id)
+    return rightId - leftId
+  })
+  const successful = ordered.filter((run) => run?.status === 'completed' && run?.conclusion === 'success')
+  const qualified = []
+  for (const run of successful) {
+    const identity = parseDeployTitle(run?.display_title)
+    if (!identity) throw new Error('invalid_deploy_run_identity')
+    const jobs = await loadJobs(Number(run.id))
+    if (!Array.isArray(jobs)) throw new Error('invalid_deploy_jobs')
+    const releaseJobs = jobs.filter((job) => job?.name === 'release')
+    if (releaseJobs.length > 1) throw new Error('invalid_deploy_jobs')
+    if (releaseJobs.length === 1 && releaseJobs[0]?.conclusion === 'success') {
+      qualified.push({ run, requestId: identity.requestId })
+    }
+  }
+
+  const pending = ordered.find((run) => run?.status !== 'completed')
+  if (pending) return { run: pending, releaseJobQualified: false }
+
+  const qualifiedRequestIds = new Set(qualified.map(({ requestId }) => requestId))
+  if (qualifiedRequestIds.size > 1) throw new Error('ambiguous_successful_deploy_requests')
+  if (qualified.length > 0) return { run: qualified[0].run, releaseJobQualified: true }
+
+  const unrecoveredFailure = ordered.find((run) => run?.status === 'completed' && run?.conclusion !== 'success')
+  return {
+    run: unrecoveredFailure ?? successful[0] ?? null,
+    releaseJobQualified: false,
+  }
+}
+
 function emptyNamedActorSet(value) {
   if (value === null) return true
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -83,11 +122,11 @@ export function evaluateLiveSample(sample, commit) {
   const missing = []
   if (sample?.version?.status !== 200 || sample.version.body?.v !== expected) missing.push('live-version')
   const ready = sample?.ready?.body
-  if (sample?.ready?.status !== 200 || ready?.ready !== true || !ready?.checks || Object.values(ready.checks).some((value) => value !== true) || ready?.release?.candidate !== true || ready?.release?.sideEffectsActive !== true) missing.push('readiness')
+  if (sample?.ready?.status !== 200 || ready?.ready !== true || !ready?.checks || Object.values(ready.checks).some((value) => value !== true) || ready?.release?.candidate !== false || ready?.release?.sideEffectsActive !== true) missing.push('readiness')
   if (sample?.live?.status !== 200 || sample.live.body?.status !== 'alive') missing.push('liveness')
   if (sample?.health?.status !== 200 || sample.health.body?.status !== 'ok') missing.push('health')
   const proof = sample?.proof?.body
-  if (sample?.proof?.status !== 200 || proof?.ready !== true || proof?.release?.sideEffectsActive !== true || proof?.activeCommit !== commit) missing.push('release-proof')
+  if (sample?.proof?.status !== 200 || proof?.ready !== true || proof?.release?.candidate !== false || proof?.release?.sideEffectsActive !== true || proof?.activeCommit !== commit) missing.push('release-proof')
   return { ok: missing.length === 0, missing }
 }
 

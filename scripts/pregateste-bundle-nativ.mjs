@@ -14,12 +14,14 @@ const PUBLIC_WS_ORIGIN = `wss://${PUBLIC_URL.host}`
 const TINTE = Object.freeze({
   ios: resolve(REPO, 'ios/native-dist'),
   desktop: resolve(REPO, 'desktop/dist'),
+  'constructor-desktop': resolve(REPO, 'constructor-desktop/dist'),
 })
 
 const RADACINI_RUNTIME = new Set([
   'anim',
   'assets',
   'favicon.svg',
+  'google-g-logo.svg',
   'icons',
   'index.html',
   'kelion-logo.png',
@@ -31,7 +33,8 @@ const RADACINI_RUNTIME = new Set([
   'ort',
 ])
 const RADACINI_EXCLUSE = new Set(['.well-known', 'downloads', 'robots.txt', 'sitemap.xml', 'sw.js'])
-const EXTENSII_RUNTIME = new Set(['.bin', '.css', '.data', '.glb', '.html', '.js', '.json', '.png', '.svg', '.wasm', '.webmanifest'])
+const RADACINI_OPTIONALE = new Set(['models'])
+const EXTENSII_RUNTIME = new Set(['.bin', '.css', '.data', '.glb', '.html', '.js', '.json', '.mjs', '.png', '.svg', '.wasm', '.webmanifest'])
 
 // CSP-ul nativ permite numai bundle-ul local, backendul Kelion și suprafețele
 // iframe deja validate de workspace. `ipc:` este transportul intern Tauri;
@@ -118,18 +121,25 @@ function copiazaRadacina(nume, destinatie) {
 
 export function pregatesteBundle(platforma) {
   const destinatie = TINTE[platforma]
-  if (!destinatie) throw new Error('Ținta trebuie să fie ios sau desktop.')
-  const parinteAsteptat = platforma === 'ios' ? resolve(REPO, 'ios') : resolve(REPO, 'desktop')
+  if (!destinatie) throw new Error('Ținta trebuie să fie ios, desktop sau constructor-desktop.')
+  const parinteAsteptat = platforma === 'ios'
+    ? resolve(REPO, 'ios')
+    : platforma === 'desktop'
+      ? resolve(REPO, 'desktop')
+      : resolve(REPO, 'constructor-desktop')
   if (dirname(destinatie) !== parinteAsteptat || !destinatie.startsWith(`${REPO}${sep}`)) {
     throw new Error(`Țintă nesigură refuzată: ${destinatie}`)
   }
 
   verificaSursa()
-  // Singurele ștergeri recursive admise sunt cele două directoare generate,
+  // Singurele ștergeri recursive admise sunt directoarele generate,
   // rezolvate exact mai sus și aflate sub rădăcina repo-ului.
   if (existsSync(destinatie)) rmSync(destinatie, { recursive: true, force: true })
   mkdirSync(destinatie, { recursive: true })
-  for (const root of [...RADACINI_RUNTIME].sort()) copiazaRadacina(root, destinatie)
+  for (const root of [...RADACINI_RUNTIME].sort()) {
+    if (RADACINI_OPTIONALE.has(root) && !existsSync(resolve(SURSA, root))) continue
+    copiazaRadacina(root, destinatie)
+  }
 
   const index = resolve(destinatie, 'index.html')
   writeFileSync(index, curataHtmlPentruNativ(readFileSync(index, 'utf8'), platforma))

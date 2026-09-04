@@ -187,7 +187,7 @@ describe('poarta faptelor — legată în tură + LEGILE ADMINULUI în orice cre
     expect(chat).toMatch(/\[POARTA FAPTELOR\] plan fără execuție/)
   })
 
-  // Constructorul local a fost eliminat; execuția aparține workerului Codex separat.
+  // Constructorul local a fost eliminat; execuția aparține workerului Constructor separat.
 })
 
 describe('LEGEA ANTI-HARDCODARE — poarta automată + regula canonică', () => {

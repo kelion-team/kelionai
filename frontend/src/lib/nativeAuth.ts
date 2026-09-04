@@ -5,7 +5,7 @@ import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { productConfig } from './productConfig'
 
-type NativePlatform = 'ios' | 'desktop'
+type NativePlatform = 'ios' | 'desktop' | 'constructor-desktop'
 type SecureKind = 'install-id' | 'access-token' | 'pending-auth' | 'pending-revocation'
 
 interface NativeSecureSessionPlugin {
@@ -42,8 +42,21 @@ let callbackInFlight: Promise<void> | null = null
 function platform(): NativePlatform | null {
   if (typeof window === 'undefined') return null
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios') return 'ios'
-  if ('__TAURI_INTERNALS__' in window) return 'desktop'
+  if ('__TAURI_INTERNALS__' in window) {
+    const declared = document.querySelector<HTMLMetaElement>('meta[name="kelion-native-platform"]')?.content
+    return declared === 'constructor-desktop' ? 'constructor-desktop' : 'desktop'
+  }
   return null
+}
+
+function nativeRedirect(current: NativePlatform): string {
+  return current === 'constructor-desktop'
+    ? productConfig.nativeRedirects.constructorDesktop
+    : productConfig.nativeRedirects[current]
+}
+
+export function usesTauriSecureStore(current: NativePlatform | null): current is 'desktop' | 'constructor-desktop' {
+  return current === 'desktop' || current === 'constructor-desktop'
 }
 
 export function isNativeShell(): boolean {
@@ -53,21 +66,21 @@ export function isNativeShell(): boolean {
 async function secureGet(kind: SecureKind): Promise<string | null> {
   const current = platform()
   if (current === 'ios') return (await iosSecure.get({ kind })).value
-  if (current === 'desktop') return invoke<string | null>('native_secure_get', { kind })
+  if (usesTauriSecureStore(current)) return invoke<string | null>('native_secure_get', { kind })
   throw new Error('native_secure_store_unavailable')
 }
 
 async function secureSet(kind: SecureKind, value: string): Promise<void> {
   const current = platform()
   if (current === 'ios') return iosSecure.set({ kind, value })
-  if (current === 'desktop') return invoke<void>('native_secure_set', { kind, value })
+  if (usesTauriSecureStore(current)) return invoke<void>('native_secure_set', { kind, value })
   throw new Error('native_secure_store_unavailable')
 }
 
 async function secureDelete(kind: SecureKind): Promise<void> {
   const current = platform()
   if (current === 'ios') return iosSecure.delete({ kind })
-  if (current === 'desktop') return invoke<void>('native_secure_delete', { kind })
+  if (usesTauriSecureStore(current)) return invoke<void>('native_secure_delete', { kind })
   throw new Error('native_secure_store_unavailable')
 }
 
@@ -186,7 +199,7 @@ function parsePending(raw: string | null): PendingAuth | null {
   try {
     const value = JSON.parse(raw) as Partial<PendingAuth>
     if (
-      !['ios', 'desktop'].includes(String(value.platform))
+      !['ios', 'desktop', 'constructor-desktop'].includes(String(value.platform))
       || !UUID_RE.test(String(value.installId ?? ''))
       || !TOKEN_RE.test(String(value.verifier ?? ''))
       || !STATE_RE.test(String(value.state ?? ''))
@@ -204,7 +217,7 @@ export function nativeCallbackParameters(raw: string, current: NativePlatform): 
   let expected: URL
   try {
     callback = new URL(raw)
-    expected = new URL(productConfig.nativeRedirects[current])
+    expected = new URL(nativeRedirect(current))
   } catch {
     return null
   }

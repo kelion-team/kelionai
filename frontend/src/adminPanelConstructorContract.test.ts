@@ -32,6 +32,7 @@ const continuity = {
   progress,
   activity: [],
   eventCount: 0,
+  modelOutcome: null,
 } as const
 const workCard = {
   id: 'constructor:7',
@@ -40,7 +41,7 @@ const workCard = {
   acceptanceCriteria: ['Testele trec.'],
   contextLinks: ['/admin#constructor'],
   owner: null,
-  actor: null,
+  actor: 'OpenCode + Qwen local (llama.cpp)',
   plan: [{ key: 'queued', label: 'În coadă', state: 'current' }],
   currentStep: 'queued',
   status: 'queued',
@@ -67,7 +68,7 @@ const job = {
   branch: null,
   prUrl: null,
   tokens: 0,
-  brain: null,
+  brain: 'OpenCode + Qwen local (llama.cpp)',
   updatedAt: observedAt,
   progress: null,
   pct: 0,

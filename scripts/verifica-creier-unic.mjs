@@ -40,10 +40,22 @@ const TIPARE_RETRASE = [
     nume: 'coqui-server',
     re: /\bCOQUI_(?:URL|ENABLE|MODEL)|\bkelion-coqui\b|\bDockerfile\.coqui\b|\/api\/voce\/(?:coqui-status|sintetizeaza|sample)\b/i,
   },
+  {
+    nume: 'codex-personal-auth', // hardcod-permis: identificator tehnic fix al căii personale Codex interzise
+    re: /\.codex\/auth\.json/i,
+  },
+  {
+    nume: 'chatgpt-private-backend', // hardcod-permis: identificator tehnic fix al endpointului privat interzis
+    re: /chatgpt\.com\/backend-api/i,
+  },
+  {
+    nume: 'chatgpt-account-header', // hardcod-permis: identificator tehnic fix al headerului privat interzis
+    re: /ChatGPT-Account-ID/i,
+  },
 ]
 
 const EXTENSII = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.sh', '.toml'])
-const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/']
+const RADACINI = ['backend/src/', 'frontend/src/', 'deploy/', '.github/workflows/', 'scripts/', 'android/', 'ios/', 'desktop/', 'constructor-desktop/']
 const EXCLUSE = new Set([
   'scripts/verifica-creier-unic.mjs',
   'scripts/verifica-creier-unic.test.mjs',
@@ -53,6 +65,8 @@ const EXCLUSE = new Set([
   'ios/package-lock.json',
   'desktop/package-lock.json',
   'desktop/src-tauri/Cargo.lock',
+  'constructor-desktop/package-lock.json',
+  'constructor-desktop/src-tauri/Cargo.lock',
 ])
 
 function snapshotGit() {

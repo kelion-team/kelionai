@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -55,11 +55,15 @@ const runtimeFixture = (cutover) => {
     ['FRONTEND_ORIGIN', 'https://kelionai.app'],
     ['GOOGLE_REDIRECT_URI', 'https://kelionai.app/auth/google/callback'],
     ['OPENAI_API_KEY_FILE', '/run/secrets/openai-project-key'],
+    ['OPENAI_ADMIN_KEY_FILE', '/run/secrets/openai-admin-key'],
     ['DATABASE_URL_FILE', '/run/secrets/database-url'],
     ['SESSION_SECRET_FILE', '/run/secrets/session-secret'],
     ['GOOGLE_CLIENT_SECRET_FILE', '/run/secrets/google-client-secret'],
     ['GOOGLE_TOKEN_ENCRYPTION_KEY_FILE', '/run/secrets/google-token-encryption-key'],
     ['CODEX_WORKER_SECRET_FILE', '/run/secrets/codex-worker-secret'],
+    ['CONSTRUCTOR_MODEL_CONTROL_ENABLED', '1'],
+    ['CONSTRUCTOR_MODEL_CONTROL_SOCKET', '/run/kelion-constructor-model-control/control.sock'],
+    ['CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE', '/run/secrets/constructor-model-control-secret'],
     ['CONSTRUCTOR_PUBLISHER_SECRET_FILE', '/run/secrets/constructor-publisher-secret'],
     ['CONSTRUCTOR_RELEASE_SECRET_FILE', '/run/secrets/constructor-release-secret'],
     ['GITHUB_RELEASE_OAUTH_TOKEN_FILE', '/run/secrets/github-release-oauth-token'],
@@ -235,7 +239,7 @@ test('publisherul raportează coduri deterministe și tratează schimbarea bazei
   assert.match(publisher, /hasExactRequiredCheckNames\(contexts, REQUIRED_CHECKS\)/)
   assert.match(publisher, /Protecția cu un control obligatoriu suplimentar a fost acceptată/)
   assert.match(publisher, /matching\.length !== 1/)
-  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*bypass\.users\.length !== 0[\s\S]*bypass\.teams\.length !== 0[\s\S]*bypass\.apps\.length !== 0/)
+  assert.match(publisher, /bypass_pull_request_allowances[\s\S]*!emptyNamedActorSet\(bypass\)/)
   assert.match(publisher, /collaborators\/[$][{]encodeURIComponent\(login\)[}]\/permission[\s\S]*\['write', 'maintain', 'admin'\]/)
   assert.match(publisher, /Recovery-ul a acceptat o asociere explicită la un PR străin/)
   assert.doesNotMatch(publisher, /policy\.appId === null/)
@@ -510,7 +514,10 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   const firstOptMutation = installer.indexOf('ensure_root_owned_install_directory /opt/kelion-codex 0755')
   assert.ok(optValidation >= 0 && firstOptMutation > optValidation,
     'layout-ul /opt trebuie validat înaintea primei mutații Constructor')
-  assert.match(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor\/lib 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-codex\/profile-home 0755/)
+  assert.match(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor 0755[\s\S]*ensure_root_owned_install_directory \/opt\/kelion-constructor\/lib 0755/)
+  assert.match(installer, /validate_root_owned_install_directory \/etc\/systemd\/system[\s\S]*ensure_root_owned_install_directory \/etc\/systemd\/system\/private-ai-web\.service\.d 0755/)
+  assert.doesNotMatch(installer, /ensure_root_owned_install_directory \/opt\/kelion-codex\/profile-home/,
+    'installerul local nu trebuie să recreeze profilul Codex retras')
   assert.doesNotMatch(installer, /install -d[^\n]*\/opt\/kelion-(?:codex|constructor)/)
   const handoffLockdown = secureHandoff.indexOf('chmod 00750 "$spool"')
   const handoffChildren = secureHandoff.indexOf('for child in ready ack retired')
@@ -522,14 +529,20 @@ test('bootstrap-ul repo este crash-safe și nu rescrie originul unui checkout ne
   assert.match(installer, /secure_service_parent \/var\/lib\/kelion-codex[\s\S]*secure_service_parent \/var\/lib\/kelion-publisher[\s\S]*secure_service_parent \/var\/lib\/kelion-release/)
   assert.doesNotMatch(installer, /install -d[^\n]*(?:\/var\/lib\/kelion-(?:codex|publisher|release))(?:\/|\s|$)/)
   assert.doesNotMatch(installer, /\/var\/lib\/kelion-(?:codex|publisher)\/\.local\/share/)
-  assert.doesNotMatch(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex(?:\s|$)/m)
-  assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex\/repo .*\/var\/lib\/kelion-codex\/jobs/m)
+  if (/^NoNewPrivileges=false$/m.test(workerUnit)) {
+    assert.match(workerUnit, /^ReadWritePaths=$/m)
+    assert.match(workerUnit, /^SupplementaryGroups=kelion-handoff privateai$/m)
+    assert.match(workerUnit, /^ProtectSystem=false$/m)
+  } else {
+    assert.doesNotMatch(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex(?:\s|$)/m)
+    assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-codex\/repo .*\/var\/lib\/kelion-codex\/jobs/m)
+    assert.match(workerUnit, /^SupplementaryGroups=kelion-handoff$/m)
+    assert.match(workerUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
+  }
   assert.doesNotMatch(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher(?:\s|$)/m)
   assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-publisher\/repo .*\/var\/lib\/kelion-publisher\/state/m)
-  for (const unit of [workerUnit, publisherUnit]) {
-    assert.match(unit, /^SupplementaryGroups=kelion-handoff$/m)
-    assert.match(unit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
-  }
+  assert.match(publisherUnit, /^SupplementaryGroups=kelion-handoff$/m)
+  assert.match(publisherUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-constructor-handoff(?:\s|$)/m)
   const releaseUnit = read('deploy/systemd/kelion-constructor-release.service')
   assert.doesNotMatch(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release(?:\s|$)/m)
   assert.match(releaseUnit, /^ReadWritePaths=.*\/var\/lib\/kelion-release\/state/m)
@@ -702,6 +715,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const expectedPhases = [
     'complete',
     'configuration-preflight',
+    'configure-owner-commit',
     'constructor-install',
     'dependency-install',
     'post-installer',
@@ -714,16 +728,16 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const expectedChecks = [
     'apply',
     'bundle-contract',
-    'codex-cli-install',
-    'codex-cli-layout',
-    'codex-cli-link',
-    'codex-cli-permissions',
     'config-stage',
+    'configure-owner-journal',
     'cutover-stage',
     'existing-config-contract',
     'existing-unit-contract',
     'install-resume-contract',
     'installer',
+    'installer-journal-finalize',
+    'local-repair-executor',
+    'model-control-secret-bootstrap',
     'node-runtime',
     'package-dependencies',
     'package-index',
@@ -744,7 +758,6 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'success-message',
     'unit-quiescence',
     'worker-gate-image',
-    'worker-profile-publication',
     'worker-repository',
   ]
   const checks = [...remote.matchAll(/constructor_config_check='([^']+)'/g)].map((match) => match[1])
@@ -755,9 +768,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   for (const [check, command] of [
     ['package-index', 'apt-get update -qq'],
     ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
-    ['codex-cli-layout', 'validate_codex_cli_directory()'],
-    ['codex-cli-install', "npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1'"],
-    ['codex-cli-permissions', 'validate_codex_cli_mounts'],
+    ['local-repair-executor', '/opt/private-ai/bin/opencode --version'],
     ['signing-stale-cleanup', 'for stale_signing_root in'],
     ['signing-key-validation', 'validate_signing_key "$signing_key"'],
     ['signing-key-registration', 'existing_keys=$(curl'],
@@ -765,55 +776,28 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     ['publisher-repository', 'clone_or_sync kelion-publisher'],
     ['worker-gate-image', 'pull_gate kelion-codex'],
     ['publisher-gate-image', 'pull_gate kelion-publisher'],
-    ['apply', 'KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh"'],
+    ['apply', 'KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$configure_install_request_id"'],
   ]) {
     const labelIndex = remote.indexOf(`constructor_config_check='${check}'`)
     const commandIndex = remote.indexOf(command, labelIndex)
     assert.ok(labelIndex >= 0 && commandIndex > labelIndex, `${check} trebuie setat înainte de comanda atribuită`)
   }
 
-  const cliInstall = remote.slice(
-    remote.indexOf("constructor_config_check='codex-cli-layout'"),
-    remote.indexOf("constructor_config_check='worker-profile-publication'"),
+  const localExecutor = remote.slice(
+    remote.indexOf("constructor_config_check='local-repair-executor'"),
+    remote.indexOf("constructor_config_check='cutover-stage'"),
   )
-  const layoutIndex = cliInstall.indexOf("constructor_config_check='codex-cli-layout'")
-  const installIndex = cliInstall.indexOf("constructor_config_check='codex-cli-install'")
-  const permissionsIndex = cliInstall.indexOf("constructor_config_check='codex-cli-permissions'")
-  const linkIndex = cliInstall.indexOf("constructor_config_check='codex-cli-link'")
-  assert.ok(layoutIndex >= 0 && layoutIndex < installIndex && installIndex < permissionsIndex && permissionsIndex < linkIndex)
-  assert.match(cliInstall, /validate_codex_cli_directory\(\)[\s\S]*\[ -d "\$path" \] && \[ ! -L "\$path" \] && \[ "\$\(realpath -e "\$path"\)" = "\$path" \]/)
-  assert.match(cliInstall, /stat -c '%u:%g'/)
-  assert.match(cliInstall, /path_mode=\$\(stat -c '%a' "\$path"\)[\s\S]*\[ \$\(\(8#\$path_mode & 0022\)\) -eq 0 \]/)
-  const rootGuard = cliInstall.indexOf('for path in / /opt /opt/kelion-codex; do')
-  const childGuard = cliInstall.indexOf('for path in /opt/kelion-codex/bin /opt/kelion-codex/npm; do')
-  const directoryCreation = cliInstall.indexOf('install -d -o root -g root -m 0755 "$path"')
-  assert.ok(rootGuard >= 0 && rootGuard < childGuard && childGuard < directoryCreation && directoryCreation < installIndex,
-    'părinții existenți trebuie validați înaintea oricărei traversări sau mutații')
-  assert.match(cliInstall, /stat -c '%d'/)
-  assert.match(cliInstall, /validate_codex_cli_mounts\(\)[\s\S]*\/proc\/self\/mountinfo/)
-  assert.ok([...cliInstall.matchAll(/^\s*validate_codex_cli_mounts$/gm)].length >= 2,
-    'mounturile trebuie refuzate înainte și după instalarea npm')
-  assert.match(cliInstall, /\(umask 022; npm install/)
-  assert.match(cliInstall, /validate_codex_cli_find_empty\(\)[\s\S]*match=\$\(find -P \/opt\/kelion-codex\/npm -xdev "\$@" -print -quit\) \|\| return 1/)
-  assert.match(cliInstall, /validate_codex_cli_find_empty ! -user root/)
-  assert.match(cliInstall, /validate_codex_cli_find_empty ! -group root/)
-  assert.match(cliInstall, /validate_codex_cli_find_empty -type f -links \+1/)
-  assert.match(cliInstall, /validate_codex_cli_find_empty ! -type f ! -type d ! -type l/)
-  assert.match(cliInstall, /validate_codex_cli_symlinks\(\)[\s\S]*validate_codex_cli_find_empty -type l ! -path "\$link"[\s\S]*\.\.\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js/)
-  assert.match(cliInstall, /required\) \[ "\$present" -eq 1 \]/)
-  const preMutationPermissions = cliInstall.indexOf('validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022')
-  assert.ok(preMutationPermissions >= 0 && preMutationPermissions < installIndex,
-    'niciun fișier sau director npm nu poate fi writable de group/other înainte de npm')
-  assert.ok(cliInstall.includes('find -P /opt/kelion-codex/npm -xdev \\( -type f -o -type d \\) -exec chmod u=rwX,go=rX {} +'))
-  const noWritableTree = 'validate_codex_cli_find_empty \\( -type f -o -type d \\) -perm /022'
-  assert.ok(cliInstall.split(noWritableTree).length - 1 >= 2)
-  assert.match(cliInstall, /codex_target=\$\(realpath -e \/opt\/kelion-codex\/bin\/codex\)/)
-  assert.match(cliInstall, /\[ "\$codex_target" = \/opt\/kelion-codex\/npm\/lib\/node_modules\/@openai\/codex\/bin\/codex\.js \]/)
-  assert.doesNotMatch(cliInstall, /ln -sfn/)
-  assert.match(cliInstall, /codex_link_temporary=\$\(mktemp[\s\S]*ln -s \/opt\/kelion-codex\/npm\/bin\/codex "\$codex_link_temporary"[\s\S]*mv -Tf -- "\$codex_link_temporary" "\$codex_link"/)
-  assert.match(remote, /codex_link_temporary=''[\s\S]*cleanup_remote\(\)[\s\S]*\.codex-link[\s\S]*rm -f -- "\$codex_link_temporary"/)
-  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ test -x \/opt\/kelion-codex\/bin\/codex/)
-  assert.match(cliInstall, /runuser -u kelion-codex -- env -i [^\n]+ \/opt\/kelion-codex\/bin\/codex --version/)
+  assert.match(localExecutor, /\/opt\/private-ai\/bin\/opencode --version\)" = '1\.18\.25'/)
+  assert.match(localExecutor, /\.enabled_providers == \["llama\.cpp"\]/)
+  assert.match(localExecutor, /\.model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
+  assert.match(localExecutor, /has\("apiKey"\) \| not/)
+  assert.match(localExecutor, /options\.baseURL == "http:\/\/127\.0\.0\.1:24080\/v1"/)
+  assert.match(localExecutor, /systemctl is-active --quiet private-ai-llm\.service/)
+  assert.match(localExecutor, /systemctl is-active --quiet private-ai-web\.service/)
+  assert.match(localExecutor, /127\.0\.0\.1:24080\/health/)
+  assert.match(localExecutor, /\[ ! -e \/var\/lib\/kelion-codex-auth \] && \[ ! -L \/var\/lib\/kelion-codex-auth \]/)
+  assert.match(localExecutor, /\[ ! -e \/opt\/kelion-codex\/profile-home \] && \[ ! -L \/opt\/kelion-codex\/profile-home \]/)
+  assert.doesNotMatch(remote, /@openai\/codex|forced_login_method|CODEX_HOME|login status|npm install --global/)
 
   const handlerStart = remote.indexOf('report_constructor_config_failure() {')
   const handlerEnd = remote.indexOf('\n          }\n          trap report_constructor_config_failure ERR', handlerStart)
@@ -826,7 +810,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const sourceCommit = 'a'.repeat(40)
   const script = `set -Euo pipefail
 constructor_config_phase='post-installer'
-constructor_config_check='codex-cli-install'
+constructor_config_check='local-repair-executor'
 source_commit='${sourceCommit}'
 ${handler}
 cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
@@ -846,7 +830,7 @@ exit 99
     ok: false,
     event: 'constructor_config_failure',
     phase: 'post-installer',
-    check: 'codex-cli-install',
+    check: 'local-repair-executor',
     line: 0,
     exit_code: 17,
     source_commit: sourceCommit,
@@ -863,6 +847,179 @@ test('configurarea Constructor păstrează ACL-ul canonic al secretelor de produ
   assert.match(cutover, /app-secret\.openai-project-key[\s\S]*mapped_target=[$]SECRET_ROOT\/[$]secret_name; mapped_group=10050; mapped_mode=440/)
   assert.match(cutover, /gate-secret\.github-ghcr-read-token[\s\S]*mapped_target=[$]ROOT\/gate-secrets\/github-ghcr-read-token; mapped_mode=400/)
   assert.match(cutover, /publisher-secret\.github-publisher-token[\s\S]*group_id kelion-publisher[\s\S]*mapped_mode=440/)
+})
+
+test('configure leagă retry-ul installerului de aceeași tuplă exactă de 25 artefacte', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const normalized = workflow.replace(/^ {10}/gm, '')
+  const arrayValues = (source, name, valuePattern) => {
+    const start = source.indexOf(`${name}=(`)
+    const end = source.indexOf('\n)', start)
+    assert.ok(start >= 0 && end > start, `array-ul ${name} trebuie delimitat`)
+    return [...source.slice(start, end).matchAll(valuePattern)].map((match) => match[1])
+  }
+
+  const installerLogicals = arrayValues(installer, 'install_logicals', /^  ([a-z0-9.-]+)$/gm)
+  const configureLogicals = arrayValues(normalized, 'configure_install_logicals', /^  ([a-z0-9.-]+)$/gm)
+  const installerSources = arrayValues(installer, 'install_sources', /^  "\$repo_root\/([^"]+)"$/gm)
+  const configureSources = arrayValues(normalized, 'configure_install_sources', /^  "\$work\/([^"]+)"$/gm)
+  assert.equal(installerLogicals.length, 25)
+  assert.deepEqual(configureLogicals, installerLogicals,
+    'workflowul trebuie să folosească ordinea logică exactă a producerului jurnalului')
+  assert.deepEqual(configureSources, installerSources,
+    'workflowul trebuie să amprenteze exact aceleași surse ca installerul')
+
+  const canonical = installerLogicals.map((logical, index) => {
+    const digest = createHash('sha256').update(readFileSync(join(root, installerSources[index]))).digest('hex')
+    return `${logical}\t${digest}\n`
+  }).join('')
+  const expectedSourceSha = createHash('sha256').update(canonical).digest('hex')
+  const arraysStart = normalized.indexOf('configure_install_logicals=(')
+  const functionStart = normalized.indexOf('current_configure_install_source_sha256() {', arraysStart)
+  const arrays = normalized.slice(arraysStart, functionStart)
+  const sourceHasher = shellFunction(normalized, 'current_configure_install_source_sha256')
+  const hashResult = spawnSync(bashExecutable, ['-s', '--', root], {
+    input: `set -euo pipefail\nwork=$1\n${arrays}\n${sourceHasher}\ncurrent_configure_install_source_sha256\n`,
+    encoding: 'utf8',
+  })
+  assert.equal(hashResult.status, 0, hashResult.stderr)
+  assert.equal(hashResult.stdout.trim(), expectedSourceSha,
+    'algoritmul remote trebuie să fie byte-exact cu current_source_sha256 al installerului')
+
+  const firstDigest = canonical.match(/[0-9a-f]{64}/)?.[0]
+  assert.ok(firstDigest)
+  const advancedCanonical = canonical.replace(firstDigest, `${firstDigest[0] === '0' ? '1' : '0'}${firstDigest.slice(1)}`)
+  const oldGenerationSha = createHash('sha256').update(advancedCanonical).digest('hex')
+  assert.notEqual(oldGenerationSha, expectedSourceSha)
+
+  const loader = shellFunction(normalized, 'load_configure_install_journal')
+  const guardStart = loader.indexOf('if [ "$configure_install_journal_source_sha256" != "$configure_install_current_source_sha256" ]')
+  const guardEnd = loader.indexOf('\n  fi', guardStart)
+  assert.ok(guardStart >= 0 && guardEnd > guardStart, 'guardul generației trebuie să poată fi executat izolat')
+  const generationGuard = loader.slice(guardStart, guardEnd + '\n  fi'.length)
+  const runGuard = (journalSource, currentSource, journalCommit) => spawnSync(bashExecutable, ['-s'], {
+    input: `set -euo pipefail\nconfigure_install_journal_source_sha256=${journalSource}\nconfigure_install_current_source_sha256=${currentSource}\nconfigure_install_commit=${journalCommit}\n${generationGuard}\nprintf '%s\\n' accepted\n`,
+    encoding: 'utf8',
+  })
+  const sameGeneration = runGuard(expectedSourceSha, expectedSourceSha, expectedSourceSha.slice(0, 40))
+  assert.equal(sameGeneration.status, 0, sameGeneration.stderr)
+  assert.equal(sameGeneration.stdout.trim(), 'accepted')
+  const masterAdvanced = runGuard(oldGenerationSha, expectedSourceSha, oldGenerationSha.slice(0, 40))
+  assert.equal(masterAdvanced.status, 1, masterAdvanced.stdout)
+  assert.match(masterAdvanced.stderr, /altei generații de 25 artefacte/)
+
+  const bind = workflow.indexOf('configure_install_journal_source_sha256=$(jq -er', workflow.indexOf('load_configure_install_journal()'))
+  const mismatchExit = workflow.indexOf('altei generații de 25 artefacte', bind)
+  const bothOrResume = workflow.indexOf('if [ -e "$reactivation_journal" ]', mismatchExit)
+  const candidatePublication = workflow.indexOf("constructor_config_check='runtime-helper-publication'", bothOrResume)
+  assert.ok(bind >= 0 && mismatchExit > bind && bothOrResume > mismatchExit && candidatePublication > bothOrResume,
+    'mismatch-ul generației trebuie să oprească fluxul înainte de BOTH/resume și orice candidat nou')
+})
+
+test('configure păstrează ownerul installerului până la mixed commit și repornește recovery înaintea controllerului', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const normalized = workflow.replace(/^ {10}/gm, '')
+  const installer = read('deploy/instaleaza-constructor.sh')
+  assert.equal((workflow.match(/KELION_CONSTRUCTOR_CONFIGURE_OWNER=1/g) ?? []).length, 2,
+    'fresh și resume trebuie să lase installerul sub același owner exterior')
+
+  const pendingPreflight = workflow.indexOf('constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending')
+  const pendingJournal = workflow.indexOf("bariera unit-only fără jurnal installer autentic este refuzată", pendingPreflight)
+  const journalLoad = workflow.indexOf('load_configure_install_journal', pendingJournal)
+  assert.ok(pendingPreflight >= 0 && pendingJournal > pendingPreflight && journalLoad > pendingJournal,
+    'pending este acceptat numai dacă urmează clasificarea jurnalului installer autentic')
+
+  const ownerLoad = workflow.indexOf("constructor_config_check='configure-owner-journal'")
+  const requestOwner = workflow.indexOf('KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$configure_install_request_id"', ownerLoad)
+  const commitOwner = workflow.indexOf('KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$configure_install_commit"', requestOwner)
+  const mixed = workflow.indexOf('--leave-constructor-quiesced', commitOwner)
+  const finalLoad = workflow.indexOf('load_configure_install_journal', mixed)
+  const clearActivation = workflow.indexOf('rm -f -- "$activation_pending"', finalLoad)
+  const clearOuter = workflow.indexOf('rm -f -- "$deploy_quiesce_journal"', clearActivation)
+  const unlock = workflow.indexOf('flock -u 9', clearOuter)
+  const recovery = workflow.indexOf('systemctl start kelion-runtime-config-recovery.service', unlock)
+  const controller = workflow.indexOf('systemctl restart kelion-constructor-model-control.service', recovery)
+  const probe = workflow.indexOf('probe_configured_model_controller', controller)
+  assert.ok(ownerLoad >= 0 && requestOwner > ownerLoad && commitOwner > requestOwner && mixed > commitOwner
+    && finalLoad > mixed && clearActivation > finalLoad && clearOuter > clearActivation
+    && unlock > clearOuter && recovery > unlock && controller > recovery && probe > controller,
+  'mixed cutover păstrează ownerul, consumă barierele durabil, eliberează lockul și abia apoi pornește recovery/controller')
+
+  const configureBranch = installer.slice(
+    installer.indexOf('if [ "$constructor_install_configure_owner" = 1 ]; then', installer.indexOf('set_constructor_install_phase commit')),
+    installer.indexOf('elif [ "$constructor_install_upgrade_owner" = 1 ]; then', installer.indexOf('set_constructor_install_phase commit')),
+  )
+  assert.match(configureBranch, /validate_constructor_activation_pending[\s\S]*validate_model_controller_quiesced[\s\S]*load_install_transaction[\s\S]*constructor-unit-migration\.pending/)
+  assert.doesNotMatch(configureBranch, /clear_install_transaction|clear_constructor_activation_pending|start_model_controller/)
+
+  const restore = shellFunction(normalized, 'restore_configure_recovery_and_controller')
+  const harness = `set -euo pipefail
+calls=''
+record() { calls="\${calls}|$*"; }
+flock() { record "flock:$*"; }
+systemctl() {
+  record "systemctl:$*"
+  case "$1:\${3:-}" in
+    is-enabled:kelion-*.timer|is-active:kelion-*.timer) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+probe_configured_model_controller() { record probe; }
+reactivation_journal=/tmp/kelion-test-reactivation-journal-absent
+exec 9>/dev/null
+${restore}
+restore_configure_recovery_and_controller
+printf '%s\n' "$calls"
+`
+  const executed = spawnSync(bashExecutable, ['-s'], { input: harness, encoding: 'utf8' })
+  assert.equal(executed.status, 0, executed.stderr)
+  const calls = executed.stdout.trim()
+  assert.match(calls,
+    /^\|flock:-u 9\|systemctl:reset-failed kelion-runtime-config-recovery\.service kelion-constructor-model-control\.service\|systemctl:start kelion-runtime-config-recovery\.service\|systemctl:is-active --quiet kelion-runtime-config-recovery\.service\|systemctl:restart kelion-constructor-model-control\.service\|probe/)
+  assert.match(calls, /systemctl:is-enabled --quiet kelion-codex-worker\.timer/)
+  assert.match(calls, /systemctl:is-active --quiet kelion-constructor-release\.timer$/)
+})
+
+test('secretul controllerului se naște o singură dată pe VPS și rămâne idempotent', () => {
+  const configure = read('.github/workflows/vps-run.yml')
+  const provision = read('.github/workflows/vps-set-env.yml')
+  for (const [name, workflow] of [['configure', configure], ['provision', provision]]) {
+    assert.doesNotMatch(workflow, /secrets\.CONSTRUCTOR_MODEL_CONTROL_SECRET/, `${name}: secret GitHub interzis`)
+    assert.doesNotMatch(workflow, /encode constructor-model-control|decode constructor-model-control/,
+      `${name}: valoarea locală nu traversează payloadul`)
+    const remote = workflow.replace(/^ {10}/gm, '')
+    const bootstrap = shellFunction(remote, 'ensure_local_model_control_secret')
+    const missing = bootstrap.indexOf('if [ ! -e "$secret_path" ] && [ ! -L "$secret_path" ]; then')
+    const generation = bootstrap.indexOf('openssl rand -hex 32', missing)
+    const publish = bootstrap.indexOf('mv -f -- "$candidate" "$secret_path"', generation)
+    const fileSync = bootstrap.indexOf('sync -f "$secret_path"', publish)
+    const dirSync = bootstrap.indexOf('sync -f "$secret_dir"', fileSync)
+    const finalStat = bootstrap.indexOf("0:10050:440:1", dirSync)
+    const readExisting = bootstrap.indexOf('model_control_secret=$(<"$secret_path")', finalStat)
+    assert.ok(missing >= 0 && generation > missing && publish > generation && fileSync > publish
+      && dirSync > fileSync && finalStat > dirSync && readExisting > finalStat,
+    `${name}: generarea atomică și validarea idempotentă nu sunt ordonate`)
+    assert.equal((bootstrap.match(/openssl rand -hex 32/g) ?? []).length, 1)
+    assert.match(workflow, /stage_value app-secret\.constructor-model-control-secret "[$]model_control_secret"/)
+    assert.match(workflow, /[$]codex_secret" != "[$]model_control_secret/)
+    assert.match(workflow, /[$]model_control_secret" != "[$]publisher_secret/)
+    assert.match(workflow, /[$]model_control_secret" != "[$]release_secret/)
+  }
+  const generation = configure.indexOf("constructor_config_check='model-control-secret-bootstrap'")
+  const installer = configure.indexOf('bash "$work/deploy/instaleaza-constructor.sh"', generation)
+  assert.ok(generation >= 0 && installer > generation,
+    'configure trebuie să publice secretul local înainte de orice reluare/instalare')
+})
+
+test('workerul serializează execuția cu schimbarea manuală pe lockul canonic', () => {
+  const unit = read('deploy/systemd/kelion-codex-worker.service')
+  const cutover = shellFunction(read('deploy/lib/runtime-config-cutover.sh'), 'validate_constructor_service_unit')
+  const execStart = 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once'
+  assert.match(unit, /^SupplementaryGroups=kelion-handoff privateai$/m)
+  assert.equal(unit.split('\n').filter((line) => line === execStart).length, 1)
+  assert.ok(cutover.includes(execStart.slice('ExecStart='.length)))
+  assert.match(cutover, /grep -Fxc "ExecStart=\$exec_start"/)
 })
 
 test('politica de retry și checks a Constructorului rămâne aliniată în provisionare, deploy și control', () => {
@@ -1077,18 +1234,29 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   assert.match(release, /LoadCredential=constructor-release-secret:\/root\/kelion\/secrets\/constructor-release-secret/)
   assert.match(release, /LoadCredential=github-release-token:/)
   assert.doesNotMatch(release, /codex-worker-secret|constructor-publisher-secret|github-publisher-token|constructor-handoff|VPS/)
-  for (const unit of [worker, publisher, release]) {
+  if (/^NoNewPrivileges=false$/m.test(worker)) {
+    assert.match(worker, /^ProtectSystem=false$/m)
+    assert.match(worker, /^CapabilityBoundingSet=~$/m)
+    assert.match(worker, /^RestrictNamespaces=false$/m)
+  } else {
+    assert.match(worker, /NoNewPrivileges=true/)
+    assert.match(worker, /ProtectSystem=strict/)
+    assert.match(worker, /CapabilityBoundingSet=\n/)
+    assert.match(worker, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
+    assert.doesNotMatch(worker, /^RestrictNamespaces=.*\bmount\b/m)
+  }
+  for (const unit of [publisher, release]) {
     assert.match(unit, /NoNewPrivileges=true/)
     assert.match(unit, /ProtectSystem=strict/)
     assert.match(unit, /CapabilityBoundingSet=\n/)
+  }
+  for (const unit of [worker, publisher, release]) {
     assert.match(unit, /After=[^\n]*kelion-runtime-config-recovery\.service/)
     assert.match(unit, /ConditionPathExists=\/run\/kelion\/runtime-config-recovery\.ready/)
     assert.doesNotMatch(unit, /\[Install\]|WantedBy=multi-user\.target/)
   }
-  for (const unit of [worker, publisher]) {
-    assert.match(unit, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
-    assert.doesNotMatch(unit, /^RestrictNamespaces=.*\bmount\b/m)
-  }
+  assert.match(publisher, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
+  assert.doesNotMatch(publisher, /^RestrictNamespaces=.*\bmount\b/m)
 })
 
 test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () => {
@@ -1119,7 +1287,12 @@ test('workerul oprește copilul activ la pierderea lease-ului și păstrează ad
   assert.match(runLogged, /const onAbort = \(\) => \{[\s\S]*aborted = true[\s\S]*terminate\(\)/)
   assert.match(runLogged, /signal\?\.addEventListener\('abort', onAbort, \{ once: true \}\)/)
   assert.match(runLogged, /signal\?\.removeEventListener\('abort', onAbort\)/)
+  if (runLogged.includes("signalGroup('SIGTERM')")) {
+    assert.match(runLogged, /detached: true[\s\S]*signalGroup\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*signalGroup\('SIGKILL'\)[\s\S]*2_000/)
+    assert.match(runLogged, /privilegedKill[\s\S]*\/usr\/bin\/sudo[\s\S]*\/usr\/bin\/kill/)
+  } else {
   assert.match(runLogged, /child\.kill\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*child\.kill\('SIGKILL'\)[\s\S]*2_000/)
+  }
   assert.match(jobLease, /new AbortController\(\)[\s\S]*controller\.abort\(error\)[\s\S]*stop\.signal = controller\.signal/)
   assert.match(worker, /30 \* 60_000,\s*stopExecLease\.signal/)
   assert.match(worker, /45 \* 60_000,\s*stopGateLease\.signal/)
@@ -1170,7 +1343,10 @@ test('workerul nu publică ready înainte de reconciliere și lipsa unui ordin e
   assert.match(prepare, /response\.job[\s\S]*'busy'[\s\S]*return job/)
   assert.match(prepare, /catch \(error\)[\s\S]*degradedWithoutMasking[\s\S]*throw error/)
   assert.doesNotMatch(runOnce, /heartbeat\(secret, 'ready'/)
-  assert.match(runOnce, /prepareWorkerClaim\(secret\)[\s\S]*acceptWorkerClaim\(secret, claimed\)/)
+  assert.match(
+    runOnce,
+    /prepareWorkerClaim\(secret, \{ profile: profile\.tier \}\)[\s\S]*acceptWorkerClaim\(secret, claimed\)/,
+  )
 })
 
 test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
@@ -1189,7 +1365,7 @@ test('bugetele systemd acoperă execuția Codex și porțile complete', () => {
   assert.ok(minutes(value(publisher, 'TimeoutStartSec')) >= 120)
 })
 
-test('installerul canonic lasă toate serviciile dezactivate și nu creează secrete', () => {
+test('installerul lasă capabilitățile dezactivate și pornește controllerul numai după commit', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
   assert.match(installer, /KELION_CONSTRUCTOR_INSTALL/)
   assert.match(installer, /set -Eeuo pipefail/)
@@ -1205,7 +1381,8 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.match(installer, /grep -Fq -- "[$]required_usermod_option" <<<"[$]usermod_help"/)
   assert.doesNotMatch(installer, /usermod --help 2>&1\s*[|]\s*grep -q/)
   assert.match(installer, /systemd-analyze verify/)
-  assert.match(installer, /kelion-worker\.config\.toml/)
+  assert.match(installer, /validate_opencode_constructor_config "\$repo_root\/deploy\/opencode-constructor\.json"/)
+  assert.match(installer, /retire_legacy_codex_state/)
   assert.match(installer, /constructor_markers=\(\/etc\/kelion\/codex-worker\.enabled \/etc\/kelion\/constructor-publisher\.enabled \/etc\/kelion\/constructor-release\.enabled\)/)
   assert.match(installer, /rm -f -- "[$][{]constructor_markers\[@\][}]"\s+sync -f \/etc\/kelion/)
   assert.match(installer, /systemctl enable kelion-runtime-config-recovery\.service/)
@@ -1218,9 +1395,33 @@ test('installerul canonic lasă toate serviciile dezactivate și nu creează sec
   assert.ok(lock >= 0 && identities > lock && transaction > lock,
     'identitățile și tranzacția durabilă se modifică numai sub lock-ul comun dovedit')
   const logicalBlock = installer.slice(installer.indexOf('install_logicals=('), installer.indexOf('\n)', installer.indexOf('install_logicals=(')))
-  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 19)
-  const withoutRecoveryEnable = installer.replace(/systemctl enable kelion-runtime-config-recovery\.service[^\n]*/, '')
-  assert.doesNotMatch(withoutRecoveryEnable, /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
+  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 25)
+  assert.equal(installer.split('systemctl restart private-ai-web.service').length - 1, 1)
+  assert.equal(installer.split('systemctl enable kelion-runtime-config-recovery.service').length - 1, 1)
+  const privateAiRestart = installer.indexOf('systemctl restart private-ai-web.service')
+  const privateAiValidation = installer.indexOf('validate_private_ai_web_full_access', privateAiRestart)
+  assert.ok(privateAiRestart >= 0 && privateAiValidation > privateAiRestart,
+    'restartul necesar al executorului local trebuie urmat de validarea contractului live')
+  const installerMain = installer.slice(installer.indexOf('set_constructor_install_phase transaction-prepare'))
+  const pendingPublish = installerMain.indexOf('publish_constructor_activation_pending')
+  const quiesce = installerMain.indexOf('quiesce_before_install', pendingPublish)
+  const installClear = installerMain.indexOf('clear_install_transaction', quiesce)
+  const pendingClear = installerMain.indexOf('clear_constructor_activation_pending', installClear)
+  const controllerStart = installerMain.indexOf('"$ROOT/bin/runtime-config-cutover.sh" --recover-only', pendingClear)
+  assert.ok(pendingPublish >= 0 && quiesce > pendingPublish && installClear > quiesce
+    && pendingClear > installClear && controllerStart > pendingClear,
+  'sentinelul precede quiesce, iar recovery-ul probează controllerul numai după clear-ul durabil al installerului')
+  assert.equal(installerMain.indexOf('start_model_controller_after_install_commit', pendingClear), -1,
+    'installerul standalone nu poate porni controllerul peste un ready stamp retras')
+  assert.match(shellFunction(installer, 'start_model_controller_after_install_commit'),
+    /\[ ! -e "\$INSTALL_JOURNAL" \][\s\S]*\[ ! -e "\$ACTIVATION_PENDING" \][\s\S]*systemctl restart kelion-constructor-model-control\.service/)
+  const withoutExpectedServiceMutations = installer
+    .replaceAll(/systemctl restart private-ai-web\.service[^\n]*/g, '')
+    .replaceAll(/systemctl enable kelion-runtime-config-recovery\.service[^\n]*/g, '')
+    .replaceAll(/systemctl enable kelion-constructor-model-control\.service[^\n]*/g, '')
+    .replaceAll(/systemctl restart kelion-constructor-model-control\.service[^\n]*/g, '')
+  assert.doesNotMatch(withoutExpectedServiceMutations,
+    /systemctl\s+(?:enable|start|restart)|openssl\s+rand|ghp_|github_pat_|CODEX_HOME=.*login/)
 })
 
 test('telemetria instalatorului rămâne fail-closed și nu divulgă mediul', () => {
@@ -1255,6 +1456,230 @@ false
     /::error::Constructor installer gate: phase=unit-validation line=\d+ exit=1 source_commit=0123456789abcdef0123456789abcdef01234567/)
   assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
   assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
+})
+
+test('release-ul refuză jurnalul persistent max-model înainte și sub publication lock', () => {
+  const deploy = read('deploy/deploy.sh')
+  assert.match(deploy, /MAX_MODEL_JOURNAL=\$RUNTIME_ROOT\/constructor-max-model[.]journal/)
+  const preflight = deploy.indexOf('o tranzacție max-model persistentă blochează release-ul')
+  const lock = deploy.indexOf('flock 8', preflight)
+  const lockedGuard = deploy.indexOf('o tranzacție max-model persistentă blochează release-ul sub publication lock', lock)
+  const recovery = deploy.indexOf('recover_lost_post_ponr_quiesce', lockedGuard)
+  assert.ok(preflight >= 0 && lock > preflight && lockedGuard > lock && recovery > lockedGuard)
+})
+
+test('release-ul dovedește controllerul ready înainte de mutații și quiesced înaintea candidatului', () => {
+  const deploy = read('deploy/deploy.sh')
+  const installation = shellFunction(deploy, 'constructor_model_control_installation_proof')
+  const ready = shellFunction(deploy, 'constructor_model_control_ready_proof')
+  const quiesced = shellFunction(deploy, 'constructor_model_control_quiesced_proof')
+  assert.match(installation,
+    /constructor-model-control\.mjs\|0:0:555:1[\s\S]*constructor-model-switch\|0:0:755:1[\s\S]*kelion-constructor-model-control\.service\|0:0:444:1[\s\S]*constructor-model-control-secret\|0:10050:440:1/)
+  assert.match(installation, /FragmentPath[\s\S]*DropInPaths[\s\S]*systemctl is-enabled/)
+  assert.match(ready,
+    /runtime-config-recovery\.ready[\s\S]*0:0:444:1[\s\S]*systemctl is-active[\s\S]*0:10050:660/)
+  assert.match(quiesced,
+    /ActiveState[\s\S]*inactive\|failed[\s\S]*systemctl list-jobs[\s\S]*\[ ! -e "\$socket" \]/)
+
+  const early = deploy.indexOf("controllerul manual de model nu este instalat și ready înaintea release-ului")
+  const lock = deploy.indexOf('flock 8', early)
+  const locked = deploy.indexOf('controllerul manual de model s-a schimbat înainte de tranzacția release', lock)
+  const firstJournal = deploy.indexOf('write_constructor_deploy_quiesce_journal armed', locked)
+  assert.ok(early >= 0 && lock > early && locked > lock && firstJournal > locked,
+    'controllerul trebuie verificat read-only înainte și sub lock, înaintea primului jurnal')
+
+  const freshBlock = deploy.indexOf('# Constructorul rămâne oprit pe toată fereastra')
+  const cutover = deploy.indexOf('upgrade_constructor_timer_units_quiesced', freshBlock)
+  const firstQuiesced = deploy.indexOf('constructor_model_control_quiesced_proof', cutover)
+  const backup = deploy.indexOf('install_cleanup_script', firstQuiesced)
+  const secondQuiesced = deploy.indexOf('constructor_model_control_quiesced_proof', backup)
+  const candidate = deploy.indexOf('"$COMPOSE_BIN" -p "$project" -f "$COMPOSE_FILE" down', secondQuiesced)
+  assert.ok(freshBlock >= 0 && cutover > freshBlock && firstQuiesced > cutover && backup > firstQuiesced
+    && secondQuiesced > backup && candidate > secondQuiesced,
+  'quiesce-ul se dovedește imediat după cutover și din nou după backup/migrări, înaintea candidatului')
+  assert.doesNotMatch(deploy.slice(firstQuiesced, candidate),
+    /systemctl is-active --quiet kelion-constructor-model-control\.service/)
+})
+
+test('controllerul manual rămâne oprit până la clear-ul durabil al jurnalului runtime', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const restore = shellFunction(cutover, 'restore_constructor_model_control')
+  const protectedRestoreHelper = shellFunction(cutover, 'restore_runtime_controller_or_quiesce')
+  assert.match(restore, /\[ -e "\$JOURNAL" \] \|\| \[ -L "\$JOURNAL" \]/)
+  assert.match(restore, /validate_owned_runtime_journal/)
+  assert.match(restore, /leave_constructor_quiesced" = 1[\s\S]*validate_effective_constructor_unit "\$unit"[\s\S]*systemctl is-enabled --quiet "\$unit"/)
+  assert.match(restore, /systemctl stop "\$unit"/)
+  assert.match(protectedRestoreHelper,
+    /restore_constructor_model_control[\s\S]*force_quiesce_constructor_units 1[\s\S]*clear_runtime_ready_stamp/)
+  const controllerFailureHarness = `set -euo pipefail
+CALLS=$1
+restore_constructor_model_control() { return 1; }
+force_quiesce_constructor_units() { printf 'quiesce:%s\\n' "\${1:-}" >> "$CALLS"; }
+clear_runtime_ready_stamp() { printf 'clear-ready\\n' >> "$CALLS"; }
+${protectedRestoreHelper}
+if restore_runtime_controller_or_quiesce; then exit 90; fi`
+  const controllerFailureSandbox = mkdtempSync(join(tmpdir(), 'kelion-controller-restore-failure-'))
+  try {
+    const calls = join(controllerFailureSandbox, 'calls')
+    const result = spawnSync(bashExecutable, ['-c', controllerFailureHarness, 'controller-failure', calls], {
+      encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(readFileSync(calls, 'utf8'), 'quiesce:1\nclear-ready\n')
+  } finally {
+    rmSync(controllerFailureSandbox, { recursive: true, force: true })
+  }
+  const transaction = cutover.slice(cutover.indexOf("write_journal_phase files-committed"))
+  const protectedRestore = transaction.indexOf('restore_constructor_model_control')
+  const backend = transaction.indexOf('recreate_active_release', protectedRestore)
+  const clear = transaction.indexOf("clear_journal || die 'jurnalul cutover-ului finalizat", backend)
+  const committedRestore = transaction.indexOf('restore_runtime_controller_or_quiesce', clear)
+  const committedTimers = transaction.indexOf('restore_constructor_timers', committedRestore)
+  const succeeded = transaction.indexOf('operation_succeeded=1', committedTimers)
+  assert.ok(protectedRestore >= 0 && backend > protectedRestore && clear > backend
+    && committedRestore > clear && committedTimers > committedRestore && succeeded > committedTimers)
+
+  const recoverOnly = cutover.slice(cutover.indexOf('if [ "$recover_only" = 1 ]; then', cutover.indexOf('recover_interrupted_gate_refresh')))
+  const ready = recoverOnly.indexOf('publish_runtime_ready_stamp')
+  const clearOuter = recoverOnly.indexOf('clear_deploy_quiesce_journal', ready)
+  const liveRestore = recoverOnly.indexOf('restore_runtime_controller_or_quiesce', clearOuter)
+  const liveTimers = recoverOnly.indexOf('restore_constructor_timers', liveRestore)
+  const disarm = recoverOnly.indexOf('recovery_in_progress=0', liveTimers)
+  assert.ok(ready >= 0 && clearOuter > ready && liveRestore > clearOuter
+    && liveTimers > liveRestore && disarm > liveTimers,
+  'recovery consumă jurnalul, probează controllerul sincron și abia apoi pornește timerele/dezarmează cleanup-ul')
+
+  const controllerUnit = read('deploy/systemd/kelion-constructor-model-control.service')
+  const recoveryUnit = read('deploy/systemd/kelion-runtime-config-recovery.service')
+  assert.doesNotMatch(controllerUnit, /^(?:After|Requires)=.*kelion-runtime-config-recovery\.service/m)
+  assert.doesNotMatch(recoveryUnit, /^Before=.*kelion-constructor-model-control\.service/m)
+
+  const deploy = read('deploy/deploy.sh')
+  const releaseRestore = shellFunction(deploy, 'restore_constructor_after_release')
+  assert.match(releaseRestore,
+    /kelion-runtime-config-recovery\.service[\s\S]*kelion-constructor-model-control\.service[\s\S]*control\.sock[\s\S]*0:10050:660/)
+})
+
+test('reactivarea păstrează un intent persistent până după controller și toate timerele', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const validate = shellFunction(cutover, 'validate_reactivation_journal')
+  const publish = shellFunction(cutover, 'publish_reactivation_journal')
+  const clear = shellFunction(cutover, 'clear_reactivation_journal')
+  assert.match(validate,
+    /0:0:600:1[\s\S]*schema == 1[\s\S]*kind == "constructor-reactivation"[\s\S]*phase == "pending"[\s\S]*keys == \["kind","phase","schema"\]/)
+  const markerFsync = publish.indexOf('fsync_path "$temporary"')
+  const markerRename = publish.indexOf('mv -f -- "$temporary" "$REACTIVATION_JOURNAL"', markerFsync)
+  const directoryFsync = publish.indexOf('fsync_path "$RUNTIME_ROOT"', markerRename)
+  assert.ok(markerFsync >= 0 && markerRename > markerFsync && directoryFsync > markerRename)
+  assert.match(clear, /rm -f -- "\$REACTIVATION_JOURNAL"[\s\S]*fsync_path "\$RUNTIME_ROOT"/)
+
+  const final = cutover.slice(cutover.lastIndexOf('write_journal_phase backend-recreated'))
+  const arm = final.indexOf('publish_reactivation_journal')
+  const runtimeClear = final.indexOf("clear_journal || die 'jurnalul cutover-ului finalizat", arm)
+  const controller = final.indexOf('restore_runtime_controller_or_quiesce', runtimeClear)
+  const timers = final.indexOf('restore_constructor_timers', controller)
+  const markerClear = final.indexOf('clear_reactivation_journal', timers)
+  const success = final.indexOf('operation_succeeded=1', markerClear)
+  assert.ok(arm >= 0 && runtimeClear > arm && controller > runtimeClear
+    && timers > controller && markerClear > timers && success > markerClear,
+  'markerul persistent trebuie să acopere fiecare fereastră SIGKILL până la probele complete')
+
+  const recovery = cutover.slice(cutover.indexOf('if [ "$recover_only" = 1 ]; then', cutover.indexOf('recover_interrupted_gate_refresh')))
+  const recoveryArm = recovery.indexOf('publish_reactivation_journal')
+  const ready = recovery.indexOf('publish_runtime_ready_stamp', recoveryArm)
+  const outerClear = recovery.indexOf('clear_deploy_quiesce_journal', ready)
+  const recoveryController = recovery.indexOf('restore_runtime_controller_or_quiesce', outerClear)
+  const recoveryTimers = recovery.indexOf('restore_constructor_timers', recoveryController)
+  const recoveryMarkerClear = recovery.indexOf('clear_reactivation_journal', recoveryTimers)
+  assert.ok(recoveryArm >= 0 && ready > recoveryArm && outerClear > ready
+    && recoveryController > outerClear && recoveryTimers > recoveryController
+    && recoveryMarkerClear > recoveryTimers)
+
+  for (const path of [
+    'deploy/systemd/kelion-codex-worker.service',
+    'deploy/systemd/kelion-constructor-publisher.service',
+    'deploy/systemd/kelion-constructor-release.service',
+    'deploy/systemd/kelion-constructor-sync.service',
+  ]) {
+    assert.match(read(path), /^ConditionPathExists=!\/root\/kelion\/runtime\/constructor-reactivation\.journal$/m)
+  }
+  for (const path of [
+    'deploy/systemd/kelion-codex-worker.timer',
+    'deploy/systemd/kelion-constructor-publisher.timer',
+    'deploy/systemd/kelion-constructor-release.timer',
+    'deploy/systemd/kelion-constructor-model-control.service',
+  ]) {
+    assert.doesNotMatch(read(path), /^ConditionPathExists=.*constructor-reactivation\.journal$/m)
+  }
+
+  const early = shellFunction(cutover, 'early_recover_only_barrier')
+  assert.match(early,
+    /kelion-constructor-model-control\.service[\s\S]*systemctl stop "\$unit"[\s\S]*ActiveState[\s\S]*systemctl list-jobs[\s\S]*control\.sock/)
+
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const installerValidator = shellFunction(installer, 'validate_constructor_reactivation_journal')
+  assert.match(installerValidator,
+    /0:0:600:1[\s\S]*schema == 1[\s\S]*constructor-reactivation[\s\S]*keys == \["kind","phase","schema"\]/)
+  const prelockValidation = installer.indexOf('validate_constructor_reactivation_state || {')
+  const publicationLock = installer.indexOf('acquire_publication_lock || {', prelockValidation)
+  const lockedValidation = installer.indexOf('validate_constructor_reactivation_state || {', publicationLock)
+  const exactHelper = installer.indexOf('cmp -s -- "$candidate_recovery_helper" "$live_recovery_helper"', lockedValidation)
+  const adoption = installer.indexOf('"$live_recovery_helper" --recover-only "$live_recovery_compose"', exactHelper)
+  const postcondition = installer.indexOf('constructor_reactivation_postcondition', adoption)
+  const identityMutation = installer.indexOf('set_constructor_install_phase identity-layout', postcondition)
+  assert.ok(prelockValidation >= 0 && publicationLock > prelockValidation
+    && lockedValidation > publicationLock && exactHelper > lockedValidation
+    && adoption > exactHelper && postcondition > adoption && identityMutation > postcondition,
+  'installerul acceptă numai markerul autentic și îl adoptă sub lock înaintea primei mutații')
+})
+
+test('retry-ul deploy separă marker-only de fereastra SIGKILL cu outer+reactivation', () => {
+  const deploy = read('deploy/deploy.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const lock = deploy.indexOf('\nflock 8\n')
+  const earlyStart = deploy.indexOf('if [ -e "$CONSTRUCTOR_REACTIVATION_JOURNAL" ]', lock)
+  const earlyEnd = deploy.indexOf('\n\n[ ! -e "$MAX_MODEL_JOURNAL" ]', earlyStart)
+  const early = deploy.slice(earlyStart, earlyEnd)
+  const markerProof = early.indexOf('validate_constructor_reactivation_intent')
+  const outerAbsent = early.indexOf('[ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]', markerProof)
+  const genericCall = early.indexOf('"$ROOT/bin/runtime-config-cutover.sh" --recover-only', outerAbsent)
+  const bothBranch = early.indexOf('\n  else\n', genericCall)
+  const outerAcl = early.indexOf("0:0:600:1", bothBranch)
+  assert.ok(lock >= 0 && earlyStart > lock && markerProof >= 0 && outerAbsent > markerProof
+    && genericCall > outerAbsent && bothBranch > genericCall && outerAcl > bothBranch,
+  'markerul este autentificat înainte de rutare, iar ownerless rulează exclusiv când outer lipsește')
+  assert.equal((early.match(/runtime-config-cutover\.sh" --recover-only/g) ?? []).length, 1)
+  assert.doesNotMatch(early.slice(bothBranch), /KELION_CUTOVER_LOCK_HELD|runtime-config-cutover\.sh" --recover-only/,
+    'fereastra BOTH trebuie păstrată pentru ownerul tuplei, fără apel generic')
+
+  const outerTuple = deploy.indexOf('recovered_constructor_quiesce_phase=$(jq -er', earlyEnd)
+  const ownerRestoreCall = deploy.indexOf('\n  restore_constructor_after_release \\', outerTuple)
+  assert.ok(outerTuple > earlyEnd && ownerRestoreCall > outerTuple,
+    'retry-ul BOTH trebuie să autentifice outer-ul înainte de calea owner-aware')
+  const ownerRestore = shellFunction(deploy, 'restore_constructor_after_release')
+  assert.match(ownerRestore,
+    /KELION_DEPLOY_QUIESCE_PROOF=1[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="\$KELION_RELEASE_REQUEST_ID"[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_COMMIT="\$COMMIT_SHA"[\s\S]*runtime-config-cutover\.sh" --recover-only/)
+
+  const ownerFinal = cutover.slice(cutover.indexOf('if [ "$recover_only" = 1 ]; then',
+    cutover.indexOf('recover_interrupted_cutover')))
+  const clearOuter = ownerFinal.indexOf('clear_deploy_quiesce_journal')
+  const controller = ownerFinal.indexOf('restore_runtime_controller_or_quiesce', clearOuter)
+  const timers = ownerFinal.indexOf('restore_constructor_timers', controller)
+  const clearMarker = ownerFinal.indexOf('clear_reactivation_journal_or_defer', timers)
+  assert.ok(clearOuter >= 0 && controller > clearOuter && timers > controller && clearMarker > timers,
+    'ownerul consumă outer-ul și markerul numai în ordinea de convergență dovedită')
+
+  const retryModel = ({ markerValid, outer }) => {
+    if (!markerValid) throw new Error('invalid-marker')
+    const earlyOwnerlessCalls = outer ? 0 : 1
+    const ownerCalls = outer ? 1 : 0
+    return { earlyOwnerlessCalls, ownerCalls, marker: false, outer: false }
+  }
+  assert.deepEqual(retryModel({ markerValid: true, outer: false }),
+    { earlyOwnerlessCalls: 1, ownerCalls: 0, marker: false, outer: false })
+  assert.deepEqual(retryModel({ markerValid: true, outer: true }),
+    { earlyOwnerlessCalls: 0, ownerCalls: 1, marker: false, outer: false })
+  assert.throws(() => retryModel({ markerValid: false, outer: true }), /invalid-marker/)
 })
 
 test('mapările subuid/subgid sunt validate strict și publicate atomic', () => {
@@ -1684,8 +2109,8 @@ test('cutover-ul runtime oprește toate unitățile, face rollback de grup și r
   assert.match(cutover, /--force-recreate --wait --wait-timeout 180/)
   assert.match(cutover, /mutation_started=1[\s\S]*mv -f --[\s\S]*config_consistent=1[\s\S]*recreate_active_release[\s\S]*restore_constructor_timers/)
 
-  assert.match(control, /KELION_CUTOVER_LOCK_HELD=1 bash "[$]work\/deploy\/lib\/runtime-config-cutover\.sh" "[$]cutover_stage"/)
-  assert.match(provision, /KELION_CUTOVER_LOCK_HELD=1 bash "[$]work\/deploy\/lib\/runtime-config-cutover\.sh" "[$]cutover_stage"/)
+  assert.match(control, /KELION_CUTOVER_LOCK_HELD=1[\s\S]{0,500}bash "[$]work\/deploy\/lib\/runtime-config-cutover\.sh"[\s\S]{0,120}"[$]cutover_stage"/)
+  assert.match(provision, /KELION_CUTOVER_LOCK_HELD=1[\s\S]{0,500}bash "[$]work\/deploy\/lib\/runtime-config-cutover\.sh"[\s\S]{0,120}"[$]cutover_stage"/)
   assert.doesNotMatch(provision, /mv "[$]temporary" \/root\/kelion\/config\/runtime\.env|mv "[$]temporary" "\/root\/kelion\/secrets\/[$]name"/)
 
   const quiesce = deploy.lastIndexOf('\nquiesce_constructor_before_candidate \\\n')
@@ -1693,8 +2118,16 @@ test('cutover-ul runtime oprește toate unitățile, face rollback de grup și r
   const refresh = deploy.lastIndexOf('\n  refresh_constructor_gate\n')
   const reactivate = deploy.indexOf('restore_constructor_after_release', refresh)
   assert.ok(quiesce >= 0 && candidate > quiesce, 'Constructor trebuie oprit înainte de pornirea candidatului')
-  assert.match(deploy, /quiesce_constructor_before_candidate\(\)[\s\S]*case "[$]unit_count" in[\s\S]*0\)[\s\S]*6\)[\s\S]*force_quiesce_constructor_release/)
+  assert.match(deploy, /quiesce_constructor_before_candidate\(\)[\s\S]*case "[$]unit_count" in[\s\S]*0\)[\s\S]*6\)[\s\S]*constructor_release_quiesced=1/)
   assert.match(deploy.slice(quiesce, candidate), /upgrade_constructor_timer_units_quiesced[\s\S]*assert_constructor_release_handoff_drained/)
+  const failedReactivation = shellFunction(deploy, 'quiesce_constructor_after_failed_reactivation_proof')
+  const durableIntent = failedReactivation.indexOf('publish_constructor_reactivation_intent')
+  const stopController = failedReactivation.indexOf('systemctl stop kelion-constructor-model-control.service', durableIntent)
+  const forceQuiesce = failedReactivation.indexOf('force_quiesce_constructor_release', stopController)
+  const intentProof = failedReactivation.indexOf('validate_constructor_reactivation_intent', forceQuiesce)
+  assert.ok(durableIntent >= 0 && stopController > durableIntent && forceQuiesce > stopController
+    && intentProof > forceQuiesce,
+  'orice probă post-helper eșuată rearmează intentul durabil înainte să retragă din nou Constructorul')
   assert.match(cutover, /systemd-timer\.kelion-codex-worker\.timer[\s\S]*systemd-timer\.kelion-constructor-publisher\.timer[\s\S]*systemd-timer\.kelion-constructor-release\.timer/)
   assert.match(cutover, /systemd-service\.kelion-codex-worker\.service[\s\S]*systemd-service\.kelion-constructor-publisher\.service[\s\S]*systemd-service\.kelion-constructor-release\.service/)
   assert.ok(refresh >= 0 && reactivate > refresh, 'timer-ele se reactivează numai după commitul configului')
@@ -1730,10 +2163,17 @@ test('activarea release este tranzacțională și cere workerul plus publisherul
     && physicalQuiesce > snapshotSync && activationJournal > physicalQuiesce,
   'snapshotul este fsync, apoi ready+unitățile sunt retrase înainte de jurnalul prepared')
   assert.match(control, /snapshot_activation_state\(\)[\s\S]*cp --preserve=mode,ownership,timestamps -- "[$]marker" "[$]activation_dir\/marker\.[$]index"[\s\S]*fsync_remote "[$]state_file"[\s\S]*force_quiesce_activation[\s\S]*write_activation_journal/)
-  assert.match(cutover, /recover_interrupted_activation\(\)[\s\S]*ensure_constructor_marker_root_durable[\s\S]*validate_live_runtime_contract[\s\S]*quiesce_units_for_recovery[\s\S]*mv -f -- "[$]restored" "[$]marker"[\s\S]*fsync_path \/etc\/kelion[\s\S]*systemctl enable "[$]timer"[\s\S]*start_constructor_unit "[$]timer"/)
+  const activationRecovery = shellFunction(cutover, 'recover_interrupted_activation')
+  assert.match(activationRecovery,
+    /ensure_constructor_marker_root_durable[\s\S]*validate_live_runtime_contract[\s\S]*quiesce_units_for_recovery[\s\S]*mv -f -- "[$]restored" "[$]marker"[\s\S]*fsync_path \/etc\/kelion[\s\S]*write_activation_journal_phase applied[\s\S]*clear_activation_pending[\s\S]*validate_reactivation_journal[\s\S]*validate_constructor_quiesce_barrier[\s\S]*activation_outer_commit_pending=1/)
+  assert.doesNotMatch(activationRecovery, /publish_runtime_ready_stamp|systemctl enable|start_constructor_unit/,
+    'helperul nu poate activa sub jurnalul exterior al operației')
   assert.match(shellFunction(cutover, 'validate_live_runtime_contract'), /validate_constructor_marker_root/)
-  assert.match(cutover, /readlink "[$]wants_link"[)]" = "\/etc\/systemd\/system\/[$]timer"[\s\S]*realpath -e -- "[$]wants_link"[)]" = "\/etc\/systemd\/system\/[$]timer"/)
-  assert.doesNotMatch(cutover, /readlink "[$]wants_link"[)]" = "\.\.\/[$]timer"/)
+  const timerRestore = shellFunction(cutover, 'restore_constructor_timers')
+  assert.match(timerRestore,
+    /systemctl enable "[$]timer"[\s\S]*start_constructor_unit "[$]timer"[\s\S]*systemctl is-enabled --quiet "[$]timer"/)
+  assert.match(shellFunction(cutover, 'validate_live_runtime_contract'),
+    /path=\/etc\/systemd\/system\/[$]unit[\s\S]*\[ -f "[$]path" \][\s\S]*validate_effective_constructor_unit "[$]unit"/)
   assert.match(release, /flock -n 9/)
   assert.match(release, /validate_runtime/)
   assert.match(release, /validate_marker \/etc\/kelion\/codex-worker\.enabled[\s\S]*validate_marker \/etc\/kelion\/constructor-publisher\.enabled/)
@@ -1755,6 +2195,9 @@ test('activarea release este tranzacțională și cere workerul plus publisherul
   assert.ok(workerEnabled >= 0 && publisherActive > workerEnabled && snapshot > publisherActive,
     'release cere workerul și publisherul enabled/active înainte de snapshot')
   assert.ok(rollForward > snapshot, 'jurnalul/snapshotul durabil trebuie publicat înainte de roll-forward')
+  const activationTail = control.slice(control.indexOf('if [ "$activation_in_progress" = 1 ]; then'))
+  assert.match(activationTail,
+    /phase == "applied"[\s\S]*reactivation_journal[\s\S]*clear_activation_journal[\s\S]*runtime-config-cutover\.sh[\s\S]*--recover-only[\s\S]*reactivation_journal[\s\S]*kelion-constructor-model-control\.service[\s\S]*control\.sock[\s\S]*prove_worker_oneshot_success/)
   assert.doesNotMatch(release, /systemctl (?:start|enable --now)/,
     'workflow-ul nu pornește unități direct; helperul jurnalizat face commitul înaintea pornirii')
 })
@@ -1774,17 +2217,40 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   const markerMutation = recovery.indexOf('mv -f -- "$restored" "$marker"', publishPending)
   const genericQuiesce = recovery.indexOf('write_activation_journal_phase quiesced', markerMutation)
   const applied = recovery.indexOf('write_activation_journal_phase applied', genericQuiesce)
+  const durableBlocker = recovery.indexOf('publish_unit_migration_pending', applied)
   const clearPending = recovery.indexOf('clear_activation_pending', applied)
-  const ready = recovery.indexOf('publish_runtime_ready_stamp', clearPending)
-  const firstEnable = recovery.indexOf('systemctl enable "$timer"', ready)
-  const firstStart = recovery.indexOf('start_constructor_unit "$timer"', ready)
+  const reactivationProof = recovery.indexOf('validate_reactivation_journal', clearPending)
+  const quiesceProof = recovery.indexOf('validate_constructor_quiesce_barrier', reactivationProof)
+  const handoff = recovery.indexOf('activation_outer_commit_pending=1', quiesceProof)
   assert.ok(quiesce >= 0 && publishPending > quiesce && markerMutation > publishPending,
     'gate-ul pending trebuie publicat după quiesce și înaintea primei mutații live')
   assert.ok(genericQuiesce > markerMutation && applied > genericQuiesce
-    && clearPending > applied && ready > clearPending && firstEnable > ready && firstStart > ready,
-  'applied trebuie fsync înainte de retragerea pending, ready și orice enable/start')
+    && durableBlocker > applied && clearPending > durableBlocker
+    && reactivationProof > clearPending && quiesceProof > reactivationProof && handoff > quiesceProof,
+  'applied și blockerul persistent trebuie fsync înainte de retragerea pending și handoff-ul outer')
+  assert.doesNotMatch(recovery, /publish_runtime_ready_stamp|systemctl enable|start_constructor_unit/,
+    'recovery-ul activării nu poate deschide unități cât jurnalul exterior există')
   assert.match(recovery,
-    /if \[ "[$]leave_constructor_quiesced" = 1 \] \|\| \[ "[$]activation_resume_operation" != "[$]operation" \]; then[\s\S]*write_activation_journal_phase quiesced[\s\S]*return 0[\s\S]*write_activation_journal_phase applied/)
+    /if \[ "[$]activation_resume_operation" != "[$]operation" \]; then[\s\S]*write_activation_journal_phase quiesced[\s\S]*return 0[\s\S]*write_activation_journal_phase applied/)
+  const appliedLeave = recovery.indexOf('if [ "$leave_constructor_quiesced" = 1 ]; then', applied)
+  const appliedLeaveReturn = recovery.indexOf('return 0', clearPending)
+  const appliedLeaveBranch = recovery.slice(appliedLeave, reactivationProof)
+  assert.ok(appliedLeave > applied && appliedLeaveReturn > clearPending && reactivationProof > appliedLeaveReturn,
+    'resume+leave trebuie să închidă applied sub blocker înaintea handoff-ului generic')
+  assert.doesNotMatch(appliedLeaveBranch, /systemctl enable|start_constructor_unit|publish_runtime_ready_stamp/,
+    'resume+leave nu poate activa timere sau servicii')
+  assert.match(appliedLeaveBranch,
+    /validate_unit_migration_pending[\s\S]*UNIT_MIGRATION_PENDING[\s\S]*ACTIVATION_PENDING[\s\S]*READY_STAMP[\s\S]*validate_constructor_quiesce_barrier/)
+  const activationBarrierExit = cutover.indexOf('if [ "$activation_barrier_pending" = 1 ]; then')
+  const recoverOnlyMain = cutover.indexOf('if [ "$recover_only" = 1 ]; then', activationBarrierExit)
+  const unitBlockerBranch = cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]; then', recoverOnlyMain)
+  const genericReady = cutover.indexOf('publish_runtime_ready_stamp', unitBlockerBranch)
+  assert.ok(activationBarrierExit >= 0 && recoverOnlyMain > activationBarrierExit
+    && unitBlockerBranch > recoverOnlyMain && genericReady > unitBlockerBranch,
+  'recover-only trebuie să trateze blockerul persistent înainte de calea generică ready')
+  assert.match(cutover.slice(unitBlockerBranch, genericReady),
+    /unit-only blochează boot-ul generic[\s\S]*exit 0/,
+    'blockerul persistent trebuie fie să oprească boot-ul, fie să iasă quiesced înainte de ready')
 
   const preflight = workflowFunction('recover_activation_preflight')
   assert.match(preflight,
@@ -1819,17 +2285,31 @@ test('SIGKILL în activare nu poate deschide unitățile înainte de commitul ap
   assert.match(shellFunction(cutover, 'validate_constructor_service_unit'),
     /ConditionPathExists=!\/run\/kelion\/constructor-activation\.pending/)
 
-  // Fault injection la fiecare frontieră durabilă. Condițiile systemd cer
-  // simultan ready prezent și pending absent; numai ultima stare poate porni.
-  const canUnitStart = ({ pending, ready: readyPresent }) => !pending && readyPresent
+  // Fault injection la fiecare frontieră durabilă. Blockerul persistent este
+  // publicat înainte ca pendingul activării să dispară și împiedică recovery-ul
+  // de boot să publice ready după ce deploy-ul consumă jurnalul activării.
+  const canUnitStart = ({ pending, reactivation = false, ready: readyPresent }) =>
+    !pending && !reactivation && readyPresent
   const crashCuts = [
-    { name: 'quiesced-pending', phase: 'quiesced', pending: true, ready: false },
-    { name: 'stale-ready-pending', phase: 'quiesced', pending: true, ready: true },
-    { name: 'applied-before-gate-clear', phase: 'applied', pending: true, ready: false },
-    { name: 'applied-after-gate-clear', phase: 'applied', pending: false, ready: false },
+    { name: 'quiesced-pending', phase: 'quiesced', pending: true, reactivation: true, ready: false },
+    { name: 'stale-ready-pending', phase: 'quiesced', pending: true, reactivation: true, ready: true },
+    { name: 'applied-before-gate-clear', phase: 'applied', pending: true, reactivation: true, ready: false },
+    { name: 'applied-blocker-durable', phase: 'applied', pending: true, reactivation: true, ready: false, unitBlocker: true },
+    { name: 'applied-after-gate-clear', phase: 'applied', pending: false, reactivation: true, ready: false, unitBlocker: true },
+    { name: 'outer-cleared-before-controller', phase: null, pending: false, reactivation: true, ready: true },
   ]
   for (const cut of crashCuts) assert.equal(canUnitStart(cut), false, cut.name)
-  assert.equal(canUnitStart({ phase: 'applied', pending: false, ready: true }), true)
+  assert.equal(canUnitStart({ phase: 'applied', pending: false, reactivation: false, ready: true }), true)
+
+  const recoveryReady = ({ unitBlocker, liveContractValid }) => !unitBlocker && liveContractValid
+  const canStartAfterReboot = ({ unitBlocker, liveContractValid = true }) =>
+    canUnitStart({ pending: false, ready: recoveryReady({ unitBlocker, liveContractValid }) })
+  assert.equal(canStartAfterReboot({ unitBlocker: true }), false,
+    'după journal clear, blockerul persistent interzice ready/start la reboot')
+  assert.equal(canStartAfterReboot({ unitBlocker: false }), true,
+    'controlul dovedește că testul ar detecta lipsa blockerului')
+  assert.equal(canStartAfterReboot({ unitBlocker: false, liveContractValid: false }), false,
+    'contractul live invalid rămâne fail-closed independent de blocker')
 })
 
 test('release-ul drenează handoff-urile Constructor după quiesce și înainte de PONR', async () => {
@@ -2012,6 +2492,7 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
     read('deploy/systemd/kelion-constructor-release.timer'),
   ]
   assert.match(recovery, /Wants=docker\.service[\s\S]*After=local-fs\.target docker\.service[\s\S]*Before=kelion-constructor-sync\.service kelion-codex-worker\.timer kelion-constructor-publisher\.timer kelion-constructor-release\.timer kelion-codex-worker\.service kelion-constructor-publisher\.service kelion-constructor-release\.service/)
+  assert.doesNotMatch(recovery, /^Before=.*kelion-constructor-model-control\.service/m)
   assert.doesNotMatch(recovery, /Requires=docker\.service/)
   assert.match(recovery, /--recover-only \/root\/kelion\/config\/compose\.production\.yml/)
   assert.match(recovery, /Environment=KELION_RECOVERY_BOOT=1/)
@@ -2050,6 +2531,7 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
 
 test('toate unitățile systemd publicate respectă contractul strict de bytes text', () => {
   const unitPaths = [
+    'private-ai-web-full-access.conf',
     'kelion-runtime-config-recovery.service',
     'kelion-constructor-sync.service',
     'kelion-codex-worker.timer',
@@ -2058,6 +2540,7 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
     'kelion-codex-worker.service',
     'kelion-constructor-publisher.service',
     'kelion-constructor-release.service',
+    'kelion-constructor-model-control.service',
   ].map((unit) => join(root, 'deploy', 'systemd', unit))
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const installer = read('deploy/instaleaza-constructor.sh')
@@ -2068,7 +2551,7 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
   const sourceValidator = shellFunction(installer, 'validate_source_systemd_text_files')
   const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
   assert.match(sourceValidator,
-    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 8/)
+    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 10/)
   assert.match(verifyCandidateUnits,
     /local allow_legacy_text=\$\{1:-0\}[\s\S]*case "\$allow_legacy_text" in 0\|1\)[\s\S]*if \[ "\$allow_legacy_text" = 0 \]; then[\s\S]*validate_systemd_text_file_bytes/)
   assert.match(mergePolicy, /"deploy\/systemd\/kelion-constructor-sync\.service"/)
@@ -2228,6 +2711,21 @@ test('ledger-ul release permite retry numai după rollback dovedit și oprește 
   assert.match(cutover, /quiesce_units_for_recovery[\s\S]*publish_runtime_ready_stamp[\s\S]*restore_constructor_timers[\s\S]*clear_deploy_quiesce_journal/)
 })
 
+test('o cerere nouă pentru commitul deja activ este no-op fără nicio mutație pe VPS', () => {
+  const deploy = read('deploy/deploy.sh')
+  const successNoop = deploy.indexOf('status=already-succeeded')
+  const activeNoop = deploy.indexOf('status=already-active', successNoop)
+  const arm = deploy.indexOf('write_constructor_deploy_quiesce_journal armed', activeNoop)
+  assert.ok(successNoop >= 0 && activeNoop > successNoop && arm > activeNoop,
+    'no-op-ul already-active precede armarea jurnalului quiesce și ledger-ul started')
+  const guard = deploy.slice(deploy.lastIndexOf('\nif [', activeNoop), activeNoop)
+  assert.match(guard, /release_request_state" = none/)
+  assert.match(guard, /-z "\$recovered_constructor_quiesce_phase"/)
+  assert.match(guard, /release_request_live_proof; then/)
+  assert.match(guard, /constructor_gate_matches_candidate \\\n\s*\|\| die 'commitul este deja activ, dar gate-ul Constructor nu îi corespunde/)
+  assert.doesNotMatch(guard, /reconcile_constructor_after_completed_release|write_release_request_ledger|write_constructor_deploy_quiesce_journal/)
+})
+
 test('jurnalul deploy leagă markerul activ de gate și nu poate fi consumat de recovery generic', () => {
   const deploy = read('deploy/deploy.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
@@ -2259,6 +2757,24 @@ test('jurnalul deploy leagă markerul activ de gate și nu poate fi consumat de 
   assert.match(cutover, /deploy_quiesce_proof" = 1[\s\S]*deploy_quiesce_owned_by_caller[\s\S]*deploy_quiesce_generation_proof/)
   assert.match(cutover, /recovery\/reactivare refuzată fără owner și dovadă de generație exactă/)
   assert.match(cutover, /KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_COMMIT/)
+
+  const gateRecoveryStart = deploy.indexOf('gate_recovery_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal')
+  const gateRecoveryEnd = deploy.indexOf("# Jurnalele runtime/activare sunt recuperate în mod normal", gateRecoveryStart)
+  assert.ok(gateRecoveryStart >= 0 && gateRecoveryEnd > gateRecoveryStart)
+  const gateRecovery = deploy.slice(gateRecoveryStart, gateRecoveryEnd)
+  const outerRequest = gateRecovery.indexOf('gate_recovery_owner_request_id=$(jq -er')
+  const outerCommit = gateRecovery.indexOf("gate_recovery_owner_commit=$(jq -er '.commit'", outerRequest)
+  const exactTuple = gateRecovery.indexOf('[ "$gate_recovery_owner_request_id" = "$KELION_RELEASE_REQUEST_ID" ]', outerCommit)
+  const gateCommit = gateRecovery.indexOf("$(jq -er '.commit' \"$gate_recovery_journal\")", exactTuple)
+  const invokeOwnerRequest = gateRecovery.indexOf('KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$gate_recovery_owner_request_id"', gateCommit)
+  const invokeOwnerCommit = gateRecovery.indexOf('KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$gate_recovery_owner_commit"', invokeOwnerRequest)
+  const invokeHelper = gateRecovery.indexOf('"$gate_recovery_root/recovery-helper.sh" --recover-only', invokeOwnerCommit)
+  assert.ok(outerRequest >= 0 && outerCommit > outerRequest && exactTuple > outerCommit
+    && gateCommit > exactTuple && invokeOwnerRequest > gateCommit
+    && invokeOwnerCommit > invokeOwnerRequest && invokeHelper > invokeOwnerCommit,
+  'recovery-ul gate jurnalizat derivă și autentifică ownerul outer/gate/current înainte să-l transmită helperului')
+  assert.match(gateRecovery,
+    /\.schema == 2 and \.phase == "gate-prepared"[\s\S]*requestId[\s\S]*commit[\s\S]*targetGateSha256[\s\S]*outer\/gate\/current release/)
 
   for (const workflow of [control, provision]) {
     assert.match(workflow, /deploy_quiesce_journal=\/root\/kelion\/runtime\/constructor-deploy-quiesce\.journal[\s\S]*--leave-constructor-quiesced[\s\S]*exit 1/)
@@ -2430,6 +2946,8 @@ test('recovery-ul post-PONR este legat de incident, artefacte semnate și dovada
   const target = 'de9fe5f3f081373a23796d83b469651e9c1e33e7'
   const recoveryBase = 'afc3c7484ff7982a78b10feb2ee0c6eb4fe927a3'
   assert.match(workflow, /name: VPS post-PONR recovery de9/)
+  assert.match(workflow, /^on:\n\s+workflow_dispatch:/m)
+  assert.doesNotMatch(workflow, /^\s+push:\s*$/m)
   assert.doesNotMatch(workflow, /actions:\s*write|route-to-master|auto_routed_to_master/)
   assert.match(workflow, /github\.ref == 'refs\/heads\/master'[\s\S]*github\.ref_name == 'master'/)
   assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
@@ -2484,6 +3002,8 @@ test('recovery-ul post-PONR este legat de incident, artefacte semnate și dovada
 
 test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperului și îl reverifică sub lock', () => {
   const workflow = read('.github/workflows/vps-recovery.yml')
+  assert.match(workflow, /^on:\n\s+workflow_dispatch:\s*$/m)
+  assert.doesNotMatch(workflow, /^\s+push:\s*$/m)
   assert.match(workflow, /group: production-release[\s\S]*cancel-in-progress: false/)
   const classify = workflow.indexOf('  classify:')
   const recover = workflow.indexOf('  recover:', classify)
@@ -2497,7 +3017,7 @@ test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperul
   assert.match(workflow, /\[ -f \/root\/kelion\/bin\/runtime-config-cutover\.sh \]\n\s+\[ ! -L \/root\/kelion\/bin\/runtime-config-cutover\.sh \][\s\S]*\[ -f \/root\/kelion\/config\/compose\.production\.yml \]\n\s+\[ ! -L \/root\/kelion\/config\/compose\.production\.yml \]/)
   assert.doesNotMatch(workflow, /\[ -f \/root\/kelion\/(?:bin\/runtime-config-cutover\.sh|config\/compose\.production\.yml) \]\s*\\\n\s*&&/)
   const journal = workflow.indexOf('journal=/root/kelion/runtime/destructive-cutover-recovery.json')
-  const defer = workflow.indexOf('RECOVERY_DEFERRED: există un jurnal distructiv valid', journal)
+  const defer = workflow.indexOf('RECOVERY_DEFERRED_QUIESCED: există un jurnal distructiv valid', journal)
   const exit = workflow.indexOf('exit 0', defer)
   const helper = workflow.indexOf('KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh', exit)
   assert.ok(journal >= 0 && defer > journal && exit > defer && helper > exit,
@@ -2527,7 +3047,7 @@ test('recovery-ul VPS generic defer-ează jurnalul distructiv înaintea helperul
   assert.doesNotMatch(guard, /rm -f -- "\$journal"|rm -rf|--recover-only/)
 })
 
-test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstrează pending-ul', () => {
+test('discard-ul runtime acceptă numai cele 12 backupuri nemutate și păstrează pending-ul', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const discard = shellFunction(cutover, 'discard_unmutated_prepared_cutover')
   const allowlistBlock = discard.match(/local -A allowed=\(([\s\S]*?)\n  \)/)
@@ -2535,6 +3055,7 @@ test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstreaz
   const allowlist = [...allowlistBlock[1].matchAll(/\[([^\]]+)\]=1/g)].map((entry) => entry[1])
   assert.deepEqual(allowlist, [
     'app-secret.codex-worker-secret',
+    'app-secret.constructor-model-control-secret',
     'app-secret.constructor-publisher-secret',
     'app-secret.constructor-release-secret',
     'worker-secret.github-worker-token',
@@ -2552,7 +3073,7 @@ test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstreaz
   const journal = discard.indexOf('.phase == "prepared"', pendingBytesBefore)
   const composeCmp = discard.indexOf('cmp -s -- "$recovery_compose" "$selected_compose"', journal)
   const manifest = discard.indexOf("while IFS=$'\\t' read -r logical present extra", composeCmp)
-  const exactCount = discard.indexOf('[ "$manifest_count" -eq 11 ]', manifest)
+  const exactCount = discard.indexOf('[ "$manifest_count" -eq 12 ]', manifest)
   const backupInventory = discard.indexOf('observed_backups=$(find', exactCount)
   const topology = discard.indexOf('mapfile -t target_ids', backupInventory)
   const finalOwnerProof = discard.lastIndexOf('deploy_quiesce_owned_by_caller')
@@ -2580,14 +3101,21 @@ test('discard-ul runtime acceptă numai cele 11 backupuri nemutate și păstreaz
 
 test('refuzul discard-ului armează cleanup fail-closed și păstrează jurnalul plus tranzacția', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  assert.match(cutover,
+    /if \[ -n "\$activation_resume_operation" \]; then\s*\[ "\$recover_only" = 1 \] && \[ "\$discard_unmutated_prepared" = 0 \] \\\s*&& \[ "\$discard_unmutated_gate_prepared" = 0 \] \\\s*\|\| die 'resume-ul activării este permis numai în recover-only generic'/,
+  'resume-ul explicit nu poate împrumuta autoritatea căii destructive discard')
+  assert.match(cutover,
+    /if \[ "\$leave_constructor_quiesced" = 1 \]; then\s*\[ "\$activation_resume_operation" = activate-worker-publisher \]/,
+  'resume+leave trebuie limitat la operația one-shot acceptată de callerul pin-uit')
   const cleanup = shellFunction(cutover, 'cleanup_cutover')
   const trap = cutover.indexOf('trap cleanup_cutover EXIT')
-  const arm = cutover.indexOf('if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi', trap)
+  const arm = cutover.indexOf('if [ "$discard_unmutated_prepared" = 1 ] || [ "$discard_unmutated_gate_prepared" = 1 ]; then', trap)
+  const armed = cutover.indexOf('recovery_in_progress=1', arm)
   const firstRecoveryValidator = cutover.indexOf('retract_runtime_ready_stamp_for_recovery', arm)
   const deployValidator = cutover.indexOf("validate_deploy_quiesce_journal || die", arm)
   const specialCall = cutover.indexOf('discard_unmutated_prepared_cutover "$discard_target_commit" "$compose_file"', arm)
   const genericRecovery = cutover.indexOf('\nrecover_interrupted_gate_refresh\n', specialCall)
-  assert.ok(trap >= 0 && arm > trap && firstRecoveryValidator > arm && deployValidator > arm
+  assert.ok(trap >= 0 && arm > trap && armed > arm && firstRecoveryValidator > armed && deployValidator > armed
     && specialCall > deployValidator && genericRecovery > specialCall,
   'guardul special trebuie armat înaintea validatorilor și executat înainte de recovery generic')
 
@@ -2604,6 +3132,7 @@ transaction_root=$2
 CALLS=$3
 recovery_in_progress=0
 discard_unmutated_prepared=1
+discard_unmutated_gate_prepared=0
 recover_only=1
 mutation_started=0
 operation_succeeded=0
@@ -2634,7 +3163,9 @@ ${cleanup}
 die() { exit 73; }
 validate_deploy_quiesce_journal() { return 1; }
 trap cleanup_cutover EXIT
-if [ "$discard_unmutated_prepared" = 1 ]; then recovery_in_progress=1; fi
+if [ "$discard_unmutated_prepared" = 1 ] || [ "$discard_unmutated_gate_prepared" = 1 ]; then
+  recovery_in_progress=1
+fi
 validate_deploy_quiesce_journal || die`
   const result = spawnSync(bashExecutable, ['-c', harness, 'discard-cleanup', journal, transaction, calls], { encoding: 'utf8' })
   assert.notEqual(result.status, 0, result.stderr || result.stdout)
@@ -2707,7 +3238,7 @@ test('migrarea unităților legacy este unit-only înaintea tranzacției runtime
   const unitInvoke = provision.indexOf('--leave-constructor-quiesced', unitStart)
   const recoveryInstall = provision.indexOf('install_atomic "$work/deploy/systemd/kelion-runtime-config-recovery.service"', unitInvoke)
   const mixedStart = provision.indexOf('cutover_stage=$(mktemp -d /root/kelion/runtime/runtime-cutover.XXXXXX)', recoveryInstall)
-  const mixedInvoke = provision.indexOf('runtime-config-cutover.sh" "$cutover_stage"', mixedStart)
+  const mixedInvoke = provision.indexOf('"$cutover_stage" "$work/deploy/compose.production.yml"', mixedStart)
   assert.ok(unitStart >= 0 && unitInvoke > unitStart && recoveryInstall > unitInvoke
     && mixedStart > recoveryInstall && mixedInvoke > mixedStart)
   assert.match(provision.slice(unitStart, unitInvoke), /systemd-timer\.[$]unit[\s\S]*systemd-service\.[$]unit/)
@@ -2719,6 +3250,74 @@ test('migrarea unităților legacy este unit-only înaintea tranzacției runtime
   const journal = cutover.indexOf('write_journal_phase prepared')
   const move = cutover.indexOf('mv -f -- "${prepared[$index]}"')
   assert.ok(journal >= 0 && move > journal, 'jurnalul fsync trebuie să preceadă orice înlocuire de timer')
+})
+
+test('vps-set-env separă bootstrapul fără controller de reactivarea canonică', () => {
+  const provision = read('.github/workflows/vps-set-env.yml')
+  const classify = provision.indexOf('controller_artifacts=(')
+  const partial = provision.indexOf("Controllerul manual este instalat parțial", classify)
+  const firstPublication = provision.indexOf('install_atomic "$work/deploy/lib/runtime-config-cutover.sh"', classify)
+  const finalBranch = provision.indexOf('if [ "$controller_bootstrap_quiesced" = 1 ]; then', firstPublication)
+  const leave = provision.indexOf('--leave-constructor-quiesced', finalBranch)
+  const liveBranch = provision.indexOf('\n          else', leave)
+  const noLeave = provision.indexOf('"$cutover_stage" "$work/deploy/compose.production.yml"', liveBranch)
+  const controllerProof = provision.indexOf('systemctl is-active --quiet kelion-constructor-model-control.service', noLeave)
+  const socketProof = provision.indexOf("0:10050:660", controllerProof)
+  assert.ok(classify >= 0 && partial > classify && firstPublication > partial
+    && finalBranch > firstPublication && leave > finalBranch && liveBranch > leave
+    && noLeave > liveBranch && controllerProof > noLeave && socketProof > controllerProof,
+  'clasificarea read-only trebuie să preceadă mutația, iar numai controllerul canonic poate urma calea no-leave')
+  const classification = provision.slice(classify, firstPublication)
+  assert.match(classification, /case "\$controller_artifact_count" in[\s\S]*0\)[\s\S]*controller_bootstrap_quiesced=1[\s\S]*3\)[\s\S]*controller_bootstrap_quiesced=0/)
+  assert.match(classification, /constructor-model-control\.mjs[\s\S]*constructor-model-switch[\s\S]*kelion-constructor-model-control\.service/)
+  assert.match(classification,
+    /validate_controller_artifact_bytes[\s\S]*controller_candidates[\s\S]*controller_sha256[\s\S]*Controllerul manual diferă byte-exact de checkout/)
+  assert.match(classification, /--self-test[\s\S]*After=local-fs\.target private-ai-llm\.service[\s\S]*systemctl is-enabled --quiet kelion-constructor-model-control\.service/)
+  assert.match(provision.slice(finalBranch), /bootstrap-quiesced până la configure-constructor/)
+
+  const bundleStart = provision.indexOf('git archive --format=tar HEAD')
+  const bundleEnd = provision.indexOf('bundle_commit=$(git rev-parse HEAD)', bundleStart)
+  const bundle = provision.slice(bundleStart, bundleEnd)
+  for (const path of [
+    'deploy/constructor-model-control.mjs',
+    'deploy/constructor-model-switch.sh',
+    'deploy/systemd/kelion-constructor-model-control.service',
+  ]) {
+    assert.match(bundle, new RegExp(path.replaceAll('.', '\\.') ))
+    assert.match(bundle, new RegExp(`git cat-file blob HEAD:${path.replaceAll('.', '\\.')} \\| sha256sum`))
+  }
+  assert.match(provision,
+    /bash -s --[\s\\]*"\$remote_bundle" "\$remote_payload" "\$cleanup_unit"[\s\\]*"\$controller_model_control_sha256" "\$controller_model_switch_sha256" "\$controller_unit_sha256"/)
+  assert.doesNotMatch(provision,
+    /install_atomic[^\n]*(?:constructor-model-control|constructor-model-switch)/,
+    'rotația secretelor nu publică artefactele controllerului; doar le clasifică byte-exact')
+
+  const validator = shellFunction(provision.replace(/^ {10}/gm, ''), 'validate_controller_artifact_bytes')
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-controller-byte-proof-'))
+  try {
+    const candidate = join(sandbox, 'controller-candidate.service')
+    const exact = join(sandbox, 'controller-live-exact.service')
+    const oldCompatible = join(sandbox, 'controller-live-old.service')
+    const canonical = read('deploy/systemd/kelion-constructor-model-control.service')
+    const digest = createHash('sha256').update(canonical).digest('hex')
+    writeFileSync(candidate, canonical)
+    writeFileSync(exact, canonical)
+    // Un comentariu păstrează toate directivele/invariant-ele systemd, dar
+    // simulează o generație live veche care nu este byte-identică checkoutului.
+    writeFileSync(oldCompatible, `${canonical}# legacy-compatible-generation\n`)
+    const runProof = (live) => spawnSync(bashExecutable, ['-c', `set -euo pipefail
+${validator}
+validate_controller_artifact_bytes "$1" "$2" "$3"`, 'controller-byte-proof', live, candidate, digest], {
+      encoding: 'utf8',
+    })
+    const exactResult = runProof(exact)
+    assert.equal(exactResult.status, 0, exactResult.stderr || exactResult.stdout)
+    const oldResult = runProof(oldCompatible)
+    assert.notEqual(oldResult.status, 0,
+      'un controller semantic compatibil, dar cu SHA diferit, trebuie refuzat înainte de mutație')
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
 })
 
 test('tranzacția unit-only amână porțile secretelor până la cutover-ul mixt cu candidații noi', () => {
@@ -3203,7 +3802,8 @@ test('jurnalul durabil recuperează un SIGKILL între mutări înainte de backen
     'pragul committed trebuie fsync după backend și înainte de primul start Constructor')
   assert.match(cutover, /recover_interrupted_cutover\(\)[\s\S]*quiesce_units_for_recovery[\s\S]*rollback-ul durabil al fișierelor[\s\S]*recreate_active_release "[$]recovery_compose"[\s\S]*restore_constructor_timers[\s\S]*clear_journal/)
   assert.match(cutover, /phase" = committed[\s\S]*validate_live_markers_for_recovery[\s\S]*recreate_active_release "[$]recovery_compose"[\s\S]*restore_constructor_timers/)
-  assert.match(cutover, /write_journal_phase backend-recreated[\s\S]*write_journal_phase committed[\s\S]*restore_constructor_timers[\s\S]*write_journal_phase timers-restored[\s\S]*clear_journal/)
+  assert.match(cutover,
+    /write_journal_phase backend-recreated[\s\S]*write_journal_phase committed[\s\S]*publish_reactivation_journal[\s\S]*clear_journal[\s\S]*restore_runtime_controller_or_quiesce[\s\S]*restore_constructor_timers[\s\S]*clear_reactivation_journal/)
   assert.match(cutover, /committed\|timers-restored\)[\s\S]*force_quiesce_constructor_units[\s\S]*prepared\|files-committed\|backend-recreated\)[\s\S]*restore_files/)
   assert.match(cutover, /if \[ "[$]marker" = legacy \]; then\s*return 1/)
 })
@@ -3235,6 +3835,91 @@ test('pierderea lease-ului este observabilă înainte de următoarea mutație', 
   }
 })
 
+test('clientul intern refuză explicit un heartbeat nepersistat', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('{"ok":true,"heartbeatPersisted":false}', {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+  const lease = startLease({
+    api: new URL('http://127.0.0.1:18079/'),
+    secret: 'h'.repeat(32),
+    prefix: 'x-constructor-publisher',
+    path: '/api/internal/constructor-publisher/jobs/1/lease',
+    body: { taskId: 'codex-123e4567-e89b-42d3-a456-426614174000', leaseId: '123e4567-e89b-42d3-a456-426614174001' },
+    intervalMs: 60_000,
+  })
+  try {
+    await assert.rejects(lease.assert(), /heartbeat nepersistat/)
+  } finally {
+    await lease().catch(() => undefined)
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('publisherul și releaserul refuză orice nepotrivire marker-execuție', () => {
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-constructor-vector-'))
+  const credential = join(sandbox, 'hmac')
+  writeFileSync(credential, `${'h'.repeat(40)}\n`, { mode: 0o600 })
+  const cases = [
+    {
+      script: 'deploy/constructor-publisher.mjs',
+      execEnv: 'CONSTRUCTOR_PUBLISHER_EXEC_ENABLED',
+      markerEnv: 'CONSTRUCTOR_PUBLISHER_ENABLE_MARKER',
+      secretEnv: 'CONSTRUCTOR_PUBLISHER_SECRET_FILE',
+      label: 'Publisherul',
+    },
+    {
+      script: 'deploy/constructor-release.mjs',
+      execEnv: 'CONSTRUCTOR_RELEASE_EXEC_ENABLED',
+      markerEnv: 'CONSTRUCTOR_RELEASE_ENABLE_MARKER',
+      secretEnv: 'CONSTRUCTOR_RELEASE_SECRET_FILE',
+      label: 'Release dispatcher',
+    },
+  ]
+  try {
+    for (const candidate of cases) {
+      for (const [enabled, markerPresent] of [[true, false], [false, true]]) {
+        const marker = join(sandbox, `${candidate.execEnv}-${enabled}-${markerPresent}`)
+        if (markerPresent) writeFileSync(marker, 'enabled\n', { mode: 0o600 })
+        const result = spawnSync(process.execPath, [join(root, candidate.script), '--once'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: {
+            ...process.env,
+            KELION_CONSTRUCTOR_API: 'http://127.0.0.1:1/',
+            [candidate.execEnv]: enabled ? '1' : '0',
+            [candidate.markerEnv]: marker,
+            [candidate.secretEnv]: credential,
+          },
+        })
+        assert.notEqual(result.status, 0, `${candidate.label} a acceptat vectorul ${enabled}:${markerPresent}`)
+        assert.match(`${result.stdout}${result.stderr}`, new RegExp(`${candidate.label}.*dezactivat explicit`))
+        assert.doesNotMatch(result.stdout, /:\s*dezactivat\s*$/m,
+          'nepotrivirea nu poate fi raportată drept stare dezactivată sănătoasă')
+      }
+    }
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test('preflightul publisher/release poate raporta degradarea după încărcarea HMAC', () => {
+  for (const path of ['deploy/constructor-publisher.mjs', 'deploy/constructor-release.mjs']) {
+    const source = read(path)
+    const runOnce = source.slice(source.indexOf('async function runOnce() {'), source.indexOf('\n}\n', source.indexOf('async function runOnce() {')) + 3)
+    const hmac = runOnce.indexOf('loadSystemdCredential(')
+    const guardedPreflight = runOnce.indexOf('try {', hmac)
+    const layout = runOnce.indexOf('assertEnabledLayout()', guardedPreflight)
+    const stateMutation = runOnce.indexOf('mkdirSync(STATE', layout)
+    const catchBlock = runOnce.indexOf('} catch (error) {', stateMutation)
+    const report = runOnce.indexOf('PreflightFailure(hmac.value, error)', catchBlock)
+    assert.ok(hmac >= 0 && guardedPreflight > hmac && layout > guardedPreflight
+      && stateMutation > layout && catchBlock > stateMutation && report > catchBlock,
+    `${path} trebuie să încarce HMAC înaintea preflightului raportabil și a primei mutații`)
+  }
+})
+
 test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
   const cutover = read('deploy/lib/runtime-config-cutover.sh')
   const collector = shellFunction(cutover, 'garbage_collect_activations')
@@ -3252,6 +3937,13 @@ test('garbage collectorul activărilor păstrează jurnalul canonic', () => {
     'GC-ul trebuie să accepte și snapshoturi legacy validate strict din runtime')
   assert.match(collector, /remove_activation_dir "\$canonical" \|\| return 1/,
     'snapshoturile reale trebuie curățate în continuare')
+  const journalAbsent = collector.indexOf('if [ ! -e "$ACTIVATION_JOURNAL" ]')
+  const preRemovalFsync = collector.indexOf('fsync_path "$RUNTIME_ROOT" || return 1', journalAbsent)
+  const removeSnapshot = collector.indexOf('remove_activation_dir "$canonical" || return 1', preRemovalFsync)
+  const postRemovalFsync = collector.indexOf('fsync_path "$RUNTIME_ROOT" || return 1', removeSnapshot)
+  assert.ok(journalAbsent >= 0 && preRemovalFsync > journalAbsent
+    && removeSnapshot > preRemovalFsync && postRemovalFsync > removeSnapshot,
+  'GC-ul persistă absența jurnalului înainte de remove și persistă din nou directorul după remove')
 })
 
 test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
@@ -3270,7 +3962,10 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
     '[ "$live_sha" = "$LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ]')
   const mixedRuntimeRefusal = recovery.indexOf(
     'for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"', livePin)
-  const journalAcl = recovery.indexOf("0:0:600:1", mixedRuntimeRefusal)
+  const retryBlocker = recovery.indexOf('if [ -e "$unit_migration_pending" ]', mixedRuntimeRefusal)
+  const retryBlockerProof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', retryBlocker)
+  const journalAcl = recovery.indexOf("0:0:600:1", retryBlockerProof)
   const workerOnly = recovery.indexOf('.operation == "activate-worker-publisher"', journalAcl)
   const rootAllowlist = recovery.indexOf('constructor-activation\\\\.[A-Za-z0-9]+', workerOnly)
   const candidatePin = recovery.indexOf(
@@ -3281,23 +3976,45 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
   const explicitResume = recovery.indexOf(
     'KELION_ACTIVATION_RESUME_OPERATION="$activation_operation"', durableCopy)
   const resumeRun = recovery.indexOf(
-    'bash "$recovery_helper" --recover-only "$live_compose";', explicitResume)
-  const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', resumeRun)
-  const requiesce = recovery.indexOf(
-    'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced', journalGone)
+    'bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced;', explicitResume)
+  const appliedProof = recovery.indexOf('.phase == "applied"', resumeRun)
+  const blockerProof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', appliedProof)
+  const blockerReproof = recovery.indexOf(
+    'validate_compatible_activation_blocker "$unit_migration_pending"', blockerProof + 1)
+  const blockerFilePersist = recovery.indexOf(
+    'fsync_release_artifact "$unit_migration_pending" file', blockerReproof)
+  const blockerDirectoryPersist = recovery.indexOf(
+    'fsync_release_artifact "$RUNTIME_ROOT" directory', blockerFilePersist)
+  const journalUnlink = recovery.indexOf('rm -f -- "$activation_journal"', blockerDirectoryPersist)
+  const journalPersist = recovery.indexOf('fsync_release_artifact "$RUNTIME_ROOT" directory', journalUnlink)
+  const journalGone = recovery.indexOf('[ ! -e "$activation_journal" ]', journalPersist)
+  const rootRemoval = recovery.indexOf('rm -rf --one-file-system -- "$activation_root"', journalGone)
+  const rootPersist = recovery.indexOf('fsync_release_artifact "$RUNTIME_ROOT" directory', rootRemoval)
   const orphanProof = recovery.indexOf(
-    'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', requiesce)
+    'for activation_candidate in "$RUNTIME_ROOT"/constructor-activation.*', rootPersist)
   const readyAbsent = recovery.indexOf(
     '[ ! -e /run/kelion/runtime-config-recovery.ready ]', orphanProof)
   const cleanup = recovery.indexOf('rm -f -- "$temporary"', readyAbsent)
 
-  assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && journalAcl > mixedRuntimeRefusal
+  assert.ok(livePin >= 0 && mixedRuntimeRefusal > livePin && retryBlocker > mixedRuntimeRefusal
+    && retryBlockerProof > retryBlocker && journalAcl > retryBlockerProof
     && workerOnly > journalAcl && rootAllowlist > workerOnly && candidatePin > rootAllowlist
     && temporaryCopy > candidatePin && durableCopy > temporaryCopy
-    && explicitResume > durableCopy && resumeRun > explicitResume && journalGone > resumeRun
-    && requiesce > journalGone && orphanProof > requiesce && readyAbsent > orphanProof
+    && explicitResume > durableCopy && resumeRun > explicitResume && appliedProof > resumeRun
+    && blockerProof > appliedProof && blockerReproof > blockerProof
+    && blockerFilePersist > blockerReproof && blockerDirectoryPersist > blockerFilePersist
+    && journalUnlink > blockerDirectoryPersist
+    && journalPersist > journalUnlink
+    && journalGone > journalPersist && rootRemoval > journalGone && rootPersist > rootRemoval
+    && orphanProof > rootPersist && readyAbsent > orphanProof
     && cleanup > readyAbsent,
-  'fallback-ul trebuie să fie pur, dublu pin-uit, explicit, requiesced și curățat')
+  'fallback-ul trebuie să fie dublu pin-uit, applied+blocked, quiesced și curățat journal-before-root')
+  assert.doesNotMatch(recovery.slice(explicitResume, orphanProof),
+    /start_constructor_unit|systemctl (?:start|enable)/,
+    'bootstrap-ul deploy nu poate porni dependențe ori timere Constructor')
+  assert.doesNotMatch(recovery, /rm -f -- "[$]unit_migration_pending"/,
+    'blockerul persistent este consumat numai de cutover-ul strict ulterior')
   assert.match(recovery,
     /elif \[ "\$status" = 0 \]; then[\s\S]*"\$recovery_helper" --recover-only "\$live_compose" --leave-constructor-quiesced/,
     'orice alt helper trebuie să-și recupereze propriile jurnale')
@@ -3307,8 +4024,2371 @@ test('deploy-ul migrează one-shot numai deadlockul GC al activării', () => {
 
   const mainStart = deploy.indexOf('# Jurnalele runtime/activare sunt recuperate în mod normal')
   const call = deploy.indexOf('\n  recover_runtime_activation_before_upgrade \\\n', mainStart)
+  const triggerStart = deploy.lastIndexOf(
+    '\nif [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal"', call)
+  const replayTrigger = deploy.slice(triggerStart, call)
   const persistentUpgrade = deploy.indexOf(
     '# Upgrade atomic și fsync al recovery gate-ului de boot', call)
-  assert.ok(mainStart >= 0 && call > mainStart && persistentUpgrade > call,
+  assert.ok(mainStart >= 0 && call > mainStart && triggerStart > mainStart && persistentUpgrade > call,
     'recovery-ul one-shot trebuie să se încheie înaintea upgrade-ului persistent')
+  assert.match(replayTrigger,
+    /constructor-activation\.journal[\s\S]*constructor-unit-migration\.pending[\s\S]*CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL/,
+  'un reboot după unlink-ul jurnalului trebuie să reintre fail-closed prin blockerul persistent')
+})
+
+test('blockerul applied este replay-idempotent și refuză aliasuri, ACL ori conținut diferit', () => {
+  const deploy = read('deploy/deploy.sh')
+  const validator = shellFunction(deploy, 'validate_compatible_activation_blocker')
+  assert.match(validator, /\[ -f "\$blocker" \] && \[ ! -L "\$blocker" \]/)
+  assert.match(validator, /stat -Lc '%u:%g:%a:%h'[\s\S]*0:0:600:1/)
+  assert.match(validator, /wc -l[\s\S]*-eq 1[\s\S]*grep -qx 'schema=1'/)
+  const harnessValidator = validator.replace(
+    "= '0:0:600:1'",
+    `= '${process.getuid()}:${process.getgid()}:600:1'`)
+  assert.ok(harnessValidator.includes(
+    `= '${process.getuid()}:${process.getgid()}:600:1'`),
+  'harnessul trebuie să adapteze numai ownerul așteptat la runnerul curent')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-activation-blocker-'))
+  const blocker = join(sandbox, 'constructor-unit-migration.pending')
+  const alias = join(sandbox, 'blocker.alias')
+  const hardlink = join(sandbox, 'blocker.hardlink')
+  const harness = `set -euo pipefail
+${harnessValidator}
+blocker=$1
+alias=$2
+hardlink=$3
+printf 'schema=1\\n' > "$blocker"
+chmod 0600 "$blocker"
+validate_compatible_activation_blocker "$blocker"
+validate_compatible_activation_blocker "$blocker"
+ln -s "$blocker" "$alias"
+if validate_compatible_activation_blocker "$alias"; then exit 71; fi
+chmod 0640 "$blocker"
+if validate_compatible_activation_blocker "$blocker"; then exit 72; fi
+chmod 0600 "$blocker"
+printf 'schema=2\\n' > "$blocker"
+if validate_compatible_activation_blocker "$blocker"; then exit 73; fi
+printf 'schema=1\\n' > "$blocker"
+ln "$blocker" "$hardlink"
+if validate_compatible_activation_blocker "$blocker"; then exit 74; fi`
+  const result = spawnSync(bashExecutable, ['-c', harness, 'activation-blocker', blocker, alias, hardlink], {
+    encoding: 'utf8',
+  })
+  try {
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test('upgrade-ul Constructor este o operație workflow izolată de credentialele aplicației', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const stepContaining = (needle) => {
+    const needleIndex = workflow.indexOf(needle)
+    assert.ok(needleIndex >= 0, `workflow-ul trebuie să conțină ${needle}`)
+    const start = workflow.lastIndexOf('\n      - ', needleIndex)
+    const next = workflow.indexOf('\n      - ', needleIndex)
+    const end = next === -1 ? workflow.length : next
+    assert.ok(start >= 0 && end > needleIndex, `pasul care conține ${needle} trebuie delimitat`)
+    return workflow.slice(start, end)
+  }
+
+  const optionStart = workflow.indexOf('        options:')
+  const optionEnd = workflow.indexOf('\n      auto_routed_to_master:', optionStart)
+  assert.ok(optionStart >= 0 && optionEnd > optionStart)
+  const operationOptions = workflow.slice(optionStart, optionEnd)
+  assert.equal(operationOptions.match(/^\s+- upgrade-constructor$/gm)?.length, 1,
+    'upgrade-constructor trebuie să fie o operație explicită și unică')
+
+  const checkout = stepContaining('actions/checkout@')
+  const gate = stepContaining('Leaga imaginea gate de sursa Constructor')
+  for (const prerequisite of [checkout, gate]) {
+    assert.match(prerequisite, /inputs\.operation == 'configure-constructor'/)
+    assert.match(prerequisite, /inputs\.operation == 'upgrade-constructor'/)
+  }
+
+  const controlStart = workflow.indexOf('\n  control:')
+  const stepsStart = workflow.indexOf('\n    steps:', controlStart)
+  assert.ok(controlStart >= 0 && stepsStart > controlStart)
+  const controlPreamble = workflow.slice(controlStart, stepsStart)
+  const configure = stepContaining('Configureaza Constructorul fara activare prematura')
+  const applicationCredentials = new Map([
+    ['CODEX_WORKER_SECRET', 'CODEX_WORKER_SECRET'],
+    ['CONSTRUCTOR_PUBLISHER_SECRET', 'CONSTRUCTOR_PUBLISHER_SECRET'],
+    ['CONSTRUCTOR_RELEASE_SECRET', 'CONSTRUCTOR_RELEASE_SECRET'],
+    ['SYNC_GITHUB_TOKEN', 'CONSTRUCTOR_SYNC_GITHUB_TOKEN'],
+    ['PUBLISHER_GITHUB_TOKEN', 'CONSTRUCTOR_PUBLISHER_GITHUB_TOKEN'],
+    ['RELEASE_GITHUB_TOKEN', 'VPS_GITHUB_TOKEN'],
+    ['GHCR_READ_TOKEN', 'CONSTRUCTOR_GHCR_READ_TOKEN'],
+  ])
+  const controlSecretRefs = [...controlPreamble.matchAll(/\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}/g)]
+    .map((match) => match[1])
+  assert.deepEqual(controlSecretRefs, ['VPS_SSH_KEY'],
+    'job-ul control poate moșteni numai cheia SSH; tokenul GitHub de control este github.token')
+  assert.match(controlPreamble, /^\s+GH_TOKEN: \$\{\{ github\.token \}\}$/m)
+  for (const [environmentName, secretName] of applicationCredentials) {
+    assert.doesNotMatch(controlPreamble, new RegExp(`^\\s+${environmentName}:`, 'm'),
+      `${environmentName} nu poate fi moștenit de toate operațiile control`)
+    assert.ok(configure.includes(`${environmentName}: \${{ secrets.${secretName} }}`),
+      `${environmentName} trebuie injectat numai în pasul configure`)
+  }
+  const audit = stepContaining('Auditeaza identitatea tokenurilor (read-only)')
+  for (const [environmentName, secretName] of [...applicationCredentials].slice(3)) {
+    assert.ok(audit.includes(`${environmentName}: \${{ secrets.${secretName} }}`),
+      `${environmentName} trebuie injectat punctual și în audit-token-identity`)
+  }
+  for (const environmentName of [...applicationCredentials.keys()].slice(0, 3)) {
+    assert.doesNotMatch(audit, new RegExp(`^\\s+${environmentName}:`, 'm'),
+      `audit-token-identity nu are nevoie de ${environmentName}`)
+  }
+
+  const upgradeStep = stepContaining('deploy/upgrade-constructor.sh')
+  assert.match(upgradeStep, /if: inputs\.operation == 'upgrade-constructor'/)
+  assert.match(upgradeStep, /KELION_CONSTRUCTOR_UPGRADE=1/)
+  assert.match(upgradeStep, /KELION_CONSTRUCTOR_SOURCE_COMMIT=/)
+  assert.match(upgradeStep, /bash [^\n]*deploy\/upgrade-constructor\.sh/)
+  assert.match(upgradeStep, /remote_bundle=.*\$\{GITHUB_RUN_ID\}.*\$\{GITHUB_RUN_ATTEMPT\}/)
+  const bundleCleanup = upgradeStep.match(/([a-z_]+)\(\) \{[\s\S]{0,700}?rm -f -- '[\$]remote_bundle'/)?.[1]
+  assert.ok(bundleCleanup, 'bundle-ul remote trebuie eliminat de un cleanup delimitat')
+  assert.ok(upgradeStep.includes(`trap ${bundleCleanup} EXIT`))
+
+  const checkoutCommit = upgradeStep.indexOf('git rev-parse HEAD')
+  const remoteMaster = upgradeStep.indexOf('/git/ref/heads/master', checkoutCommit)
+  const firstCopy = upgradeStep.indexOf('scp ', remoteMaster)
+  const remoteRun = upgradeStep.indexOf('deploy/upgrade-constructor.sh', firstCopy)
+  assert.ok(checkoutCommit >= 0 && remoteMaster > checkoutCommit && firstCopy > remoteMaster && remoteRun > firstCopy,
+    'master trebuie reverificat imediat înainte de primul mutator VPS și înainte de execuția upgrade-ului')
+
+  for (const environmentName of applicationCredentials.keys()) {
+    assert.doesNotMatch(upgradeStep, new RegExp(`\\b${environmentName}\\b`),
+      `pasul upgrade nu poate primi ${environmentName}`)
+  }
+  const explicitSecretRefs = [...upgradeStep.matchAll(/\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}/g)]
+    .map((match) => match[1])
+  assert.ok(explicitSecretRefs.every((name) => name === 'VPS_SSH_KEY'),
+    `upgrade-ul poate primi numai cheia SSH de control, nu ${explicitSecretRefs.join(', ')}`)
+  assert.doesNotMatch(upgradeStep,
+    /\bpayload\b|\bbase64\b|\bapt(?:-get)?\b|\bnpm\b|set\s+-x|printenv|declare\s+-p|export\s+-p/i)
+})
+
+test('dovada release din workflow cere candidate=false și SHA-ul selectat în fresh și recovery', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const upgradeStart = workflow.indexOf('- name: Actualizeaza atomic Constructorul in-place')
+  const upgradeEnd = workflow.indexOf('\n      - name:', upgradeStart + 1)
+  assert.ok(upgradeStart >= 0 && upgradeEnd > upgradeStart)
+  const upgradeStep = workflow.slice(upgradeStart, upgradeEnd)
+  const filterMatch = upgradeStep.match(
+    /jq -e --arg expected "\$source_commit" '([\s\S]*?)' <<<"\$release_proof"/)
+  assert.ok(filterMatch, 'predicatul jq al dovezii release din pasul upgrade trebuie să poată fi extras')
+  const filter = filterMatch[1]
+  assert.match(filter, /\.ready == true/)
+  assert.match(filter, /\.release\.candidate == false/)
+  assert.match(filter, /\.release\.sideEffectsActive == true/)
+  assert.match(filter, /\.activeCommit == \$expected/)
+  assert.doesNotMatch(filter, /candidate\s*\/\//,
+    'absența candidate nu poate fi convertită implicit în false')
+
+  const evaluate = (expected, payload) => spawnSync('jq', ['-e', '--arg', 'expected', expected, filter], {
+    input: `${JSON.stringify(payload)}\n`,
+    encoding: 'utf8',
+  })
+  for (const [mode, expected, mismatch] of [
+    ['fresh', '89abcdef0123456789abcdef0123456789abcdef', '76543210fedcba9876543210fedcba9876543210'],
+    ['recovery', '1234567890abcdef1234567890abcdef12345678', '89abcdef0123456789abcdef0123456789abcdef'],
+  ]) {
+    assert.equal(evaluate(expected, {
+      ready: true,
+      release: { candidate: false, sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să accepte numai SHA-ul selectat exact`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să refuze payloadul fără candidate`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { candidate: true, sideEffectsActive: true },
+      activeCommit: expected,
+    }).status, 0, `${mode} trebuie să refuze candidatul pre-PONR`)
+    assert.notEqual(evaluate(expected, {
+      ready: true,
+      release: { candidate: false, sideEffectsActive: true },
+      activeCommit: mismatch,
+    }).status, 0, `${mode} trebuie să refuze un release live de la alt SHA`)
+  }
+  assert.match(upgradeStep,
+    /active_marker=\/root\/kelion\/runtime\/release-state\/active[\s\S]*grep -qx "\$source_commit" "\$active_marker"/,
+    'dovada remote trebuie să lege și markerul activ exact de sursa fresh/recovery')
+})
+
+test('selectorul upgrade folosește master pentru fresh și numai jurnalul strict al unui ancestor pentru recovery', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const step = (name) => {
+    const start = workflow.indexOf(`- name: ${name}`)
+    const next = workflow.indexOf('\n      - name:', start + 1)
+    assert.ok(start >= 0, `pasul ${name} lipsește`)
+    return workflow.slice(start, next < 0 ? workflow.length : next)
+  }
+  const checkoutStart = workflow.indexOf('- uses: actions/checkout@')
+  const checkoutEnd = workflow.indexOf('\n      - name:', checkoutStart)
+  const checkout = workflow.slice(checkoutStart, checkoutEnd)
+  assert.match(checkout, /if: inputs\.operation == 'configure-constructor' \|\| inputs\.operation == 'upgrade-constructor'/)
+  assert.match(checkout, /ref: master[\s\S]*fetch-depth: 0[\s\S]*persist-credentials: false/)
+
+  const selector = step('Selecteaza determinist sursa upgrade-ului Constructor')
+  assert.match(selector, /set -Eeuo pipefail/)
+  const remoteSelectorMatch = selector.match(
+    /journal_source=\$\(ssh[\s\S]*?<<'REMOTE'\n([\s\S]*?)\n\s+REMOTE\n/)
+  assert.ok(remoteSelectorMatch, 'heredoc-ul probei remote trebuie să poată fi extras')
+  const remoteSelector = remoteSelectorMatch[1]
+  assert.doesNotMatch(remoteSelector,
+    /\b(?:rm|mv|cp|install|touch|mkdir|rmdir|truncate|tee|chmod|chown|systemctl|flock|scp|rsync)\b|\btar\s+-x/,
+    'selectorul remote este strict read-only și nu poate lua lock ori modifica VPS-ul')
+  assert.doesNotMatch(remoteSelector,
+    /set\s+-x|printenv|declare\s+-p|export\s+-p|\b(?:SendEnv|AcceptEnv)\b/,
+    'selectorul nu poate exporta sau afișa mediul')
+  assert.deepEqual(remoteSelector.match(/^\s*exec\b.*$/gm)?.map((line) => line.trim()), [
+    'exec 8<"$journal"',
+    'exec 7<"$snapshot_root/state"',
+  ], 'singurele exec-uri remote permise deschid read-only FD-urile pin-uite')
+  for (const credential of [
+    'CODEX_WORKER_SECRET',
+    'CONSTRUCTOR_PUBLISHER_SECRET',
+    'CONSTRUCTOR_RELEASE_SECRET',
+    'SYNC_GITHUB_TOKEN',
+    'PUBLISHER_GITHUB_TOKEN',
+    'RELEASE_GITHUB_TOKEN',
+    'GHCR_READ_TOKEN',
+  ]) {
+    assert.doesNotMatch(selector, new RegExp(`\\b${credential}\\b`),
+      `selectorul nu poate primi ${credential}`)
+  }
+  const master = selector.indexOf('master_commit=$(gh api')
+  const localMaster = selector.indexOf('[ "$(git rev-parse HEAD)" = "$master_commit" ]', master)
+  const remoteProbe = selector.indexOf('journal_source=$(ssh', localMaster)
+  const absent = selector.indexOf('if [ ! -e "$journal" ] && [ ! -L "$journal" ]; then', remoteProbe)
+  const absentResult = selector.indexOf("printf 'none\\n'", absent)
+  const journalFile = selector.indexOf('[ -f "$journal" ] && [ ! -L "$journal" ]', absentResult)
+  const journalAcl = selector.indexOf("0:0:600:1", journalFile)
+  const journalIdentity = selector.indexOf("journal_identity=$(stat -Lc '%d:%i' \"$journal\")", journalAcl)
+  const journalFdOpen = selector.indexOf('exec 8<"$journal"', journalIdentity)
+  const journalFdPath = selector.indexOf('readlink /proc/$$/fd/8', journalFdOpen)
+  const journalFdAcl = selector.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8", journalFdPath)
+  const journalFdIdentity = selector.indexOf("stat -Lc '%d:%i' /proc/$$/fd/8", journalFdAcl)
+  const journalLine = selector.indexOf('wc -l < /proc/$$/fd/8', journalFdIdentity)
+  const journalJq = selector.indexOf('source_commit=$(jq -er', journalLine)
+  const journalPathRecheck = selector.indexOf('[ ! -L "$journal" ]', journalJq)
+  const journalIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$journal\"", journalPathRecheck)
+  const snapshotGuard = selector.indexOf('[ -d "$snapshot_root" ] && [ ! -L "$snapshot_root" ]', journalIdentityRecheck)
+  const snapshotCanonical = selector.indexOf('realpath -e -- "$snapshot_root"', snapshotGuard)
+  const snapshotIdentity = selector.indexOf("snapshot_identity=$(stat -Lc '%d:%i' \"$snapshot_root\")", snapshotCanonical)
+  const stateGuard = selector.indexOf('[ -f "$snapshot_root/state" ] && [ ! -L "$snapshot_root/state" ]', snapshotIdentity)
+  const stateIdentity = selector.indexOf("state_identity=$(stat -Lc '%d:%i' \"$snapshot_root/state\")", stateGuard)
+  const stateFdOpen = selector.indexOf('exec 7<"$snapshot_root/state"', stateIdentity)
+  const stateFdPath = selector.indexOf('readlink /proc/$$/fd/7', stateFdOpen)
+  const stateFdAcl = selector.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/7", stateFdPath)
+  const stateFdIdentity = selector.indexOf("stat -Lc '%d:%i' /proc/$$/fd/7", stateFdAcl)
+  const stateHash = selector.indexOf('sha256sum /proc/$$/fd/7', stateFdIdentity)
+  const statePathRecheck = selector.indexOf('[ ! -L "$snapshot_root/state" ]', stateHash)
+  const stateIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$snapshot_root/state\"", statePathRecheck)
+  const snapshotPathRecheck = selector.indexOf('[ ! -L "$snapshot_root" ]', stateIdentityRecheck)
+  const snapshotIdentityRecheck = selector.indexOf("stat -Lc '%d:%i' \"$snapshot_root\"", snapshotPathRecheck)
+  const oneResult = selector.indexOf('[ "$(printf \'%s\\n\' "$journal_source" | wc -l)" -eq 1 ]', snapshotIdentityRecheck)
+  assert.ok(master >= 0 && localMaster > master && remoteProbe > localMaster && absent > remoteProbe
+    && absentResult > absent && journalFile > absentResult && journalAcl > journalFile
+    && journalIdentity > journalAcl && journalFdOpen > journalIdentity
+    && journalFdPath > journalFdOpen && journalFdAcl > journalFdPath
+    && journalFdIdentity > journalFdAcl && journalLine > journalFdIdentity
+    && journalJq > journalLine && journalPathRecheck > journalJq
+    && journalIdentityRecheck > journalPathRecheck && snapshotGuard > journalIdentityRecheck
+    && snapshotCanonical > snapshotGuard && snapshotIdentity > snapshotCanonical
+    && stateGuard > snapshotIdentity && stateIdentity > stateGuard && stateFdOpen > stateIdentity
+    && stateFdPath > stateFdOpen && stateFdAcl > stateFdPath && stateFdIdentity > stateFdAcl
+    && stateHash > stateFdIdentity && statePathRecheck > stateHash
+    && stateIdentityRecheck > statePathRecheck && snapshotPathRecheck > stateIdentityRecheck
+    && snapshotIdentityRecheck > snapshotPathRecheck && oneResult > snapshotIdentityRecheck,
+  'proba remote trebuie să distingă absența reală de symlink și să citească jurnalul/state prin FD-uri pin-uite, cu dev:ino reverificat')
+
+  const filterMatch = selector.match(/source_commit=\$\(jq -er '([\s\S]*?)' \/proc\/\$\$\/fd\/8\)/)
+  assert.ok(filterMatch, 'schema jq a jurnalului selector trebuie să poată fi extrasă')
+  const journalFilter = filterMatch[1]
+  assert.match(journalFilter, /\.schema == 1 and \.kind == "constructor-upgrade"/)
+  assert.match(journalFilter,
+    /\.phase == "armed" or \.phase == "installed" or \.phase == "committed"/)
+  assert.match(journalFilter, /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
+  const ancestor = '1234567890abcdef1234567890abcdef12345678'
+  const validJournal = {
+    schema: 1,
+    kind: 'constructor-upgrade',
+    phase: 'armed',
+    sourceCommit: ancestor,
+    snapshotRoot: '/root/kelion/runtime/constructor-upgrade.Abc123',
+    stateSha256: 'a'.repeat(64),
+  }
+  const evaluateJournal = (journal) => spawnSync('jq', ['-er', journalFilter], {
+    input: `${JSON.stringify(journal)}\n`,
+    encoding: 'utf8',
+  })
+  for (const phase of ['armed', 'installed', 'committed']) {
+    const accepted = evaluateJournal({ ...validJournal, phase })
+    assert.equal(accepted.status, 0, `${phase}: ${accepted.stderr}`)
+    assert.equal(accepted.stdout.trim(), ancestor)
+  }
+  for (const malformed of [
+    Object.fromEntries(Object.entries(validJournal).filter(([key]) => key !== 'phase')),
+    { ...validJournal, phase: 'complete' },
+    { ...validJournal, phase: '' },
+    { ...validJournal, phase: null },
+    { ...validJournal, sourceCommit: ancestor.slice(0, 7) },
+    { ...validJournal, snapshotRoot: '/tmp/constructor-upgrade.Abc123' },
+    { ...validJournal, stateSha256: 'a'.repeat(63) },
+    { ...validJournal, extra: true },
+  ]) {
+    assert.notEqual(evaluateJournal(malformed).status, 0,
+      'orice abatere de la schema exactă a jurnalului trebuie refuzată')
+  }
+
+  const freshDefault = selector.indexOf('recovery=0', oneResult)
+  const freshCommit = selector.indexOf('source_commit=$master_commit', freshDefault)
+  const recoveryBranch = selector.indexOf('if [ "$journal_source" != none ]; then', freshCommit)
+  const sourceShape = selector.indexOf('[[ "$journal_source" =~ ^[0-9a-f]{40}$ ]]', recoveryBranch)
+  const sourceObject = selector.indexOf('git cat-file -e "$journal_source^{commit}"', sourceShape)
+  const sourceAncestor = selector.indexOf('git merge-base --is-ancestor "$journal_source" "$master_commit"', sourceObject)
+  const recoveryCommit = selector.indexOf('source_commit=$journal_source', sourceAncestor)
+  const recoveryMode = selector.indexOf('recovery=1', recoveryCommit)
+  const checkoutSelected = selector.indexOf('git checkout --detach "$source_commit"', recoveryMode)
+  const verifySelected = selector.indexOf('[ "$(git rev-parse HEAD)" = "$source_commit" ]', checkoutSelected)
+  const publishOutputs = selector.indexOf("printf 'commit=%s\\nmaster=%s\\nrecovery=%s\\n'", verifySelected)
+  assert.ok(freshDefault >= 0 && freshCommit > freshDefault && recoveryBranch > freshCommit
+    && sourceShape > recoveryBranch && sourceObject > sourceShape && sourceAncestor > sourceObject
+    && recoveryCommit > sourceAncestor && recoveryMode > recoveryCommit
+    && checkoutSelected > recoveryMode && verifySelected > checkoutSelected && publishOutputs > verifySelected,
+  'absența trebuie să selecteze master/0, iar jurnalul strict numai un commit existent ancestor și modul 1')
+  assert.doesNotMatch(selector.slice(sourceAncestor, recoveryCommit), /\|\|\s*true/)
+
+  const gate = step('Leaga imaginea gate de sursa Constructor')
+  assert.match(workflow,
+    /control:\n[\s\S]*?timeout-minutes: 90[\s\S]*?Leaga imaginea gate de sursa Constructor/)
+  assert.match(gate,
+    /case "\$UPGRADE_RECOVERY" in[\s\S]*0\) \[ "\$commit" = "\$remote_master" \][\s\S]*1\) git merge-base --is-ancestor "\$commit" "\$remote_master"/)
+  assert.match(gate,
+    /gate_deadline=\$SECONDS[\s\S]*configure-constructor[\s\S]*SECONDS \+ 1800[\s\S]*sleep 20/)
+  assert.match(gate,
+    /actions\/workflows\/build-images\.yml\/runs"[\s\\]*-f event=workflow_run -f status=completed -f head_sha="\$commit" -f per_page=100/)
+  assert.match(gate,
+    /build_matches=[\s\S]*head_sha == \$sha[\s\S]*head_branch == "master"[\s\S]*event == "workflow_run"[\s\S]*conclusion == "success"[\s\S]*head_repository\.full_name == \$repo/)
+  assert.match(gate, /\[ "\$build_matches" -le 1 \]/)
+  assert.match(gate, /\[ "\$artifact_matches" -le 1 \]/)
+  assert.match(gate, /\[ "\$entries" = \$'codex-gates\.json\\nimages\.json' \]/)
+  assert.match(gate,
+    /keys == \["commit", "image", "schema", "sourceRunId"\][\s\S]*\.schema == 1[\s\S]*\.commit == \$commit/)
+  assert.match(gate,
+    /\.event == "push"[\s\S]*\.conclusion == "success"[\s\S]*\.repository\.full_name == \$repo[\s\S]*pr-verify\.yml/)
+  assert.match(gate, /latest_master=.*git\/ref\/heads\/master[\s\S]*\[ "\$latest_master" = "\$remote_master" \]/)
+  const upgradeStep = step('Actualizeaza atomic Constructorul in-place')
+  assert.match(upgradeStep,
+    /\[ "\$source_commit" = "\$UPGRADE_SOURCE_COMMIT" \][\s\S]*\[ "\$\(git rev-parse origin\/master\)" = "\$UPGRADE_MASTER_COMMIT" \]/)
+  assert.match(upgradeStep,
+    /case "\$UPGRADE_RECOVERY" in 0\|1\) ;; \*\) exit 1 ;; esac/)
+  assert.match(upgradeStep,
+    /if \[ "\$UPGRADE_RECOVERY" = 0 \]; then[\s\S]*\[ "\$bundle_commit" = "\$latest_master" \][\s\S]*else[\s\S]*git merge-base --is-ancestor "\$bundle_commit" "\$latest_master"/)
+  assert.match(upgradeStep,
+    /KELION_CONSTRUCTOR_RECOVERY="\$recovery"[\s\\]*KELION_CONSTRUCTOR_SOURCE_COMMIT="\$source_commit"/)
+})
+
+test('scriptul upgrade leagă modul fresh/recovery de prezența jurnalului și de commitul selectat', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  assert.match(upgrade,
+    /constructor_upgrade_recovery=\$\{KELION_CONSTRUCTOR_RECOVERY:-invalid\}[\s\S]*\[\[ "\$constructor_upgrade_recovery" =~ \^\[01\]\$ \]\]/)
+  const modeBranch = upgrade.indexOf('if [ "$constructor_upgrade_recovery" = 0 ]; then')
+  const publicationLock = upgrade.lastIndexOf('flock -n 9', modeBranch)
+  const freshAbsence = upgrade.indexOf('[ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]', modeBranch)
+  const snapshot = upgrade.indexOf('create_upgrade_snapshot', freshAbsence)
+  const recoveryPresence = upgrade.indexOf('[ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]', snapshot)
+  const load = upgrade.indexOf('load_upgrade_journal', recoveryPresence)
+  assert.ok(publicationLock >= 0 && modeBranch > publicationLock && freshAbsence > modeBranch && snapshot > freshAbsence
+    && recoveryPresence > snapshot && load > recoveryPresence,
+  'fresh trebuie să ceară jurnal absent și să-l creeze; recovery trebuie să ceară jurnal prezent înainte de load')
+  const loader = shellFunction(upgrade, 'load_upgrade_journal')
+  assert.match(loader, /--arg commit "\$constructor_upgrade_source_commit"[\s\S]*\.sourceCommit == \$commit/)
+  assert.match(loader,
+    /\[ "\$\(sha256sum "\$state_file" \| awk '\{print \$1\}'\)" = "\$snapshot_state_sha256" \]/)
+})
+
+test('upgrade-ul Constructor păstrează un jurnal exterior durabil și rămâne quiesced până la generația completă', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const arrayValues = (name) => {
+    const match = upgrade.match(new RegExp(`${name}=\\(\\n([\\s\\S]*?)\\n\\)`))
+    assert.ok(match, `vectorul ${name} lipsește`)
+    return match[1].trim().split(/\r?\n/).map((line) => line.trim())
+  }
+  assert.deepEqual(arrayValues('constructor_markers'), [
+    '/etc/kelion/codex-worker.enabled',
+    '/etc/kelion/constructor-publisher.enabled',
+    '/etc/kelion/constructor-release.enabled',
+  ])
+  assert.deepEqual(arrayValues('constructor_timers'), [
+    'kelion-codex-worker.timer',
+    'kelion-constructor-publisher.timer',
+    'kelion-constructor-release.timer',
+  ])
+  assert.deepEqual(arrayValues('constructor_services'), [
+    'kelion-codex-worker.service',
+    'kelion-constructor-publisher.service',
+    'kelion-constructor-release.service',
+  ])
+  assert.match(upgrade, /UPGRADE_JOURNAL=\$RUNTIME_ROOT\/constructor-upgrade\.journal/)
+
+  const liveVector = shellFunction(upgrade, 'validate_live_activation_vector')
+  assert.match(liveVector,
+    /if \[ "\$present" = 1 \]; then[\s\S]*"\$unit_file_state" = enabled[\s\S]*"\$active_state" = active[\s\S]*else[\s\S]*"\$unit_file_state" = disabled[\s\S]*"\$active_state" = inactive/)
+  assert.match(liveVector,
+    /constructor_markers\[2\][\s\S]*constructor_markers\[0\][\s\S]*constructor_markers\[1\][\s\S]*constructor_markers\[1\][\s\S]*constructor_markers\[0\]/,
+    'vectorii activi acceptați trebuie să fie prefixele canonice worker, publisher, release')
+
+  const snapshot = shellFunction(upgrade, 'create_upgrade_snapshot')
+  const snapshotFileFsync = snapshot.indexOf('fsync_path "$snapshot_root/marker.$index"')
+  const snapshotStateFsync = snapshot.indexOf('fsync_path "$state_file"', snapshotFileFsync)
+  const snapshotRootFsync = snapshot.indexOf('fsync_path "$snapshot_root"', snapshotStateFsync)
+  const snapshotHash = snapshot.indexOf('snapshot_state_sha256=$(sha256sum "$state_file"', snapshotRootFsync)
+  const armedJournal = snapshot.indexOf('write_upgrade_journal armed', snapshotHash)
+  assert.ok(snapshotFileFsync >= 0 && snapshotStateFsync > snapshotFileFsync
+    && snapshotRootFsync > snapshotStateFsync && snapshotHash > snapshotRootFsync
+    && armedJournal > snapshotHash,
+  'copiile, starea și directorul snapshotului trebuie fsync înaintea jurnalului armed')
+
+  const journalWriter = shellFunction(upgrade, 'write_upgrade_journal')
+  assert.match(journalWriter, /case "\$phase" in armed\|installed\|committed\) ;; \*\) return 1 ;; esac/)
+  assert.match(journalWriter,
+    /schema:1,kind:"constructor-upgrade",phase:\$phase,sourceCommit:\$sourceCommit,[\s\S]*snapshotRoot:\$snapshotRoot,stateSha256:\$stateSha256/)
+  const journalFsync = journalWriter.indexOf('fsync_path "$temporary"')
+  const journalMove = journalWriter.indexOf('mv -f -- "$temporary" "$UPGRADE_JOURNAL"', journalFsync)
+  const journalRootFsync = journalWriter.indexOf('fsync_path "$RUNTIME_ROOT"', journalMove)
+  assert.ok(journalFsync >= 0 && journalMove > journalFsync && journalRootFsync > journalMove)
+
+  const journalLoader = shellFunction(upgrade, 'load_upgrade_journal')
+  assert.match(journalLoader,
+    /\.schema == 1 and \.kind == "constructor-upgrade"[\s\S]*\(\.phase == "armed" or \.phase == "installed" or \.phase == "committed"\)[\s\S]*\.sourceCommit == \$commit/)
+  assert.match(journalLoader,
+    /keys == \["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"\]/)
+  assert.match(journalLoader, /sha256sum "\$state_file"[\s\S]*snapshot_state_sha256/)
+  assert.match(journalLoader, /\[ "\$\{#snapshot_lines\[@\]\}" -eq 6 \]/)
+  assert.match(journalLoader,
+    /"\$first" = "\$\{snapshot_marker_present\[\$index\]\}"[\s\S]*"\$second" = "\$\{snapshot_marker_present\[\$index\]\}"/,
+    'snapshotul autentificat trebuie să lege marker == timer enabled == timer active')
+
+  const installedProof = shellFunction(upgrade, 'validate_installed_generation_quiesced')
+  assert.match(installedProof, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
+  assert.match(installedProof, /\[ ! -e "\$READY_STAMP" \] && \[ ! -L "\$READY_STAMP" \]/)
+  assert.match(installedProof, /for marker in "\$\{constructor_markers\[@\]\}"[\s\S]*\[ ! -e "\$marker" \]/)
+  assert.match(installedProof, /UnitFileState --value\)" = disabled[\s\S]*inactive\|failed/)
+  assert.match(installedProof, /validate_service_quiescence/)
+
+  const main = upgrade.slice(upgrade.lastIndexOf('[ -d "$ROOT" ]'))
+  const publicationLock = main.indexOf('flock -n 9')
+  const createSnapshot = main.indexOf('create_upgrade_snapshot', publicationLock)
+  const loadArmed = main.indexOf('load_upgrade_journal', createSnapshot)
+  const installer = main.indexOf('bash "$repo_root/deploy/instaleaza-constructor.sh"', loadArmed)
+  const proveInstalled = main.indexOf('validate_installed_generation_quiesced', installer)
+  const commitInstalled = main.indexOf('write_upgrade_journal installed', proveInstalled)
+  const strictCutover = main.indexOf('strict_constructor_config_recommit', commitInstalled)
+  const proveCommittedQuiesced = main.indexOf('validate_committed_activation_vector_quiesced', strictCutover)
+  const commitCommitted = main.indexOf('write_upgrade_journal committed', proveCommittedQuiesced)
+  const loadCommitted = main.indexOf('load_upgrade_journal', commitCommitted)
+  const quiesceCommitted = main.indexOf('quiesce_committed_activation', loadCommitted)
+  const reproveCommittedQuiesced = main.indexOf('validate_committed_activation_vector_quiesced', quiesceCommitted)
+  const finalizeCommitted = main.indexOf('finalize_committed_activation', reproveCommittedQuiesced)
+  const proveRestored = main.indexOf('validate_restored_activation_vector', finalizeCommitted)
+  const workerHash = main.indexOf('worker_sha256=$(sha256sum', proveRestored)
+  const clearOuter = main.indexOf('clear_upgrade_transaction', workerHash)
+  assert.ok(publicationLock >= 0 && createSnapshot > publicationLock && loadArmed > createSnapshot
+    && installer > loadArmed && proveInstalled > installer && commitInstalled > proveInstalled
+    && strictCutover > commitInstalled && proveCommittedQuiesced > strictCutover
+    && commitCommitted > proveCommittedQuiesced && loadCommitted > commitCommitted
+    && quiesceCommitted > loadCommitted && reproveCommittedQuiesced > quiesceCommitted
+    && finalizeCommitted > reproveCommittedQuiesced && proveRestored > finalizeCommitted
+    && workerHash > proveRestored && clearOuter > workerHash,
+  'jurnalul exterior trebuie să încadreze installerul roll-forward, cutover-ul strict și dovada exactă finală')
+  assert.match(main.slice(loadArmed, installer), /\[ "\$upgrade_phase" = armed \]/)
+  assert.match(main.slice(loadArmed, installer), /KELION_CONSTRUCTOR_SOURCE_COMMIT="\$constructor_upgrade_source_commit"/)
+  assert.doesNotMatch(shellFunction(upgrade, 'report_constructor_upgrade_failure'),
+    /clear_upgrade_transaction|rm -f -- "\$UPGRADE_JOURNAL"|rm -rf[^\n]*constructor-upgrade/,
+    'un eșec trebuie să păstreze jurnalul exterior și snapshotul pentru retry autentificat')
+})
+
+test('faza committed precede orice activare și recuperează idempotent un SIGKILL după primul timer', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const bootUnit = read('deploy/systemd/kelion-runtime-config-recovery.service')
+  const main = upgrade.slice(upgrade.lastIndexOf('[ -d "$ROOT" ]'))
+  const installedBranch = main.indexOf('if [ "$upgrade_phase" = installed ]; then')
+  const strictRecommit = main.indexOf('strict_constructor_config_recommit', installedBranch)
+  const quiescedProof = main.indexOf('validate_committed_activation_vector_quiesced', strictRecommit)
+  const committedWrite = main.indexOf('write_upgrade_journal committed', quiescedProof)
+  const committedLoad = main.indexOf('load_upgrade_journal', committedWrite)
+  const committedEntry = main.indexOf('[ "$upgrade_phase" = committed ]', committedLoad)
+  const retryQuiesce = main.indexOf('quiesce_committed_activation', committedEntry)
+  const retryQuiescedProof = main.indexOf('validate_committed_activation_vector_quiesced', retryQuiesce)
+  const retryCommittedWrite = main.indexOf('write_upgrade_journal committed', retryQuiescedProof)
+  const retryCommittedLoad = main.indexOf('load_upgrade_journal', retryCommittedWrite)
+  const clearControllerPending = main.indexOf('clear_upgrade_activation_pending', retryCommittedLoad)
+  const firstActivation = main.indexOf('finalize_committed_activation', clearControllerPending)
+  const exactProof = main.indexOf('validate_restored_activation_vector', firstActivation)
+  const workerHashProof = main.indexOf('worker_sha256=$(sha256sum', exactProof)
+  const clear = main.indexOf('clear_upgrade_transaction', exactProof)
+  const controllerStart = main.indexOf('start_model_controller_after_upgrade_commit', clear)
+  const clearDisarm = main.indexOf('activation_restore_started=0', controllerStart)
+  assert.ok(installedBranch >= 0 && strictRecommit > installedBranch && quiescedProof > strictRecommit
+    && committedWrite > quiescedProof && committedLoad > committedWrite
+    && committedEntry > committedLoad && retryQuiesce > committedEntry
+    && retryQuiescedProof > retryQuiesce && retryCommittedWrite > retryQuiescedProof
+    && retryCommittedLoad > retryCommittedWrite && clearControllerPending > retryCommittedLoad
+    && firstActivation > clearControllerPending
+    && exactProof > firstActivation && workerHashProof > exactProof
+    && clear > workerHashProof && controllerStart > clear && clearDisarm > controllerStart,
+  'fiecare retry republică committed sub quiesce, păstrează markerul peste clear-ul outer și dezarmează cleanup numai după controller')
+  assert.doesNotMatch(main.slice(strictRecommit, committedWrite),
+    /finalize_committed_activation|validate_restored_activation_vector|systemctl\s+(?:enable|start)|publish_runtime_ready_stamp/)
+
+  const journalWriter = shellFunction(upgrade, 'write_upgrade_journal')
+  const fileFsync = journalWriter.indexOf('fsync_path "$temporary"')
+  const journalMove = journalWriter.indexOf('mv -f -- "$temporary" "$UPGRADE_JOURNAL"', fileFsync)
+  const directoryFsync = journalWriter.indexOf('fsync_path "$RUNTIME_ROOT"', journalMove)
+  assert.ok(fileFsync >= 0 && journalMove > fileFsync && directoryFsync > journalMove,
+    'write committed revine numai după fsync(file), rename și fsync(runtime root)')
+
+  const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
+  const recommitHelperCalls = recommit.match(/^\s*"\$helper" .*$/gm) ?? []
+  assert.equal(recommitHelperCalls.length, 2)
+  for (const helperCall of recommitHelperCalls) {
+    assert.match(helperCall, /--leave-constructor-quiesced$/,
+      'pregătirea din installed nu poate publica ready ori porni timere')
+  }
+  assert.doesNotMatch(recommit,
+    /systemctl\s+(?:enable|start)|publish_runtime_ready_stamp|restore_constructor_timers/)
+  const committedVectorProof = shellFunction(upgrade, 'validate_committed_activation_vector_quiesced')
+  assert.match(committedVectorProof,
+    /\[ ! -e "\$READY_STAMP" \] && \[ ! -L "\$READY_STAMP" \][\s\S]*UnitFileState --value[\s\S]*"\$unit_file_state" = disabled[\s\S]*inactive\|failed/)
+
+  const actualClear = shellFunction(upgrade, 'clear_upgrade_transaction')
+  const clearLoad = actualClear.indexOf('load_upgrade_journal')
+  const clearCommitted = actualClear.indexOf('[ "$upgrade_phase" = committed ]', clearLoad)
+  const clearUnlink = actualClear.indexOf('rm -f -- "$UPGRADE_JOURNAL"', clearCommitted)
+  const clearFsync = actualClear.indexOf('fsync_path "$RUNTIME_ROOT"', clearUnlink)
+  assert.ok(clearLoad >= 0 && clearCommitted > clearLoad && clearUnlink > clearCommitted && clearFsync > clearUnlink,
+    'clear-ul real reautentifică committed și persistă unlink-ul outer înainte de snapshot GC')
+  assert.doesNotMatch(actualClear, /activation_restore_started=/,
+    'flagul se dezarmează numai în main după dovada exactă, nu în clear')
+
+  const flowEnd = main.indexOf('\nprintf \'{"ok":true,"event":"constructor_upgrade_complete"', clear)
+  assert.ok(flowEnd > clear)
+  const executableFlow = main.slice(installedBranch, flowEnd)
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-constructor-committed-'))
+  const runtimeRoot = join(sandbox, 'runtime')
+  const snapshotRoot = join(runtimeRoot, 'snapshot')
+  const journal = join(runtimeRoot, 'constructor-upgrade.journal')
+  const state = join(sandbox, 'units.state')
+  const expected = join(sandbox, 'expected.state')
+  const quiesced = join(sandbox, 'quiesced.state')
+  const ready = join(sandbox, 'runtime.ready')
+  const crashEvents = join(sandbox, 'crash.events')
+  const bootEvents = join(sandbox, 'boot.events')
+  const retryEvents = join(sandbox, 'retry.events')
+  const renameCrashEvents = join(sandbox, 'rename-crash.events')
+  const renameRetryEvents = join(sandbox, 'rename-retry.events')
+  const rmFailureEvents = join(sandbox, 'rm-failure.events')
+  const fsyncFailureEvents = join(sandbox, 'fsync-failure.events')
+  const freshEvents = join(sandbox, 'fresh.events')
+  const resurrectedEvents = join(sandbox, 'resurrected.events')
+  mkdirSync(snapshotRoot, { recursive: true })
+  for (let index = 0; index < 3; index += 1) writeFileSync(join(snapshotRoot, `marker.${index}`), '')
+  writeFileSync(join(snapshotRoot, 'state'), 'snapshot\n')
+  const quiescedState = [
+    'kelion-codex-worker.timer disabled inactive',
+    'kelion-constructor-publisher.timer disabled inactive',
+    'kelion-constructor-release.timer disabled inactive',
+    'kelion-codex-worker.service static inactive',
+    'kelion-constructor-publisher.service static inactive',
+    'kelion-constructor-release.service static inactive',
+  ].join('\n') + '\n'
+  const expectedState = [
+    'kelion-codex-worker.timer enabled active',
+    'kelion-constructor-publisher.timer enabled active',
+    'kelion-constructor-release.timer disabled inactive',
+    'kelion-codex-worker.service static inactive',
+    'kelion-constructor-publisher.service static inactive',
+    'kelion-constructor-release.service static inactive',
+  ].join('\n') + '\n'
+  const committedDocument = {
+    schema: 1,
+    kind: 'constructor-upgrade',
+    phase: 'committed',
+    sourceCommit: 'b'.repeat(40),
+    snapshotRoot: '/root/kelion/runtime/constructor-upgrade.Harness',
+    stateSha256: 'a'.repeat(64),
+  }
+  writeFileSync(state, quiescedState)
+  writeFileSync(quiesced, quiescedState)
+  writeFileSync(expected, expectedState)
+  writeFileSync(crashEvents, '')
+  writeFileSync(bootEvents, '')
+  writeFileSync(retryEvents, '')
+  writeFileSync(renameCrashEvents, '')
+  writeFileSync(renameRetryEvents, '')
+  writeFileSync(rmFailureEvents, '')
+  writeFileSync(fsyncFailureEvents, '')
+  writeFileSync(freshEvents, '')
+  writeFileSync(resurrectedEvents, '')
+
+  const harness = `
+set -Eeuo pipefail
+RUNTIME_ROOT=$HARNESS_RUNTIME_ROOT
+UPGRADE_JOURNAL=$HARNESS_JOURNAL
+snapshot_root=$HARNESS_SNAPSHOT_ROOT
+snapshot_state_sha256=${'a'.repeat(64)}
+constructor_upgrade_source_commit=${'b'.repeat(40)}
+constructor_markers=(worker publisher release)
+activation_restore_started=0
+controller_commit_start_started=0
+restored_proof=0
+
+event() { printf '%s\\n' "$1" >> "$HARNESS_EVENTS"; }
+exit_cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" != 0 ] && [ "$activation_restore_started" = 1 ]; then
+    event exit-quiesce
+    quiesce_committed_activation
+  fi
+  exit "$status"
+}
+trap exit_cleanup EXIT
+write_quiesced_state() { command cp "$HARNESS_QUIESCED" "$HARNESS_STATE"; }
+write_restored_state() {
+  local worker publisher release
+  IFS=, read -r worker publisher release <<<"$HARNESS_VECTOR"
+  {
+    if [ "$worker" = 1 ]; then printf 'kelion-codex-worker.timer enabled active\\n'; else printf 'kelion-codex-worker.timer disabled inactive\\n'; fi
+    if [ "$publisher" = 1 ]; then printf 'kelion-constructor-publisher.timer enabled active\\n'; else printf 'kelion-constructor-publisher.timer disabled inactive\\n'; fi
+    if [ "$release" = 1 ]; then printf 'kelion-constructor-release.timer enabled active\\n'; else printf 'kelion-constructor-release.timer disabled inactive\\n'; fi
+    printf '%s\\n' \\
+      'kelion-codex-worker.service static inactive' \\
+      'kelion-constructor-publisher.service static inactive' \\
+      'kelion-constructor-release.service static inactive'
+  } > "$HARNESS_STATE"
+}
+set_constructor_upgrade_phase() { event "phase:$1"; }
+strict_constructor_config_recommit() {
+  event strict-quiesce
+  command rm -f -- "$HARNESS_READY"
+  write_quiesced_state
+}
+validate_committed_activation_vector_quiesced() {
+  [ ! -e "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_QUIESCED"
+  event proof-quiesced
+}
+write_upgrade_journal() {
+  local phase=$1 temporary
+  [ "$phase" = committed ]
+  temporary=$(mktemp "$RUNTIME_ROOT/.outer.XXXXXX")
+  jq -cn \\
+    --arg sourceCommit "$constructor_upgrade_source_commit" \\
+    --arg snapshotRoot /root/kelion/runtime/constructor-upgrade.Harness \\
+    --arg stateSha256 "$snapshot_state_sha256" \\
+    '{schema:1,kind:"constructor-upgrade",phase:"committed",sourceCommit:$sourceCommit,
+      snapshotRoot:$snapshotRoot,stateSha256:$stateSha256}' > "$temporary"
+  command sync -f "$temporary"
+  event journal-file-fsync
+  command mv -f -- "$temporary" "$UPGRADE_JOURNAL"
+  event journal-rename
+  if [ "$HARNESS_MODE" = kill-after-rename ]; then kill -KILL "$$"; fi
+  command sync -f "$RUNTIME_ROOT"
+  event committed-durable
+}
+load_upgrade_journal() {
+  [ -f "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]
+  jq -e --arg commit "$constructor_upgrade_source_commit" '
+    .schema == 1 and .kind == "constructor-upgrade" and .phase == "committed" and
+    .sourceCommit == $commit and
+    (.snapshotRoot | strings | test("^/root/kelion/runtime/constructor-upgrade\\\\.[A-Za-z0-9]+$")) and
+    (.stateSha256 | strings | test("^[0-9a-f]{64}$")) and
+    (keys == ["kind","phase","schema","snapshotRoot","sourceCommit","stateSha256"])
+  ' "$UPGRADE_JOURNAL" >/dev/null
+  upgrade_phase=$(jq -er '.phase' "$UPGRADE_JOURNAL")
+  snapshot_root=$HARNESS_SNAPSHOT_ROOT
+  event "load:$upgrade_phase"
+}
+quiesce_committed_activation() {
+  command rm -f -- "$HARNESS_READY"
+  event ready-retracted
+  event quiesce:kelion-codex-worker.timer
+  event quiesce:kelion-constructor-publisher.timer
+  event quiesce:kelion-constructor-release.timer
+  event quiesce:kelion-codex-worker.service
+  event quiesce:kelion-constructor-publisher.service
+  event quiesce:kelion-constructor-release.service
+  write_quiesced_state
+  event quiesce-complete
+}
+clear_upgrade_activation_pending() {
+  event controller-pending-cleared
+}
+finalize_committed_activation() {
+  [ ! -e "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_QUIESCED"
+  event restore-begin
+  : > "$HARNESS_READY"
+  event ready-published
+  printf '%s\\n' \\
+    'kelion-codex-worker.timer enabled active' \\
+    'kelion-constructor-publisher.timer disabled inactive' \\
+    'kelion-constructor-release.timer disabled inactive' \\
+    'kelion-codex-worker.service static inactive' \\
+    'kelion-constructor-publisher.service static inactive' \\
+    'kelion-constructor-release.service static inactive' > "$HARNESS_STATE"
+  event timer-start:kelion-codex-worker.timer
+  if [ "$HARNESS_MODE" = kill ]; then kill -KILL "$$"; fi
+  event timer-start:kelion-constructor-publisher.timer
+  write_restored_state
+  event restore-complete
+}
+validate_restored_activation_vector() {
+  [ -f "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_EXPECTED"
+  restored_proof=1
+  event proof-restored-exact
+}
+sha256sum() { printf '${'c'.repeat(64)}  %s\\n' "$1"; }
+clear_upgrade_transaction() {
+  load_upgrade_journal
+  [ "$upgrade_phase" = committed ]
+  [ "$restored_proof" = 1 ]
+  event outer-unlink-attempt
+  if [ "$HARNESS_MODE" = rm-fail ]; then
+    event outer-unlink-failed
+    return 90
+  fi
+  command rm -f -- "$UPGRADE_JOURNAL"
+  event outer-unlink
+  if [ "$HARNESS_MODE" = fsync-fail ]; then
+    event outer-dir-fsync-failed
+    return 91
+  fi
+  command sync -f "$RUNTIME_ROOT"
+  event outer-dir-fsync
+}
+start_model_controller_after_upgrade_commit() {
+  [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]
+  event controller-start-after-outer-clear
+}
+
+boot_ownerless_model() {
+  [ "$(jq -er '.phase' "$UPGRADE_JOURNAL")" = committed ]
+  event boot-owner:0
+  command rm -f -- "$HARNESS_READY"
+  event boot-ready-retracted
+  event boot-stop-disable:kelion-codex-worker.timer
+  event boot-stop-disable:kelion-constructor-publisher.timer
+  event boot-stop-disable:kelion-constructor-release.timer
+  event boot-stop-disable:kelion-codex-worker.service
+  event boot-stop-disable:kelion-constructor-publisher.service
+  event boot-stop-disable:kelion-constructor-release.service
+  write_quiesced_state
+  event boot-quiesce-complete
+  event boot-outer-committed-refused
+  return 73
+}
+
+fresh_snapshot_model() {
+  [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]
+  if [ ! -e "$HARNESS_READY" ]; then
+    # Modelează adoptarea markerului reactivation rămas după unlink-ul outer
+    # observabil, dar al cărui fsync de director a eșuat.
+    write_restored_state
+    : > "$HARNESS_READY"
+    event orphan-marker-recovered
+  fi
+  [ -f "$HARNESS_READY" ]
+  command cmp -s -- "$HARNESS_STATE" "$HARNESS_EXPECTED"
+  event fresh-live-vector-valid
+  command cp "$HARNESS_STATE" "$RUNTIME_ROOT/fresh-snapshot.state"
+  command sync -f "$RUNTIME_ROOT/fresh-snapshot.state"
+  event fresh-snapshot-durable
+}
+
+if [ "$HARNESS_MODE" = boot-ownerless ]; then
+  set +e
+  boot_ownerless_model
+  boot_status=$?
+  exit "$boot_status"
+fi
+if [ "$HARNESS_MODE" = fresh-check ]; then
+  fresh_snapshot_model
+  exit 0
+fi
+if [ -f "$UPGRADE_JOURNAL" ]; then load_upgrade_journal; else upgrade_phase=installed; fi
+${executableFlow}
+`
+  const runHarness = (mode, events) => spawnSync(bashExecutable, ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HARNESS_RUNTIME_ROOT: runtimeRoot,
+      HARNESS_JOURNAL: journal,
+      HARNESS_SNAPSHOT_ROOT: snapshotRoot,
+      HARNESS_STATE: state,
+      HARNESS_EXPECTED: expected,
+      HARNESS_QUIESCED: quiesced,
+      HARNESS_READY: ready,
+      HARNESS_VECTOR: '1,1,0',
+      HARNESS_EVENTS: events,
+      HARNESS_MODE: mode,
+    },
+  })
+
+  const constructorUnits = [
+    'kelion-codex-worker.timer',
+    'kelion-constructor-publisher.timer',
+    'kelion-constructor-release.timer',
+    'kelion-codex-worker.service',
+    'kelion-constructor-publisher.service',
+    'kelion-constructor-release.service',
+  ]
+
+  try {
+    const crash = runHarness('kill', crashEvents)
+    assert.equal(crash.signal, 'SIGKILL', crash.stderr || crash.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'SIGKILL după primul start trebuie să păstreze schema outer committed exactă')
+    const crashLog = readFileSync(crashEvents, 'utf8').trim().split(/\r?\n/)
+    const currentQuiescedProof = crashLog.lastIndexOf('proof-quiesced')
+    const currentDurable = crashLog.lastIndexOf('committed-durable')
+    const restore = crashLog.indexOf('restore-begin')
+    const readyPublished = crashLog.indexOf('ready-published')
+    const firstTimer = crashLog.indexOf('timer-start:kelion-codex-worker.timer')
+    assert.ok(crashLog.filter((entry) => entry === 'committed-durable').length >= 2,
+      'fresh-ul trebuie să persiste committed și să îl re-publice la intrarea în ramura committed')
+    assert.ok(currentQuiescedProof >= 0 && currentDurable > currentQuiescedProof
+      && restore > currentDurable && readyPublished > restore && firstTimer > readyPublished,
+    'nici ready, restore sau timer start nu poate preceda re-fsync-ul committed al execuției curente')
+    assert.equal(crashLog.includes('outer-unlink'), false)
+
+    const boot = runHarness('boot-ownerless', bootEvents)
+    assert.equal(boot.status, 73, boot.stderr || boot.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'boot-ul ownerless trebuie să păstreze outer journal committed pentru retry-ul pin-uit')
+    const bootLog = readFileSync(bootEvents, 'utf8').trim().split(/\r?\n/)
+    const bootReady = bootLog.indexOf('boot-ready-retracted')
+    const bootComplete = bootLog.indexOf('boot-quiesce-complete')
+    const bootRefusal = bootLog.indexOf('boot-outer-committed-refused')
+    assert.ok(bootReady >= 0 && bootComplete > bootReady && bootRefusal > bootComplete)
+    for (const unit of constructorUnits) {
+      const stopped = bootLog.indexOf(`boot-stop-disable:${unit}`)
+      assert.ok(stopped > bootReady && stopped < bootRefusal,
+        `boot ownerless trebuie să oprească/dezactiveze ${unit} înainte de refuz`)
+    }
+    assert.doesNotMatch(bootLog.join('\n'), /restore-begin|ready-published|timer-start|outer-unlink/)
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+
+    const retry = runHarness('retry', retryEvents)
+    assert.equal(retry.status, 0, retry.stderr || retry.stdout)
+    const retryLog = readFileSync(retryEvents, 'utf8').trim().split(/\r?\n/)
+    const retryQuiescedProof = retryLog.indexOf('proof-quiesced')
+    const retryDurable = retryLog.indexOf('committed-durable')
+    const retryRestore = retryLog.indexOf('restore-begin')
+    const retryProof = retryLog.indexOf('proof-restored-exact')
+    const retryUnlink = retryLog.indexOf('outer-unlink')
+    const retryFsync = retryLog.indexOf('outer-dir-fsync')
+    assert.ok(retryLog.indexOf('ready-retracted') >= 0)
+    for (const unit of constructorUnits) {
+      const stopped = retryLog.indexOf(`quiesce:${unit}`)
+      assert.ok(stopped >= 0 && stopped < retryRestore, `${unit} trebuie quiesced înainte de retry restore`)
+    }
+    assert.ok(retryQuiescedProof >= 0 && retryDurable > retryQuiescedProof
+      && retryRestore > retryDurable && retryProof > retryRestore
+      && retryUnlink > retryProof && retryFsync > retryUnlink,
+    'retry-ul re-fsyncuiește committed înainte de restore și îl șterge numai după dovada exactă')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(journal), false)
+
+    writeFileSync(journal, `${JSON.stringify(committedDocument)}\n`)
+    const renameCrash = runHarness('kill-after-rename', renameCrashEvents)
+    assert.equal(renameCrash.signal, 'SIGKILL', renameCrash.stderr || renameCrash.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'rename-ul pre-dir-fsync poate lăsa vizibil numai un document committed strict')
+    const renameCrashLog = readFileSync(renameCrashEvents, 'utf8').trim().split(/\r?\n/)
+    const renameQuiescedProof = renameCrashLog.indexOf('proof-quiesced')
+    const renameFileFsync = renameCrashLog.indexOf('journal-file-fsync')
+    const renameVisible = renameCrashLog.indexOf('journal-rename')
+    assert.ok(renameQuiescedProof >= 0 && renameFileFsync > renameQuiescedProof
+      && renameVisible > renameFileFsync)
+    assert.doesNotMatch(renameCrashLog.join('\n'),
+      /committed-durable|restore-begin|ready-published|timer-start|outer-unlink/,
+      'crash-ul dintre rename și dir-fsync nu poate activa sau declara committed durabil')
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+    assert.equal(existsSync(ready), false)
+
+    const renameRetry = runHarness('retry', renameRetryEvents)
+    assert.equal(renameRetry.status, 0, renameRetry.stderr || renameRetry.stdout)
+    const renameRetryLog = readFileSync(renameRetryEvents, 'utf8').trim().split(/\r?\n/)
+    const renameRetryProofQuiesced = renameRetryLog.indexOf('proof-quiesced')
+    const renameRetryFileFsync = renameRetryLog.indexOf('journal-file-fsync')
+    const renameRetryVisible = renameRetryLog.indexOf('journal-rename')
+    const renameRetryDurable = renameRetryLog.indexOf('committed-durable')
+    const renameRetryRestore = renameRetryLog.indexOf('restore-begin')
+    const renameRetryExact = renameRetryLog.indexOf('proof-restored-exact')
+    const renameRetryUnlink = renameRetryLog.indexOf('outer-unlink')
+    assert.ok(renameRetryProofQuiesced >= 0
+      && renameRetryFileFsync > renameRetryProofQuiesced
+      && renameRetryVisible > renameRetryFileFsync
+      && renameRetryDurable > renameRetryVisible
+      && renameRetryRestore > renameRetryDurable
+      && renameRetryExact > renameRetryRestore
+      && renameRetryUnlink > renameRetryExact,
+    'retry-ul după crash pre-dir-fsync trebuie să re-publice și să re-fsyncuiească committed înainte de activare')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+    assert.equal(existsSync(journal), false)
+
+    const rmFailure = runHarness('rm-fail', rmFailureEvents)
+    assert.equal(rmFailure.status, 90, rmFailure.stderr || rmFailure.stdout)
+    assert.deepEqual(JSON.parse(readFileSync(journal, 'utf8')), committedDocument,
+      'eșecul unlink trebuie să păstreze outer committed pentru retry pin-uit')
+    const rmFailureLog = readFileSync(rmFailureEvents, 'utf8').trim().split(/\r?\n/)
+    const rmFailureProof = rmFailureLog.indexOf('proof-restored-exact')
+    const rmFailureAttempt = rmFailureLog.indexOf('outer-unlink-attempt')
+    const rmFailed = rmFailureLog.indexOf('outer-unlink-failed')
+    assert.ok(rmFailureProof >= 0 && rmFailureAttempt > rmFailureProof && rmFailed > rmFailureAttempt)
+    assert.equal(rmFailureLog.includes('outer-unlink'), false)
+    assert.equal(rmFailureLog.includes('exit-quiesce'), true,
+      'outer-ul rămas autorizează cleanup-ul să retragă fail-closed vectorul după unlink eșuat')
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+    assert.equal(existsSync(ready), false)
+
+    rmSync(journal)
+    const fsyncFailure = runHarness('fsync-fail', fsyncFailureEvents)
+    assert.equal(fsyncFailure.status, 91, fsyncFailure.stderr || fsyncFailure.stdout)
+    const fsyncFailureLog = readFileSync(fsyncFailureEvents, 'utf8').trim().split(/\r?\n/)
+    const fsyncFailureProof = fsyncFailureLog.indexOf('proof-restored-exact')
+    const fsyncFailureUnlink = fsyncFailureLog.indexOf('outer-unlink')
+    const fsyncFailed = fsyncFailureLog.indexOf('outer-dir-fsync-failed')
+    assert.ok(fsyncFailureProof >= 0 && fsyncFailureUnlink > fsyncFailureProof
+      && fsyncFailed > fsyncFailureUnlink)
+    assert.equal(fsyncFailureLog.includes('exit-quiesce'), true,
+      'markerul reactivation rămas permite retragerea fail-closed chiar dacă outer-ul nu mai este vizibil')
+    assert.equal(existsSync(journal), false)
+    assert.equal(existsSync(ready), false)
+    assert.equal(readFileSync(state, 'utf8'), quiescedState)
+
+    const fresh = runHarness('fresh-check', freshEvents)
+    assert.equal(fresh.status, 0, fresh.stderr || fresh.stdout)
+    assert.deepEqual(readFileSync(freshEvents, 'utf8').trim().split(/\r?\n/),
+      ['orphan-marker-recovered', 'fresh-live-vector-valid', 'fresh-snapshot-durable'],
+      'outer absent după fsync eșuat trebuie să adopte markerul înainte de snapshotul fresh')
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+
+    writeFileSync(journal, `${JSON.stringify(committedDocument)}\n`)
+    const resurrected = runHarness('retry', resurrectedEvents)
+    assert.equal(resurrected.status, 0, resurrected.stderr || resurrected.stdout)
+    const resurrectedLog = readFileSync(resurrectedEvents, 'utf8').trim().split(/\r?\n/)
+    const resurrectedQuiescedProof = resurrectedLog.indexOf('proof-quiesced')
+    const resurrectedDurable = resurrectedLog.indexOf('committed-durable')
+    const resurrectedRestore = resurrectedLog.indexOf('restore-begin')
+    const resurrectedExact = resurrectedLog.indexOf('proof-restored-exact')
+    const resurrectedUnlink = resurrectedLog.indexOf('outer-unlink')
+    for (const unit of constructorUnits) {
+      const stopped = resurrectedLog.indexOf(`quiesce:${unit}`)
+      assert.ok(stopped >= 0 && stopped < resurrectedRestore,
+        `outer committed reapărut trebuie să re-quiesce ${unit} înainte de restore`)
+    }
+    assert.ok(resurrectedQuiescedProof >= 0 && resurrectedDurable > resurrectedQuiescedProof
+      && resurrectedRestore > resurrectedDurable && resurrectedExact > resurrectedRestore
+      && resurrectedUnlink > resurrectedExact)
+    assert.equal(readFileSync(state, 'utf8'), expectedState)
+    assert.equal(existsSync(ready), true)
+    assert.equal(existsSync(journal), false)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+
+  assert.match(bootUnit,
+    /Environment=KELION_RECOVERY_BOOT=1[\s\S]*ExecStart=\/root\/kelion\/bin\/runtime-config-cutover\.sh --recover-only/)
+  const earlyBarrier = shellFunction(cutover, 'early_recover_only_barrier')
+  assert.match(earlyBarrier,
+    /rm -f -- "\$ready_stamp"[\s\S]*sync -f "\$ready_root"[\s\S]*kelion-codex-worker\.timer[\s\S]*kelion-constructor-release\.service/)
+  assert.doesNotMatch(earlyBarrier,
+    /systemctl\s+(?:start|enable --now)|publish_runtime_ready_stamp|restore_constructor_timers/)
+  const earlyCall = cutover.indexOf('\n  early_recover_only_barrier \\')
+  const outerGuard = cutover.indexOf('if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then', earlyCall)
+  assert.ok(earlyCall >= 0 && outerGuard > earlyCall,
+    'boot generic trebuie să execute quiesce-ul fail-closed înainte să întâlnească outer journal')
+  assert.match(cutover.slice(outerGuard, cutover.indexOf('\nfsync_path() {', outerGuard)),
+    /constructor_upgrade_owner" = 1[\s\S]*\.phase == "armed" or \.phase == "installed" or \.phase == "committed"/,
+    'apelantul generic fără owner trebuie refuzat și pentru committed după quiesce')
+})
+
+test('cutover-ul final al upgrade-ului restage-uiește toate cele trei configuri byte-identic, fără restart backend', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const recommit = shellFunction(upgrade, 'strict_constructor_config_recommit')
+  // Cutover-ul acceptă zero sau trei configuri, niciodată una: o stagiere
+  // parțială era refuzată și lăsa upgrade-ul blocat. Toate cele trei se
+  // stagiază împreună, fiecare verificată byte cu byte după copiere.
+  for (const logical of [
+    'constructor-config.codex-worker.env',
+    'constructor-config.constructor-publisher.env',
+    'constructor-config.constructor-release.env',
+  ]) assert.ok(recommit.includes(logical), `configul ${logical} trebuie stageat`)
+  assert.match(recommit, /for config_file in "\$\{config_files\[@\]\}"/)
+  assert.match(recommit,
+    /--recover-only "\$compose" --leave-constructor-quiesced[\s\S]*restore_snapshot_markers/)
+  assert.match(recommit,
+    /install -o root -g root -m 0600 "\$config_file" "\$cutover_stage\/files\/\$logical"/)
+  assert.match(recommit,
+    /cmp -s -- "\$config_file" "\$cutover_stage\/files\/\$logical"/)
+  // Manifestul se scrie o linie per config și trebuie să aibă exact trei:
+  // asta este chiar regula pe care cutover-ul o impune la primire.
+  assert.match(recommit, /printf '%s\\n' "\$logical" >> "\$cutover_stage\/manifest"/)
+  assert.match(recommit, /\[ "\$\(wc -l < "\$cutover_stage\/manifest"\)" \] *-eq 3|-eq 3/)
+  assert.match(recommit,
+    /fsync_path "\$cutover_stage\/files\/\$logical"[\s\S]*fsync_path "\$cutover_stage\/manifest"[\s\S]*fsync_path "\$cutover_stage\/files"[\s\S]*fsync_path "\$cutover_stage"/)
+  assert.match(recommit,
+    /KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1[\s\\]*KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"[\s\\]*"\$helper" "\$cutover_stage" "\$compose"/)
+  assert.doesNotMatch(recommit,
+    /runtime\.env|app-secret|gate-secret|worker-secret|publisher-secret|release-secret|recreate_active_release|systemctl\s+(?:restart|try-restart)/)
+
+  const mapper = shellFunction(cutover, 'map_logical')
+  const workerMappingStart = mapper.indexOf('constructor-config.codex-worker.env)')
+  const workerMappingEnd = mapper.indexOf('\n    constructor-config.constructor-publisher.env)', workerMappingStart)
+  assert.ok(workerMappingStart >= 0 && workerMappingEnd > workerMappingStart)
+  const workerMapping = mapper.slice(workerMappingStart, workerMappingEnd)
+  assert.match(workerMapping, /mapped_target=\$CONFIG_ROOT\/codex-worker\.env; mapped_mode=640/)
+  assert.doesNotMatch(workerMapping, /restart_required=1/)
+
+  const restored = shellFunction(upgrade, 'validate_restored_activation_vector')
+  assert.match(restored, /validate_ready_stamp/)
+  assert.match(restored, /cmp -s -- "\$repo_root\/deploy\/codex-worker\.mjs" \/opt\/kelion-codex\/codex-worker\.mjs/)
+  assert.match(restored,
+    /cmp -s -- "\$snapshot_root\/marker\.\$index" "\$marker"/)
+  assert.match(restored, /unit_file_state=\$\(systemctl show "\$timer" --property=UnitFileState --value\)/)
+  assert.match(restored, /active_state=\$\(systemctl show "\$timer" --property=ActiveState --value\)/)
+  assert.match(restored,
+    /"\$\{snapshot_timer_enabled\[\$index\]\}" = 1[\s\S]*"\$unit_file_state" = enabled[\s\S]*else[\s\S]*"\$unit_file_state" = disabled/)
+  assert.match(restored,
+    /"\$\{snapshot_timer_active\[\$index\]\}" = 1[\s\S]*"\$active_state" = active[\s\S]*else[\s\S]*"\$active_state" = inactive/)
+  assert.match(restored, /validate_service_quiescence/)
+})
+
+test('statusul VPS leagă profilul manual de snapshotul HMAC și de runtime-ul modelului', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const stepStart = workflow.indexOf('- name: Activeaza etapizat sau raporteaza starea')
+  const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
+  assert.ok(stepStart >= 0 && stepEnd > stepStart, 'pasul de status Constructor trebuie delimitat')
+  const remote = workflow.slice(stepStart, stepEnd).replace(/^ {10}/gm, '')
+  const snapshotStart = remote.indexOf('constructor_model_snapshot() {')
+  const fastInstallStart = remote.indexOf('validate_fast_model_install() {', snapshotStart)
+  const powerfulInstallStart = remote.indexOf('validate_powerful_model_install() {', fastInstallStart)
+  const dropinStart = remote.indexOf('expected_powerful_status_dropin() {', powerfulInstallStart)
+  const validatorStart = remote.indexOf('validate_constructor_model_status() {', dropinStart)
+  const statusStart = remote.indexOf('\nstatus() {', validatorStart) + 1
+  assert.ok(snapshotStart >= 0 && fastInstallStart > snapshotStart
+    && powerfulInstallStart > fastInstallStart && dropinStart > powerfulInstallStart
+    && validatorStart > dropinStart && statusStart > validatorStart,
+  'dovezile modelului trebuie definite înaintea statusului')
+
+  const snapshot = remote.slice(snapshotStart, fastInstallStart)
+  assert.match(snapshot, /systemctl is-active --quiet kelion-constructor-model-control\.service/)
+  assert.match(snapshot, /control\.sock[\s\S]*0:10050:660/)
+  assert.match(snapshot, /constructor-model-control-secret[\s\S]*0:10050:440:1/)
+  assert.match(snapshot, /readServiceSecret, signServiceRequest/)
+  assert.match(snapshot, /socketPath[\s\S]*path = '\/v1\/model\/state'[\s\S]*method: 'POST'/)
+  assert.match(snapshot, /x-kelion-nonce[\s\S]*x-kelion-signature[\s\S]*x-kelion-timestamp/)
+  assert.match(snapshot, /response\.statusCode !== 200[\s\S]*contentType !== 'application\/json'/)
+
+  const fastInstall = remote.slice(fastInstallStart, powerfulInstallStart)
+  assert.match(fastInstall, /\.install-complete[\s\S]*installer_id=private-ai-contabo-v1/)
+  assert.match(fastInstall, /model\.ready[\s\S]*privateai:privateai:600:1/)
+  assert.match(fastInstall, /find "\$model_cache" -xdev -type f -size 20419565568c/)
+  assert.match(fastInstall, /privateai:privateai:20419565568:1/)
+
+  const powerfulInstall = remote.slice(powerfulInstallStart, dropinStart)
+  assert.match(powerfulInstall, /\.max-model-complete[\s\S]*"\$\{#complete_lines\[@\]\}" -eq 20/)
+  assert.match(powerfulInstall, /schema=2[\s\S]*default_model=llama\.cpp\/qwen3\.6-35b-a3b-local/)
+  assert.match(powerfulInstall, /powerful_model=llama\.cpp\/qwen3\.5-122b-a10b-local/)
+  assert.match(powerfulInstall, /fast_model_path=\$fast_model_path/)
+  for (const bytes of ['10943552', '49968146912', '26557874144']) {
+    assert.match(powerfulInstall, new RegExp(`root:privateai:440:${bytes}:1`))
+  }
+
+  const validator = remote.slice(validatorStart, statusStart)
+  assert.match(validator, /private-ai-model-switch\.lock[\s\S]*root:privateai:660:1[\s\S]*flock --shared --wait 30 8/)
+  assert.match(validator, /\.model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
+  assert.match(validator, /\.small_model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
+  assert.match(validator,
+    /models \| keys[\s\S]*\["qwen3\.5-122b-a10b-local", "qwen3\.6-35b-a3b-local"\]/)
+  assert.match(validator, /snapshot=\$\(constructor_model_snapshot\)/)
+  assert.match(validator, /\.defaultProfile == "fast"[\s\S]*\.installedProfiles == \["fast", "powerful"\]/)
+  assert.match(validator, /\.activeProfile == "fast" or \.activeProfile == "powerful"/)
+  assert.match(validator, /127\.0\.0\.1:24080\/v1\/models/)
+  assert.match(validator, /fast:qwen3\.6-35b-a3b-local\)[\s\S]*"\$web_state" = active[\s\S]*"\$dropins"/)
+  assert.match(validator,
+    /powerful:qwen3\.5-122b-a10b-local\)[\s\S]*"\$web_state" = inactive[\s\S]*expected_powerful_status_dropin/)
+  assert.match(validator, /\/proc\/\$llm_pid\/maps/)
+
+  const status = remote.slice(statusStart, remote.indexOf('\ncase "$operation" in', statusStart))
+  assert.match(status, /if validate_constructor_model_status; then[\s\S]*opencode-qwen-local=ready[\s\S]*opencode-qwen-local=required/)
+})
+
+test('jurnalul exterior al upgrade-ului blochează fiecare mutator după eliberarea lock-ului la crash', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const deploy = read('deploy/deploy.sh')
+  const provision = read('.github/workflows/vps-set-env.yml')
+  const control = read('.github/workflows/vps-run.yml')
+
+  const pendingPublisher = shellFunction(upgrade, 'publish_unit_pending')
+  const pendingValidation = pendingPublisher.indexOf('validate_unit_pending')
+  const pendingMove = pendingPublisher.indexOf('mv -f -- "$temporary" "$UNIT_MIGRATION_PENDING"')
+  const pendingFsync = pendingPublisher.indexOf('fsync_path "$RUNTIME_ROOT"', pendingMove)
+  const readyRemoval = pendingPublisher.indexOf('rm -f -- "$READY_STAMP"', pendingFsync)
+  const readyFsync = pendingPublisher.indexOf('fsync_path "$READY_ROOT"', readyRemoval)
+  assert.ok(pendingValidation >= 0 && pendingMove > pendingValidation && pendingFsync > pendingMove
+    && readyRemoval > pendingFsync && readyFsync > readyRemoval,
+  'pending trebuie autentificat și fsync înainte de unlink+fsync ready; crash-ul nu poate lăsa outer-only fără barieră')
+
+  const deployLock = deploy.indexOf('\nflock 8\n')
+  const deployOuterGuard = deploy.indexOf('CONSTRUCTOR_UPGRADE_JOURNAL=', deployLock)
+  const deployFirstRecovery = deploy.indexOf('\nrecover_lost_post_ponr_quiesce', deployLock)
+  assert.ok(deployLock >= 0 && deployOuterGuard > deployLock && deployFirstRecovery > deployOuterGuard,
+    'deploy-ul trebuie să refuze outer journal înaintea primului recovery sau mutator')
+  assert.match(deploy.slice(deployOuterGuard, deployFirstRecovery),
+    /CONSTRUCTOR_UPGRADE_JOURNAL=\$RUNTIME_ROOT\/constructor-upgrade\.journal[\s\S]*\[ ! -e "\$CONSTRUCTOR_UPGRADE_JOURNAL" \] && \[ ! -L "\$CONSTRUCTOR_UPGRADE_JOURNAL" \]/)
+
+  const provisionRemoteStart = provision.indexOf('          exec 9>/root/kelion/publicare.lock')
+  const provisionLock = provision.indexOf('          flock -n 9', provisionRemoteStart)
+  const provisionOuterGuard = provision.indexOf('constructor_upgrade_journal=', provisionLock)
+  const provisionFirstRecovery = provision.indexOf('KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh', provisionLock)
+  const provisionFirstInstall = provision.indexOf('          install_atomic ', provisionLock)
+  assert.ok(provisionLock >= 0 && provisionOuterGuard > provisionLock
+    && provisionFirstRecovery > provisionOuterGuard && provisionFirstInstall > provisionOuterGuard,
+  'provisionarea trebuie să refuze outer journal înainte de recovery și de primul install atomic')
+  assert.match(provision.slice(provisionOuterGuard, Math.min(provisionFirstRecovery, provisionFirstInstall)),
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal[\s\S]*\[ ! -e "\$constructor_upgrade_journal" \] && \[ ! -L "\$constructor_upgrade_journal" \]/)
+
+  const configureStart = control.indexOf('- name: Configureaza Constructorul fara activare prematura')
+  const configureEnd = control.indexOf('\n      - name:', configureStart + 1)
+  assert.ok(configureStart >= 0 && configureEnd > configureStart)
+  const configure = control.slice(configureStart, configureEnd)
+  const configureLock = configure.indexOf('flock -n 9')
+  const configureOuterGuard = configure.indexOf('constructor_upgrade_journal=', configureLock)
+  const configureFirstRecovery = configure.indexOf('deploy_quiesce_journal=', configureLock)
+  assert.ok(configureLock >= 0 && configureOuterGuard > configureLock
+    && configureFirstRecovery > configureOuterGuard,
+  'configure trebuie să refuze outer journal înainte să recupereze ori să reia installerul')
+  assert.match(configure.slice(configureOuterGuard, configureFirstRecovery),
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal[\s\S]*(?:\[ ! -e "\$constructor_upgrade_journal" \] && \[ ! -L "\$constructor_upgrade_journal" \]|if \[ -e "\$constructor_upgrade_journal" \] \|\| \[ -L "\$constructor_upgrade_journal" \]; then[\s\S]*exit 1)/)
+
+  const activationStart = control.indexOf('- name: Activeaza etapizat sau raporteaza starea')
+  const activationEnd = control.indexOf('\n      - name:', activationStart + 1)
+  assert.ok(activationStart >= 0 && activationEnd > activationStart)
+  const activation = control.slice(activationStart, activationEnd)
+  const workerStart = activation.indexOf('            activate-worker-publisher)')
+  const releaseStart = activation.indexOf('            activate-release)', workerStart)
+  const statusStart = activation.indexOf('            constructor-status)', releaseStart)
+  assert.ok(workerStart >= 0 && releaseStart > workerStart && statusStart > releaseStart)
+  assert.match(activation,
+    /constructor_upgrade_journal=\/root\/kelion\/runtime\/constructor-upgrade\.journal/)
+  for (const [name, branch] of [
+    ['activate-worker-publisher', activation.slice(workerStart, releaseStart)],
+    ['activate-release', activation.slice(releaseStart, statusStart)],
+  ]) {
+    const lock = branch.indexOf('flock -n 9')
+    const guard = branch.indexOf('if [ -e "$constructor_upgrade_journal"', lock)
+    const recovery = branch.indexOf('recover_activation_preflight', lock)
+    assert.ok(lock >= 0 && guard > lock && recovery > guard,
+      `${name} trebuie să refuze outer journal după lock și înainte de recovery`)
+    assert.match(branch.slice(guard, recovery),
+      /if \[ -e "\$constructor_upgrade_journal" \] \|\| \[ -L "\$constructor_upgrade_journal" \]; then[\s\S]*exit 1/)
+  }
+
+  assert.match(cutover, /^leave_constructor_quiesced=0$/m)
+  const ownerContractStart = cutover.indexOf('constructor_upgrade_owner=${KELION_CONSTRUCTOR_UPGRADE_OWNER:-0}')
+  const ownerContractEnd = cutover.indexOf('deploy_owner_request_id=', ownerContractStart)
+  assert.ok(ownerContractStart >= 0 && ownerContractEnd > ownerContractStart)
+  assert.match(cutover.slice(ownerContractStart, ownerContractEnd),
+    /constructor_upgrade_source_commit=\$\{KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT:-\}[\s\S]*if \[ "\$constructor_upgrade_owner" = 1 \]; then[\s\S]*\^\[0-9a-f\]\{40\}\$[\s\S]*else[\s\S]*\[ -z "\$constructor_upgrade_source_commit" \][\s\S]*unset KELION_CONSTRUCTOR_UPGRADE_OWNER[\s\S]*unset KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT/,
+    'ownerul trebuie să prezinte un source commit canonic, iar apelantul generic nu poate furniza această capabilitate')
+  const runtimeLockContract = cutover.indexOf('if [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ]; then')
+  const inheritedFdGuard = cutover.indexOf('[ -f /proc/$$/fd/9 ]', runtimeLockContract)
+  const inheritedFdPath = cutover.indexOf('readlink /proc/$$/fd/9', inheritedFdGuard)
+  const inheritedFdAcl = cutover.indexOf("stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9", inheritedFdPath)
+  const inheritedFdIdentity = cutover.indexOf("publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)", inheritedFdAcl)
+  const inheritedRuntimeLock = cutover.indexOf('flock -n 9', runtimeLockContract)
+  const directPathGuard = cutover.indexOf('[ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ]', inheritedRuntimeLock)
+  const directFdOpen = cutover.indexOf('exec 9<>"$PUBLICATION_LOCK"', directPathGuard)
+  const directFdGuard = cutover.indexOf('[ -f /proc/$$/fd/9 ]', directFdOpen)
+  const directFdIdentity = cutover.indexOf("publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)", directFdGuard)
+  const directPathIdentity = cutover.indexOf('[ "$publication_fd_identity" = "$(stat -Lc \'%d:%i\' "$PUBLICATION_LOCK")" ]', directFdIdentity)
+  const directRuntimeLock = cutover.indexOf('flock -n 9', inheritedRuntimeLock + 1)
+  const postFlockGuard = cutover.indexOf('[ ! -L "$PUBLICATION_LOCK" ]', directRuntimeLock)
+  const postFlockPath = cutover.indexOf('readlink /proc/$$/fd/9', postFlockGuard)
+  const postFlockIdentity = cutover.indexOf('[ "$publication_fd_identity" = "$(stat -Lc \'%d:%i\' "$PUBLICATION_LOCK")" ]', postFlockPath)
+  const earlyBarrierCall = cutover.indexOf('\n  early_recover_only_barrier \\')
+  assert.ok(runtimeLockContract >= 0 && inheritedFdGuard > runtimeLockContract
+    && inheritedFdPath > inheritedFdGuard && inheritedFdAcl > inheritedFdPath
+    && inheritedFdIdentity > inheritedFdAcl && inheritedRuntimeLock > inheritedFdIdentity
+    && directPathGuard > inheritedRuntimeLock && directFdOpen > directPathGuard
+    && directFdGuard > directFdOpen && directFdIdentity > directFdGuard
+    && directPathIdentity > directFdIdentity && directRuntimeLock > directPathIdentity
+    && postFlockGuard > directRuntimeLock && postFlockPath > postFlockGuard
+    && postFlockIdentity > postFlockPath && earlyBarrierCall > postFlockIdentity,
+  'recover-only nu poate retrage ready sau opri unități înainte să dețină publication lock-ul canonic')
+  const runtimeUpgradeGuard = cutover.indexOf('if [ -e "$UPGRADE_JOURNAL" ] || [ -L "$UPGRADE_JOURNAL" ]; then', directRuntimeLock)
+  const runtimePendingGuard = cutover.indexOf('if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then', runtimeUpgradeGuard)
+  const runtimeFsyncDefinition = cutover.indexOf('\nfsync_path() {', runtimeUpgradeGuard)
+  assert.ok(runtimeUpgradeGuard > earlyBarrierCall && runtimePendingGuard > runtimeUpgradeGuard
+    && runtimeFsyncDefinition > runtimePendingGuard,
+    'apelantul generic poate doar quiesce fail-closed sub lock înainte ca outer journal să fie autentificat; guardul precede restul cutover-ului')
+  assert.match(cutover.slice(runtimeUpgradeGuard, runtimePendingGuard),
+    /constructor_upgrade_owner" = 1[\s\S]*KELION_CUTOVER_LOCK_HELD[\s\S]*--arg sourceCommit "\$constructor_upgrade_source_commit"[\s\S]*\.kind == "constructor-upgrade"[\s\S]*\.sourceCommit == \$sourceCommit[\s\S]*\.snapshotRoot[\s\S]*\.stateSha256/)
+  assert.match(cutover.slice(runtimePendingGuard, runtimeFsyncDefinition),
+    /\[ -f "\$UNIT_MIGRATION_PENDING" \] && \[ ! -L "\$UNIT_MIGRATION_PENDING" \][\s\S]*0:0:600:1[\s\S]*wc -l[\s\S]*grep -qx 'schema=1'/,
+    'pending-ul trebuie autentificat înaintea selecției ownerului de recovery')
+  assert.doesNotMatch(cutover.slice(earlyBarrierCall, runtimeUpgradeGuard),
+    /publish_runtime_ready_stamp|restore_constructor_timers|clear_unit_migration_pending|recover_interrupted|mv -f/,
+    'între quiesce-ul serializat și guard nu poate exista recovery, restaurare sau publicare')
+  const genericRecoveryStart = cutover.indexOf('if [ "$recover_only" = 1 ]; then',
+    cutover.indexOf('trap cleanup_cutover EXIT'))
+  const retractReady = cutover.indexOf('retract_runtime_ready_stamp_for_recovery', genericRecoveryStart)
+  const quiesceFirst = cutover.indexOf('quiesce_units_for_recovery 1', retractReady)
+  const pendingRecoveryStart = cutover.indexOf('if [ "$recover_only" = 1 ]; then', quiesceFirst + 1)
+  const validatePending = cutover.indexOf('validate_unit_migration_pending', pendingRecoveryStart)
+  const genericPendingBranch = cutover.indexOf('\n    else\n      [ "$leave_constructor_quiesced" = 1 ]',
+    cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]', validatePending))
+  const requireExplicitLeave = cutover.indexOf('[ "$leave_constructor_quiesced" = 1 ]', genericPendingBranch)
+  const pendingExit = cutover.indexOf('exit 0', requireExplicitLeave)
+  const genericReady = cutover.indexOf('publish_runtime_ready_stamp', pendingExit)
+  assert.ok(genericRecoveryStart >= 0 && retractReady > genericRecoveryStart
+    && quiesceFirst > retractReady && pendingRecoveryStart > quiesceFirst
+    && validatePending > pendingRecoveryStart && genericPendingBranch > validatePending
+    && requireExplicitLeave > genericPendingBranch && pendingExit > requireExplicitLeave
+    && genericReady > pendingExit,
+  'recover-only trebuie să retragă ready, să oprească unitățile și să refuze pending fără --leave înainte de orice ready/start')
+  assert.match(cutover.slice(requireExplicitLeave, pendingExit),
+    /bariera unit-only blochează boot-ul generic până la cutover-ul strict/)
+  assert.doesNotMatch(cutover.slice(genericPendingBranch, pendingExit),
+    /clear_unit_migration_pending|publish_runtime_ready_stamp|restore_constructor_timers/)
+
+  for (const genericName of [
+    'recover_orphaned_reactivation_before_upgrade',
+    'start_model_controller_after_upgrade_commit',
+  ]) {
+    const genericRecovery = shellFunction(upgrade, genericName)
+    const outerAbsent = genericRecovery.indexOf('[ ! -e "$UPGRADE_JOURNAL" ]')
+    const markerProof = genericRecovery.indexOf('validate_reactivation_journal')
+    const genericCall = genericRecovery.indexOf('KELION_CUTOVER_LOCK_HELD=1 "$helper" --recover-only "$compose"')
+    assert.ok(outerAbsent >= 0 && markerProof >= 0 && genericCall > outerAbsent && genericCall > markerProof,
+      `${genericName} poate fi ownerless numai după dovada că outer-ul upgrade lipsește`)
+    assert.doesNotMatch(genericRecovery, /KELION_CONSTRUCTOR_UPGRADE_OWNER=1/)
+  }
+  const ownerOnlyUpgrade = upgrade
+    .replace(shellFunction(upgrade, 'recover_orphaned_reactivation_before_upgrade'), '')
+    .replace(shellFunction(upgrade, 'start_model_controller_after_upgrade_commit'), '')
+  const inheritedOwnerCalls = [...ownerOnlyUpgrade.matchAll(/KELION_CUTOVER_LOCK_HELD=1/g)]
+  assert.ok(inheritedOwnerCalls.length >= 5)
+  for (const call of inheritedOwnerCalls) {
+    const ownerCall = ownerOnlyUpgrade.slice(call.index, call.index + 340)
+    assert.match(ownerCall, /KELION_CONSTRUCTOR_UPGRADE_OWNER=1/,
+      'fiecare helper/installer al upgrade-ului trebuie să poarte ownerul explicit sub lockul moștenit')
+    assert.match(ownerCall,
+      /KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="\$constructor_upgrade_source_commit"/,
+      'fiecare owner moștenit trebuie legat de sourceCommit-ul exact al jurnalului exterior')
+  }
+})
+
+test('pending-ul unit-only separă refresh-ul quiesced de finalizerul gate-committed', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const deploy = read('deploy/deploy.sh')
+  const owner = shellFunction(cutover, 'strict_pending_deploy_recovery_owner')
+  assert.match(owner,
+    /recover_only" = 1[\s\S]*boot_recovery" = 0[\s\S]*KELION_CUTOVER_LOCK_HELD:-0[\s\S]*validate_deploy_quiesce_journal[\s\S]*deploy_quiesce_owned_by_caller/)
+  assert.match(owner,
+    /leave_constructor_quiesced" = 1[\s\S]*deploy_quiesce_proof" = 0[\s\S]*phase" = gate-prepared[\s\S]*GATE_JOURNAL[\s\S]*\.commit == \$commit/)
+  assert.match(owner,
+    /deploy_quiesce_proof" = 1[\s\S]*phase" = gate-committed[\s\S]*! -e "\$GATE_JOURNAL"[\s\S]*deploy_quiesce_generation_proof committed/)
+  assert.match(owner,
+    /discard_unmutated_gate_prepared" = 1[\s\S]*phase" = gate-prepared[\s\S]*discard_gate_request_id[\s\S]*discard_gate_active_commit/)
+
+  const ownerDefinition = cutover.indexOf('strict_pending_deploy_recovery_owner() {')
+  const pendingGuard = cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]', ownerDefinition)
+  const genericRecovery = cutover.indexOf('if [ "$recover_only" = 1 ]; then',
+    cutover.indexOf('trap cleanup_cutover EXIT'))
+  assert.ok(ownerDefinition >= 0 && pendingGuard > ownerDefinition && genericRecovery > pendingGuard,
+    'ownerul pending trebuie autentificat înaintea oricărui recovery tranzacțional')
+  assert.match(cutover.slice(pendingGuard, genericRecovery),
+    /constructor_upgrade_owner" != 1[\s\S]*recover_only" = 1[\s\S]*strict_pending_deploy_recovery_owner[\s\S]*die 'bariera unit-only ține recovery-ul generic quiesced până la cutover-ul strict'/)
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-pending-deploy-owner-'))
+  try {
+    const journal = join(sandbox, 'deploy.journal')
+    const gateJournal = join(sandbox, 'gate.journal')
+    writeFileSync(journal, '{}\n', { mode: 0o600 })
+    const harness = `
+validate_deploy_quiesce_journal() { [ "$JOURNAL_VALID" = 1 ]; }
+deploy_quiesce_owned_by_caller() {
+  [ "$OWNER_VALID" = 1 ] \
+    && [ "$deploy_owner_request_id" = "$OUTER_REQUEST" ] \
+    && [ "$deploy_owner_commit" = "$OUTER_COMMIT" ]
+}
+deploy_quiesce_generation_proof() { [ "\${1:-}" = "$PROOF_SCOPE" ]; }
+stat() { printf '0:0:600:1\\n'; }
+jq() {
+  if [ "\${1:-}" = -er ] && [ "\${2:-}" = .phase ]; then printf '%s\\n' "$PHASE"; return 0; fi
+  local request='' commit='' active=''
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --arg ] && [ "$#" -ge 3 ]; then
+      case "$2" in
+        requestId) request=$3 ;;
+        commit) commit=$3 ;;
+        active) active=$3 ;;
+      esac
+      shift 3
+    else
+      shift
+    fi
+  done
+  [ -z "$request" ] || [ "$request" = "$OUTER_REQUEST" ] || return 1
+  [ -z "$commit" ] || [ "$commit" = "$OUTER_COMMIT" ] || return 1
+  [ -z "$active" ] || [ "$active" = "$OUTER_ACTIVE" ] || return 1
+}
+${owner}
+strict_pending_deploy_recovery_owner`
+    const runOwner = ({ phase = 'gate-prepared', recover = 1, leave = 1, proof = 0,
+      boot = 0, inherited = 1, journalValid = 1, ownerValid = 1, gate = true,
+      special = 0, proofScope = 'committed',
+      ownerRequest = 'ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3',
+      ownerCommit = 'aadb55932d41ac26635df90028276e25ba9f51af',
+      discardRequest = 'ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3',
+      discardCommit = 'aadb55932d41ac26635df90028276e25ba9f51af',
+      discardActive = '10c7ce5b06307e953db9184f0ecb57e6ca60ad38' } = {}) => {
+      if (gate) writeFileSync(gateJournal, '{}\n', { mode: 0o600 })
+      else rmSync(gateJournal, { force: true })
+      return spawnSync(bashExecutable, ['-c', harness], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PHASE: phase,
+        recover_only: String(recover),
+        leave_constructor_quiesced: String(leave),
+        deploy_quiesce_proof: String(proof),
+        boot_recovery: String(boot),
+        KELION_CUTOVER_LOCK_HELD: String(inherited),
+        DEPLOY_QUIESCE_JOURNAL: journal,
+        GATE_JOURNAL: gateJournal,
+        JOURNAL_VALID: String(journalValid),
+        OWNER_VALID: String(ownerValid),
+        PROOF_SCOPE: proofScope,
+        OUTER_REQUEST: 'ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3',
+        OUTER_COMMIT: 'aadb55932d41ac26635df90028276e25ba9f51af',
+        OUTER_ACTIVE: '10c7ce5b06307e953db9184f0ecb57e6ca60ad38',
+        discard_unmutated_gate_prepared: String(special),
+        deploy_owner_request_id: ownerRequest,
+        deploy_owner_commit: ownerCommit,
+        discard_gate_request_id: discardRequest,
+        discard_gate_commit: discardCommit,
+        discard_gate_active_commit: discardActive,
+      },
+    })
+    }
+    const prepared = runOwner()
+    assert.equal(prepared.status, 0, prepared.stderr || prepared.stdout)
+    const committed = runOwner({ phase: 'gate-committed', leave: 0, proof: 1, gate: false })
+    assert.equal(committed.status, 0, committed.stderr || committed.stdout)
+    const incident = runOwner({ leave: 0, proof: 1, special: 1 })
+    assert.equal(incident.status, 0, incident.stderr || incident.stdout)
+    for (const denied of [
+      { phase: 'gate-committed' },
+      { phase: 'gate-committed', leave: 0, proof: 0, gate: false },
+      { phase: 'gate-committed', leave: 0, proof: 1, gate: true },
+      { phase: 'gate-prepared', leave: 0, proof: 1, gate: false },
+      { boot: 1 },
+      { inherited: 0 },
+      { journalValid: 0 },
+      { ownerValid: 0 },
+      { leave: 0, proof: 1, special: 1, ownerRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { leave: 0, proof: 1, special: 1, ownerCommit: 'b'.repeat(40) },
+      { leave: 0, proof: 1, special: 1, discardRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { leave: 0, proof: 1, special: 1, discardCommit: 'b'.repeat(40) },
+      { leave: 0, proof: 1, special: 1, discardActive: 'c'.repeat(40) },
+    ]) assert.notEqual(runOwner(denied).status, 0, JSON.stringify(denied))
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+
+  const refreshStart = deploy.indexOf('refresh_constructor_gate() (')
+  const refreshEnd = deploy.indexOf('\n)\nif [ "$resume_after_gate_commit"', refreshStart)
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart)
+  const refresh = deploy.slice(refreshStart, refreshEnd)
+  const helperCalls = [...refresh.matchAll(/"\$ROOT\/bin\/runtime-config-cutover\.sh" --recover-only "\$ROOT\/config\/compose\.production\.yml" --leave-constructor-quiesced/g)]
+  assert.equal(helperCalls.length, 2, 'refresh-ul și cleanup-ul lui trebuie să folosească același recovery strict')
+  for (const call of helperCalls) {
+    const prefix = refresh.slice(Math.max(0, call.index - 320), call.index)
+    assert.match(prefix, /KELION_CUTOVER_LOCK_HELD=1[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="\$KELION_RELEASE_REQUEST_ID"[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_COMMIT="\$COMMIT_SHA"/)
+  }
+
+  const proof = shellFunction(cutover, 'deploy_quiesce_generation_proof')
+  assert.match(proof, /proof_configs=\([\s\S]*codex-worker\.env[\s\S]*constructor-publisher\.env[\s\S]*constructor-release\.env[\s\S]*\)/)
+  assert.equal((proof.match(/for index in "\$\{!proof_configs\[@\]\}"/g) ?? []).length, 2,
+    'ambele generații trebuie să verifice explicit toate cele trei configuri gate')
+  const restore = shellFunction(deploy, 'restore_constructor_after_release')
+  assert.match(restore,
+    /KELION_DEPLOY_QUIESCE_PROOF=1[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID[\s\S]*--recover-only[^\n]*compose\.production\.yml/)
+})
+
+test('recovery-ul incidentului gate-prepared retrage numai jurnalul și txn nemutate înainte de finalizare', () => {
+  const cutover = read('deploy/lib/runtime-config-cutover.sh')
+  const discard = shellFunction(cutover, 'discard_unmutated_gate_prepared_refresh')
+  const validateTxn = shellFunction(cutover, 'validate_unmutated_gate_transaction')
+  const withdrawTxn = shellFunction(cutover, 'withdraw_gate_transaction_durably')
+  const removeTombstone = shellFunction(cutover, 'remove_discarded_gate_tombstone')
+  const validateTombstone = shellFunction(cutover, 'validate_discarded_gate_tombstone')
+  const validateGateGc = shellFunction(cutover, 'validate_discarded_gate_gc')
+  const removeGateGc = shellFunction(cutover, 'remove_discarded_gate_gc')
+  const strictQuiesce = shellFunction(cutover, 'validate_live_constructor_units_quiesced')
+  const clearOuterJournal = shellFunction(cutover, 'clear_deploy_quiesce_journal')
+  assert.match(discard,
+    /phase == "gate-prepared"[\s\S]*activeBefore == \$active[\s\S]*deploy_quiesce_generation_proof old[\s\S]*validate_live_constructor_units_quiesced/)
+  assert.match(discard,
+    /validate_unmutated_gate_transaction "\$gate_root" "\$helper_sha"[\s\S]*rm -f -- "\$GATE_JOURNAL"[\s\S]*fsync_path "\$RUNTIME_ROOT"[\s\S]*withdraw_gate_transaction_durably "\$gate_root" "\$failed_commit"/)
+  assert.match(discard,
+    /keys \| sort[\s\S]*gateSha256[\s\S]*targetGateSha256[\s\S]*requestId == \$requestId[\s\S]*commit == \$commit[\s\S]*activeBefore == \$active/)
+  assert.match(validateTxn,
+    /recovery-helper\.sh[\s\S]*recovery-compose\.yml[\s\S]*cmp -s[\s\S]*helper_sha[\s\S]*expected_helper_sha/)
+  assert.match(validateTxn,
+    /codex-worker\.env[\s\S]*constructor-publisher\.env[\s\S]*constructor-release\.env/)
+  assert.match(validateTxn,
+    /targetGateSha256\[\$key\][\s\S]*sha256sum "\$source"[\s\S]*"\$actual" = "\$expected"/)
+  const unlinkGate = discard.indexOf('rm -f -- "$GATE_JOURNAL"')
+  const fsyncGate = discard.indexOf('fsync_path "$RUNTIME_ROOT"', unlinkGate)
+  const withdrawGate = discard.indexOf('withdraw_gate_transaction_durably "$gate_root" "$failed_commit"', fsyncGate)
+  assert.ok(unlinkGate >= 0 && fsyncGate > unlinkGate && withdrawGate > fsyncGate,
+    'jurnalul gate trebuie retras și fsync-uit înaintea retragerii tranzacției')
+  assert.match(withdrawTxn,
+    /sha256sum "\$gate_root\/recovery-helper\.sh"[\s\S]*constructor-gate-discarded\.\$failed_commit\.\$helper_sha[\s\S]*validate_unmutated_gate_transaction "\$gate_root" "\$helper_sha"[\s\S]*mv -T -- "\$gate_root" "\$tombstone"[\s\S]*fsync_path "\$RUNTIME_ROOT"[\s\S]*remove_discarded_gate_tombstone "\$tombstone" "\$failed_commit"/)
+  assert.match(removeTombstone,
+    /validate_discarded_gate_tombstone[\s\S]*sha256sum "\$candidate\/recovery-helper\.sh"[\s\S]*constructor-gate-gc\.\$failed_commit\.\$helper_sha[\s\S]*mv -T -- "\$candidate" "\$gc_root"[\s\S]*fsync_path "\$RUNTIME_ROOT"[\s\S]*remove_discarded_gate_gc "\$gc_root" "\$failed_commit"/,
+  'tombstone-ul integral trebuie redenumit și fsync-uit ca GC autentificat înainte de rm recursiv')
+  assert.match(validateTombstone,
+    /constructor-gate-discarded[\s\S]*BASH_REMATCH\[1\][\s\S]*BASH_REMATCH\[2\][\s\S]*0:0:700[\s\S]*realpath -e[\s\S]*validate_unmutated_gate_transaction/)
+  assert.match(validateGateGc,
+    /constructor-gate-gc\\\.\(\[0-9a-f\]\{40\}\)[\s\S]*BASH_REMATCH\[1\][\s\S]*failed_commit[\s\S]*0:0:700[\s\S]*realpath -e[\s\S]*canonical" = "\$candidate[\s\S]*candidate_device=\$\(stat -Lc '%d'[\s\S]*runtime_device=\$\(stat -Lc '%d'[\s\S]*candidate_device" = "\$runtime_device[\s\S]*mountpoint -q -- "\$candidate"[\s\S]*mount_rc" -eq 32/,
+  'GC-ul de retry este autentificat numai prin numele tuplei și inode-ul root-only canonic')
+  assert.match(validateGateGc,
+    /mount_targets=\$\(findmnt -n -r -o TARGET\) \|\| return 1[\s\S]*while IFS= read -r mount_target[\s\S]*"\$candidate"\|"\$candidate"\/\*\) return 1/,
+  'GC-ul trebuie să refuze bind mounts pe candidat sau descendenți chiar când st_dev coincide')
+  assert.match(removeGateGc,
+    /identity_before=\$\(stat -Lc '%d:%i'[\s\S]*validate_discarded_gate_gc "\$candidate" "\$failed_commit"[\s\S]*identity_after=\$\(stat -Lc '%d:%i'[\s\S]*identity_after" = "\$identity_before[\s\S]*rm -rf --one-file-system -- "\$candidate"[\s\S]*fsync_path "\$RUNTIME_ROOT"/,
+  'ștergerea GC revalidează device:inode imediat înainte de rm one-file-system')
+  assert.match(discard,
+    /constructor-gate-gc\.\*[\s\S]*validate_discarded_gate_gc[\s\S]*gc_roots\+=[\s\S]*tombstones\[@\][\s\S]*candidates\[@\][\s\S]*gc_roots\[@\][\s\S]*remove_discarded_gate_gc/,
+  'retry-ul trebuie să accepte cel mult un singur artefact dintre txn, tombstone și GC')
+  assert.match(discard,
+    /constructor-gate-txn\.\* \\[\s\S]*constructor-gate-discarded\.\* \\[\s\S]*constructor-gate-gc\.\*[\s\S]*un artefact gate a reapărut/,
+  'postcondiția trebuie să respingă inclusiv reapariția quarantine-ului GC')
+  const inventoryBeforeFinalFsync = discard.indexOf('un artefact gate a reapărut înainte de finalizarea discardului')
+  const finalArtifactFsync = discard.indexOf('fsync_path "$RUNTIME_ROOT"', inventoryBeforeFinalFsync)
+  const inventoryAfterFinalFsync = discard.indexOf('un artefact gate a reapărut după fsync-ul final al discardului', finalArtifactFsync)
+  const finalOwnerProof = discard.indexOf('deploy_quiesce_owned_by_caller', inventoryAfterFinalFsync)
+  assert.ok(inventoryBeforeFinalFsync >= 0 && finalArtifactFsync > inventoryBeforeFinalFsync
+    && inventoryAfterFinalFsync > finalArtifactFsync && finalOwnerProof > inventoryAfterFinalFsync,
+  'txn/tombstone/GC trebuie reinventariate după fsync și înainte de pending/finalizare')
+  assert.match(strictQuiesce,
+    /for unit in "\$\{constructor_timers\[@\]\}"[\s\S]*for unit in "\$\{constructor_services\[@\]\}"[\s\S]*"\$count" -eq 6[\s\S]*validate_constructor_quiesce_barrier/)
+  assert.match(clearOuterJournal,
+    /rm -f -- "\$DEPLOY_QUIESCE_JOURNAL"[\s\S]*deploy_quiesce_journal_unlinked=1[\s\S]*fsync_path "\$RUNTIME_ROOT"/)
+  assert.doesNotMatch(clearOuterJournal, /recovery_in_progress=0/,
+    'după unlink cleanup-ul rămâne armat până la controller și timere validate')
+  assert.doesNotMatch(discard, /clear_unit_migration_pending|publish_runtime_ready_stamp|restore_constructor_timers|clear_deploy_quiesce_journal/)
+
+  const ensure = cutover.indexOf('if ! ensure_constructor_marker_root_durable; then')
+  const call = cutover.indexOf('discard_unmutated_gate_prepared_refresh \\', ensure)
+  const genericGate = cutover.indexOf('\nrecover_interrupted_gate_refresh\n', call)
+  assert.ok(ensure >= 0 && call > ensure && genericGate > call,
+    'discardul exact trebuie rulat după preflight și înaintea recovery-ului gate generic')
+  const pendingBranch = cutover.indexOf('if [ -f "$UNIT_MIGRATION_PENDING" ]; then', genericGate)
+  const clearPending = cutover.indexOf('clear_unit_migration_pending', pendingBranch)
+  const publishReady = cutover.indexOf('publish_runtime_ready_stamp', clearPending)
+  const clearOuter = cutover.indexOf('clear_deploy_quiesce_journal', publishReady)
+  const restoreController = cutover.indexOf('restore_runtime_controller_or_quiesce', clearOuter)
+  const restoreTimers = cutover.indexOf('restore_constructor_timers', restoreController)
+  assert.ok(pendingBranch > genericGate && clearPending > pendingBranch && publishReady > clearPending
+    && clearOuter > publishReady && restoreController > clearOuter && restoreTimers > restoreController,
+  'pending-ul rămâne până la dovada standard, apoi outer dispare înainte de controller și timere')
+
+  const sandbox = mkdtempSync(join(tmpdir(), 'kelion-gate-prepared-discard-'))
+  try {
+    const runtime = join(sandbox, 'runtime')
+    const gateRoot = join(runtime, 'constructor-gate-txn.Incident')
+    const helperBody = '#!/bin/sh\nexit 0\n'
+    const helperSha = createHash('sha256').update(helperBody).digest('hex')
+    const tombstone = join(runtime,
+      `constructor-gate-discarded.aadb55932d41ac26635df90028276e25ba9f51af.${helperSha}`)
+    const gateGc = join(runtime,
+      `constructor-gate-gc.aadb55932d41ac26635df90028276e25ba9f51af.${helperSha}`)
+    const gateJournal = join(runtime, 'constructor-gate-refresh.journal')
+    const outer = join(runtime, 'constructor-deploy-quiesce.journal')
+    const pending = join(runtime, 'constructor-unit-migration.pending')
+    const compose = join(sandbox, 'compose.production.yml')
+    const calls = join(sandbox, 'calls.log')
+    const gateJournalBody = '{"gate":true}\n'
+    const resetState = ({ withJournal = true, withGate = true, withPending = true,
+      withTombstone = false, withGateGc = false } = {}) => {
+      rmSync(runtime, { recursive: true, force: true })
+      mkdirSync(runtime)
+      if (withGate) {
+        mkdirSync(gateRoot)
+        writeFileSync(join(gateRoot, 'recovery-helper.sh'), helperBody, { mode: 0o500 })
+      }
+      if (withTombstone) {
+        mkdirSync(tombstone)
+        writeFileSync(join(tombstone, 'recovery-helper.sh'), helperBody, { mode: 0o500 })
+      }
+      if (withGateGc) {
+        mkdirSync(gateGc)
+        writeFileSync(join(gateGc, 'partial-fragment'), 'partial\n', { mode: 0o600 })
+      }
+      if (withJournal) writeFileSync(gateJournal, gateJournalBody, { mode: 0o600 })
+      writeFileSync(outer, '{"outer":true}\n', { mode: 0o600 })
+      if (withPending) writeFileSync(pending, 'schema=1\n', { mode: 0o600 })
+      writeFileSync(calls, '')
+    }
+    writeFileSync(compose, 'services: {}\n', { mode: 0o444 })
+    const harness = `set -euo pipefail
+RUNTIME_ROOT=$1
+GATE_ROOT=$2
+GATE_JOURNAL=$3
+DEPLOY_QUIESCE_JOURNAL=$4
+UNIT_MIGRATION_PENDING=$5
+compose_file=$6
+CALLS=$7
+TOMBSTONE=$8
+GATE_GC=$9
+JOURNAL=$RUNTIME_ROOT/runtime-config-cutover.journal
+ACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-activation.journal
+ACTIVATION_PENDING=$RUNTIME_ROOT/constructor-activation.pending
+READY_STAMP=$RUNTIME_ROOT/runtime-config-recovery.ready
+DESTRUCTIVE_RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
+CONFIG_ROOT=$(dirname "$compose_file")
+discard_unmutated_gate_prepared=1
+recover_only=1
+leave_constructor_quiesced=0
+boot_recovery=$BOOT_RECOVERY
+deploy_quiesce_proof=$DEPLOY_PROOF
+discard_gate_request_id=$DISCARD_REQUEST
+discard_gate_commit=$DISCARD_COMMIT
+discard_gate_active_commit=$DISCARD_ACTIVE
+deploy_owner_request_id=$OWNER_REQUEST
+deploy_owner_commit=$OWNER_COMMIT
+recovery_in_progress=0
+fsync_count=0
+die() { printf 'die:%s\\n' "$1" >> "$CALLS"; exit 91; }
+jq() {
+  if [ "\${1:-}" = -er ] && [ "\${2:-}" = .transactionRoot ]; then printf '%s\\n' "$GATE_ROOT"; return 0; fi
+  if [ "\${1:-}" = -er ] && [ "\${2:-}" = .helperSha256 ]; then printf '%064d\\n' 0; return 0; fi
+  local request='' commit='' active='' last="\${!#}"
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = --arg ] && [ "$#" -ge 3 ]; then
+      case "$2" in
+        requestId) request=$3 ;;
+        commit) commit=$3 ;;
+        active) active=$3 ;;
+      esac
+      shift 3
+    else
+      shift
+    fi
+  done
+  if [ "$last" = "$DEPLOY_QUIESCE_JOURNAL" ]; then
+    [ "$request" = "$OUTER_REQUEST" ] && [ "$commit" = "$OUTER_COMMIT" ] \
+      && [ "$active" = "$OUTER_ACTIVE" ]
+  elif [ "$last" = "$GATE_JOURNAL" ]; then
+    [ "$commit" = "$OUTER_COMMIT" ]
+  else
+    return 1
+  fi
+}
+stat() { printf '0:0:600:1\\n'; }
+deploy_quiesce_owned_by_caller() {
+  [ "$OWNER_VALID" = 1 ] && [ "$deploy_owner_request_id" = "$OUTER_REQUEST" ] \
+    && [ "$deploy_owner_commit" = "$OUTER_COMMIT" ]
+}
+deploy_quiesce_generation_proof() {
+  printf 'proof:%s\\n' "$1" >> "$CALLS"
+  [ "$PROOF_VALID" = 1 ] && [ "$1" = old ]
+}
+validate_unit_migration_pending() {
+  if [ -e "$UNIT_MIGRATION_PENDING" ] || [ -L "$UNIT_MIGRATION_PENDING" ]; then
+    [ -f "$UNIT_MIGRATION_PENDING" ] && [ ! -L "$UNIT_MIGRATION_PENDING" ]
+  fi
+}
+validate_live_constructor_units_quiesced() {
+  printf 'quiesce-six\\n' >> "$CALLS"
+  [ "$QUIESCE_VALID" = 1 ]
+}
+validate_live_runtime_contract() { [ "$LIVE_VALID" = 1 ]; }
+validate_unmutated_gate_transaction() {
+  printf 'txn:%s:%s\\n' "$1" "\${2:-}" >> "$CALLS"
+  [ "$TXN_VALID" = 1 ] && [ "$1" = "$GATE_ROOT" ] && [ -d "$GATE_ROOT" ]
+}
+validate_discarded_gate_tombstone() {
+  [ "$1" = "$TOMBSTONE" ] && [ "$2" = "$DISCARD_COMMIT" ] \
+    && [ -d "$TOMBSTONE" ] && [ ! -L "$TOMBSTONE" ]
+}
+validate_discarded_gate_gc() {
+  [[ "$1" =~ ^$RUNTIME_ROOT/constructor-gate-gc\\.$DISCARD_COMMIT\\.[0-9a-f]{64}$ ]] \
+    && [ "$2" = "$DISCARD_COMMIT" ] && [ -d "$1" ] && [ ! -L "$1" ]
+}
+fsync_path() {
+  fsync_count=$((fsync_count + 1))
+  printf 'fsync:%s:%s\\n' "$fsync_count" "$1" >> "$CALLS"
+  [ "$FSYNC_FAIL_AT" -eq 0 ] || [ "$fsync_count" -ne "$FSYNC_FAIL_AT" ] || return 1
+  if [ "$RESURRECT_GC_AT" -ne 0 ] && [ "$fsync_count" -eq "$RESURRECT_GC_AT" ]; then
+    mkdir "$GATE_GC"
+    printf 'resurrected\\n' > "$GATE_GC/power-loss-fragment"
+  fi
+}
+rm() {
+  printf 'rm:%s\\n' "$*" >> "$CALLS"
+  if [ "$FAIL_GATE_RM" = 1 ] && [ "\${!#}" = "$GATE_JOURNAL" ]; then return 1; fi
+  if [ "$FAIL_GC_RM" = 1 ] && [ "\${!#}" = "$GATE_GC" ]; then return 1; fi
+  command rm "$@"
+}
+mv() {
+  printf 'mv:%s\\n' "$*" >> "$CALLS"
+  if [ "$FAIL_TXN_RENAME" = 1 ] && [ "\${!#}" = "$TOMBSTONE" ]; then return 1; fi
+  if [ "$FAIL_GC_RENAME" = 1 ] && [ "\${!#}" = "$GATE_GC" ]; then return 1; fi
+  command mv "$@"
+}
+${removeGateGc}
+${removeTombstone}
+${withdrawTxn}
+${discard}
+discard_unmutated_gate_prepared_refresh "$CALL_REQUEST" "$CALL_COMMIT" "$CALL_ACTIVE" "$CALL_COMPOSE"`
+    const canonical = {
+      request: 'ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3',
+      commit: 'aadb55932d41ac26635df90028276e25ba9f51af',
+      active: '10c7ce5b06307e953db9184f0ecb57e6ca60ad38',
+    }
+    const runDiscard = ({ boot = 0, proof = 1, ownerValid = 1, proofValid = 1,
+      quiesceValid = 1, txnValid = 1, liveValid = 1, failGateRm = 0,
+      fsyncFailAt = 0, resurrectGcAt = 0, failTxnRename = 0, failGcRename = 0, failGcRm = 0,
+      ownerRequest = canonical.request, ownerCommit = canonical.commit,
+      discardRequest = canonical.request, discardCommit = canonical.commit,
+      discardActive = canonical.active, callRequest = canonical.request,
+      callCommit = canonical.commit, callActive = canonical.active,
+      callCompose = compose, outerRequest = canonical.request,
+      outerCommit = canonical.commit, outerActive = canonical.active } = {}) => spawnSync(
+      bashExecutable,
+      ['-c', harness, 'incident', runtime, gateRoot, gateJournal, outer, pending, compose, calls, tombstone, gateGc],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          BOOT_RECOVERY: String(boot),
+          DEPLOY_PROOF: String(proof),
+          OWNER_VALID: String(ownerValid),
+          PROOF_VALID: String(proofValid),
+          QUIESCE_VALID: String(quiesceValid),
+          TXN_VALID: String(txnValid),
+          LIVE_VALID: String(liveValid),
+          FAIL_GATE_RM: String(failGateRm),
+          FSYNC_FAIL_AT: String(fsyncFailAt),
+          RESURRECT_GC_AT: String(resurrectGcAt),
+          FAIL_TXN_RENAME: String(failTxnRename),
+          FAIL_GC_RENAME: String(failGcRename),
+          FAIL_GC_RM: String(failGcRm),
+          OWNER_REQUEST: ownerRequest,
+          OWNER_COMMIT: ownerCommit,
+          DISCARD_REQUEST: discardRequest,
+          DISCARD_COMMIT: discardCommit,
+          DISCARD_ACTIVE: discardActive,
+          CALL_REQUEST: callRequest,
+          CALL_COMMIT: callCommit,
+          CALL_ACTIVE: callActive,
+          CALL_COMPOSE: callCompose,
+          OUTER_REQUEST: outerRequest,
+          OUTER_COMMIT: outerCommit,
+          OUTER_ACTIVE: outerActive,
+        },
+      },
+    )
+
+    resetState()
+    const success = runDiscard()
+    assert.equal(success.status, 0, success.stderr || success.stdout)
+    assert.equal(existsSync(gateJournal), false)
+    assert.equal(existsSync(gateRoot), false)
+    assert.equal(existsSync(tombstone), false)
+    assert.equal(existsSync(gateGc), false)
+    assert.equal(existsSync(pending), true, 'pending-ul trebuie lăsat finalizerului standard')
+    assert.equal(existsSync(outer), true, 'outer journal trebuie lăsat finalizerului standard')
+    const trace = readFileSync(calls, 'utf8')
+    assert.match(trace,
+      /proof:old[\s\S]*quiesce-six[\s\S]*txn:[^\n]+[\s\S]*proof:old[\s\S]*quiesce-six[\s\S]*rm:-f --[^\n]+[\s\S]*fsync:1:[^\n]+[\s\S]*mv:-T --[^\n]+[\s\S]*fsync:2:[^\n]+[\s\S]*mv:-T --[^\n]+constructor-gate-gc[^\n]+[\s\S]*fsync:3:[^\n]+[\s\S]*rm:-rf --[^\n]+constructor-gate-gc[^\n]+[\s\S]*fsync:4:[^\n]+[\s\S]*proof:old[\s\S]*quiesce-six/)
+    const idempotent = runDiscard()
+    assert.equal(idempotent.status, 0, idempotent.stderr || idempotent.stdout)
+    rmSync(pending)
+    assert.equal(runDiscard().status, 0, 'reluarea după finalizer trebuie să accepte pending absent numai cu contract live')
+    assert.notEqual(runDiscard({ liveValid: 0 }).status, 0)
+
+    for (const denied of [
+      { boot: 1 },
+      { proof: 0 },
+      { ownerValid: 0 },
+      { proofValid: 0 },
+      { quiesceValid: 0 },
+      { callRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { callCommit: 'b'.repeat(40) },
+      { callActive: 'c'.repeat(40) },
+      { callCompose: `${compose}.wrong` },
+      { ownerRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { ownerCommit: 'b'.repeat(40) },
+      { discardRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { discardCommit: 'b'.repeat(40) },
+      { discardActive: 'c'.repeat(40) },
+      { outerRequest: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { outerCommit: 'b'.repeat(40) },
+      { outerActive: 'c'.repeat(40) },
+    ]) {
+      resetState()
+      assert.notEqual(runDiscard(denied).status, 0, JSON.stringify(denied))
+      assert.equal(existsSync(gateJournal), true, 'o tuplă/probă respinsă nu poate retrage jurnalul gate')
+      assert.equal(existsSync(gateRoot), true, 'o tuplă/probă respinsă nu poate retrage tranzacția gate')
+    }
+
+    resetState()
+    assert.notEqual(runDiscard({ failGateRm: 1 }).status, 0)
+    assert.equal(existsSync(gateJournal), true)
+    assert.equal(existsSync(gateRoot), true)
+    assert.equal(runDiscard().status, 0, 'retry după eșecul unlink-ului gate trebuie să conveargă')
+
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 1 }).status, 0)
+    assert.equal(existsSync(gateJournal), false)
+    assert.equal(existsSync(gateRoot), true)
+    assert.equal(runDiscard().status, 0, 'retry cu jurnal absent și txn prezent trebuie să conveargă')
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 1 }).status, 0)
+    writeFileSync(gateJournal, gateJournalBody, { mode: 0o600 })
+    assert.equal(runDiscard().status, 0, 'retry cu jurnal resurrectat și txn prezent trebuie să conveargă')
+
+    resetState()
+    assert.notEqual(runDiscard({ failTxnRename: 1 }).status, 0)
+    assert.equal(existsSync(gateJournal), false)
+    assert.equal(existsSync(gateRoot), true)
+    assert.equal(runDiscard().status, 0, 'retry după eșecul retragerii txn trebuie să conveargă')
+
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 2 }).status, 0)
+    assert.equal(existsSync(gateRoot), false)
+    assert.equal(existsSync(tombstone), true)
+    assert.equal(runDiscard().status, 0, 'retry după rename fără fsync trebuie să consume tombstone-ul')
+
+    resetState()
+    assert.notEqual(runDiscard({ failGcRename: 1 }).status, 0)
+    assert.equal(existsSync(tombstone), true)
+    assert.equal(existsSync(gateGc), false)
+    assert.equal(runDiscard().status, 0,
+      'retry după eșecul rename-ului tombstone→GC trebuie să conveargă')
+
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 3 }).status, 0)
+    assert.equal(existsSync(gateRoot), false)
+    assert.equal(existsSync(tombstone), false)
+    assert.equal(existsSync(gateGc), true)
+    rmSync(join(gateGc, 'recovery-helper.sh'), { force: true })
+    assert.equal(runDiscard().status, 0,
+      'retry după rename GC fără fsync trebuie să consume chiar și quarantine-ul rămas parțial')
+
+    resetState()
+    assert.notEqual(runDiscard({ failGcRm: 1 }).status, 0)
+    assert.equal(existsSync(tombstone), false)
+    assert.equal(existsSync(gateGc), true)
+    rmSync(join(gateGc, 'recovery-helper.sh'), { force: true })
+    assert.equal(runDiscard().status, 0,
+      'retry după eșecul rm al quarantine-ului GC parțial trebuie să conveargă')
+
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 4 }).status, 0)
+    assert.equal(existsSync(gateRoot), false)
+    assert.equal(existsSync(tombstone), false)
+    assert.equal(existsSync(gateGc), false)
+    assert.equal(runDiscard().status, 0,
+      'retry după fsync-ul final eșuat cu GC absent trebuie să fie idempotent')
+    resetState()
+    assert.notEqual(runDiscard({ fsyncFailAt: 4 }).status, 0)
+    assert.equal(existsSync(gateGc), false)
+    mkdirSync(gateGc)
+    writeFileSync(join(gateGc, 'power-loss-fragment'), 'partial\n', { mode: 0o600 })
+    assert.equal(runDiscard().status, 0,
+      'retry după resurrectarea GC-ului post-rm trebuie să-l consume ca quarantine, nu ca recovery data')
+
+    resetState({ withJournal: false, withGate: false, withTombstone: true })
+    assert.equal(runDiscard().status, 0, 'retry după resurrectarea tombstone-ului trebuie să-l consume durabil')
+
+    resetState({ withJournal: false, withGate: false, withGateGc: true })
+    assert.equal(runDiscard().status, 0,
+      'retry-ul poate elimina un GC parțial numai sub outer exact și pending prezent')
+    resetState({ withJournal: false, withGate: false })
+    assert.notEqual(runDiscard({ resurrectGcAt: 1 }).status, 0,
+      'un artefact GC reapărut după fsync trebuie detectat înainte de consumarea pending-ului')
+    assert.equal(existsSync(gateGc), true)
+    resetState({ withJournal: false, withGate: false, withPending: false, withGateGc: true })
+    assert.notEqual(runDiscard().status, 0,
+      'un GC parțial fără pending nu poate primi autoritate de cleanup')
+    assert.equal(existsSync(gateGc), true)
+
+    resetState({ withTombstone: true })
+    assert.notEqual(runDiscard().status, 0,
+      'jurnalul gate și tombstone-ul nu pot fi acceptate simultan')
+    assert.equal(existsSync(gateJournal), true)
+    assert.equal(existsSync(gateRoot), true)
+    assert.equal(existsSync(tombstone), true)
+
+    resetState({ withGateGc: true })
+    assert.notEqual(runDiscard().status, 0,
+      'jurnalul gate și quarantine-ul GC nu pot fi acceptate simultan')
+    assert.equal(existsSync(gateJournal), true)
+    assert.equal(existsSync(gateRoot), true)
+    assert.equal(existsSync(gateGc), true)
+
+    const foreignTombstone = join(runtime,
+      `constructor-gate-discarded.${canonical.commit}.${'f'.repeat(64)}`)
+    resetState({ withJournal: false, withGate: false })
+    mkdirSync(foreignTombstone)
+    writeFileSync(join(foreignTombstone, 'recovery-helper.sh'), helperBody, { mode: 0o500 })
+    assert.notEqual(runDiscard().status, 0, 'un tombstone străin trebuie refuzat fail-closed')
+    assert.equal(existsSync(foreignTombstone), true, 'tombstone-ul străin nu poate fi șters')
+
+    resetState({ withJournal: false, withGate: false })
+    writeFileSync(tombstone, 'corrupt\n', { mode: 0o600 })
+    assert.notEqual(runDiscard().status, 0, 'un tombstone corupt trebuie refuzat fail-closed')
+    assert.equal(existsSync(tombstone), true, 'tombstone-ul corupt nu poate fi șters')
+
+    const foreignGateGc = join(runtime,
+      `constructor-gate-gc.${'b'.repeat(40)}.${helperSha}`)
+    resetState({ withJournal: false, withGate: false })
+    mkdirSync(foreignGateGc)
+    assert.notEqual(runDiscard().status, 0, 'un GC cu commit străin trebuie refuzat fail-closed')
+    assert.equal(existsSync(foreignGateGc), true)
+
+    resetState({ withJournal: false, withGate: false })
+    writeFileSync(gateGc, 'corrupt-inode\n', { mode: 0o600 })
+    assert.notEqual(runDiscard().status, 0, 'un GC care nu este director canonic trebuie refuzat')
+    assert.equal(existsSync(gateGc), true)
+
+    resetState({ withJournal: false, withGate: false })
+    symlinkSync(join(runtime, 'missing-gc-target'), gateGc)
+    assert.notEqual(runDiscard().status, 0, 'un GC dangling trebuie refuzat fail-closed')
+    assert.equal(existsSync(gateGc), false)
+    assert.equal(lstatSync(gateGc).isSymbolicLink(), true, 'GC-ul dangling nu poate fi șters')
+
+    const secondGateGc = join(runtime,
+      `constructor-gate-gc.${canonical.commit}.${'e'.repeat(64)}`)
+    resetState({ withJournal: false, withGate: false, withGateGc: true })
+    mkdirSync(secondGateGc)
+    assert.notEqual(runDiscard().status, 0, 'mai multe GC-uri fac reluarea ambiguă și fail-closed')
+    assert.equal(existsSync(gateGc), true)
+    assert.equal(existsSync(secondGateGc), true)
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true })
+  }
+
+  const gcSafetySandbox = mkdtempSync(join(tmpdir(), 'kelion-gate-gc-safety-'))
+  try {
+    const runtime = join(gcSafetySandbox, 'runtime')
+    const candidate = join(runtime,
+      `constructor-gate-gc.${'a'.repeat(40)}.${'b'.repeat(64)}`)
+    const calls = join(gcSafetySandbox, 'calls.log')
+    const identityCalls = join(gcSafetySandbox, 'identity.calls')
+    mkdirSync(runtime)
+    mkdirSync(candidate, { mode: 0o700 })
+    const sandboxValidateGateGc = validateGateGc.replace(
+      '^/root/kelion/runtime/constructor-gate-gc\\.',
+      '^$RUNTIME_ROOT/constructor-gate-gc\\.',
+    )
+    assert.notEqual(sandboxValidateGateGc, validateGateGc,
+      'validatorul GC trebuie relocat exclusiv în harnessul sandbox')
+    const gcSafetyHarness = `set -u
+RUNTIME_ROOT=$1
+CANDIDATE=$2
+CALLS=$3
+IDENTITY_CALLS=$4
+stat() {
+  local format=$2 path="\${!#}" count
+  case "$format" in
+    '%u:%g:%a') printf '0:0:700\\n' ;;
+    '%d')
+      if [ "$path" = "$CANDIDATE" ]; then printf '%s\\n' "$CANDIDATE_DEVICE"
+      else printf '%s\\n' "$RUNTIME_DEVICE"; fi
+      ;;
+    '%d:%i')
+      printf 'x\\n' >> "$IDENTITY_CALLS"
+      count=$(wc -l < "$IDENTITY_CALLS")
+      if [ "$count" -gt 1 ] && [ "$IDENTITY_RACE" = 1 ]; then printf '41:101\\n'
+      else printf '41:100\\n'; fi
+      ;;
+    *) return 1 ;;
+  esac
+}
+realpath() { printf '%s\\n' "\${!#}"; }
+mountpoint() {
+  [ "$MOUNT_RC" -ne 0 ] || return 0
+  return "$MOUNT_RC"
+}
+findmnt() {
+  [ "$FINDMNT_RC" -eq 0 ] || return "$FINDMNT_RC"
+  case "$FINDMNT_TARGET" in
+    none) printf '/\\n' ;;
+    exact) printf '%s\\n' "$CANDIDATE" ;;
+    descendant) printf '%s/nested-bind\\n' "$CANDIDATE" ;;
+    sibling) printf '%s-sibling\\n' "$CANDIDATE" ;;
+    *) return 93 ;;
+  esac
+}
+rm() {
+  printf 'rm:%s\\n' "$*" >> "$CALLS"
+  command rm "$@"
+}
+fsync_path() { printf 'fsync:%s\\n' "$1" >> "$CALLS"; }
+${sandboxValidateGateGc}
+${removeGateGc}
+case "$5" in
+  validate) validate_discarded_gate_gc "$CANDIDATE" "$FAILED_COMMIT" ;;
+  remove) remove_discarded_gate_gc "$CANDIDATE" "\${FAILED_COMMIT}" ;;
+  *) exit 92 ;;
+esac`
+    const failedCommit = 'a'.repeat(40)
+    const runGcSafety = (operation, { candidateDevice = 41, runtimeDevice = 41,
+      mountRc = 32, findmntRc = 0, findmntTarget = 'none', identityRace = 0 } = {}) => {
+      writeFileSync(calls, '')
+      writeFileSync(identityCalls, '')
+      return spawnSync(bashExecutable,
+        ['-c', gcSafetyHarness, 'gc-safety', runtime, candidate, calls, identityCalls, operation], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            CANDIDATE_DEVICE: String(candidateDevice),
+            RUNTIME_DEVICE: String(runtimeDevice),
+            MOUNT_RC: String(mountRc),
+            FINDMNT_RC: String(findmntRc),
+            FINDMNT_TARGET: findmntTarget,
+            IDENTITY_RACE: String(identityRace),
+            FAILED_COMMIT: failedCommit,
+          },
+        })
+    }
+    const validGc = runGcSafety('validate')
+    assert.equal(validGc.status, 0, validGc.stderr || validGc.stdout)
+    assert.notEqual(runGcSafety('validate', { candidateDevice: 42 }).status, 0,
+      'un GC de pe alt st_dev trebuie refuzat')
+    assert.notEqual(runGcSafety('validate', { mountRc: 0 }).status, 0,
+      'un mountpoint GC trebuie refuzat')
+    assert.notEqual(runGcSafety('validate', { mountRc: 1 }).status, 0,
+      'rc=1 nu este contractul util-linux pentru not-a-mountpoint și trebuie refuzat')
+    assert.notEqual(runGcSafety('validate', { mountRc: 2 }).status, 0,
+      'o eroare mountpoint nu poate fi reinterpretată ca not-a-mountpoint')
+    assert.notEqual(runGcSafety('validate', { findmntRc: 1 }).status, 0,
+      'eșecul inventarului findmnt trebuie propagat fail-closed')
+    assert.notEqual(runGcSafety('validate', { findmntTarget: 'exact' }).status, 0,
+      'un bind mount pe GC trebuie refuzat chiar dacă st_dev coincide')
+    assert.notEqual(runGcSafety('validate', { findmntTarget: 'descendant' }).status, 0,
+      'un bind mount sub GC trebuie refuzat chiar dacă st_dev coincide')
+    assert.equal(runGcSafety('validate', { findmntTarget: 'sibling' }).status, 0,
+      'un target cu simplu prefix textual, dar în afara GC-ului, nu este descendent')
+    assert.notEqual(runGcSafety('remove', { identityRace: 1 }).status, 0,
+      'schimbarea device:inode între validare și rm trebuie să fie fail-closed')
+    assert.equal(existsSync(candidate), true)
+    assert.doesNotMatch(readFileSync(calls, 'utf8'), /^rm:/m)
+
+    const removedGc = runGcSafety('remove')
+    assert.equal(removedGc.status, 0, removedGc.stderr || removedGc.stdout)
+    assert.equal(existsSync(candidate), false)
+    assert.match(readFileSync(calls, 'utf8'), /rm:-rf --one-file-system --/,
+      'ștergerea GC validată nu poate traversa un filesystem străin')
+  } finally {
+    rmSync(gcSafetySandbox, { recursive: true, force: true })
+  }
+
+  const outerSandbox = mkdtempSync(join(tmpdir(), 'kelion-outer-journal-durability-'))
+  try {
+    const runtime = join(outerSandbox, 'runtime')
+    const outer = join(runtime, 'constructor-deploy-quiesce.journal')
+    const calls = join(outerSandbox, 'calls.log')
+    mkdirSync(runtime)
+    const outerHarness = `set -u
+RUNTIME_ROOT=$1
+DEPLOY_QUIESCE_JOURNAL=$2
+CALLS=$3
+recovery_in_progress=1
+deploy_quiesce_journal_unlinked=0
+rm() {
+  printf 'rm:%s\\n' "$*" >> "$CALLS"
+  [ "$FAIL_OUTER_RM" = 0 ] || return 1
+  command rm "$@"
+}
+fsync_path() {
+  printf 'fsync:%s\\n' "$1" >> "$CALLS"
+  [ "$FAIL_OUTER_FSYNC" = 0 ]
+}
+${clearOuterJournal}
+clear_deploy_quiesce_journal
+rc=$?
+printf 'state:%s:%s:%s\\n' "$rc" "$recovery_in_progress" "$deploy_quiesce_journal_unlinked" >> "$CALLS"
+exit "$rc"`
+    const runClearOuter = ({ failRm = 0, failFsync = 0 } = {}) => spawnSync(
+      bashExecutable, ['-c', outerHarness, 'outer', runtime, outer, calls], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          FAIL_OUTER_RM: String(failRm),
+          FAIL_OUTER_FSYNC: String(failFsync),
+        },
+      })
+
+    writeFileSync(outer, '{}\n', { mode: 0o600 })
+    writeFileSync(calls, '')
+    assert.notEqual(runClearOuter({ failRm: 1 }).status, 0)
+    assert.equal(existsSync(outer), true, 'eșecul unlink-ului outer trebuie să păstreze jurnalul')
+
+    assert.notEqual(runClearOuter({ failFsync: 1 }).status, 0)
+    assert.equal(existsSync(outer), false, 'eșecul fsync vine după unlink-ul outer')
+    assert.match(readFileSync(calls, 'utf8'), /state:1:1:1/,
+      'cleanup-ul rămâne armat după unlink până la dovada controllerului și a vectorului live')
+
+    writeFileSync(outer, '{}\n', { mode: 0o600 })
+    assert.equal(runClearOuter().status, 0,
+      'retry după resurrectarea integrală a outer journal trebuie să conveargă')
+    assert.equal(existsSync(outer), false)
+    assert.match(readFileSync(calls, 'utf8'), /state:0:1:1/,
+      'clear-ul outer nu poate declara singur recovery-ul complet')
+  } finally {
+    rmSync(outerSandbox, { recursive: true, force: true })
+  }
+})
+
+test('workflow-ul dedicat recuperează exclusiv incidentul gate-prepared verificat', () => {
+  const workflow = read('.github/workflows/vps-recovery.yml')
+  const classifyStart = workflow.indexOf('- name: Separă recovery-ul generic de incidentul gate-prepared')
+  const incidentStart = workflow.indexOf('- name: Recuperează exact incidentul gate-prepared aadb')
+  const genericStart = workflow.indexOf('- name: Recovery generic pe VPS', incidentStart)
+  assert.ok(classifyStart >= 0 && incidentStart > classifyStart && genericStart > incidentStart)
+  const classify = workflow.slice(classifyStart, incidentStart)
+  const incident = workflow.slice(incidentStart, genericStart)
+  const checkout = workflow.slice(workflow.lastIndexOf('- uses: actions/checkout@', incidentStart), incidentStart)
+
+  assert.match(workflow,
+    /if: github\.event_name == 'push' && github\.event\.before == 'aadb55932d41ac26635df90028276e25ba9f51af'/)
+  assert.match(classify,
+    /failed_commit=aadb55932d41ac26635df90028276e25ba9f51af[\s\S]*active_commit=10c7ce5b06307e953db9184f0ecb57e6ca60ad38[\s\S]*request=ebf1d8cb-ecdc-4b8b-b98e-c053269af5d3[\s\S]*ci_run=33316869492[\s\S]*build_run=33317102554[\s\S]*failed_run=33317466950[\s\S]*failed_job=99273467144/)
+  assert.match(classify,
+    /git rev-parse HEAD\^\)" = "\$failed_commit"[\s\S]*git rev-list --count "\$failed_commit\.\.\$hotfix"\)" -eq 1[\s\S]*git rev-list --parents -n 1 "\$hotfix"[\s\S]*"\$remote_master" = "\$hotfix"/)
+  assert.match(classify,
+    /"\$\{#changed\[@\]\}" -eq 5[\s\S]*M\\t\.github\/workflows\/vps-recovery\.yml[\s\S]*M\\tdeploy\/deploy\.sh[\s\S]*M\\tdeploy\/instaleaza-constructor\.sh[\s\S]*M\\tdeploy\/lib\/constructor-publication\.test\.mjs[\s\S]*M\\tdeploy\/lib\/runtime-config-cutover\.sh/)
+  assert.equal((classify.match(/\.total_count == 3/g) ?? []).length, 2,
+    'atât CI-ul incidentului, cât și CI-ul hotfixului trebuie să aibă exact trei joburi')
+  assert.equal((classify.match(/\["container-isolation", "release-train-preflight", "verify"\]/g) ?? []).length, 2)
+  assert.match(classify,
+    /actions\/workflows\/pr-verify\.yml\/runs\?branch=master&event=push[\s\S]*\.head_sha == \$sha[\s\S]*\.event == "push"[\s\S]*\.conclusion == "success"/)
+
+  assert.match(checkout,
+    /if: needs\.classify\.outputs\.incident == 'true'[\s\S]*ref: \$\{\{ needs\.classify\.outputs\.hotfix_commit \}\}[\s\S]*fetch-depth: 2[\s\S]*persist-credentials: false/)
+  assert.match(incident,
+    /sha256sum deploy\/lib\/runtime-config-cutover\.sh[\s\S]*\[\[ "\$GITHUB_RUN_ID" =~ \^\[1-9\]\[0-9\]\*\$ \]\][\s\S]*\[\[ "\$GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$ \]\][\s\S]*remote_stage="\/root\/kelion-gate-recovery\.\$\{GITHUB_RUN_ID\}\.\$\{GITHUB_RUN_ATTEMPT\}"[\s\S]*runtime-config-cutover\.incoming/)
+  assert.equal((incident.match(/\^\/root\/kelion-gate-recovery\\\.\[1-9\]\[0-9\]\*\\\.\[1-9\]\[0-9\]\*\$/g) ?? []).length, 3,
+    'cleanup-ul, stagingul și recovery-ul trebuie să accepte exclusiv stage-ul run.attempt')
+  assert.match(incident,
+    /exec 9<"\$publication_lock"[\s\S]*flock -n 9[\s\S]*phase=incident-proof/)
+  assert.match(incident,
+    /phase=helper-install[\s\S]*install -o root -g root -m 0500 "\$incoming" "\$helper"[\s\S]*phase=helper-recovery[\s\S]*KELION_CUTOVER_LOCK_HELD=1 \\[\s\S]*KELION_DEPLOY_QUIESCE_PROOF=1 \\[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="\$request" \\[\s\S]*KELION_DEPLOY_QUIESCE_OWNER_COMMIT="\$failed_commit" \\[\s\S]*"\$helper" --discard-unmutated-gate-prepared \\[\s\S]*"\$request" "\$failed_commit" "\$active_commit" "\$compose"/)
+
+  const alreadyComplete = incident.indexOf('if [ ! -e "$outer" ] && [ ! -L "$outer" ]; then')
+  const helperInstall = incident.indexOf('phase=helper-install')
+  assert.ok(alreadyComplete >= 0 && helperInstall > alreadyComplete,
+    'ramura idempotentă trebuie să iasă înainte să instaleze sau să invoce helperul')
+  assert.match(incident.slice(alreadyComplete, helperInstall),
+    /validate_complete_poststate[\s\S]*sync -f "\$runtime"[\s\S]*validate_complete_poststate[\s\S]*emit_complete_receipt already-complete[\s\S]*exit 0/)
+  const inventoryStart = incident.indexOf('gate_transaction_count() {')
+  const noArtifactsStart = incident.indexOf('assert_no_gate_recovery_artifacts() {', inventoryStart)
+  const completeStart = incident.indexOf('validate_complete_poststate() {', inventoryStart)
+  const receiptStart = incident.indexOf('emit_complete_receipt() {', completeStart)
+  assert.ok(inventoryStart >= 0 && noArtifactsStart > inventoryStart
+    && completeStart > noArtifactsStart && receiptStart > completeStart)
+  const inventory = incident.slice(inventoryStart, noArtifactsStart)
+  const noArtifacts = incident.slice(noArtifactsStart, incident.indexOf('validate_constructor_vector() {', noArtifactsStart))
+  const completePoststate = incident.slice(completeStart, receiptStart)
+  assert.match(inventory,
+    /"\$runtime"\/constructor-gate-txn\.\* \\[\s\S]*"\$runtime"\/constructor-gate-discarded\.\* \\[\s\S]*"\$runtime"\/constructor-gate-gc\.\*[\s\S]*\[ ! -e "\$candidate" \] && \[ ! -L "\$candidate" \][\s\S]*\[ -d "\$candidate" \][\s\S]*\[ ! -L "\$candidate" \]/,
+  'inventarul global trebuie să refuze inclusiv un txn, tombstone sau GC străin/dangling')
+  assert.match(inventory,
+    /\[ -d "\$candidate" \] \|\| return 1[\s\S]*\[ ! -L "\$candidate" \] \|\| return 1[\s\S]*canonical=\$\(realpath -e -- "\$candidate"\) \|\| return 1[\s\S]*\[ "\$canonical" = "\$candidate" \] \|\| return 1[\s\S]*acl=\$\(stat -Lc '%u:%g:%a' "\$candidate"\) \|\| return 1[\s\S]*\[ "\$acl" = '0:0:700' \] \|\| return 1/,
+  'fiecare predicat din command substitution trebuie să propage explicit eșecul')
+  assert.match(noArtifacts,
+    /"\$runtime"\/constructor-gate-txn\.\* \\[\s\S]*"\$runtime"\/constructor-gate-discarded\.\* \\[\s\S]*"\$runtime"\/constructor-gate-gc\.\*[\s\S]*\[ ! -e "\$candidate" \][\s\S]*\[ ! -L "\$candidate" \]/,
+  'poststarea completă refuză global orice txn, tombstone ori GC, inclusiv dangling')
+  assert.match(noArtifacts,
+    /\[ ! -e "\$candidate" \] \|\| return 1[\s\S]*\[ ! -L "\$candidate" \] \|\| return 1/,
+  'absența artefactelor trebuie propagată explicit chiar și fără errexit')
+  assert.match(completePoststate,
+    /for cleared in "\$outer" "\$gate" "\$unit_pending"[\s\S]*\[ ! -e "\$cleared" \][\s\S]*\[ ! -L "\$cleared" \][\s\S]*assert_no_gate_recovery_artifacts/,
+  'already-complete cere absență fizică și de symlink pentru toate jurnalele și toate artefactele gate')
+  assert.match(incident,
+    /transaction_count=\$\(gate_transaction_count\) \|\| \{[\s\S]*phase=incident-artifact-inventory[\s\S]*on_err "\$LINENO" 1[\s\S]*\}/,
+  'callerul inventarului trebuie să propage assignment-ul eșuat înainte de preflight')
+  assert.match(incident,
+    /event:"incident_recovery_complete"[\s\S]*gate_recovery_artifacts:"absent"/,
+  'receiptul final trebuie să afirme explicit absența tuturor artefactelor gate')
+
+  const artifactInventory = inventory.replace(/^ {10}/gm, '')
+  const noArtifactFunction = noArtifacts.replace(/^ {10}/gm, '')
+  const artifactSandbox = mkdtempSync(join(tmpdir(), 'kelion-workflow-gate-inventory-'))
+  try {
+    const runArtifactProbe = (operation) => spawnSync(bashExecutable, ['-c', `set -u
+runtime=$1
+${artifactInventory}
+${noArtifactFunction}
+case "$2" in
+  count) gate_transaction_count ;;
+  absent) assert_no_gate_recovery_artifacts ;;
+  *) exit 90 ;;
+esac`, 'gate-artifacts', artifactSandbox, operation], { encoding: 'utf8' })
+    const emptyCount = runArtifactProbe('count')
+    assert.equal(emptyCount.status, 0, emptyCount.stderr || emptyCount.stdout)
+    assert.equal(emptyCount.stdout, '0')
+    assert.equal(runArtifactProbe('absent').status, 0)
+
+    const malformed = join(artifactSandbox, 'constructor-gate-gc.malformed')
+    writeFileSync(malformed, 'not-a-directory\n', { mode: 0o600 })
+    assert.notEqual(runArtifactProbe('count').status, 0,
+      'un artefact GC care nu este director nu poate deveni count valid')
+    assert.notEqual(runArtifactProbe('absent').status, 0,
+      'already-complete refuză artefactul GC malformed')
+    rmSync(malformed)
+
+    const dangling = join(artifactSandbox, 'constructor-gate-txn.Dangling')
+    symlinkSync(join(artifactSandbox, 'missing-target'), dangling)
+    assert.notEqual(runArtifactProbe('count').status, 0,
+      'un artefact gate dangling trebuie să propage eșecul inventarului')
+    assert.notEqual(runArtifactProbe('absent').status, 0,
+      'already-complete refuză explicit symlinkul dangling')
+  } finally {
+    rmSync(artifactSandbox, { recursive: true, force: true })
+  }
+
+  const topologyStart = incident.indexOf('validate_managed_topology() {')
+  const topologyEnd = incident.indexOf('\n\n          validate_public_proof() {', topologyStart)
+  assert.ok(topologyStart >= 0 && topologyEnd > topologyStart)
+  const topologyIndented = incident.slice(topologyStart, topologyEnd)
+  const topology = topologyIndented.replace(/^ {10}/gm, '')
+  for (const inventory of ['legacy_proxy_inventory', 'active_inventory', 'role_inventory',
+    'inactive_running_inventory', 'candidate_inventory']) {
+    assert.match(topology, new RegExp(`${inventory}=\\$\\(docker ps [\\s\\S]*?\\) \\|\\| return 1`),
+      `${inventory} trebuie capturat înainte de parsare și să propage eroarea Docker`)
+  }
+  assert.doesNotMatch(topology, /mapfile[^\n]*< <\(docker ps/,
+    'process substitution ar ascunde statusul docker ps')
+  assert.match(topology,
+    /legacy_proxy_inventory=\$\(docker ps -aq --filter 'name=\^\/kelion-caddy\$'\) \|\| return 1[\s\S]*case "\$\{#legacy_proxy_ids\[@\]\}" in[\s\S]*0\) ;;[\s\S]*1\)[\s\S]*legacy_proxy_running=\$\(docker inspect[\s\S]*\|\| return 1[\s\S]*legacy_proxy_restart_policy=\$\(docker inspect[\s\S]*\|\| return 1[\s\S]*false[\s\S]*no[\s\S]*\*\) return 1/,
+  'kelion-caddy absent este dovedit prin inventar 0/1, iar inspectul singur nu poate masca eroarea')
+
+  const topologySandbox = mkdtempSync(join(tmpdir(), 'kelion-workflow-topology-'))
+  try {
+    const upstream = join(topologySandbox, 'kelion-upstream.caddy')
+    writeFileSync(upstream,
+      'reverse_proxy app-blue:8080 {\n\theader_up X-Kelion-Client-IP {client_ip}\n}',
+      { mode: 0o644 })
+    const topologyHarness = `set -u
+upstream=$1
+active_commit=10c7ce5b06307e953db9184f0ecb57e6ca60ad38
+active_slot=''
+inactive_slot=''
+docker() {
+  local command=$1 option='' args="$*" role=''
+  shift
+  case "$command" in
+    inspect)
+      case "$args" in
+        *legacy-caddy-id*)
+          [ "$FAIL_CADDY_INSPECT" = 0 ] || return 44
+          case "$args" in
+            *State.Running*) printf 'false\\n' ;;
+            *HostConfig.RestartPolicy.Name*) printf 'no\\n' ;;
+            *) return 1 ;;
+          esac
+          ;;
+        *State.Health.Status*) printf 'healthy\\n' ;;
+        *HostConfig.RestartPolicy.Name*) printf 'unless-stopped\\n' ;;
+        *com.kelion.commit*) printf '%s\\n' "$active_commit" ;;
+        *State.Running*) printf 'true\\n' ;;
+        *) return 1 ;;
+      esac
+      ;;
+    ps)
+      option=\${1:-}
+      if [[ "$args" == *'name=^/kelion-caddy$'* ]]; then
+        [ "$FAIL_CADDY_INVENTORY" = 0 ] || return 43
+        case "$CADDY_COUNT" in
+          0) return 0 ;;
+          1) printf 'legacy-caddy-id\\n' ;;
+          2) printf 'legacy-caddy-id\\nlegacy-caddy-id-2\\n' ;;
+          *) return 1 ;;
+        esac
+        return 0
+      fi
+      if [[ "$args" == *'label=com.kelion.slot=green'* ]]; then
+        if [ "$option" = -q ] && [ "$FAIL_INACTIVE_PS" = 1 ]; then return 42; fi
+        return 0
+      fi
+      case "$args" in
+        *'label=com.kelion.role=app'*) role=app ;;
+        *'label=com.kelion.role=browser-worker'*) role=browser-worker ;;
+        *'label=com.kelion.role=browser-egress'*) role=browser-egress ;;
+        *'label=com.kelion.role=converter-gateway'*) role=converter-gateway ;;
+        *'label=com.kelion.role=converter-parser'*) role=converter-parser ;;
+      esac
+      if [ -n "$role" ]; then printf 'id-%s\\n' "$role"
+      else printf 'id-app\\nid-browser-worker\\nid-browser-egress\\nid-converter-gateway\\nid-converter-parser\\n'; fi
+      ;;
+    *) return 1 ;;
+  esac
+}
+${topology}
+validate_managed_topology`
+    const runTopology = ({ failInactive = 0, failCaddyInventory = 0,
+      failCaddyInspect = 0, caddyCount = 0 } = {}) => spawnSync(
+      bashExecutable, ['-c', topologyHarness, 'topology', upstream], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          FAIL_INACTIVE_PS: String(failInactive),
+          FAIL_CADDY_INVENTORY: String(failCaddyInventory),
+          FAIL_CADDY_INSPECT: String(failCaddyInspect),
+          CADDY_COUNT: String(caddyCount),
+        },
+      })
+    const topologyOk = runTopology()
+    assert.equal(topologyOk.status, 0, topologyOk.stderr || topologyOk.stdout)
+    const stoppedLegacy = runTopology({ caddyCount: 1 })
+    assert.equal(stoppedLegacy.status, 0, stoppedLegacy.stderr || stoppedLegacy.stdout)
+    const topologyDockerFailure = runTopology({ failInactive: 1 })
+    assert.notEqual(topologyDockerFailure.status, 0,
+      'docker ps eșuat pe slotul inactiv nu poate fi reinterpretat ca inventar gol valid')
+    assert.notEqual(runTopology({ failCaddyInventory: 1 }).status, 0,
+      'eșecul inventarului kelion-caddy nu poate dovedi absența lui')
+    assert.notEqual(runTopology({ caddyCount: 2 }).status, 0,
+      'mai multe containere legacy cu același nume trebuie refuzate')
+    assert.notEqual(runTopology({ caddyCount: 1, failCaddyInspect: 1 }).status, 0,
+      'un kelion-caddy inventariat nu poate fi considerat absent când inspect eșuează')
+  } finally {
+    rmSync(topologySandbox, { recursive: true, force: true })
+  }
+  assert.match(incident,
+    /event:"incident_recovery_complete"[\s\S]*phase=postcondition[\s\S]*validate_complete_poststate[\s\S]*sync -f "\$runtime"[\s\S]*validate_complete_poststate[\s\S]*emit_complete_receipt recovered/)
+  assert.match(incident,
+    /cleanup\(\)[\s\S]*bash -s -- "\$remote_stage"[\s\S]*rm -rf -- "\$stage"[\s\S]*trap cleanup EXIT/)
+  assert.doesNotMatch(incident, /set\s+-x|printenv|declare\s+-p|export\s+-p/)
+})
+
+test('telemetria upgrade-ului Constructor este structurată și nu divulgă mediul', () => {
+  const upgrade = read('deploy/upgrade-constructor.sh')
+  const reporter = shellFunction(upgrade, 'report_constructor_upgrade_failure')
+  const capture = shellFunction(upgrade, 'capture_constructor_upgrade_failure')
+  const pinnedProviderMetadata = '$config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and'
+  assert.equal(upgrade.split(pinnedProviderMetadata).length - 1, 1,
+    'singura apariție npm permisă este cheia de schemă fixată a providerului local')
+  const upgradeWithoutPinnedProviderMetadata = upgrade.replace(pinnedProviderMetadata, '')
+  assert.doesNotMatch(upgradeWithoutPinnedProviderMetadata,
+    /CODEX_WORKER_SECRET|CONSTRUCTOR_(?:PUBLISHER|RELEASE)_SECRET|SYNC_GITHUB_TOKEN|PUBLISHER_GITHUB_TOKEN|RELEASE_GITHUB_TOKEN|GHCR_READ_TOKEN|OPENAI_(?:API|ADMIN)_KEY|\bpayload\b|\bapt(?:-get)?\b|\bnpm\b/i)
+  assert.doesNotMatch(reporter,
+    /BASH_COMMAND|set\s+-x|printenv|declare\s+-p|export\s+-p|printf[^\n]*(?:token|secret|value|env)/i)
+
+  const canary = `CANARY-UPGRADE-${process.pid}-${Date.now()}`
+  const sourceCommit = '89abcdef0123456789abcdef0123456789abcdef'
+  const probe = spawnSync(bashExecutable, ['-c', `
+set -Eeuo pipefail
+constructor_upgrade_phase=artifact-publication
+constructor_upgrade_failure_line=0
+constructor_upgrade_source_commit=${sourceCommit}
+activation_restore_started=0
+cleanup_unpublished_stage() { :; }
+${reporter}
+${capture}
+trap 'capture_constructor_upgrade_failure "$LINENO"' ERR
+trap report_constructor_upgrade_failure EXIT
+false
+`], {
+    encoding: 'utf8',
+    env: { ...process.env, CANARY_SECRET: canary },
+  })
+  assert.equal(probe.status, 1, probe.stderr || probe.stdout)
+  assert.equal(probe.stdout, '')
+  const events = probe.stderr.trim().split(/\r?\n/).filter((line) => line.startsWith('{'))
+  assert.equal(events.length, 1, probe.stderr)
+  const event = JSON.parse(events[0])
+  assert.deepEqual({ ...event, line: 0 }, {
+    ok: false,
+    event: 'constructor_upgrade_failure',
+    phase: 'artifact-publication',
+    line: 0,
+    exit_code: 1,
+    source_commit: sourceCommit,
+  })
+  assert.ok(Number.isInteger(event.line) && event.line > 0)
+  assert.doesNotMatch(probe.stdout + probe.stderr, new RegExp(canary))
+  assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
+})
+
+// Instalatorul si controllerul valideaza aceleasi artefacte private-ai, dar prin
+// mecanisme diferite: primul dupa nume de cont, al doilea numeric. Cand cele doua
+// contracte diverg, detectInstalledProfiles intoarce [] pe orice gazda unde
+// `privateai` nu are exact uid-ul hardcodat, controllerul raporteaza `unavailable`
+// si claim-ul raspunde 503 constructor_model_not_ready - fara ca vreun test sa cada,
+// pentru ca suita controllerului injecteaza un dublu peste fastArtifactsInstalled.
+// Testul de fata compara direct cele doua contracte, nu logica fiecaruia separat.
+test('contractul de proprietate al artefactelor private-ai este acelasi in installer si in controller', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const controller = read('deploy/constructor-model-control.mjs')
+
+  // Installerul ramane sursa de adevar si valideaza dupa nume de cont.
+  assert.match(installer, /privateai:privateai:600:1/)
+  assert.match(installer, /privateai:privateai:20419565568:1/)
+
+  const fastArtifacts = controller.slice(
+    controller.indexOf('function fastArtifactsInstalled('),
+    controller.indexOf('function discoverFastModelPath('),
+  )
+  assert.ok(fastArtifacts.length > 0, 'fastArtifactsInstalled nu a putut fi izolata')
+
+  // Controllerul nu are voie sa compare proprietarul cu un uid/gid literal:
+  // identitatile conturilor difera de la o gazda la alta, iar 10050 este gid-ul
+  // grupului kelion-app, nu al contului privateai.
+  const numericOwnerComparison = /\b(?:uid|gid)\s*===\s*\d+/
+  assert.doesNotMatch(
+    fastArtifacts,
+    numericOwnerComparison,
+    'proprietarul artefactelor private-ai este comparat cu un identificator numeric fix',
+  )
+
+  // Trebuie rezolvat la rulare, exact contul pe care il cere installerul.
+  assert.match(fastArtifacts, /privateAiIdentity\(\)/)
+  const identity = controller.slice(
+    controller.indexOf('function privateAiIdentity('),
+    controller.indexOf('function fastArtifactsInstalled('),
+  )
+  assert.match(identity, /\/etc\/passwd[\s\S]*privateai:/)
+  assert.match(identity, /\/etc\/group[\s\S]*privateai:/)
 })

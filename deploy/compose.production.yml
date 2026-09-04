@@ -18,6 +18,7 @@ services:
     environment:
       BIND_HOST: 0.0.0.0
       OPENAI_API_KEY_FILE: /run/secrets/openai-project-key
+      OPENAI_ADMIN_KEY_FILE: /run/secrets/openai-admin-key
       SESSION_SECRET_FILE: /run/secrets/session-secret
       GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google-client-secret
       GOOGLE_TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/google-token-encryption-key
@@ -26,6 +27,9 @@ services:
       VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid-private-key
       DATABASE_URL_FILE: /run/secrets/database-url
       CODEX_WORKER_SECRET_FILE: /run/secrets/codex-worker-secret
+      CONSTRUCTOR_MODEL_CONTROL_ENABLED: "1"
+      CONSTRUCTOR_MODEL_CONTROL_SOCKET: /run/kelion-constructor-model-control/control.sock
+      CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE: /run/secrets/constructor-model-control-secret
       CONSTRUCTOR_PUBLISHER_SECRET_FILE: /run/secrets/constructor-publisher-secret
       CONSTRUCTOR_RELEASE_SECRET_FILE: /run/secrets/constructor-release-secret
       GITHUB_RELEASE_OAUTH_TOKEN_FILE: /run/secrets/github-release-oauth-token
@@ -53,12 +57,20 @@ services:
         target: /run/kelion-converter-api
         read_only: true
       - type: bind
+        source: /run/kelion-constructor-model-control
+        target: /run/kelion-constructor-model-control
+        read_only: true
+      - type: bind
         source: ${KELION_RELEASE_STATE_ROOT:?global release state root is required}
         target: /run/kelion-release
         read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-project-key
         target: /run/secrets/openai-project-key
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/openai-admin-key
+        target: /run/secrets/openai-admin-key
         read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/session-secret
@@ -91,6 +103,10 @@ services:
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/codex-worker-secret
         target: /run/secrets/codex-worker-secret
+        read_only: true
+      - type: bind
+        source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/constructor-model-control-secret
+        target: /run/secrets/constructor-model-control-secret
         read_only: true
       - type: bind
         source: ${KELION_SECRET_ROOT:-/root/kelion/secrets}/constructor-publisher-secret

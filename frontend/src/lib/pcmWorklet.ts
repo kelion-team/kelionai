@@ -42,6 +42,11 @@ export interface CulesPcm {
   opreste(): void
 }
 
+// Contextul audio e acum PARTAJAT între sesiuni (audioContextPartajat.ts):
+// `registerProcessor` cu același nume de două ori pe același worklet aruncă,
+// deci modulul se înregistrează O DATĂ per context și se reține aici.
+const contexteCuModul = new WeakSet<AudioContext>()
+
 /** Pornește culesul: `laCadru` primește bucăți Float32 (~4096 mostre, rata
  *  contextului). Întoarce null dacă browserul nu poate — apelantul cade pe
  *  ScriptProcessor, cu deprecarea lui cu tot (mai bine deprecat decât mut). */
@@ -52,11 +57,14 @@ export async function pornesteCulesPcm(
 ): Promise<CulesPcm | null> {
   try {
     if (!ctx.audioWorklet) return null
-    const url = URL.createObjectURL(new Blob([COD_PROCESOR], { type: 'application/javascript' }))
-    try {
-      await ctx.audioWorklet.addModule(url)
-    } finally {
-      URL.revokeObjectURL(url)
+    if (!contexteCuModul.has(ctx)) {
+      const url = URL.createObjectURL(new Blob([COD_PROCESOR], { type: 'application/javascript' }))
+      try {
+        await ctx.audioWorklet.addModule(url)
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+      contexteCuModul.add(ctx)
     }
     const nod = new AudioWorkletNode(ctx, 'culegator-pcm', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
     nod.port.onmessage = (ev: MessageEvent): void => laCadru(ev.data as Float32Array)

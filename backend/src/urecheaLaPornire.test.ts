@@ -32,7 +32,14 @@ describe('P21 — veriga 1: urechea pornește numai după intenție', () => {
 
 describe('P21 — veriga 2: urechea deschisă chiar AUDE (contextul suspendat)', () => {
   it('contextul de intrare pornit altfel decât running primește deblocarea la gest', () => {
-    expect(vocal).toMatch(/if \(ctxIn\.state !== 'running'\) deblocheazaAudioLaGest\(ctxIn\)/)
+    // Garanția s-a mutat în contextul partajat: acolo se creează singurul
+    // AudioContext al aplicației, i se armează deblocarea la gest o singură
+    // dată, și se reia dacă browserul l-a suspendat. Fără asta urechea pare
+    // deschisă dar nu aude — de aceea regula rămâne păzită, doar în alt loc.
+    const partajat = sursa('../../frontend/src/lib/audioContextPartajat.ts')
+    expect(partajat).toMatch(/deblocheazaAudioLaGest\(/)
+    expect(partajat).toMatch(/state === 'suspended'[\s\S]{0,80}resume\(\)/)
+    expect(vocal).toMatch(/const ctxPartajat = obtineAudioContext\(\)[\s\S]{0,400}ctxIn = ctxPartajat[\s\S]{0,80}ctxOut = ctxPartajat/)
   })
 
   it('auto-resume pe interval, cât sesiunea e vie (mobilul adoarme contextele)', () => {

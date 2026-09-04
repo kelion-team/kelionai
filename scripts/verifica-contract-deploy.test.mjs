@@ -24,7 +24,7 @@ test('contractul real backend-provision-compose este complet', () => {
 test('contractul declară exact schema runtime și toate intrările de control ale provisioning-ului', () => {
   const contract = JSON.parse(readFileSync(new URL('../config/runtime-contract.json', import.meta.url), 'utf8'))
   const expected = [...runtimeContractNames(contract)].sort()
-  assert.equal(expected.length, 86)
+  assert.equal(expected.length, 90)
   assert.deepEqual([...workflowRuntimeNames()].sort(), expected)
   assert.deepEqual([...cutoverRuntimeNames()].sort(), expected)
   const example = exampleRuntimeNames()
@@ -33,12 +33,42 @@ test('contractul declară exact schema runtime și toate intrările de control a
     actionsSecret: 'RELEASE_GITHUB_TOKEN',
     file: 'github-release-oauth-token',
   })
+  assert.equal(contract.secretFiles.OPENAI_ADMIN_KEY, 'openai-admin-key')
+  assert.equal(contract.hostGeneratedRuntimeSecretFiles.CONSTRUCTOR_MODEL_CONTROL_SECRET,
+    'constructor-model-control-secret')
   assert.deepEqual(contract.hostProvisionedSecretFiles.CONSTRUCTOR_GHCR_READ_TOKEN, {
     environment: 'GHCR_READ_TOKEN',
     file: 'github-ghcr-read-token',
     target: '/root/kelion/gate-secrets/github-ghcr-read-token',
   })
   assert.deepEqual(contract.workflowControlSecrets, ['VPS_SSH_KEY'])
+  const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
+  assert.doesNotMatch(workflow, /secrets\.CONSTRUCTOR_MODEL_CONTROL_SECRET/)
+  assert.match(workflow, /ensure_local_model_control_secret/)
+  assert.match(workflow, /openssl rand -hex 32/)
+})
+
+test('cheia OpenAI Admin este secret-file backend-only și distinctă de cheia de inferență', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/vps-set-env.yml', import.meta.url), 'utf8')
+  const compose = readFileSync(new URL('../deploy/compose.production.yml', import.meta.url), 'utf8')
+  const deploy = readFileSync(new URL('../deploy/deploy.sh', import.meta.url), 'utf8')
+  const cutover = readFileSync(new URL('../deploy/lib/runtime-config-cutover.sh', import.meta.url), 'utf8')
+
+  const beforeSteps = workflow.slice(0, workflow.indexOf('    steps:'))
+  assert.doesNotMatch(beforeSteps, /OPENAI_(?:API|ADMIN)_KEY:/)
+  assert.match(workflow, /- name: Aplică atomic allowlist-ul și secretele\s+env:\s+OPENAI_API_KEY: \$\{\{ secrets\.OPENAI_API_KEY \}\}\s+OPENAI_ADMIN_KEY: \$\{\{ secrets\.OPENAI_ADMIN_KEY \}\}\s+run:/)
+  assert.match(workflow, /\[\[ "\$OPENAI_API_KEY" =~ \^sk-proj-\[A-Za-z0-9_-\]\{16,\}\$ \]\] \|\| exit 1/)
+  assert.match(workflow, /\[\[ "\$OPENAI_ADMIN_KEY" =~ \^sk-admin-\[A-Za-z0-9_-\]\{16,\}\$ \]\] \|\| exit 1/)
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY="disabled-placeholder-/)
+  assert.match(workflow, /encode openai-admin-key "\$OPENAI_ADMIN_KEY"/)
+  assert.doesNotMatch(workflow, /['"]OPENAI_ADMIN_KEY=/)
+  assert.match(compose, /OPENAI_ADMIN_KEY_FILE: \/run\/secrets\/openai-admin-key/)
+  assert.match(compose, /source: \$\{KELION_SECRET_ROOT:-\/root\/kelion\/secrets\}\/openai-admin-key\s+target: \/run\/secrets\/openai-admin-key\s+read_only: true/)
+  assert.match(deploy, /awk 'NR != 1[^\n]+\^sk-proj-\[A-Za-z0-9_-\]\{16,\}\$/)
+  assert.match(deploy, /awk 'NR != 1[^\n]+\^sk-admin-\[A-Za-z0-9_-\]\{16,\}\$/)
+  assert.doesNotMatch(deploy, /sed -n '1p' "\$SECRET_ROOT\/openai-(?:project|admin)-key"/)
+  assert.doesNotMatch(deploy, /disabled-placeholder-\*\) ;;\s*# Mod abonament ChatGPT Pro/)
+  assert.match(cutover, /app-secret\.openai-project-key\|app-secret\.openai-admin-key/)
 })
 
 test('Revolut Merchant este clasificat complet și moneda nu mai este env', () => {

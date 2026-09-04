@@ -1,54 +1,101 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-08-30T05:39:53Z`
+Actualizat: `2026-09-01T14:35:00Z`
 
 ## Stare verificată
 
-- `master` este `4687c7f2a57b17f2f3a1e8ca5b1a9bcb2583e907`.
-  CI-ul post-merge și buildul celor cinci imagini OCI au trecut, iar
-  digesturile au fost semnate.
-- Release run `33272696377` a validat candidatul și semnăturile, dar s-a
-  oprit înainte de point-of-no-return. Release-ul public anterior a rămas
-  activ.
-- Cauza nouă este un bootstrap deadlock în `deploy.sh`: înainte să
-  instaleze helperul reparat, deploy-ul cere helperului live vechi să
-  recupereze `constructor-activation.journal`. Generația veche include
-  jurnalul în globul `constructor-activation.*` și refuză recovery-ul.
-- Migrarea pregătită pe ramura
-  `chore/deploy-activation-gc-bootstrap-20260829` este one-shot și dublu
-  pin-uită. Acceptă numai helperul live `ce136f…`, candidatul `cd93ea…`,
-  un jurnal schema 2 pentru `activate-worker-publisher` și absența
-  oricărui jurnal runtime, gate sau deploy concurent.
-- Migrarea rulează helperul candidat numai dintr-o copie temporară
-  root-only, reia explicit operația jurnalizată, dovedește ștergerea
-  jurnalului/pendingului/snapshotului, apoi quiesce din nou Constructorul.
-  Helperul live nu este înlocuit înaintea dovezii.
-- Constructorul rămâne fail-closed; timerele sunt inactive până la
-  recovery/deploy reușit și la probele Codex CLI.
-- Cheia OpenAI API de producție rămâne revocată; aceasta este o problemă
-  separată de release și Constructor.
-- Failul jobului `provision` (`actions/runs/33295132843/jobs/99213371892`)
-  a fost corelat cu validarea prea strictă a snapshoturilor
-  `constructor-activation.*`: helperul refuza sufixe legacy validate
-  root-only, ceea ce bloca `garbage_collect_activations`.
-- Corecția locală lărgește allowlist-ul de sufixe pentru snapshoturile
-  `constructor-activation.*` în helperul runtime și actualizează hash-urile
-  pin-uite pentru helperul compatibil (`deploy.sh` și
-  `instaleaza-constructor.sh`), împreună cu testul contractual aferent.
+- `origin/master` este la `f57c77b395e1f17ff3d498b120173971442a5f6e`;
+  PR-ul liniar `#1571` a fost îmbinat prin rebase.
+- AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
+  `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
+- Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
+  instalat are `20,419,565,568` bytes și SHA-256
+  `671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7`.
+- Run-ul `33364953572` a verificat baza AI, accesul full-host, executorul
+  OpenCode și heartbeat-ul HMAC, apoi a făcut rollback deoarece
+  `kelion-constructor-sync.service` a încercat un `runuser` blocat de sandbox.
+- Laptopul nu găzduiește modelul. Clientul Windows trebuie să folosească
+  `https://kelionai.app` și aceeași coadă procesată de workerul Contabo.
+- Proba read-only `private-ai-active-model-benchmark`, run `33497637524`, a
+  măsurat `private-ai-llm.service` ca inactiv înainte de inferență; nu există o
+  măsurătoare validă de viteză pentru niciun model în starea curentă.
+- Re-rularea #2 a runului `33339737404` pentru vechiul workflow de reparare a
+  eșuat la `resume-install` în 19 secunde și nu a restaurat serviciul.
+- Artefactele GGUF sigilate au exact `20.419.565.568` bytes pentru 35B și
+  `76.536.964.608` bytes pentru 122B, în total `96.956.530.176` bytes.
+- Freeze-ul local final este verde: backend `1.539/1.539`, frontend `321/321`,
+  manifestul static exact `332/332`, în total `2.192/2.192` teste. Au trecut
+  separat 11 porți statice, 3 self-testuri, Gitleaks pe 50,32 MB fără secrete,
+  jscpd pe 316 fișiere fără clone, sintaxa Bash `19/19`, YAML `25/25`, Node
+  `97/97` și verificarea staged a 12 unități systemd.
+- Re-auditul pe hashurile finale a dat `GO` pentru deployul safe. Publicarea
+  are `114/114` teste verzi; reluarea configurării leagă byte-exact aceeași
+  tuplă ordonată de 25 artefacte și refuză înainte de mutații o generație veche.
+- Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
+  frontend. Poarta statică a identificat că proba reală `flock` era lansată de
+  runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
+  Pasul PR CI activează explicit numai acea probă prin boundary-ul `sudo` deja
+  obligatoriu în workflow. Gate-ul container rămâne portabil fără `sudo`, iar un
+  test static sigilează diferența; validatorul și codul de producție nu au fost
+  relaxate.
+- Planul de migrare pentru starea live măsurată are exact versiunile
+  `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
+  sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
 
-## Următorul pas sigur
+## Schimbarea în curs
 
-1. Rulează din nou workflow-ul `provision-production-secrets` pe SHA-ul cu
-   fixul GC + hash pinning și confirmă că jobul `provision` trece.
-2. Rulează porțile PR pentru modificările curente și păstrează doar failurile
-   reproduse local (în prezent, un test existent cere dependența
-   `@electric-sql/pglite` absentă în sandboxul curent).
-3. Îmbină prin rebase numai pe verde și publică noul `master`.
-4. Confirmă release proof pentru SHA-ul nou și apoi rulează controlul
-   Constructor pentru starea timerelor și proba `codex --version`.
+- Ownerul a respins al doilea VPS și orice cost nou. Ambele modele rămân pe
+  discul Contabo existent, dar numai unul este încărcat în RAM: 35B implicit la
+  instalare/reboot și 122B numai după comutarea manuală a ownerului din Admin.
+- Workerul nu schimbă modelul și nu reîncearcă/reexecută automat. Numai dacă o
+  execuție FAST validă se termină `unresolved`, produsul recomandă explicit
+  comutarea manuală la POWERFUL; ownerul decide separat comutarea și comanda
+  `Reia`. O cădere tehnică este terminală și raportată separat, fără recomandare
+  de model. POWERFUL nerezolvat este terminal, fără alt model recomandat.
+- Backendul și interfața Admin pentru starea/comanda manuală sunt verzi local.
+  Controllerul privilegiat UDS/HMAC, comutatorul systemd, workerul cu un singur
+  profil activ și cablarea installer/upgrade au teste locale verzi. Controllerul
+  este blocat fail-closed de recovery/ready și de toate jurnalele persistente,
+  iar ACK-ul de switch este serializat cu lockul canonic de publicare.
+- Instalarea 122B este reluabilă sub lockurile host + GitHub, păstrează profilul
+  manual la rerun și nu pornește controllerul înainte de receiptul final.
+  Workflowurile mutatoare Contabo folosesc aceeași coadă `production-release`,
+  iar configurarea Constructor poate aștepta bounded dovada release-images
+  exactă a noului master.
+- Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
+  măsurători valide de inferență sau de durată a comutării; în această etapă nu
+  este cerut și nu este pretins niciun benchmark valid de viteză.
+- Prima rotație post-merge a refuzat corect markerul live
+  `constructor-unit-migration.pending` înainte de mutațiile runtime. Calea
+  owner-aware următoare este `configure-constructor`, iar `vps-set-env` poate fi
+  reluat numai după succesul complet al configurării.
+- Buildul release exact pentru `f57c77b` a oprit publicarea imaginilor la proba
+  read-only: self-testul workerului folosea două căi `/tmp` literale, iar testul
+  boundary elimina `TMPDIR=/work/tmp` din mediul allowlist al copilului. Fixul
+  în curs folosește `node:os.tmpdir()` pentru ambele directoare și transmite
+  explicit `TMPDIR`; manifestul static exact este local `332/332` verde.
+- Ownerul a aprobat explicit publicarea urgentă pe Contabo existent, fără cost
+  nou. Nu mai este necesară o altă aprobare pentru commit, merge și deploy în
+  limitele acestui contract; orice extindere de cost sau schimbare a profilurilor
+  rămâne exclusiv decizia ownerului.
+- Helperul de restore distructiv are defecte preexistente de reluare după
+  SIGKILL între jurnalul intern și receiptul exterior, precum și după eșecul
+  fazei `restoring`; un workdir decriptat poate rămâne și orfan. Nu sunt pe
+  calea acestui pilot safe; orice release viitor clasificat `destructive`
+  rămâne blocat până la remedierea și testarea acelor cazuri.
+
+## Prag de finalizare
+
+Nu se raportează finalizat până când finalizerul Contabo, claimul real al
+workerului și verificarea clientului Windows nu sunt toate verzi pentru același
+commit. Installerul Windows se publică numai semnat, după integrarea canonică.
+Următorul pas sigur este PR-ul liniar al fixului read-only, CI/buildul canonic și
+merge-ul prin rebase. După buildul verde se reia `configure-constructor`; numai
+după succesul lui se reia `vps-set-env`, apoi deployul serializat pe Contabo.
+Până la dovada live exactă nu se raportează instalat sau finalizat.
 
 ## Legături canonice
 
-- Workflow control Constructor: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>
-- Release eșuat pre-PONR: <https://github.com/kelion-team/kelionai/actions/runs/33272696377>
-- Versiune live: <https://kelionai.app/api/release-proof>
+- Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
+- PR operațional: <https://github.com/kelion-team/kelionai/pull/1571>
+- Aplicație: <https://kelionai.app>

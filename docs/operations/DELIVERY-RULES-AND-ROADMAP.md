@@ -71,14 +71,30 @@ chatul trebuie sa proiecteze aceleasi checkpointuri ordonate:
     verificat sau un fix-forward explicit.
 
 Fiecare checkpoint are timestamp, actor, stare, legatura canonica si ultima
-dovada. Lease-ul si heartbeatul detecteaza stagnarea. Timeoutul nu marcheaza
-succes: reia aceeasi cerere idempotent, pe un termen/backoff persistat. Numarul
-de incercari este diagnostic si nu devine plafon terminal pentru o eroare
-recuperabila. Numai o autoritate externa reala poate pune cererea in asteptare,
-cu o singura actiune explicita; dupa restabilirea autoritatii, aceeasi cerere se
-reia automat. Retry-ul nu creeaza o cerere duplicata si nu pierde dovezile
-anterioare. Receiptul `local_gates` confirma numai portile locale/offline;
-rezultatul GitHub `ci=green` este un checkpoint independent si ulterior.
+dovada. Lease-ul si heartbeatul detecteaza stagnarea, dar nu autorizeaza o a
+doua executie: dupa ce workerul revendica ordinul, workerul, modelul si ordinul
+au **zero retry si zero reexecutie automata**. Un timeout, o eroare tehnica ori
+`unresolved` inchide terminal ciclul curent. Butonul explicit `Reia` ramane o
+decizie separata a ownerului: porneste un `execution_cycle` nou si primeste un
+task ID worker nou, fara sa rescrie sau sa continue ciclul terminal anterior.
+
+Numai tranzitiile de **publication, CI si release** pot fi reluate idempotent,
+exclusiv pentru acelasi handoff imuabil si acelasi commit/SHA. Reluarea pastreaza
+identitatea si dovezile, nu modifica patchul/commitul si nu invoca din nou
+workerul sau modelul. O autoritate externa reala poate pune in asteptare numai o
+astfel de tranzitie downstream, cu o singura actiune explicita; dupa
+restabilirea autoritatii se reia acelasi checkpoint downstream. Receiptul
+`local_gates` confirma numai portile locale/offline; rezultatul GitHub
+`ci=green` este un checkpoint independent si ulterior.
+
+Exista exact doua exceptii tehnice, care nu relaxeaza regula ordinului:
+
+1. installerul poate activa temporar POWERFUL numai ca sa-i probeze model-list
+   si inferenta, apoi trebuie sa revina si sa dovedeasca FAST activ in receiptul
+   final; nu ruleaza si nu reia un ordin;
+2. dupa restart, controllerul de model poate continua numai intentia manuala
+   deja acceptata si persistata, cu acelasi request ID si aceeasi tinta. Nu
+   alege un profil, nu creeaza o comutare noua si nu repune ordinul in executie.
 
 Rollbackul este parte a traseului, nu o nota ulterioara. Pentru fiecare release
 se pastreaza candidatul, point-of-no-return, artefactul anterior eligibil si
@@ -95,8 +111,9 @@ Sistemul trebuie sa:
 1. detecteze automat prerechizitele si sa afiseze rezultatul verificarii;
 2. aplice defaulturi sigure, versionate si fail-closed;
 3. creeze si sa porneasca automat cererea/jobul validat;
-4. avanseze automat tranzitiile eligibile si sa reia dupa un retry sau dupa
-   disparitia unui blocaj;
+4. avanseze automat tranzitiile eligibile; numai publication, CI si release se
+   pot relua dupa un blocaj, pe acelasi handoff si commit, fara reexecutia
+   workerului/modelului/ordinului;
 5. afiseze starea, checkpointurile, dovezile si escaladarea, fara a transfera
    munca operationala evitabila catre owner.
 
@@ -104,10 +121,11 @@ Actiunea umana este permisa numai cand este ireversibila sau cere autoritate
 externa pe care sistemul nu o poate delega, de exemplu consimtamant OAuth,
 plata/acceptarea unui contract ori loginul interactiv al unei credentiale. In
 acel caz, UI-ul descrie in limbaj simplu o singura actiune necesara, motivul si
-efectul ei. Dupa confirmarea externa, aceeasi cerere se reia automat de la
-checkpointul durabil; utilizatorul nu trebuie sa recreeze jobul sau sa apese
-butoane de continuare evitabile. Un task de setup care poate fi automatizat nu
-este prezentat ownerului.
+efectul ei. Dupa confirmarea externa, numai tranzitia downstream de publication,
+CI sau release se reia de la checkpointul durabil al aceluiasi handoff/commit;
+utilizatorul nu trebuie sa recreeze jobul sau sa apese butoane de continuare
+evitabile. Un task de setup care poate fi automatizat nu este prezentat
+ownerului.
 
 ## Regula release train
 
@@ -178,9 +196,11 @@ inregistrat durabil cu:
 4. testul de regresie care ar fi detectat esecul;
 5. runbookul reutilizabil sau actualizarea procedurii existente.
 
-Un retry reusit fara cauza si protectie de regresie nu inchide lectia. Nu se
-copiaza secrete sau loguri brute in documentatie; se pastreaza linkul canonic si
-rezumatul minim verificabil.
+O reluare reusita de publication, CI sau release fara cauza si protectie de
+regresie nu inchide lectia. Reluarea ramane limitata la acelasi handoff/commit si
+nu autorizeaza retry-ul workerului/modelului/ordinului. Nu se copiaza secrete sau
+loguri brute in documentatie; se pastreaza linkul canonic si rezumatul minim
+verificabil.
 
 ## Credentiala proiectului Keleon
 
@@ -190,17 +210,19 @@ Serviciile server-side relevante o primesc din aceeasi sursa de secret, prin
 mount read-only si cu privilegiu minim; „partajata” nu inseamna copiere in cod,
 env-uri publice sau baze de date.
 
-Credentiala nu ajunge niciodata in browser, client nativ, workerul Constructor,
-publisher, releaser, Git, GitHub Actions logs sau artefacte. Workerul Codex isi
-pastreaza separat autentificarea oficiala `codex login`; ea nu inlocuieste si nu
-citeste credentiala de produs.
+Credentiala nu ajunge niciodata in browser, client nativ, Constructor,
+publisher, releaser, Git, GitHub Actions logs sau artefacte. Workerul Constructor
+nu primeste nicio cheie AI: executa OpenCode `1.18.25` cu
+Qwen3.6-35B-A3B Q4_K_M local, prin endpointul loopback llama.cpp. Configul
+permite exclusiv providerul `llama.cpp`, nu contine `apiKey`, iar loginul si
+cache-ul Codex legacy trebuie sa ramana absente.
 
-Daca secretul lipseste sau nu poate fi citit, capabilitatile dependente se
-opresc fail-closed si afiseaza un diagnostic stabil, redactat si actionabil in
-Admin/chat: serviciul afectat, categoria `provider credential missing`, starea
-`setup_required` sau `degraded` si actiunea operatorului. Diagnosticul nu
-afiseaza valoarea, prefixul sau lungimea secretului si nu activeaza un furnizor
-alternativ.
+Daca secretul lipseste sau nu poate fi citit, numai capabilitatile OpenAI ale
+produsului se opresc fail-closed si afiseaza un diagnostic stabil, redactat si
+actionabil in Admin/chat: serviciul afectat, categoria
+`provider credential missing`, starea `setup_required` sau `degraded` si
+actiunea operatorului. Diagnosticul nu afiseaza valoarea, prefixul sau lungimea
+secretului si nu activeaza un furnizor alternativ.
 
 ## Protocol obligatoriu de reluare intre sesiuni
 
@@ -256,8 +278,8 @@ Aceasta regula este criteriu de acceptare obligatoriu, nu recomandare.
 ### Status transparent
 
 - [ ] Aceeasi cerere durabila este vizibila in Admin si chat.
-- [ ] Checkpointurile, heartbeatul, timeoutul, retry-ul si escaladarea au
-      timestamp si stare factuala.
+- [ ] Checkpointurile, heartbeatul si timeoutul au timestamp si stare factuala;
+      orice reluare publication/CI/release indica acelasi handoff si commit.
 - [ ] PR-ul, checkurile, deploy-ul si incidentul au fiecare URL direct canonic.
 - [ ] Nicio stare `live` nu apare fara SHA si proba publica aferenta.
 
@@ -275,11 +297,13 @@ Aceasta regula este criteriu de acceptare obligatoriu, nu recomandare.
 - [ ] Prerechizitele sunt detectate automat, cu rezultat si dovada vizibile.
 - [ ] Defaulturile sigure sunt aplicate fara butoane de configurare in traseul
       normal.
-- [ ] Crearea jobului si tranzitiile eligibile pornesc si continua automat.
+- [ ] Crearea jobului si executia initiala pornesc automat; dupa claim,
+      workerul/modelul/ordinul nu repornesc, iar numai tranzitiile downstream
+      eligibile continua pe acelasi handoff/commit.
 - [ ] Orice actiune umana ramasa este externa sau ireversibila, iar UI-ul cere
       o singura actiune in limbaj simplu si explica motivul.
-- [ ] Dupa actiunea externa, aceeasi cerere se reia automat de la checkpoint,
-      fara recreare sau pas manual evitabil.
+- [ ] Dupa actiunea externa, numai publication/CI/release continua de la
+      checkpointul aceluiasi handoff/commit, fara recreare sau reexecutie worker.
 
 ### Reluare intre sesiuni
 
@@ -295,8 +319,8 @@ legaturi canonice verificabile.
 ## Constructor observability and no-hardcoding rule
 
 This section is a mandatory carry-over requirement and supersedes any earlier
-wording that permits an accepted Constructor request to remain blocked or to
-require a routine manual retry.
+wording that permits retry or re-execution of a claimed Constructor order,
+worker invocation, or model invocation.
 
 - Every user-visible operation exposes an on-screen status, real 0-100 progress,
   and a plain-language activity timeline from start to a resolved result.
@@ -305,13 +329,25 @@ require a routine manual retry.
   cosmetic minimums, fixed stage percentages, and simulated output are forbidden.
 - Refresh reconstructs the same status from PostgreSQL. The UI is a projection;
   it does not own stages, transition labels, percentages, or completion.
-- Once an admin request is accepted, recoverable worker, publisher, CI, and
-  release transitions retry automatically from their last durable checkpoint.
-  They do not become a blocking terminal result because an attempt counter was reached.
-- A truly external authority step may pause execution only for one explicit
-  action such as interactive provider login, OAuth consent, or payment. The UI
-  states that single action and the persisted request resumes automatically when
-  readiness is restored.
+- Once the worker claims an accepted order, the worker, model invocation, and
+  order have zero automatic retry and zero automatic re-execution. Timeout,
+  technical failure, and `unresolved` are terminal for that execution cycle.
+  The explicit Admin `Retry` action remains a separate owner decision: it starts
+  a new `execution_cycle` with a fresh worker task ID and preserves the terminal
+  cycle instead of continuing it.
+- Only publication, CI, and release transitions may resume idempotently, and
+  only for the exact same immutable handoff and commit/SHA. Resume must not
+  change the patch, substitute a commit, or invoke the worker/model again.
+- The installer may temporarily activate and probe POWERFUL, but it must return
+  to and prove FAST as the final active profile; this validation runs no order.
+- After restart, the model controller may continue only an already accepted,
+  persisted manual intent with the exact same request ID and target. It must not
+  choose a target, create a new switch, or re-enqueue an order.
+- A truly external authority step may pause a publication, CI, or release
+  transition only for one explicit action such as interactive provider login,
+  OAuth consent, or payment. The UI states that single action; when readiness is
+  restored, only the same downstream checkpoint for the same handoff/commit may
+  resume.
 - 100% is emitted only after the release service has persisted the deployed
   commit and verified live version. Administrator cancellation is a separate
   resolved terminal result.
@@ -322,8 +358,10 @@ require a routine manual retry.
 - [ ] Worker readiness/heartbeat and claim are visible without exposing credentials.
 - [ ] Every meaningful Constructor, PR, merge, and release transition appears after refresh.
 - [ ] Percentage changes are derived from the canonical activity catalog and event history.
-- [ ] A recoverable failure produces a persisted automatic-recovery event and advances again.
-- [ ] No accepted request remains failed, blocked, or lease-expired without automatic continuation.
+- [ ] A claimed worker/model/order execution is never retried or re-executed automatically; only explicit Admin `Retry` may start a new cycle while the terminal cycle remains visible.
+- [ ] A publication/CI/release recovery event preserves the exact handoff and commit/SHA and never invokes the worker/model.
+- [ ] Installer POWERFUL probing ends with FAST proven active, without an order execution.
+- [ ] Controller restart recovery preserves the accepted manual switch request ID and target and creates no new decision.
 - [ ] The monitor reaches 100% only with deployed commit, live version, readiness proof, and canonical links.
 - [ ] The session handoff records verified state, unfinished work, owner-only blockers, ordered next steps, and links.
 

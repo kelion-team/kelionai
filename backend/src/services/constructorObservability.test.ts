@@ -10,6 +10,7 @@ const catalog: ConstructorCatalogEntry[] = [
   { activityKey: 'working', sequenceNo: 10, label: 'Executata', terminal: false },
   { activityKey: 'deployed', sequenceNo: 40, label: 'Live', terminal: true },
   { activityKey: 'automatic_retry', sequenceNo: null, label: 'Reluare automata', terminal: false },
+  { activityKey: 'manual_owner_retry', sequenceNo: null, label: 'Reluare ceruta de owner', terminal: false },
 ]
 
 const event = (
@@ -55,6 +56,22 @@ describe('Constructor observability', () => {
     expect(afterRefresh).toEqual(first)
     expect(first.progress.percent).toBe(25)
     expect(first.activity.at(-1)?.state).toBe('recovery')
+  })
+
+  it('attributes an explicit owner retry separately from automatic recovery', () => {
+    const view = projectConstructorObservability(
+      { id: 7, status: 'queued', constructorStage: 'queued' },
+      catalog,
+      [
+        event('1', 'working', 'working', 10),
+        event('2', 'manual_owner_retry', 'queued', null),
+      ],
+    )
+    expect(view.activity.at(-1)).toMatchObject({
+      eventKey: 'manual_owner_retry',
+      label: 'Reluare ceruta de owner',
+      state: 'recovery',
+    })
   })
 
   it('reaches 100 only with the authoritative deployed result', () => {

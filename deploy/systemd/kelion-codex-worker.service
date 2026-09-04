@@ -1,58 +1,61 @@
 [Unit]
-Description=Kelion Constructor Codex queue and isolated executor
-After=network-online.target kelion-constructor-sync.service kelion-runtime-config-recovery.service
-Wants=network-online.target
-Requires=kelion-constructor-sync.service
+Description=Kelion Constructor queue with local OpenCode/Qwen full-host executor
+After=network-online.target private-ai-llm.service kelion-constructor-sync.service kelion-constructor-model-control.service kelion-runtime-config-recovery.service
+Wants=network-online.target private-ai-llm.service
+Requires=kelion-constructor-sync.service kelion-constructor-model-control.service
 ConditionPathExists=/etc/kelion/codex-worker.enabled
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
 
 [Service]
 Type=oneshot
 User=kelion-codex
 Group=kelion-codex
-SupplementaryGroups=kelion-handoff
+SupplementaryGroups=kelion-handoff privateai
 UMask=0027
 WorkingDirectory=/var/lib/kelion-codex
-Environment=PATH=/opt/kelion-codex/bin:/usr/bin:/bin
-Environment=CODEX_BIN=/opt/kelion-codex/bin/codex
-Environment=CODEX_HOME=/var/lib/kelion-codex-auth
+Environment=PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode
+Environment=OPENCODE_CONFIG_HOME=/srv/private-ai/home/.config
+Environment=OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json
+Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local
+Environment=OPENCODE_BASE_URL=http://127.0.0.1:24080/v1
 Environment=CODEX_WORKER_REPO=/var/lib/kelion-codex/repo
 Environment=CODEX_WORKER_JOBS=/var/lib/kelion-codex/jobs
-Environment=CODEX_WORKER_PROFILE_HOME=/opt/kelion-codex/profile-home
 Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
-Environment=KELION_CODEX_ADVERSARIAL_SENTINEL=KELION-CODEX-ADVERSARIAL-SENTINEL-V1
 EnvironmentFile=/root/kelion/config/codex-worker.env
 LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
 ExecStartPre=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test
-ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
-NoNewPrivileges=true
-KeyringMode=private
-PrivateIPC=true
-PrivateDevices=true
-PrivateTmp=true
+ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+NoNewPrivileges=false
+KeyringMode=shared
+PrivateIPC=false
+PrivateDevices=false
+PrivateTmp=false
 RuntimeDirectory=kelion-codex
 RuntimeDirectoryMode=0700
-ProtectProc=invisible
-ProcSubset=pid
-ProtectClock=true
-ProtectControlGroups=true
-ProtectHome=true
-ProtectHostname=true
-ProtectKernelLogs=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/kelion-codex/repo /var/lib/kelion-codex/jobs /var/lib/kelion-codex/.cache /var/lib/kelion-codex/.config /var/lib/kelion-codex/.local /var/lib/kelion-codex-auth /var/lib/kelion-constructor-handoff /run/kelion-codex
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RestrictNamespaces=user mnt net pid ipc uts
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-CapabilityBoundingSet=
+ProtectProc=default
+ProcSubset=all
+ProtectClock=false
+ProtectControlGroups=false
+ProtectHome=false
+ProtectHostname=false
+ProtectKernelLogs=false
+ProtectKernelModules=false
+ProtectKernelTunables=false
+ProtectSystem=false
+ReadWritePaths=
+RestrictAddressFamilies=
+RestrictNamespaces=false
+RestrictRealtime=false
+RestrictSUIDSGID=false
+LockPersonality=false
+CapabilityBoundingSet=~
 AmbientCapabilities=
-SystemCallArchitectures=native
+SystemCallArchitectures=
 MemoryMax=6G
 TasksMax=512
-TimeoutStartSec=100min
+TimeoutStartSec=240min
+TimeoutStopSec=40min
 KillMode=control-group

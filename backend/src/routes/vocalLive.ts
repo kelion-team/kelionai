@@ -422,11 +422,11 @@ const PERSONA_KELION =
   'INVENTARUL REAL depinde de consimțămintele și integrările contului. Folosește doar funcțiile ' +
   'declarate în sesiune și raportează indisponibilitatea factual, fără să promiți acces generic.'
 
-export function ancoraConstructor(codexActiv: boolean): string {
-  return codexActiv
-    ? '\nPENTRU ADMIN — CONSTRUCTOR: cererile validate pot fi puse în coada workerului Codex separat. ' +
+export function ancoraConstructor(constructorActiv: boolean): string {
+  return constructorActiv
+    ? '\nPENTRU ADMIN — CONSTRUCTOR: cererile validate intră direct în build_jobs pentru workerul OpenCode + Qwen local (llama.cpp). ' +
       'Nu afirma PR, merge, deploy sau versiune live până când starea durabilă a jobului le dovedește.'
-    : '\nPENTRU ADMIN — CONSTRUCTOR: workerul Codex nu este configurat; spune setup_required și nu inventa execuție locală.'
+    : '\nPENTRU ADMIN — CONSTRUCTOR: workerul OpenCode + Qwen local (llama.cpp) nu este configurat; spune setup_required și nu inventa execuție.'
 }
 
 export async function capacitateVocalLive(
@@ -1552,7 +1552,7 @@ export async function vocalLiveRoutes(app: FastifyInstance): Promise<void> {
         })
       }
       const instructiune = construiesteInstructiune(
-        PERSONA_KELION + (isAdminSession ? ancoraConstructor(config.codexWorker.enabled) : ''),
+        PERSONA_KELION + (isAdminSession ? ancoraConstructor(config.constructorWorker.enabled) : ''),
         nume,
         istoric,
         ancora,

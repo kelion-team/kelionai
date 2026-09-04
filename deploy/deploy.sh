@@ -67,6 +67,8 @@ migration_proof_copy=''
 PUBLICATION_LOCK=$ROOT/publicare.lock
 RECOVERY_JOURNAL=$RUNTIME_ROOT/destructive-cutover-recovery.json
 CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL=$RUNTIME_ROOT/constructor-deploy-quiesce.journal
+MAX_MODEL_JOURNAL=$RUNTIME_ROOT/constructor-max-model.journal
+CONSTRUCTOR_REACTIVATION_JOURNAL=$RUNTIME_ROOT/constructor-reactivation.journal
 BACKUP_INSTALL_ROOT=/opt/kelion-backup
 BACKUP_RELEASE_ROOT=$BACKUP_INSTALL_ROOT/releases
 PERSISTENT_BACKUP_SCRIPT=$BACKUP_RELEASE_ROOT/$COMMIT_SHA/backup.sh
@@ -77,6 +79,9 @@ SYSTEMD_UNIT_ROOT=/etc/systemd/system
 LEGACY_BACKUP_CRON='0 3 * * 0 /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1'
 LEGACY_BACKUP_CRON_MARKER=$RUNTIME_ROOT/legacy-backup-cron-retired
 LEGACY_RUNTIME_CONTAINERS=(kelionai-app omniroute kelionai-coqui)
+
+[ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+  || die 'o tranzacție max-model persistentă blochează release-ul'
 
 fsync_release_artifact() {
   python3 - "$1" "$2" <<'PY'
@@ -1665,6 +1670,99 @@ recover_lost_post_ponr_quiesce() {
   esac
 }
 
+constructor_model_control_installation_proof() {
+  local path metadata fragment dropins
+  for metadata in \
+    '/opt/kelion-constructor/constructor-model-control.mjs|0:0:555:1' \
+    '/opt/kelion-constructor/lib/service-auth.mjs|0:0:444:1' \
+    '/opt/private-ai/bin/constructor-model-switch|0:0:755:1' \
+    '/etc/systemd/system/kelion-constructor-model-control.service|0:0:444:1' \
+    '/root/kelion/secrets/constructor-model-control-secret|0:10050:440:1'; do
+    path=${metadata%%|*}
+    metadata=${metadata#*|}
+    [ -f "$path" ] && [ ! -L "$path" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$path")" = "$metadata" ] || return 1
+  done
+  systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1 || return 1
+  fragment=$(systemctl show kelion-constructor-model-control.service --property=FragmentPath --value) \
+    || return 1
+  dropins=$(systemctl show kelion-constructor-model-control.service --property=DropInPaths --value) \
+    || return 1
+  [ "$fragment" = /etc/systemd/system/kelion-constructor-model-control.service ] \
+    && [ -z "$dropins" ] \
+    && systemctl is-enabled --quiet kelion-constructor-model-control.service
+}
+
+constructor_model_control_ready_proof() {
+  local socket=/run/kelion-constructor-model-control/control.sock
+  constructor_model_control_installation_proof || return 1
+  [ -f /run/kelion/runtime-config-recovery.ready ] \
+    && [ ! -L /run/kelion/runtime-config-recovery.ready ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /run/kelion/runtime-config-recovery.ready)" = '0:0:444:1' ] \
+    && systemctl is-active --quiet kelion-constructor-model-control.service \
+    && [ -S "$socket" ] && [ ! -L "$socket" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$socket")" = '0:10050:660' ]
+}
+
+constructor_model_control_active_socket_proof() {
+  local socket=/run/kelion-constructor-model-control/control.sock
+  constructor_model_control_installation_proof || return 1
+  systemctl is-active --quiet kelion-constructor-model-control.service \
+    && [ -S "$socket" ] && [ ! -L "$socket" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$socket")" = '0:10050:660' ]
+}
+
+validate_constructor_reactivation_intent() {
+  [ -f "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+    && [ ! -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_REACTIVATION_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e '
+      .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+      (keys == ["kind","phase","schema"])
+    ' "$CONSTRUCTOR_REACTIVATION_JOURNAL" >/dev/null
+}
+
+constructor_model_control_preflight() {
+  constructor_model_control_installation_proof || return 1
+  if [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+    [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+      && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ]
+    return
+  fi
+  if [ -e "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+    || [ -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ]; then
+    [ -f "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+      && [ ! -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_REACTIVATION_JOURNAL")" = '0:0:600:1' ] \
+      && jq -e '
+        .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+        (keys == ["kind","phase","schema"])
+      ' "$CONSTRUCTOR_REACTIVATION_JOURNAL" >/dev/null \
+      && { constructor_model_control_quiesced_proof \
+        || constructor_model_control_active_socket_proof; }
+    return
+  fi
+  constructor_model_control_ready_proof
+}
+
+constructor_model_control_quiesced_proof() {
+  local state socket=/run/kelion-constructor-model-control/control.sock
+  constructor_model_control_installation_proof || return 1
+  state=$(systemctl show kelion-constructor-model-control.service --property=ActiveState --value) \
+    || return 1
+  case "$state" in inactive|failed) ;; *) return 1 ;; esac
+  [ -z "$(systemctl list-jobs --no-legend --plain kelion-constructor-model-control.service 2>/dev/null)" ] \
+    && [ ! -e "$socket" ] && [ ! -L "$socket" ]
+}
+
+# Bootstrapul auto poate ajunge înaintea configurării Constructorului. Refuzăm
+# read-only înainte de orice jurnal, backup sau migrator; recovery-ul existent
+# cere în continuare instalația exactă, dar poate avea controllerul quiesced.
+constructor_model_control_preflight \
+  || die 'controllerul manual de model nu este instalat și ready înaintea release-ului'
+
 if [ -e "$PUBLICATION_LOCK" ] || [ -L "$PUBLICATION_LOCK" ]; then
   [ -f "$PUBLICATION_LOCK" ] && [ ! -L "$PUBLICATION_LOCK" ] \
     || die 'lock-ul de publicare nu este fișier regulat'
@@ -1691,6 +1789,82 @@ chmod 0600 "/proc/$$/fd/8"
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'pathul lock-ului a fost schimbat în timpul normalizării'
 flock 8
+[ "$(readlink /proc/$$/fd/8)" = "$PUBLICATION_LOCK" ] \
+  && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/8)" = '0:0:600:1' ] \
+  && [ ! -L "$PUBLICATION_LOCK" ] \
+  && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
+  || die 'lock-ul de publicare s-a schimbat după flock'
+
+# Un crash după clear-ul jurnalului interior, dar înainte de proba controllerului,
+# lasă numai markerul persistent și control-plane-ul quiesced. Îl adoptăm sub
+# publication lock înaintea oricărei validări care ar cere fals ready+socket.
+if [ -e "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+  || [ -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ]; then
+  validate_constructor_reactivation_intent \
+    || die 'reactivarea Constructor existentă nu este autentică'
+  if [ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+    constructor_model_control_preflight \
+      || die 'reactivarea Constructor existentă nu este autentică și sigură'
+    [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500:1' ] \
+      || die 'helperul persistent lipsește pentru reactivarea timpurie'
+    [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$ROOT/config/compose.production.yml")" = '0:0:444:1' ] \
+      || die 'compose-ul persistent lipsește pentru reactivarea timpurie'
+    exec 9>&8
+    KELION_CUTOVER_LOCK_HELD=1 \
+      "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" \
+      || die 'reactivarea timpurie a Constructorului a eșuat'
+    exec 9>&-
+    [ ! -e "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+      && [ ! -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+      && constructor_model_control_ready_proof \
+      || die 'reactivarea timpurie nu a restaurat ready+controller+socket'
+  else
+    # Marker+outer este fereastra crash-safe normală a aceluiași deploy.
+    # Helperul generic nu deține încă tupla requestId+commit și ar refuza
+    # corect. Păstrăm ambele intacte până când jurnalul outer este autentificat
+    # mai jos, iar restore_constructor_after_release îl consumă owner-aware.
+    [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+      && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+      || die 'outer journal al reactivării Constructor este nesigur'
+  fi
+fi
+
+[ ! -e "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+  || die 'o tranzacție max-model persistentă blochează release-ul sub publication lock'
+
+CONSTRUCTOR_UPGRADE_JOURNAL=$RUNTIME_ROOT/constructor-upgrade.journal
+[ ! -e "$CONSTRUCTOR_UPGRADE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_UPGRADE_JOURNAL" ] \
+  || die 'un upgrade Constructor exterior este pending; release-ul este refuzat'
+# O barieră unit-only rămasă după rollback-ul pre-PONR al ACESTEI cereri nu mai
+# blochează circular deploy/boot/activare: jurnalul quiesce aparține tuplei
+# curente, este într-o fază de dinaintea markerului, iar helperul owner-aware o
+# consumă numai după dovada exactă a generației vechi. Orice altă barieră
+# (upgrade exterior, alt request, fază post-marker) rămâne fail-closed.
+if [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+  || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ]; then
+  [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ ! -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$RUNTIME_ROOT/constructor-unit-migration.pending")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$RUNTIME_ROOT/constructor-unit-migration.pending")" -eq 1 ] \
+    && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending" \
+    || die 'bariera unit-only Constructor pending este nesigură; release-ul este refuzat'
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    && jq -e --arg requestId "$KELION_RELEASE_REQUEST_ID" --arg commit "$COMMIT_SHA" '
+      (.schema == 1 or .schema == 2) and .requestId == $requestId and .commit == $commit and
+      (.phase == "armed" or .phase == "quiesced" or .phase == "active-prepared")
+    ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" >/dev/null \
+    || die 'o barieră unit-only Constructor este pending fără rollback-ul pre-PONR al acestei cereri; release-ul este refuzat'
+fi
+
+# Repetăm dovada sub publication lock: preflightul anterior este numai bariera
+# timpurie, iar acest punct închide TOCTOU înainte de recovery sau primul jurnal.
+constructor_model_control_preflight \
+  || die 'controllerul manual de model s-a schimbat înainte de tranzacția release'
 
 recover_lost_post_ponr_quiesce \
   || die 'recovery-ul incidentului post-PONR nu a putut dovedi și reconstitui exact starea'
@@ -1738,8 +1912,40 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
   [ -f "$gate_recovery_journal" ] && [ ! -L "$gate_recovery_journal" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_journal")" = '0:0:600' ] \
     || die 'jurnalul gate existent este nesigur'
-  gate_recovery_root=$(jq -er 'select(.schema == 1 and (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
+  gate_recovery_root=$(jq -er 'select(
+    (keys | sort) == ["commit","helperSha256","schema","transactionRoot"] and
+    .schema == 1 and (.commit | strings | test("^[0-9a-f]{40}$")) and
+    (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-gate-txn\\.[A-Za-z0-9]+$")) and
+    (.helperSha256 | strings | test("^[0-9a-f]{64}$"))) | .transactionRoot' "$gate_recovery_journal") \
     || die 'jurnalul gate existent este invalid'
+  [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL")" = '0:0:600:1' ] \
+    || die 'jurnalul gate nu are outer journal canonic pentru owner'
+  gate_recovery_owner_request_id=$(jq -er '
+    select((keys | sort) == (["activeBefore","activeVersionBefore","commit","gateSha256",
+      "legacyContainers","legacyRestartPolicies","phase","proxyIntent","requestId","schema",
+      "targetGateSha256"] | sort) and
+      .schema == 2 and .phase == "gate-prepared" and
+      (.requestId | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) and
+      (.commit | strings | test("^[0-9a-f]{40}$")) and
+      (.activeBefore | strings | test("^([0-9a-f]{40}|legacy)$")) and
+      (.activeVersionBefore | strings | test("^[0-9a-f]{7,40}$")) and
+      (.legacyContainers | type == "array") and (.legacyRestartPolicies | type == "object") and
+      (.proxyIntent | type == "object") and
+      (.gateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.gateSha256.worker,.gateSha256.publisher,.gateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent"))) and
+      (.targetGateSha256 | keys | sort) == ["publisher","release","worker"] and
+      ([.targetGateSha256.worker,.targetGateSha256.publisher,.targetGateSha256.release] |
+        (all(.[]; type == "string" and test("^[0-9a-f]{64}$")) or all(.[]; . == "absent")))) | .requestId
+  ' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica requestul owner'
+  gate_recovery_owner_commit=$(jq -er '.commit' "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL") \
+    || die 'outer journal gate-prepared nu poate autentifica commitul owner'
+  [ "$gate_recovery_owner_request_id" = "$KELION_RELEASE_REQUEST_ID" ] \
+    && [ "$gate_recovery_owner_commit" = "$COMMIT_SHA" ] \
+    && [ "$(jq -er '.commit' "$gate_recovery_journal")" = "$gate_recovery_owner_commit" ] \
+    || die 'tupla ownerului gate nu corespunde outer/gate/current release'
   [ -d "$gate_recovery_root" ] && [ ! -L "$gate_recovery_root" ] \
     && [ "$(realpath -e -- "$gate_recovery_root")" = "$gate_recovery_root" ] \
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root")" = '0:0:700' ] \
@@ -1754,7 +1960,10 @@ if [ -e "$gate_recovery_journal" ] || [ -L "$gate_recovery_journal" ]; then
     && [ "$(stat -c '%u:%g:%a' "$gate_recovery_root/recovery-compose.yml")" = '0:0:444' ] \
     || die 'compose-ul jurnalizat pentru gate este nesigur'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$gate_recovery_owner_request_id" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$gate_recovery_owner_commit" \
+    "$gate_recovery_root/recovery-helper.sh" --recover-only "$gate_recovery_root/recovery-compose.yml" --leave-constructor-quiesced \
     || die 'recovery-ul gate jurnalizat a eșuat'
   exec 9>&-
 fi
@@ -1765,16 +1974,25 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=1e187e2d32e67c76ae77903033d77c5974f1b86ef479c7330f0ca5678b17cab8
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=829687d4571805244134feb721375cdc2f3f0b19d297daf11ad40c8c40b46057
+
+validate_compatible_activation_blocker() {
+  local blocker=$1
+  [ -f "$blocker" ] && [ ! -L "$blocker" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$blocker")" = '0:0:600:1' ] \
+    && [ "$(wc -l < "$blocker")" -eq 1 ] \
+    && grep -qx 'schema=1' "$blocker"
+}
 
 recover_runtime_activation_before_upgrade() {
   local live_helper=$ROOT/bin/runtime-config-cutover.sh
   local live_compose=$ROOT/config/compose.production.yml
   local candidate_helper=$BUNDLE_DIR/lib/runtime-config-cutover.sh
   local activation_journal=$RUNTIME_ROOT/constructor-activation.journal
+  local unit_migration_pending=$RUNTIME_ROOT/constructor-unit-migration.pending
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
   local gate_journal=$RUNTIME_ROOT/constructor-gate-refresh.journal
-  local live_sha candidate_sha recovery_helper activation_operation=''
+  local live_sha candidate_sha recovery_helper activation_operation='' activation_root='' activation_identity=''
   local temporary='' status=0 cleanup_failed=0 use_compatible_activation_resume=0
   local incompatible activation_candidate
 
@@ -1792,6 +2010,9 @@ recover_runtime_activation_before_upgrade() {
     for incompatible in "$runtime_journal" "$gate_journal" "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL"; do
       [ ! -e "$incompatible" ] && [ ! -L "$incompatible" ] || return 1
     done
+    if [ -e "$unit_migration_pending" ] || [ -L "$unit_migration_pending" ]; then
+      validate_compatible_activation_blocker "$unit_migration_pending" || return 1
+    fi
     [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
       && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
       || return 1
@@ -1803,6 +2024,12 @@ recover_runtime_activation_before_upgrade() {
           test("^/root/kelion/runtime/constructor-activation\\.[A-Za-z0-9]+$"))) |
       .operation
     ' "$activation_journal") || return 1
+    activation_root=$(jq -er '.activationRoot' "$activation_journal") || return 1
+    [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+      && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+      || return 1
+    activation_identity=$(stat -Lc '%d:%i' "$activation_root") || return 1
     [ -f "$candidate_helper" ] && [ ! -L "$candidate_helper" ] || return 1
     candidate_sha=$(sha256sum "$candidate_helper" | awk '{print $1}') || return 1
     [ "$candidate_sha" = "$COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256" ] || return 1
@@ -1824,18 +2051,44 @@ recover_runtime_activation_before_upgrade() {
   if [ "$status" = 0 ] && [ "$use_compatible_activation_resume" = 1 ]; then
     if KELION_CUTOVER_LOCK_HELD=1 \
       KELION_ACTIVATION_RESUME_OPERATION="$activation_operation" \
-      bash "$recovery_helper" --recover-only "$live_compose"; then
-      if [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+      bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
+      [ -f "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+        && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_journal")" = '0:0:600:1' ] \
+        && jq -e --arg operation "$activation_operation" --arg activationRoot "$activation_root" '
+          .schema == 2 and .phase == "applied" and .operation == $operation and
+          .activationRoot == $activationRoot
+        ' "$activation_journal" >/dev/null \
         && [ ! -e /run/kelion/constructor-activation.pending ] \
-        && [ ! -L /run/kelion/constructor-activation.pending ]; then
-        if KELION_CUTOVER_LOCK_HELD=1 \
-          bash "$recovery_helper" --recover-only "$live_compose" --leave-constructor-quiesced; then
-          status=0
-        else
-          status=$?
-        fi
-      else
-        status=1
+        && [ ! -L /run/kelion/constructor-activation.pending ] \
+        && [ ! -e /run/kelion/runtime-config-recovery.ready ] \
+        && [ ! -L /run/kelion/runtime-config-recovery.ready ] \
+        && validate_compatible_activation_blocker "$unit_migration_pending" \
+        && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+        && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+        && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+        && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+        || status=1
+      if [ "$status" = 0 ]; then
+        validate_compatible_activation_blocker "$unit_migration_pending" || status=1
+        fsync_release_artifact "$unit_migration_pending" file || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -f -- "$activation_journal" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        [ ! -e "$activation_journal" ] && [ ! -L "$activation_journal" ] \
+          && [ -d "$activation_root" ] && [ ! -L "$activation_root" ] \
+          && [ "$(realpath -e -- "$activation_root")" = "$activation_root" ] \
+          && [ "$(stat -Lc '%u:%g:%a' "$activation_root")" = '0:0:700' ] \
+          && [ "$(stat -Lc '%d:%i' "$activation_root")" = "$activation_identity" ] \
+          || status=1
+      fi
+      if [ "$status" = 0 ]; then
+        rm -rf --one-file-system -- "$activation_root" || status=1
+        fsync_release_artifact "$RUNTIME_ROOT" directory || status=1
+        [ ! -e "$activation_root" ] && [ ! -L "$activation_root" ] || status=1
       fi
     else
       status=$?
@@ -1873,6 +2126,7 @@ recover_runtime_activation_before_upgrade() {
 
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
+  || [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
   || [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
   recover_runtime_activation_before_upgrade \
     || die 'recovery-ul runtime/activare pre-upgrade a eșuat fail-closed'
@@ -1949,6 +2203,32 @@ recovery_need_reload=$(systemctl show kelion-runtime-config-recovery.service --p
 # Un SIGKILL/reboot în timpul rotației runtime sau al activării Constructor
 # lasă un jurnal root-only. Îl recuperăm sub același publication lock înainte
 # ca release-ul să valideze ori să pornească un backend candidat.
+constructor_reactivation_journal=$RUNTIME_ROOT/constructor-reactivation.journal
+if [ -e "$constructor_reactivation_journal" ] || [ -L "$constructor_reactivation_journal" ]; then
+  validate_constructor_reactivation_intent \
+    || die 'jurnalul reactivării Constructor este nesigur înainte de release'
+  if [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
+    || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
+    # Helperul ownerless ar refuza corect jurnalul exterior. Păstrăm ambele
+    # intenții autentice pentru ramura owner-aware imediat următoare, care leagă
+    # exact requestId+commit sub același lock.
+    :
+  else
+  [ -f "$ROOT/bin/runtime-config-cutover.sh" ] && [ ! -L "$ROOT/bin/runtime-config-cutover.sh" ] \
+    && [ "$(stat -c '%u:%g:%a' "$ROOT/bin/runtime-config-cutover.sh")" = '0:0:500' ] \
+    || die 'helperul persistent pentru reactivarea Constructor lipsește sau are ACL invalid'
+  [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
+    && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
+    || die 'compose-ul persistent pentru reactivarea Constructor lipsește sau are ACL invalid'
+  exec 9>&8
+  KELION_CUTOVER_LOCK_HELD=1 \
+    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" \
+    || die 'reactivarea Constructor întreruptă nu a putut fi finalizată înainte de release'
+  exec 9>&-
+  [ ! -e "$constructor_reactivation_journal" ] && [ ! -L "$constructor_reactivation_journal" ] \
+    || die 'jurnalul reactivării Constructor a rămas după recovery'
+  fi
+fi
 if [ -e "$RUNTIME_ROOT/runtime-config-cutover.journal" ] || [ -L "$RUNTIME_ROOT/runtime-config-cutover.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-activation.journal" ] || [ -L "$RUNTIME_ROOT/constructor-activation.journal" ] \
   || [ -e "$RUNTIME_ROOT/constructor-gate-refresh.journal" ] || [ -L "$RUNTIME_ROOT/constructor-gate-refresh.journal" ] \
@@ -2060,7 +2340,7 @@ KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --validate-env-
 exec 9>&-
 
 declare -A allowed_config=()
-for name in NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE; do
+for name in NODE_ENV PORT PUBLIC_APP_ORIGIN FRONTEND_ORIGIN ADMIN_EMAIL OPENAI_API_KEY_FILE OPENAI_ADMIN_KEY_FILE OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND OPENAI_VIDEO_SHUTDOWN_AT DATABASE_URL_FILE SESSION_SECRET_FILE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_FILE GOOGLE_TOKEN_ENCRYPTION_KEY_ID GOOGLE_REDIRECT_URI CODEX_WORKER_ENABLED CODEX_WORKER_SECRET_FILE CONSTRUCTOR_MODEL_CONTROL_ENABLED CONSTRUCTOR_MODEL_CONTROL_SOCKET CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_PUBLISHER_SECRET_FILE CONSTRUCTOR_RELEASE_ENABLED CONSTRUCTOR_RELEASE_SECRET_FILE GITHUB_RELEASE_OAUTH_TOKEN_FILE CONSTRUCTOR_RETRY_BASE_SECONDS CONSTRUCTOR_RETRY_MAX_SECONDS CONSTRUCTOR_EXTERNAL_RETRY_SECONDS CONSTRUCTOR_REQUIRED_CHECKS BROWSER_WORKER_SOCKET BROWSER_WORKER_SECRET_FILE CONVERTER_WORKER_SOCKET CONVERTER_WORKER_SECRET_FILE REVOLUT_MERCHANT_SECRET_KEY_FILE REVOLUT_WEBHOOK_SIGNING_SECRET_FILE VAPID_PRIVATE_KEY_FILE VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY PUSH_ENABLED VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS PUSH_MAX_SUBSCRIPTIONS GOOGLE_TTS_ENABLED GOOGLE_TTS_VOICE SEARCH_ENABLED MAIL_ENABLED RELEASE_CANDIDATE_MODE; do
   allowed_config[$name]=1
 done
 while IFS='=' read -r name _value; do
@@ -2120,6 +2400,10 @@ done
 for name in CODEX_WORKER_ENABLED CONSTRUCTOR_PUBLISHER_ENABLED CONSTRUCTOR_RELEASE_ENABLED; do
   [[ "$(config_value "$name")" =~ ^[01]$ ]] || die "$name trebuie să fie 0 sau 1"
 done
+[ "$(config_value CONSTRUCTOR_MODEL_CONTROL_ENABLED)" = 1 ] \
+  || die 'CONSTRUCTOR_MODEL_CONTROL_ENABLED trebuie să fie 1'
+[ "$(config_value CONSTRUCTOR_MODEL_CONTROL_SOCKET)" = /run/kelion-constructor-model-control/control.sock ] \
+  || die 'CONSTRUCTOR_MODEL_CONTROL_SOCKET este necanonic'
 for name in VISITOR_CHAT_TTL_SECONDS VISITOR_ANALYTICS_RETENTION_DAYS SESSION_ABSOLUTE_TTL_SECONDS SESSION_IDLE_TTL_SECONDS SESSION_TOUCH_INTERVAL_SECONDS SESSION_MAX_ACTIVE_PER_ACCOUNT SESSION_RECENT_REAUTH_SECONDS NATIVE_AUTH_REQUEST_TTL_SECONDS NATIVE_AUTH_EXCHANGE_TTL_SECONDS NATIVE_CHANNEL_TICKET_TTL_SECONDS OFFLINE_SYNC_MAX_TURNS OFFLINE_SYNC_MAX_TEXT_CHARS OFFLINE_SYNC_MAX_AGE_DAYS OFFLINE_SYNC_FUTURE_SKEW_SECONDS VOCAL_LIVE_IDLE_TIMEOUT_SECONDS PRIVACY_BACKUP_RETENTION_DAYS FINANCIAL_RETENTION_YEARS JOURNAL_RETENTION_DAYS MEDIA_RETENTION_DAYS OPENAI_VIDEO_PRICE_USD_MICROS_PER_SECOND CREDIT_PRICE_MINOR CHAT_TURN_PRICE_MINOR VOICE_LIVE_MINUTE_PRICE_MINOR CALL_UTTERANCE_PRICE_MINOR BILLING_FIRST_TOPUP_MIN_MINOR BILLING_TOPUP_STEP_MINOR BILLING_TOPUP_MIN_MINOR BILLING_TOPUP_MAX_MINOR LOW_CREDIT_THRESHOLD_MINOR LOW_CREDIT_TOPUP_MINOR PUSH_MAX_SUBSCRIPTIONS; do
   [[ "$(config_value "$name")" =~ ^[1-9][0-9]*$ ]] || die "$name trebuie să fie un întreg pozitiv"
 done
@@ -2136,7 +2420,7 @@ esac
 [[ "$(config_value REVOLUT_ORDER_EXPIRY)" =~ ^PT([1-9][0-9]{0,2}M|[1-9][0-9]?H)$ ]] \
   || die 'REVOLUT_ORDER_EXPIRY trebuie să fie o durată ISO-8601 în minute sau ore'
 
-secret_files=(openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key migration-backup-proof-key)
+secret_files=(openai-project-key openai-admin-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-model-control-secret constructor-publisher-secret constructor-release-secret github-release-oauth-token browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key migration-backup-proof-key)
 [ "$(stat -c '%u:%g:%a' "$SECRET_ROOT")" = '0:10050:750' ] || die 'directorul de secrete trebuie root:10050 mode 0750'
 for name in "${secret_files[@]}"; do
   path=$SECRET_ROOT/$name
@@ -2154,12 +2438,12 @@ else
     *) die 'github-release-oauth-token trebuie să fie o credentială dedicată validă' ;;
   esac
 fi
-case "$(sed -n '1p' "$SECRET_ROOT/openai-project-key")" in
-  sk-proj-*) ;;
-  disabled-placeholder-*) ;;  # Mod abonament ChatGPT Pro — fără cheie API
-  *) die 'cheia OpenAI runtime nu este project-scoped' ;;
-esac
-[ ! -e "$SECRET_ROOT/openai-admin-key" ] || die 'cheia OpenAI admin nu poate exista în secret root-ul aplicației'
+LC_ALL=C awk 'NR != 1 || $0 !~ /^sk-proj-[A-Za-z0-9_-]{16,}$/ { invalid = 1 } END { exit !(NR == 1 && !invalid) }' \
+  "$SECRET_ROOT/openai-project-key" \
+  || die 'cheia OpenAI runtime nu este project-scoped sau are format invalid'
+LC_ALL=C awk 'NR != 1 || $0 !~ /^sk-admin-[A-Za-z0-9_-]{16,}$/ { invalid = 1 } END { exit !(NR == 1 && !invalid) }' \
+  "$SECRET_ROOT/openai-admin-key" \
+  || die 'cheia OpenAI Admin trebuie să fie organization-admin, backend-only și validă'
 for name in revolut-merchant-secret-key revolut-webhook-signing-secret; do
   path=$SECRET_ROOT/$name
   [ "$(wc -l < "$path")" -eq 1 ] || die "$name trebuie să conțină exact o linie"
@@ -3417,6 +3701,43 @@ force_quiesce_constructor_release() {
   [ "$failed" = 0 ]
 }
 
+publish_constructor_reactivation_intent() {
+  local temporary
+  if [ -e "$CONSTRUCTOR_REACTIVATION_JOURNAL" ] \
+    || [ -L "$CONSTRUCTOR_REACTIVATION_JOURNAL" ]; then
+    validate_constructor_reactivation_intent
+    return
+  fi
+  temporary=$(mktemp "$RUNTIME_ROOT/.constructor-reactivation.journal.XXXXXX") || return 1
+  if jq -nc '{schema:1,kind:"constructor-reactivation",phase:"pending"}' > "$temporary" \
+    && chown root:root "$temporary" && chmod 0600 "$temporary" \
+    && fsync_release_artifact "$temporary" file \
+    && mv -f -- "$temporary" "$CONSTRUCTOR_REACTIVATION_JOURNAL" \
+    && fsync_release_artifact "$RUNTIME_ROOT" directory; then
+    return 0
+  fi
+  rm -f -- "$temporary"
+  return 1
+}
+
+quiesce_constructor_after_failed_reactivation_proof() {
+  local state socket=/run/kelion-constructor-model-control/control.sock failed=0
+  # Helperul poate să fi șters deja jurnalul exterior și intentul său. Înainte
+  # să retragem ready ori să oprim orice unitate publicăm din nou autoritatea
+  # crash-safe pe care următorul deploy o poate relua sub publication lock.
+  publish_constructor_reactivation_intent || return 1
+  systemctl stop kelion-constructor-model-control.service >/dev/null 2>&1 || :
+  force_quiesce_constructor_release || failed=1
+  state=$(systemctl show kelion-constructor-model-control.service --property=ActiveState --value) \
+    || failed=1
+  case "$state" in inactive|failed) ;; *) failed=1 ;; esac
+  [ -z "$(systemctl list-jobs --no-legend --plain kelion-constructor-model-control.service 2>/dev/null)" ] \
+    || failed=1
+  [ ! -e "$socket" ] && [ ! -L "$socket" ] || failed=1
+  validate_constructor_reactivation_intent || failed=1
+  [ "$failed" = 0 ]
+}
+
 quiesce_constructor_before_candidate() {
   local config_count=0 marker_count=0 unit_count=0 path unit state index
   for path in "${constructor_release_configs[@]}"; do
@@ -3658,6 +3979,12 @@ restore_constructor_after_release() {
   exec 9>&-
   if [ "$failed" = 0 ]; then
     systemctl daemon-reload || failed=1
+    systemctl is-active --quiet kelion-runtime-config-recovery.service || failed=1
+    systemctl is-active --quiet kelion-constructor-model-control.service || failed=1
+    [ -S /run/kelion-constructor-model-control/control.sock ] \
+      && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
+      && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ] \
+      || failed=1
     for index in "${!constructor_release_timers[@]}"; do
       timer=${constructor_release_timers[$index]}
       marker=${constructor_release_markers[$index]}
@@ -3670,7 +3997,7 @@ restore_constructor_after_release() {
     done
   fi
   if [ "$failed" != 0 ]; then
-    force_quiesce_constructor_release || true
+    quiesce_constructor_after_failed_reactivation_proof || true
     return 1
   fi
   constructor_release_quiesced=0
@@ -3697,7 +4024,7 @@ reconcile_constructor_after_completed_release() {
   fi
   if [ "$failed" = 0 ]; then backup_schedule_live_proof || failed=1; fi
   if [ "$failed" != 0 ]; then
-    force_quiesce_constructor_release || true
+    quiesce_constructor_after_failed_reactivation_proof || true
     return 1
   fi
 }
@@ -3900,6 +4227,18 @@ if [ "$release_request_state" = success ] && [ "$resume_after_gate_commit" = 0 ]
   fi
   die 'ledger-ul success nu mai are dovada exactă app+gate+Constructor; cutover-ul nu se repetă'
 fi
+# O cerere nouă (fără ledger și fără jurnal quiesce) pentru commitul deja activ
+# este un dispatch duplicat, nu un release. Candidatul ar boota cu markerul
+# activ egal cu propriul RELEASE_ID și s-ar declara activ (candidate=false),
+# readiness-ul ar pica, iar rollback-ul ar lăsa Constructor quiesced. Fără
+# nicio mutație: no-op dacă și gate-ul corespunde, altfel refuz fail-closed.
+if [ "$release_request_state" = none ] && [ -z "$recovered_constructor_quiesce_phase" ] \
+  && release_request_live_proof; then
+  constructor_gate_matches_candidate \
+    || die 'commitul este deja activ, dar gate-ul Constructor nu îi corespunde; cererea duplicată este refuzată'
+  printf 'release_noop request=%s commit=%s status=already-active\n' "$KELION_RELEASE_REQUEST_ID" "$COMMIT_SHA"
+  exit 0
+fi
 [ "$resume_after_active_marker" = 1 ] || [ "$resume_after_gate_commit" = 1 ] \
   || { [ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; } \
   || die 'jurnalul quiesce nu a putut fi reconciliat înaintea retry-ului'
@@ -3925,6 +4264,8 @@ quiesce_constructor_before_candidate \
   || die 'inventarul celor șase unități Constructor este invalid înaintea release-ului'
 upgrade_constructor_timer_units_quiesced \
   || die 'unitățile Constructor actualizate nu au putut fi instalate atomic sub quiesce'
+constructor_model_control_quiesced_proof \
+  || die 'controllerul manual de model nu este quiesced după cutover-ul runtime'
 write_constructor_deploy_quiesce_journal quiesced \
   || die 'starea quiesced a Constructorului nu a putut fi jurnalizată durabil'
 assert_constructor_release_handoff_drained \
@@ -4014,6 +4355,9 @@ KELION_SECCOMP_PROFILE=$SECCOMP_PROFILE
 export KELION_SLOT KELION_COMMIT_SHA KELION_RUNTIME_ROOT KELION_RELEASE_STATE_ROOT
 export KELION_CONFIG_FILE KELION_SECRET_ROOT KELION_SECCOMP_PROFILE
 export KELION_BIND_PORT KELION_BROWSER_SUBNET KELION_BROWSER_WORKER_IP KELION_BROWSER_PROXY_IP
+
+constructor_model_control_quiesced_proof \
+  || die 'controllerul manual de model nu a rămas quiesced înaintea candidatului'
 
 project=kelion-$inactive_slot
 "$COMPOSE_BIN" -p "$project" -f "$COMPOSE_FILE" down --remove-orphans >/dev/null 2>&1 || true
@@ -4225,7 +4569,10 @@ refresh_constructor_gate() (
         && [ -f "$ROOT/config/compose.production.yml" ] && [ ! -L "$ROOT/config/compose.production.yml" ] \
         && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ]; then
         exec 9>&8
-        if KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
+        if KELION_CUTOVER_LOCK_HELD=1 \
+          KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+          KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+          "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced; then
           config_consistent=1
           journal_written=0
         else
@@ -4379,7 +4726,10 @@ refresh_constructor_gate() (
     && [ "$(stat -c '%u:%g:%a' "$ROOT/config/compose.production.yml")" = '0:0:444' ] \
     || die 'compose-ul persistent de recovery gate lipsește sau are ACL invalid'
   exec 9>&8
-  KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
+  KELION_CUTOVER_LOCK_HELD=1 \
+  KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+  KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+    "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" --leave-constructor-quiesced
   exec 9>&-
   journal_written=0
   assert_constructor_env_value "$worker_env" KELION_CODEX_GATE_IMAGE "$KELION_CODEX_GATE_IMAGE"

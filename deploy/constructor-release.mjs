@@ -575,11 +575,11 @@ async function reconcileLegacyRelease({ candidate, claimJob, identity, githubTok
 }
 
 async function runOnce() {
-  assertEnabledLayout()
-  mkdirSync(STATE, { recursive: true, mode: 0o700 })
   const hmac = loadSystemdCredential('constructor-release-secret', process.env.CONSTRUCTOR_RELEASE_SECRET_FILE)
   let githubCredential
   try {
+    assertEnabledLayout()
+    mkdirSync(STATE, { recursive: true, mode: 0o700 })
     githubCredential = loadSystemdCredential('github-release-token', process.env.GITHUB_RELEASE_TOKEN_FILE)
     await releaseUpstreamPreflight(githubCredential.value)
   } catch (error) {
@@ -924,6 +924,7 @@ function selfTest() {
 const mode = process.argv[2] ?? '--once'
 if (mode === '--self-test') selfTest()
 else if (mode === '--once') {
-  if (!ENABLED || !existsSync(ENABLE_MARKER)) process.stdout.write('constructor-release: dezactivat\n')
+  const activationMarkerExists = existsSync(ENABLE_MARKER)
+  if (!ENABLED && !activationMarkerExists) process.stdout.write('constructor-release: dezactivat\n')
   else await runOnce()
 } else fail(`Mod necunoscut: ${mode}`)

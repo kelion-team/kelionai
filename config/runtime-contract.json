@@ -65,6 +65,8 @@
   ],
   "generatedRuntime": [
     "BROWSER_WORKER_SOCKET",
+    "CONSTRUCTOR_MODEL_CONTROL_ENABLED",
+    "CONSTRUCTOR_MODEL_CONTROL_SOCKET",
     "CONVERTER_WORKER_SOCKET",
     "FRONTEND_ORIGIN",
     "GOOGLE_TTS_ENABLED",
@@ -88,11 +90,15 @@
     },
     "GOOGLE_CLIENT_SECRET": "google-client-secret",
     "GOOGLE_TOKEN_ENCRYPTION_KEY": "google-token-encryption-key",
+    "OPENAI_ADMIN_KEY": "openai-admin-key",
     "OPENAI_API_KEY": "openai-project-key",
     "REVOLUT_MERCHANT_SECRET_KEY": "revolut-merchant-secret-key",
     "REVOLUT_WEBHOOK_SIGNING_SECRET": "revolut-webhook-signing-secret",
     "SESSION_SECRET": "session-secret",
     "VAPID_PRIVATE_KEY": "vapid-private-key"
+  },
+  "hostGeneratedRuntimeSecretFiles": {
+    "CONSTRUCTOR_MODEL_CONTROL_SECRET": "constructor-model-control-secret"
   },
   "hostOnlySecretFiles": {
     "MIGRATION_BACKUP_PROOF_KEY": "migration-backup-proof-key"

@@ -6,11 +6,13 @@ import test from 'node:test'
 import {
   assertSecureFileStat,
   databaseFingerprint,
+  deriveRestoreNames,
   deriveBackupKeys,
   parseCanonicalJson,
   parseLocalSocketDatabaseUrl,
   requireUniqueBackup,
   verifyBackupManifest,
+  validateRestoreJournal,
   verifyRestoreProof,
 } from './restore-verified-backup.mjs'
 
@@ -166,6 +168,66 @@ test('selecția și metadatele backupului sunt fail-closed', () => {
   ]) assert.throws(() => assertSecureFileStat(stat, { label: 'backup' }), /backup_file_security_invalid/)
 })
 
+test('numele restore sunt deterministe, iar jurnalul leagă strict backupul, destinația și OID-urile', () => {
+  const identity = parseLocalSocketDatabaseUrl(
+    'postgresql://postgres@localhost/kelion?host=%2Fvar%2Frun%2Fpostgresql',
+  )
+  const backupPath = '/root/kelion/backups/kelion-2026-08-24_200000.dump.enc'
+  const backupSha256 = 'a'.repeat(64)
+  const names = deriveRestoreNames({
+    backupPath,
+    backupSha256,
+    database: identity.database,
+    user: identity.user,
+  })
+  assert.deepEqual(
+    deriveRestoreNames({ backupPath, backupSha256, database: identity.database, user: identity.user }),
+    names,
+  )
+  assert.notDeepEqual(
+    deriveRestoreNames({ backupPath, backupSha256: 'b'.repeat(64), database: identity.database, user: identity.user }),
+    names,
+  )
+  const journal = {
+    backupPath,
+    backupSha256,
+    backupSizeBytes: 8192,
+    destinationDatabase: identity.database,
+    failedDatabase: names.failedDatabase,
+    host: identity.host,
+    kind: 'restore-verified-backup',
+    phase: 'swapping',
+    port: identity.port,
+    quarantineDatabase: names.quarantineDatabase,
+    schema: 1,
+    scratchDatabase: names.scratchDatabase,
+    scratchOid: 42002,
+    targetOid: 42001,
+    user: identity.user,
+  }
+  assert.equal(
+    validateRestoreJournal(journal, { backupDirectory: '/root/kelion/backups', identity }),
+    journal,
+  )
+  for (const invalid of [
+    { ...journal, extra: true },
+    { ...journal, phase: 'unknown' },
+    { ...journal, backupPath: '/root/kelion/backups/../secrets/database-url' },
+    { ...journal, backupSizeBytes: 0 },
+    { ...journal, destinationDatabase: 'other_database' },
+    { ...journal, scratchDatabase: 'kelion_restore_000000000000' },
+    { ...journal, targetOid: 0 },
+    { ...journal, scratchOid: null },
+  ]) assert.throws(
+    () => validateRestoreJournal(invalid, { backupDirectory: '/root/kelion/backups', identity }),
+    /restore_(?:journal|identity)_/,
+  )
+  assert.doesNotThrow(() => validateRestoreJournal(
+    { ...journal, phase: 'restoring', scratchOid: null },
+    { backupDirectory: '/root/kelion/backups', identity },
+  ))
+})
+
 test('scriptul validează înainte de swap, cotează identificatorii și revine fail-closed', () => {
   const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
   const approval = script.indexOf('KELION_RESTORE_APPROVED')
@@ -192,7 +254,8 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
   assert.match(script, /pg_restore[\s\S]*--dbname="\$scratch_database"[\s\S]*--single-transaction --no-owner --no-privileges/)
   assert.doesNotMatch(script, /PGDATABASE="\$scratch_database"\s+pg_restore/)
   assert.match(script, /format\('ALTER DATABASE %I RENAME TO %I'/)
-  assert.match(swapBody, /pg_terminate_backend[\s\S]*RENAME TO %I[\s\S]*RENAME TO %I/)
+  assert.match(swapBody, /write_restore_journal_phase swapping[\s\S]*complete_swap[\s\S]*write_restore_journal_phase committed/)
+  assert.match(script, /complete_swap\(\)[\s\S]*terminate_connections "\$database"[\s\S]*rename_database "\$database" "\$quarantine_database"[\s\S]*rename_database "\$scratch_database" "\$database"/)
   assert.match(script, /rollback_swap[\s\S]*rename_database "\$quarantine_database" "\$database"/)
   assert.match(script, /preserve_scratch_database[\s\S]*rename_database "\$scratch_database" "\$failed_database"/)
   assert.match(script, /json_boolean\(\)[\s\S]*jq -r[\s\S]*type == "boolean"[\s\S]*true\|false/)
@@ -221,6 +284,40 @@ test('scriptul validează înainte de swap, cotează identificatorii și revine 
     "('voiceprints', 'gender')",
     "('voiceprints', 'is_admin')",
   ]) assert.ok(!script.includes(removedFragment), `contractul reintroduce obiectul eliminat ${removedFragment}`)
+})
+
+test('jurnalul restore este root-only, fsync-uit și conduce recovery-ul OID înainte de un plan nou', () => {
+  const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
+  const validator = readFileSync(new URL('./restore-verified-backup.mjs', import.meta.url), 'utf8')
+  const restoreLock = script.indexOf('flock -n 9 || fail restore_operation_active')
+  const pendingCheck = script.indexOf('if [ -e "$RESTORE_JOURNAL" ] || [ -L "$RESTORE_JOURNAL" ]', restoreLock)
+  const work = script.indexOf('work=$(mktemp -d', pendingCheck)
+  const initialJournal = script.indexOf('write_restore_journal_phase restoring null', script.indexOf('postgres_ready=1', work))
+  const createScratch = script.indexOf("'CREATE DATABASE %I WITH TEMPLATE template0 OWNER %I'", initialJournal)
+  const bindScratch = script.indexOf('scratch_oid=$(json_oid "$scratch_created_state" scratchOid)', createScratch)
+  const importScratch = script.indexOf('--dbname="$scratch_database"', bindScratch)
+  const swapping = script.indexOf('write_restore_journal_phase swapping', importScratch)
+  const firstRename = script.indexOf('rename_database "$database" "$quarantine_database"')
+  const committed = script.lastIndexOf('write_restore_journal_phase committed')
+  const record = script.lastIndexOf('publish_restore_record')
+  const cleanup = script.lastIndexOf('cleanup_restore_work')
+  const clear = script.lastIndexOf('clear_restore_journal')
+
+  assert.ok(restoreLock >= 0 && pendingCheck > restoreLock && work > pendingCheck)
+  assert.match(script.slice(pendingCheck, work), /operation_mode=recovery[\s\S]*journal_mode=1/)
+  assert.match(script.slice(pendingCheck, work), /operation_mode" != preflight[\s\S]*restore_recovery_required/)
+  assert.ok(initialJournal > work && createScratch > initialJournal)
+  assert.ok(bindScratch > createScratch && importScratch > bindScratch)
+  assert.ok(swapping > importScratch && firstRename > 0)
+  assert.match(script, /write_restore_journal_phase\(\)[\s\S]*chown 0:0[\s\S]*chmod 0600[\s\S]*fsync_path "\$journal_next"[\s\S]*mv -fT[\s\S]*fsync_path "\$RESTORE_JOURNAL"[\s\S]*fsync_path "\$RUNTIME_DIRECTORY"/)
+  assert.match(script, /validate_restore_journal\(\)[\s\S]*exec 6<"\$RESTORE_JOURNAL"[\s\S]*verify_lock_fd 6[\s\S]*journal_bytes[\s\S]*keys ==/)
+  assert.match(script, /complete_swap\(\)[\s\S]*target_actual_oid[\s\S]*scratch_actual_oid[\s\S]*quarantine_actual_oid/)
+  assert.match(script, /rollback_swap\(\)[\s\S]*topology[\s\S]*false:false:true:true/)
+  assert.ok(committed > swapping && record > committed && cleanup > record && clear > cleanup)
+  assert.match(script, /clear_restore_journal\(\)[\s\S]*rm -f -- "\$RESTORE_JOURNAL"[\s\S]*fsync_path "\$RUNTIME_DIRECTORY"/)
+  assert.match(validator, /constants\.O_RDONLY \| constants\.O_NOFOLLOW/)
+  assert.match(validator, /opened\.dev !== before\.dev \|\| opened\.ino !== before\.ino/)
+  assert.doesNotMatch(validator, /randomBytes/)
 })
 
 test('booleanul JSON false este o valoare validă, nu un exit de recovery', {

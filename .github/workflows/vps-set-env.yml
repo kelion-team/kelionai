@@ -105,7 +105,6 @@ jobs:
       PUSH_ENDPOINT_HOSTS: ${{ vars.PUSH_ENDPOINT_HOSTS }}
       PUSH_MAX_SUBSCRIPTIONS: ${{ vars.PUSH_MAX_SUBSCRIPTIONS || '5' }}
       SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -128,6 +127,9 @@ jobs:
           persist-credentials: false
 
       - name: Aplică atomic allowlist-ul și secretele
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ADMIN_KEY: ${{ secrets.OPENAI_ADMIN_KEY }}
         run: |
           set -euo pipefail
           [ "$GITHUB_REF" = refs/heads/master ]
@@ -156,18 +158,15 @@ jobs:
           for name in PUBLIC_APP_ORIGIN ADMIN_EMAIL OPENAI_LUNA_MODEL OPENAI_MEDIUM_MODEL OPENAI_HEAVY_MODEL OPENAI_REALTIME_MODEL OPENAI_REALTIME_TRANSCRIPTION_MODEL OPENAI_CALL_TRANSCRIPTION_MODEL OPENAI_TTS_MODEL OPENAI_IMAGE_MODEL OPENAI_VIDEO_MODEL OPENAI_VIDEO_SHUTDOWN_AT GOOGLE_CLIENT_ID GOOGLE_REDIRECT_URI GOOGLE_TOKEN_ENCRYPTION_KEY_ID CONSTRUCTOR_REQUIRED_CHECKS PRIVACY_POLICY_UPDATED DATA_CONTROLLER_NAME PAYMENT_MODE PAYMENT_CONTRACT_VERIFIED REVOLUT_MERCHANT_API_VERSION REVOLUT_ORDER_EXPIRY VAPID_PUBLIC_KEY PUSH_ENDPOINT_HOSTS; do
             validate_single_line_env "$name" 2048
           done
-          for name in OPENAI_API_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
+          for name in OPENAI_API_KEY OPENAI_ADMIN_KEY DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_SECRET GOOGLE_TOKEN_ENCRYPTION_KEY CODEX_WORKER_SECRET CONSTRUCTOR_PUBLISHER_SECRET CONSTRUCTOR_RELEASE_SECRET GITHUB_RELEASE_OAUTH_TOKEN GHCR_READ_TOKEN BROWSER_WORKER_SECRET CONVERTER_WORKER_SECRET REVOLUT_MERCHANT_SECRET_KEY REVOLUT_WEBHOOK_SIGNING_SECRET VAPID_PRIVATE_KEY; do
             validate_single_line_env "$name" 8192
           done
           [[ "$GOOGLE_TOKEN_ENCRYPTION_KEY_ID" =~ ^[A-Za-z0-9_-]{1,32}$ ]]
           [[ "$OPENAI_VIDEO_SHUTDOWN_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$ ]]
           admin_email=$(printf '%s' "$ADMIN_EMAIL" | tr '[:upper:]' '[:lower:]')
           [[ "$admin_email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]
-          if [ -n "$OPENAI_API_KEY" ]; then
-            case "$OPENAI_API_KEY" in sk-proj-*) ;; *) exit 1 ;; esac
-          else
-            OPENAI_API_KEY="disabled-placeholder-$(openssl rand -hex 32)"
-          fi
+          [[ "$OPENAI_API_KEY" =~ ^sk-proj-[A-Za-z0-9_-]{16,}$ ]] || exit 1
+          [[ "$OPENAI_ADMIN_KEY" =~ ^sk-admin-[A-Za-z0-9_-]{16,}$ ]] || exit 1
           [ "${#SESSION_SECRET}" -ge 32 ]
           [ "${#CODEX_WORKER_SECRET}" -ge 32 ]
           [ "${#BROWSER_WORKER_SECRET}" -ge 32 ]
@@ -312,6 +311,7 @@ jobs:
             "FRONTEND_ORIGIN=$PUBLIC_APP_ORIGIN" \
             "ADMIN_EMAIL=$admin_email" \
             'OPENAI_API_KEY_FILE=/run/secrets/openai-project-key' \
+            'OPENAI_ADMIN_KEY_FILE=/run/secrets/openai-admin-key' \
             "OPENAI_LUNA_MODEL=$OPENAI_LUNA_MODEL" \
             "OPENAI_MEDIUM_MODEL=$OPENAI_MEDIUM_MODEL" \
             "OPENAI_HEAVY_MODEL=$OPENAI_HEAVY_MODEL" \
@@ -332,6 +332,9 @@ jobs:
             "GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI" \
             "CODEX_WORKER_ENABLED=$CODEX_WORKER_ENABLED" \
             'CODEX_WORKER_SECRET_FILE=/run/secrets/codex-worker-secret' \
+            'CONSTRUCTOR_MODEL_CONTROL_ENABLED=1' \
+            'CONSTRUCTOR_MODEL_CONTROL_SOCKET=/run/kelion-constructor-model-control/control.sock' \
+            'CONSTRUCTOR_MODEL_CONTROL_SECRET_FILE=/run/secrets/constructor-model-control-secret' \
             "CONSTRUCTOR_PUBLISHER_ENABLED=$CONSTRUCTOR_PUBLISHER_ENABLED" \
             'CONSTRUCTOR_PUBLISHER_SECRET_FILE=/run/secrets/constructor-publisher-secret' \
             "CONSTRUCTOR_RELEASE_ENABLED=$CONSTRUCTOR_RELEASE_ENABLED" \
@@ -420,6 +423,7 @@ jobs:
           encode() { printf '%s:%s\n' "$1" "$(printf '%s' "$2" | base64 -w0)"; }
           {
             encode openai-project-key "$OPENAI_API_KEY"
+            encode openai-admin-key "$OPENAI_ADMIN_KEY"
             encode database-url "$DATABASE_URL"
             encode session-secret "$SESSION_SECRET"
             encode google-client-secret "$GOOGLE_CLIENT_SECRET"
@@ -438,7 +442,10 @@ jobs:
           } > "$payload"
           git archive --format=tar HEAD \
             deploy/compose.production.yml deploy/lib/runtime-config-cutover.sh \
+            deploy/constructor-model-control.mjs \
+            deploy/constructor-model-switch.sh \
             deploy/systemd/kelion-runtime-config-recovery.service \
+            deploy/systemd/kelion-constructor-model-control.service \
             deploy/systemd/kelion-constructor-sync.service \
             deploy/systemd/kelion-codex-worker.timer \
             deploy/systemd/kelion-constructor-publisher.timer \
@@ -450,7 +457,10 @@ jobs:
           for entry in \
             'deploy/compose.production.yml' \
             'deploy/lib/runtime-config-cutover.sh' \
+            'deploy/constructor-model-control.mjs' \
+            'deploy/constructor-model-switch.sh' \
             'deploy/systemd/kelion-runtime-config-recovery.service' \
+            'deploy/systemd/kelion-constructor-model-control.service' \
             'deploy/systemd/kelion-constructor-sync.service' \
             'deploy/systemd/kelion-codex-worker.timer' \
             'deploy/systemd/kelion-constructor-publisher.timer' \
@@ -459,6 +469,14 @@ jobs:
             'deploy/systemd/kelion-constructor-publisher.service' \
             'deploy/systemd/kelion-constructor-release.service'; do
             grep -qx "$entry" "$RUNNER_TEMP/bundle-entries"
+          done
+
+          controller_model_control_sha256=$(git cat-file blob HEAD:deploy/constructor-model-control.mjs | sha256sum | awk '{print $1}')
+          controller_model_switch_sha256=$(git cat-file blob HEAD:deploy/constructor-model-switch.sh | sha256sum | awk '{print $1}')
+          controller_unit_sha256=$(git cat-file blob HEAD:deploy/systemd/kelion-constructor-model-control.service | sha256sum | awk '{print $1}')
+          for digest in \
+            "$controller_model_control_sha256" "$controller_model_switch_sha256" "$controller_unit_sha256"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           done
 
           bundle_commit=$(git rev-parse HEAD)
@@ -472,12 +490,21 @@ jobs:
             "systemd-run --quiet --unit='$cleanup_unit' --on-active=15m /usr/bin/rm -f -- '$remote_payload'; systemctl is-active --quiet '$cleanup_unit.timer'"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
             "umask 077; systemctl is-active --quiet '$cleanup_unit.timer'; [ ! -e '$remote_payload' ] && [ ! -L '$remote_payload' ]; cat > '$remote_payload'" < "$payload"
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- "$remote_bundle" "$remote_payload" "$cleanup_unit" <<'REMOTE'
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
+            "$remote_bundle" "$remote_payload" "$cleanup_unit" \
+            "$controller_model_control_sha256" "$controller_model_switch_sha256" "$controller_unit_sha256" <<'REMOTE'
           set -euo pipefail
           umask 077
           bundle=$1
           payload=$2
           cleanup_unit=$3
+          controller_model_control_sha256=$4
+          controller_model_switch_sha256=$5
+          controller_unit_sha256=$6
+          for digest in \
+            "$controller_model_control_sha256" "$controller_model_switch_sha256" "$controller_unit_sha256"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
           [[ "$bundle" =~ ^/root/kelion/runtime/runtime-cutover-bundle\.[1-9][0-9]*\.[1-9][0-9]*\.tar\.gz$ ]]
           [[ "$payload" =~ ^/run/kelion-runtime-cutover\.[1-9][0-9]*\.[1-9][0-9]*$ ]]
           [[ "$cleanup_unit" =~ ^kelion-runtime-payload-cleanup-[1-9][0-9]*-[1-9][0-9]*$ ]]
@@ -498,7 +525,11 @@ jobs:
           if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/bundle-entries-before-extract; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
           [ -f "$work/deploy/compose.production.yml" ] && [ -f "$work/deploy/lib/runtime-config-cutover.sh" ]
+          [ -f "$work/deploy/constructor-model-control.mjs" ] && [ ! -L "$work/deploy/constructor-model-control.mjs" ]
+          [ -f "$work/deploy/constructor-model-switch.sh" ] && [ ! -L "$work/deploy/constructor-model-switch.sh" ]
           [ -f "$work/deploy/systemd/kelion-runtime-config-recovery.service" ]
+          [ -f "$work/deploy/systemd/kelion-constructor-model-control.service" ] \
+            && [ ! -L "$work/deploy/systemd/kelion-constructor-model-control.service" ]
           [ -f "$work/deploy/systemd/kelion-constructor-sync.service" ] && [ ! -L "$work/deploy/systemd/kelion-constructor-sync.service" ]
           for unit in \
             kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer \
@@ -506,8 +537,34 @@ jobs:
             [ -f "$work/deploy/systemd/$unit" ] && [ ! -L "$work/deploy/systemd/$unit" ]
           done
 
-          exec 9>/root/kelion/publicare.lock
+          publication_lock=/root/kelion/publicare.lock
+          [ -f "$publication_lock" ] && [ ! -L "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$publication_lock")" = '0:0:600:1' ]
+          exec 9<>"$publication_lock"
+          publication_fd_path=$(readlink /proc/$$/fd/9)
+          publication_fd_identity=$(stat -Lc '%d:%i' /proc/$$/fd/9)
+          [ "$publication_fd_path" = "$publication_lock" ]
+          [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ]
+          [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
           flock -n 9
+          [ "$(readlink /proc/$$/fd/9)" = "$publication_lock" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
+            && [ ! -L "$publication_lock" ] \
+            && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$publication_lock")" ]
+          constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
+          [ ! -e "$constructor_upgrade_journal" ] && [ ! -L "$constructor_upgrade_journal" ] \
+            || { echo 'un upgrade Constructor exterior este pending; rotația runtime este refuzată' >&2; exit 1; }
+          constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          [ ! -e "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ] \
+            || { echo 'o barieră unit-only Constructor este pending; rotația runtime este refuzată' >&2; exit 1; }
+          constructor_reactivation_journal=/root/kelion/runtime/constructor-reactivation.journal
+          if [ -e "$constructor_reactivation_journal" ] || [ -L "$constructor_reactivation_journal" ]; then
+            [ -f "$constructor_reactivation_journal" ] && [ ! -L "$constructor_reactivation_journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$constructor_reactivation_journal")" = '0:0:600:1' ] \
+              && jq -e '.schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and (keys == ["kind","phase","schema"])' \
+                "$constructor_reactivation_journal" >/dev/null \
+              || { echo 'jurnalul reactivării Constructor este nesigur' >&2; exit 1; }
+          fi
           export KELION_CUTOVER_LOCK_HELD=1
           deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
           if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
@@ -539,6 +596,72 @@ jobs:
           case "$unit_count" in
             0|6) ;;
             *) echo 'Set systemd Constructor parțial; rotația este refuzată' >&2; exit 1 ;;
+          esac
+          validate_controller_artifact_bytes() {
+            local live=$1 candidate=$2 expected_sha256=$3 live_sha256 candidate_sha256
+            [ -f "$live" ] && [ ! -L "$live" ] \
+              && [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+            live_sha256=$(sha256sum "$live" | awk '{print $1}') || return 1
+            candidate_sha256=$(sha256sum "$candidate" | awk '{print $1}') || return 1
+            [ "$candidate_sha256" = "$expected_sha256" ] \
+              && [ "$live_sha256" = "$expected_sha256" ] \
+              && cmp -s -- "$live" "$candidate"
+          }
+          controller_artifacts=(
+            /opt/kelion-constructor/constructor-model-control.mjs
+            /opt/private-ai/bin/constructor-model-switch
+            /etc/systemd/system/kelion-constructor-model-control.service
+          )
+          controller_candidates=(
+            "$work/deploy/constructor-model-control.mjs"
+            "$work/deploy/constructor-model-switch.sh"
+            "$work/deploy/systemd/kelion-constructor-model-control.service"
+          )
+          controller_sha256=(
+            "$controller_model_control_sha256"
+            "$controller_model_switch_sha256"
+            "$controller_unit_sha256"
+          )
+          controller_artifact_count=0
+          for path in "${controller_artifacts[@]}"; do
+            if [ -e "$path" ] || [ -L "$path" ]; then controller_artifact_count=$((controller_artifact_count + 1)); fi
+          done
+          case "$controller_artifact_count" in
+            0)
+              controller_bootstrap_quiesced=1
+              ;;
+            3)
+              controller_bootstrap_quiesced=0
+              [ "$unit_count" -eq 6 ]
+              for index in "${!controller_artifacts[@]}"; do
+                validate_controller_artifact_bytes \
+                  "${controller_artifacts[$index]}" "${controller_candidates[$index]}" "${controller_sha256[$index]}" \
+                  || { echo "Controllerul manual diferă byte-exact de checkout: ${controller_artifacts[$index]}" >&2; exit 1; }
+              done
+              [ -f "${controller_artifacts[0]}" ] && [ ! -L "${controller_artifacts[0]}" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "${controller_artifacts[0]}")" = '0:0:555:1' ]
+              [ -f "${controller_artifacts[1]}" ] && [ ! -L "${controller_artifacts[1]}" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "${controller_artifacts[1]}")" = '0:0:755:1' ]
+              [ -f "${controller_artifacts[2]}" ] && [ ! -L "${controller_artifacts[2]}" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "${controller_artifacts[2]}")" = '0:0:444:1' ]
+              /usr/bin/node "${controller_artifacts[0]}" --self-test >/dev/null
+              grep -Fqx 'After=local-fs.target private-ai-llm.service' "${controller_artifacts[2]}"
+              ! grep -Eq '^(After|Requires)=.*kelion-runtime-config-recovery\.service' "${controller_artifacts[2]}"
+              grep -Fqx 'ConditionPathExists=/run/kelion/runtime-config-recovery.ready' "${controller_artifacts[2]}"
+              grep -Fqx 'ExecStartPre=/opt/private-ai/bin/constructor-model-switch --prepare-lock' "${controller_artifacts[2]}"
+              grep -Fqx 'ExecStart=/usr/bin/node /opt/kelion-constructor/constructor-model-control.mjs' "${controller_artifacts[2]}"
+              controller_fragment=$(systemctl show kelion-constructor-model-control.service --property=FragmentPath --value)
+              controller_dropins=$(systemctl show kelion-constructor-model-control.service --property=DropInPaths --value)
+              controller_load=$(systemctl show kelion-constructor-model-control.service --property=LoadState --value)
+              controller_reload=$(systemctl show kelion-constructor-model-control.service --property=NeedDaemonReload --value)
+              [ "$controller_fragment" = /etc/systemd/system/kelion-constructor-model-control.service ] \
+                && [ -z "$controller_dropins" ] && [ "$controller_load" = loaded ] && [ "$controller_reload" = no ]
+              systemctl is-enabled --quiet kelion-constructor-model-control.service
+              ;;
+            *)
+              echo 'Controllerul manual este instalat parțial; rotația runtime este refuzată' >&2
+              exit 1
+              ;;
           esac
           install_atomic() {
             local source=$1 target=$2 owner=$3 group=$4 mode=$5 temporary
@@ -607,6 +730,40 @@ jobs:
             [ "$(systemctl show "$unit" --property=NeedDaemonReload --value)" = no ]
           done
           systemctl is-enabled --quiet kelion-runtime-config-recovery.service
+          ensure_local_model_control_secret() {
+            local secret_dir=/root/kelion/secrets
+            local secret_path=$secret_dir/constructor-model-control-secret
+            local candidate='' bytes clean_bytes
+            getent group 10050 >/dev/null || return 1
+            if [ ! -e "$secret_dir" ] && [ ! -L "$secret_dir" ]; then
+              install -d -o root -g 10050 -m 0750 "$secret_dir" || return 1
+              sync -f /root/kelion || return 1
+            fi
+            [ -d "$secret_dir" ] && [ ! -L "$secret_dir" ] \
+              && [ "$(realpath -e -- "$secret_dir")" = "$secret_dir" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$secret_dir")" = '0:10050:750' ] || return 1
+            if [ ! -e "$secret_path" ] && [ ! -L "$secret_path" ]; then
+              candidate=$(mktemp "$secret_dir/.constructor-model-control-secret.XXXXXX") || return 1
+              if ! openssl rand -hex 32 > "$candidate" \
+                || ! chown root:10050 "$candidate" \
+                || ! chmod 0440 "$candidate" \
+                || ! sync -f "$candidate" \
+                || ! mv -f -- "$candidate" "$secret_path" \
+                || ! sync -f "$secret_path" \
+                || ! sync -f "$secret_dir"; then
+                rm -f -- "$candidate"
+                return 1
+              fi
+            fi
+            [ -f "$secret_path" ] && [ ! -L "$secret_path" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$secret_path")" = '0:10050:440:1' ] \
+              && [ "$(wc -l < "$secret_path")" -eq 1 ] || return 1
+            model_control_secret=$(<"$secret_path") || return 1
+            bytes=$(printf '%s' "$model_control_secret" | wc -c)
+            clean_bytes=$(printf '%s' "$model_control_secret" | LC_ALL=C tr -d '\000-\037\177' | wc -c)
+            [ "$bytes" -ge 32 ] && [ "$bytes" -le 8192 ] && [ "$bytes" -eq "$clean_bytes" ]
+          }
+          ensure_local_model_control_secret
           decode() {
             local name=$1 encoded
             [ "$(awk -F: -v wanted="$name" '$1 == wanted { count++ } END { print count + 0 }' "$payload")" -eq 1 ]
@@ -619,9 +776,12 @@ jobs:
           release_secret=$(decode constructor-release-secret)
           oauth_token=$(decode github-release-oauth-token)
           ghcr_token=$(decode github-ghcr-read-token)
-          for value in "$codex_secret" "$publisher_secret" "$release_secret" "$oauth_token" "$ghcr_token"; do [ "${#value}" -ge 32 ]; done
+          for value in "$codex_secret" "$model_control_secret" "$publisher_secret" "$release_secret" "$oauth_token" "$ghcr_token"; do [ "${#value}" -ge 32 ]; done
           [ "$codex_secret" != "$publisher_secret" ]
           [ "$codex_secret" != "$release_secret" ]
+          [ "$codex_secret" != "$model_control_secret" ]
+          [ "$model_control_secret" != "$publisher_secret" ]
+          [ "$model_control_secret" != "$release_secret" ]
           [ "$publisher_secret" != "$release_secret" ]
           [ "$oauth_token" != "$ghcr_token" ]
 
@@ -635,9 +795,10 @@ jobs:
             chmod 0600 "$cutover_stage/files/$logical"
             printf '%s\n' "$logical" >> "$cutover_stage/manifest"
           }
-          for name in openai-project-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
+          for name in openai-project-key openai-admin-key database-url session-secret google-client-secret google-token-encryption-key codex-worker-secret constructor-publisher-secret constructor-release-secret browser-worker-secret converter-worker-secret revolut-merchant-secret-key revolut-webhook-signing-secret vapid-private-key; do
             stage_value "app-secret.$name" "$(decode "$name")"
           done
+          stage_value app-secret.constructor-model-control-secret "$model_control_secret"
           stage_value app-secret.github-release-oauth-token "$oauth_token"
           stage_value gate-secret.github-ghcr-read-token "$ghcr_token"
           stage_value runtime.env "$(decode runtime-env)"
@@ -676,7 +837,31 @@ jobs:
               printf '%s\n' "$logical" >> "$cutover_stage/manifest"
             done
           fi
-          KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" "$cutover_stage" "$work/deploy/compose.production.yml"
+          if [ -e "$constructor_reactivation_journal" ] || [ -L "$constructor_reactivation_journal" ]; then
+            if [ "$controller_bootstrap_quiesced" = 1 ]; then
+              KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+                --recover-only /root/kelion/config/compose.production.yml --leave-constructor-quiesced
+            else
+              KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+                --recover-only /root/kelion/config/compose.production.yml
+              [ ! -e "$constructor_reactivation_journal" ] && [ ! -L "$constructor_reactivation_journal" ]
+            fi
+          fi
+          if [ "$controller_bootstrap_quiesced" = 1 ]; then
+            KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+              "$cutover_stage" "$work/deploy/compose.production.yml" --leave-constructor-quiesced
+          else
+            KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" \
+              "$cutover_stage" "$work/deploy/compose.production.yml"
+            systemctl is-active --quiet kelion-constructor-model-control.service
+            controller_socket=/run/kelion-constructor-model-control/control.sock
+            [ -S "$controller_socket" ] && [ ! -L "$controller_socket" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$controller_socket")" = '0:10050:660' ]
+          fi
           cutover_stage=''
-          printf '%s\n' 'runtime allowlist și secrete aplicate atomic; backendul activ a fost recreat și verificat'
+          if [ "$controller_bootstrap_quiesced" = 1 ]; then
+            printf '%s\n' 'runtime allowlist și secrete aplicate atomic; bootstrap-quiesced până la configure-constructor'
+          else
+            printf '%s\n' 'runtime allowlist și secrete aplicate atomic; backendul și controllerul au fost recreate și verificate'
+          fi
           REMOTE
