@@ -2233,6 +2233,20 @@ export default function ChatPanel({
         monitor: () => getMonitorContent(),
         tranzactii: () => getStareTranzactii(),
         onEroare: opresteDupaEroare,
+        onInchis: () => {
+          // Închidere curată (1000): fără eroare, fără reluare — repaus.
+          if (generatie !== vlGeneratieRef.current) return
+          vlGeneratieRef.current++
+          micManualOffRef.current = true
+          anuleazaPornireMic()
+          unregisterLiveFocus()
+          const sesiune = vlRef.current
+          vlRef.current = null
+          sesiune?.inchide()
+          setListening(false)
+          setLiveVoice('')
+          setLivePhase('idle')
+        },
       })
 
       if (

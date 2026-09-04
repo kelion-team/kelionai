@@ -86,11 +86,15 @@ export function cheieMesajEroareVocalLive(code: VocalLiveFailureCode): VocalLive
 export type VocalLiveCloseFailure = VocalLiveFailureCode | 'no_credit'
 
 /** Mapează numai codurile/reasons fixe emise de backend. Textul liber primit
- * într-un close frame nu devine niciodată mesaj sau decizie în interfață. */
+ * într-un close frame nu devine niciodată mesaj sau decizie în interfață.
+ *
+ * `null` = închidere CURATĂ (cod 1000 fără motiv de eroare cunoscut): nu e
+ * eroare, nu se raportează, nu se reia. Înainte orice închidere, inclusiv cea
+ * normală, devenea 'transport' → console.error → reluare inutilă. */
 export function clasificaInchidereVocalLive(
   closeCode: number,
   reason: string,
-): VocalLiveCloseFailure {
+): VocalLiveCloseFailure | null {
   if (closeCode === 1008) {
     if (reason === 'fara_credit') return 'no_credit'
     if (reason === 'session_limit') return 'session_limit'
@@ -102,7 +106,7 @@ export function clasificaInchidereVocalLive(
     return reason === 'vocal_live_indisponibil' ? 'not_configured' : 'provider_5xx'
   }
   if (closeCode === 1006) return 'transport'
-  if (closeCode === 1000) return reason === 'idle_timeout' ? 'idle_timeout' : 'transport'
+  if (closeCode === 1000) return reason === 'idle_timeout' ? 'idle_timeout' : null
   return 'transport'
 }
 
