@@ -19,6 +19,7 @@ readonly LEGACY_DROPIN='/etc/systemd/system/private-ai-llm.service.d/90-qwen35-1
 readonly STATE_DIR='/run/private-ai'
 readonly STATE_FILE="$STATE_DIR/active-model"
 readonly LOCK_FILE='/run/lock/private-ai-model-switch.lock'
+readonly MAX_MODEL_JOURNAL='/root/kelion/runtime/constructor-max-model.journal'
 
 readonly -a POWERFUL_SHARDS=(
   'Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf'
@@ -150,9 +151,26 @@ verify_loopback_listener() {
     || fail 'llama.cpp ascultă în afara loopbackului'
 }
 
+# Installerul max-model publică jurnalul persistent sub lockul canonic de
+# publicare, cu controllerul manual oprit, și abia după proba de inferență 122B
+# scrie receiptul final. Până atunci `powerful` trebuie să fie posibil numai pe
+# baza receiptului sigilat + metadatelor shardurilor; altfel installerul pică
+# mut la propria probă, iar receiptul final nu poate apărea niciodată.
+max_model_transaction_open() {
+  [ -f "$MAX_MODEL_JOURNAL" ] && [ ! -L "$MAX_MODEL_JOURNAL" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$MAX_MODEL_JOURNAL")" = '0:0:600:1' ] \
+    && [ "$(sed -n '1p' "$MAX_MODEL_JOURNAL")" = 'schema=1' ] \
+    && [ "$(sed -n '2p' "$MAX_MODEL_JOURNAL")" = 'kind=constructor-max-model' ]
+}
+
 verify_powerful_artifacts() {
   local index path
-  verify_final_receipt
+  if [ ! -e "$POWERFUL_COMPLETE_RECEIPT" ] && [ ! -L "$POWERFUL_COMPLETE_RECEIPT" ] \
+    && max_model_transaction_open; then
+    log 'receiptul final 122B lipsește; tranzacția max-model este deschisă, proba folosește receiptul sigilat'
+  else
+    verify_final_receipt
+  fi
   require_regular "$POWERFUL_SEALED_RECEIPT"
   [ "$(stat -Lc '%U:%G:%a:%h' "$POWERFUL_SEALED_RECEIPT")" = 'root:root:600:1' ] \
     || fail 'receiptul sigilat 122B are metadate invalide'

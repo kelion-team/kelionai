@@ -44,7 +44,18 @@ test('122B este un override runtime exclusiv și rebootul revine la baza 35B', (
 test('powerful este permis numai după receiptul final schema 2 complet', () => {
   const verify = shellFunction('verify_final_receipt')
   const artifacts = shellFunction('verify_powerful_artifacts')
-  assert.match(artifacts, /^  verify_final_receipt$/m)
+  assert.match(artifacts, /^\s+verify_final_receipt$/m)
+  // Singura excepție: proba installerului max-model, cât timp jurnalul persistent
+  // este deschis și receiptul final încă nu există (altfel installerul pică mut).
+  const open = shellFunction('max_model_transaction_open')
+  assert.match(source, /readonly MAX_MODEL_JOURNAL='\/root\/kelion\/runtime\/constructor-max-model[.]journal'/)
+  assert.match(open, /0:0:600:1/)
+  assert.match(open, /kind=constructor-max-model/)
+  assert.match(
+    artifacts,
+    /if \[ ! -e "\$POWERFUL_COMPLETE_RECEIPT" \] && \[ ! -L "\$POWERFUL_COMPLETE_RECEIPT" \] \\\n\s+&& max_model_transaction_open; then[\s\S]*else\n\s+verify_final_receipt\n\s+fi/,
+  )
+  assert.ok(artifacts.indexOf('require_regular "$POWERFUL_SEALED_RECEIPT"') > artifacts.indexOf('fi'))
   assert.match(verify, /"\$\{#lines\[@\]\}" -eq 20/)
   assert.match(verify, /"\$\{lines\[0\]\}" = 'schema=2'/)
   assert.match(verify, /"\$\{lines\[13\]\}" =~ \^fast_model_path=\/srv\/private-ai\/models\//)

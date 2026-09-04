@@ -377,3 +377,72 @@ test('receiptul schema 2 are același contract de 20 linii la producer și toți
   assert.match(modelController, /switch_source_sha256=.*lines\[18\]/)
   assert.match(modelController, /verified_at=.*lines\[19\]/)
 })
+
+test('trapul ERR raportează comanda, linia și statusul înainte de rollback', () => {
+  const reporter = shellFunction(installer, 'report_silent_failure')
+  assert.match(reporter, /max-model: ERROR: comanda '%s' a picat la linia %s cu status %s/)
+  assert.match(reporter, />&2/)
+
+  // Trapul global este armat imediat după `fail`/`log`, înaintea oricărei comenzi.
+  const globalTrap = installer.indexOf(`trap 'report_silent_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR`)
+  assert.ok(globalTrap > 0 && globalTrap < installer.indexOf('require_regular() {'))
+
+  // Trapul armat: raportul precede rollback-ul, cu același status; EXIT separat.
+  const armed = installer.indexOf(
+    `trap 'max_model_status=$?; report_silent_failure "$max_model_status" "$LINENO" "$BASH_COMMAND"; rollback "$max_model_status"' ERR`,
+  )
+  assert.ok(armed > 0)
+  assert.equal(installer.indexOf(`trap 'rollback $?' EXIT`, armed) > armed, true)
+  assert.doesNotMatch(installer, /trap 'rollback \$\?' ERR EXIT/)
+  assert.ok(installer.indexOf('rollback_armed=1', armed) > armed)
+
+  // Probă reală: o comandă mută sub set -Ee cu trapul ERR explică căderea pe stderr.
+  const probe = spawnSync(
+    'bash',
+    ['-c', [
+      'set -Eeuo pipefail',
+      `report_silent_failure() {\n${reporter}}`,
+      `trap 'report_silent_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR`,
+      'check() { [ "$1" = expected ]; }',
+      'check altceva',
+    ].join('\n')],
+    { encoding: 'utf8' },
+  )
+  assert.equal(probe.status, 1)
+  assert.match(probe.stderr, /max-model: ERROR: comanda '\[ "\$1" = expected \]' a picat la linia \d+ cu status 1/)
+})
+
+test('rollback-ul și curățenia nu ating niciodată shardurile verificate', () => {
+  const rollback = shellFunction(installer, 'rollback')
+  assert.match(rollback, /GARANȚIE: rollback-ul restaurează NUMAI runtime-ul/)
+  assert.doesNotMatch(rollback, /\brm\b[^\n]*(?:MODEL_ROOT|SHARD_NAMES|MODEL_FIRST|\.gguf|SEALED_RECEIPT)/)
+  assert.doesNotMatch(rollback, /\b(?:find|rmdir|unlink|truncate)\b/)
+  assert.match(rollback, /rm -f -- "\$RUNTIME_DROPIN" "\$PERSISTENT_DROPIN" "\$RECEIPT"/)
+
+  // În tot installerul, `rm` țintește numai cache-ul neautentificat (.part, chunkuri
+  // HTTP Range, candidați temporari) și artefactele runtime; niciodată un shard final.
+  for (const line of installer.split('\n')) {
+    if (!/\brm\s+-r?f\b/.test(line)) continue
+    assert.doesNotMatch(line, /\$destination\b|SHARD_NAMES|MODEL_FIRST|"\$MODEL_ROOT"|\.gguf"/, `rm periculos: ${line.trim()}`)
+  }
+  assert.doesNotMatch(installer, /find [^\n]*-delete/)
+  assert.doesNotMatch(installer, /rm -rf[^\n]*MODEL_ROOT/)
+
+  // Descărcarea retrage numai .part după SHA invalid; un shard final invalid este
+  // raportat prin `fail`, nu șters.
+  const sequential = shellFunction(installer, 'download_shard')
+  assert.match(sequential, /\[ ! -e "\$destination" \] \|\| fail "shard final existent dar invalid/)
+  assert.doesNotMatch(sequential, /rm[^\n]*\$destination/)
+})
+
+test('proba powerful din installer rulează înaintea receiptului final și helperul o acceptă', () => {
+  const powerfulProbe = installer.indexOf('"$SWITCH_BIN" powerful')
+  const receipt = installer.indexOf("set_stage 'write-max-model-receipt'")
+  assert.ok(powerfulProbe > 0 && receipt > powerfulProbe, 'proba powerful trebuie să preceadă receiptul final')
+  assert.ok(installer.indexOf('publish_max_model_journal || fail') < powerfulProbe)
+
+  const artifacts = shellFunction(switchHelper, 'verify_powerful_artifacts')
+  assert.match(artifacts, /max_model_transaction_open/)
+  assert.match(switchHelper, /readonly MAX_MODEL_JOURNAL='\/root\/kelion\/runtime\/constructor-max-model[.]journal'/)
+  assert.match(installer, /readonly MAX_MODEL_JOURNAL='\/root\/kelion\/runtime\/constructor-max-model[.]journal'/)
+})
