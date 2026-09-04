@@ -580,16 +580,29 @@ export async function failPublisherLease(
           ],
         )
         await sql.query('DELETE FROM constructor_pipeline WHERE job_id=$1', [jobId])
+        // `stale_base` nu este vina ordinului: cineva a împins un commit în
+        // master cât el trecea porțile. Retragerea PR-ului și a ramurii rămâne
+        // necesară, dar ordinul se reia automat pe noua bază, în loc să ceară
+        // repornire manuală și să arunce toată execuția modelului. Celelalte
+        // coduri rămân terminale: acolo chiar a eșuat conținutul.
+        const reluabil = code === 'stale_base' && Number(row.publisher_attempts) < 3
         const terminal = await sql.query<PipelineRow>(
           `UPDATE build_jobs
-              SET status='failed', constructor_stage='failed',
+              SET status=$3, constructor_stage=$4,
                   branch=NULL, pr_url=NULL, commit_sha=NULL, live_version=NULL, ci=NULL,
-                  progress='publisher_manual_restart_required', log=$2,
-                  retry_not_before=NULL,
+                  progress=$5, log=$2,
+                  retry_not_before=$6,
                   progress_at=now(), updated_at=now()
             WHERE id=$1
             RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
-          [jobId, code],
+          [
+            jobId,
+            code,
+            reluabil ? 'queued' : 'failed',
+            reluabil ? 'queued' : 'failed',
+            reluabil ? 'queued' : 'publisher_manual_restart_required',
+            reluabil ? new Date(Date.now() + 60_000) : null,
+          ],
         )
         return terminal.rows[0] ? eventResult(terminal.rows[0]) : null
       }
