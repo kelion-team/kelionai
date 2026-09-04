@@ -800,19 +800,39 @@ function assertEnabledLayout(expectedModelId) {
     undefined,
     podmanSupervisorEnv(),
   )
-  if (gateRevision !== expectedCommit) fail('Imaginea gate nu a fost construită din același commit ca origin/master')
+  // Imaginea gate se improspateaza abia la deploy, dar clona dedicata urmareste
+  // origin/master imediat. Intre un merge si deployul urmator cele doua diverg,
+  // iar o comparatie cu varful mobil al lui master respinge orice ordin din acel
+  // interval — inclusiv ordinele deja pornite, care mor la jumatatea executiei.
+  // Ordinul se ancoreaza deci in commitul din care a fost construita imaginea
+  // gate: acelasi cod ruleaza in container si in worktree. Cerem doar ca acel
+  // commit sa existe in clona si sa fie stramos al lui origin/master, adica sa
+  // fie cod chiar ajuns pe master, nu unul arbitrar.
+  if (!/^[0-9a-f]{40}$/.test(gateRevision ?? '')) fail('Imaginea gate nu declară commitul din care a fost construită')
+  if (gateRevision !== expectedCommit) {
+    if (!commandOk('/usr/bin/git', ['rev-parse', '--verify', `${gateRevision}^{commit}`], REPO, gitSupervisorEnv())) {
+      fail('Commitul imaginii gate nu există în clona dedicată')
+    }
+    if (!commandOk('/usr/bin/git', ['merge-base', '--is-ancestor', gateRevision, expectedCommit], REPO, gitSupervisorEnv())) {
+      fail('Imaginea gate nu a fost construită dintr-un commit aflat pe origin/master')
+    }
+  }
+  return gateRevision
 }
 
 async function preflight() {
   if (!EXEC_ENABLED) return { problem: 'Execuția locală este dezactivată explicit', profile: null }
   try {
     const profile = activeConstructorProfile()
-    assertEnabledLayout(profile.modelId)
-    return { problem: null, profile }
+    // Commitul imaginii gate este si baza pe care se executa ordinul: containerul
+    // de porti si worktree-ul trebuie sa contina exact acelasi cod.
+    const gateCommit = assertEnabledLayout(profile.modelId)
+    return { problem: null, profile, gateCommit }
   } catch (error) {
     return {
       problem: error instanceof Error ? error.message : 'Preflightul OpenCode a eșuat',
       profile: null,
+      gateCommit: null,
     }
   }
 }
@@ -1297,13 +1317,14 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
 async function runOnce() {
   assertLoopbackApi()
   const secret = loadSecret()
-  const { problem, profile } = await preflight()
+  const { problem, profile, gateCommit } = await preflight()
   if (problem) {
     await heartbeat(secret, 'setup_required', problem)
     if (!EXEC_ENABLED) return
     fail(problem)
   }
   if (!profile) fail('Preflightul nu a furnizat modelul selectat manual')
+  if (!/^[0-9a-f]{40}$/.test(gateCommit ?? '')) fail('Preflightul nu a furnizat commitul imaginii gate')
 
   const claimed = await prepareWorkerClaim(secret, { profile: profile.tier })
   if (!claimed) return
@@ -1327,14 +1348,16 @@ async function runOnce() {
     mkdirSync(jobStateDir, { recursive: false, mode: 0o700 })
     const added = spawnSync(
       '/usr/bin/git',
-      ['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--detach', jobDir, 'origin/master'],
+      ['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--detach', jobDir, gateCommit],
       { cwd: REPO, env: gitSupervisorEnv(), stdio: 'ignore', timeout: 60_000 },
     )
     if (added.status !== 0) fail('Nu am putut crea worktree-ul dedicat')
     worktreeAdded = true
     const baseCommit = exactOutput('/usr/bin/git', ['rev-parse', 'HEAD'], jobDir, gitSupervisorEnv())
-    const expectedCommit = exactOutput('/usr/bin/git', ['rev-parse', 'origin/master^{commit}'], REPO, gitSupervisorEnv())
-    if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== expectedCommit) fail('Worktree-ul nu corespunde exact origin/master')
+    // Baza este commitul imaginii gate, verificat in preflight ca fiind stramos
+    // al lui origin/master. Nu folosim varful lui master: acesta se poate muta
+    // in timpul executiei, iar ordinul ar muri fara vina lui.
+    if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== gateCommit) fail('Worktree-ul nu corespunde commitului imaginii gate')
     writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-local-qwen', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
     const orderPath = join(jobStateDir, 'order.md')
     writeFileSync(orderPath, `${effectiveOrder}\n`, { flag: 'wx', mode: 0o600 })
