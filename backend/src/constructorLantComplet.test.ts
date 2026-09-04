@@ -87,9 +87,16 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
       route.indexOf("'/api/internal/constructor-publisher/jobs/claim'"),
     )
 
-    expect(transition).toContain("status=CASE WHEN $3 THEN 'failed' ELSE status END")
-    expect(transition).toContain('retry_not_before=CASE WHEN $3 THEN NULL ELSE retry_not_before END')
-    expect(transition).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled|now\(\) \+ \(\$\d+::text/)
+    // Un eșec tehnic al workerului este trecător prin natura lui (modelul local
+    // se reîncarcă, un deploy oprește unitatea, procesul e omorât la memorie),
+    // deci ordinul se reia automat, mărginit de plafon. Un verdict `unresolved`
+    // este despre conținutul ordinului, nu o pană, și rămâne definitiv.
+    expect(transition).toContain("const reluabil = input.event === 'failed'")
+    expect(transition).toContain("WHEN $8 AND attempts < $9 THEN 'queued'")
+    expect(transition).toContain("WHEN $3 THEN 'failed'")
+    expect(transition).toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
+    expect(transition).toContain("failedRow.status === 'failed'")
+    expect(transition).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)
     expect(workerEvent).toContain("['taskId', 'event', 'code', 'profile', 'progress']")
     expect(workerEvent).toContain("['taskId', 'event', 'reason', 'profile', 'progress']")
     expect(workerEvent).toMatch(/reason !== 'no_changes'.*reason !== 'test_failure'.*reason !== 'quality_gate_failure'/s)
@@ -131,16 +138,20 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
     expect(transition).not.toContain("unresolved: ['claimed'")
   })
 
-  it('watchdog-ul închide tehnic execuția tăcută fără requeue sau schimbare de profil', () => {
+  it('watchdog-ul repune în coadă execuția tăcută, mărginit, fără schimbare de profil', () => {
     const db = cod('db.ts')
     const watchdog = db.slice(
       db.indexOf('export async function deblocheazaJoburileClaimate'),
       db.indexOf('// AUDIT ADMIN', db.indexOf('export async function deblocheazaJoburileClaimate')),
     )
-    expect(watchdog).toContain("status='failed'")
+    // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy, care
+    // oprește unitatea. Ordinul se repune în coadă până la plafon, iar incidentul
+    // se deschide doar când chiar a murit. Profilul măsurat rămâne neatins.
+    expect(watchdog).toContain("status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END")
+    expect(watchdog).toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
     expect(watchdog).toContain("constructorWorkerTechnicalFailureRecord('execution_timeout', profile)")
-    expect(watchdog).toContain('retry_not_before=NULL')
-    expect(watchdog).not.toMatch(/status='queued'|execution_cycle\s*=|worker_retry_scheduled|retry_not_before=now/)
+    expect(watchdog).toContain("if (failedRow.status !== 'failed') continue")
+    expect(watchdog).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)
   })
 
   it('publisherul nu reinvocă modelul după un handoff respins', () => {
@@ -149,10 +160,14 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
       pipeline.indexOf('export async function failPublisherLease'),
       pipeline.indexOf('export async function claimReleaseJob'),
     )
-    expect(failure).toContain("status='failed'")
-    expect(failure).toContain("progress='publisher_manual_restart_required'")
-    expect(failure).toContain('retry_not_before=NULL')
-    expect(failure).not.toMatch(/status='queued'|execution_cycle\s*=|worker_retry_scheduled|stale_base_requeued/)
+    // Modelul NU se reinvocă pentru un handoff respins pe fond. Singura excepție
+    // este `stale_base`, unde ordinul nu are nicio vină — cineva a împins un
+    // commit în master cât el trecea porțile — iar PR-ul și ramura sunt retrase
+    // corect înainte de reluare. Restul codurilor rămân definitive.
+    expect(failure).toContain("const reluabil = code === 'stale_base' && Number(row.publisher_attempts) < 3")
+    expect(failure).toContain("reluabil ? 'queued' : 'failed'")
+    expect(failure).toContain("reluabil ? 'queued' : 'publisher_manual_restart_required'")
+    expect(failure).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)
   })
 
   it('auditul separă Reia cerut de owner de recuperările automate', () => {

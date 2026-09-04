@@ -246,13 +246,6 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       expectedProgress: 'powerful_final_failure',
       evidence: 'worker_unresolved:quality_gate_failure;profile=powerful',
     },
-    {
-      label: 'technical brain_unavailable/fast',
-      input: { event: 'failed', code: 'brain_unavailable', profile: 'fast' } as const,
-      expectedStage: 'failed',
-      expectedProgress: 'technical_failure',
-      evidence: 'worker_failure:brain_unavailable;profile=fast',
-    },
   ])(
     'keeps $label terminal without automatic retry',
     async ({ input, expectedStage, expectedProgress, evidence }) => {
@@ -361,9 +354,49 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'failed', code: 'worker_internal_failure', profile: 'fast',
     })).resolves.toMatchObject({
+      status: 'queued',
+      constructorStage: 'queued',
+      progress: 'technical_failure',
+    })
+  })
+
+  it('reia automat un esec tehnic al workerului, marginit de plafon', async () => {
+    // Prima cadere: ordinul se intoarce in coada, cu asteptare, si fara sa piarda
+    // dovada. Codul ramane prima linie din log si ajunge la worker ca recoveryCode.
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
+      event: 'failed', code: 'brain_unavailable', profile: 'fast',
+    })).resolves.toMatchObject({
+      status: 'queued',
+      constructorStage: 'queued',
+      progress: 'technical_failure',
+    })
+    const dupaPrima = await database.query<{
+      status: string
+      constructor_stage: string
+      log: string
+      retry_not_before: Date | null
+      codex_task_id: string | null
+    }>(
+      `SELECT status, constructor_stage, log, retry_not_before, codex_task_id
+         FROM build_jobs WHERE id=1`,
+    )
+    expect(dupaPrima.rows[0]).toMatchObject({
+      status: 'queued',
+      constructor_stage: 'queued',
+      log: 'worker_failure:brain_unavailable;profile=fast',
+      codex_task_id: null,
+    })
+    expect(dupaPrima.rows[0].retry_not_before).toBeInstanceOf(Date)
+
+    // Peste plafon ordinul moare definitiv: daca pica de atatea ori la rand,
+    // cauza nu mai este trecatoare.
+    await database.query("UPDATE build_jobs SET attempts=3, status='running', constructor_stage='working', codex_task_id=$2 WHERE id=$1", [1, taskId])
+    await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
+      event: 'failed', code: 'brain_unavailable', profile: 'fast',
+    })).resolves.toMatchObject({
       status: 'failed',
       constructorStage: 'failed',
-      progress: 'technical_failure',
+      retryNotBefore: null,
     })
   })
 
@@ -372,7 +405,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     await expect(buildJobs.advanceConstructorBuildJob(1, taskId, {
       event: 'failed', code: 'worker_internal_failure', profile: 'powerful',
     })).resolves.toMatchObject({
-      status: 'failed',
+      status: 'queued',
       executionProfile: 'powerful',
       executionCycle: 0,
     })
@@ -1020,7 +1053,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     })
   })
 
-  it('retires a stale publisher base as terminal until the owner explicitly retries', { timeout: 30_000 }, async () => {
+  it('retrage PR-ul si ramura pe stale_base, apoi reia ordinul pe noua baza', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
       baseCommit: base,
@@ -1049,9 +1082,12 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       prNumber: 42,
       cleanupReceiptSha256: hash2,
     })).resolves.toEqual({
+      // Ordinul nu are nicio vina: cineva a impins un commit in master cat el
+      // trecea portile. PR-ul si ramura sunt retrase, dar munca modelului nu se
+      // arunca — ordinul se reia pe noua baza.
       jobId: '1',
-      status: 'failed',
-      stage: 'failed',
+      status: 'queued',
+      stage: 'queued',
       commit: null,
       liveVersion: null,
     })
@@ -1074,11 +1110,11 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     )).resolves.toMatchObject({
       rows: [{
         id: '1',
-        status: 'failed',
+        status: 'queued',
         codex_task_id: taskId,
         execution_profile: 'fast',
         execution_cycle: 0,
-        constructor_stage: 'failed',
+        constructor_stage: 'queued',
         branch: null,
         pr_url: null,
         commit_sha: null,
@@ -1090,14 +1126,14 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       'SELECT count(*)::text AS count FROM constructor_pipeline WHERE job_id=1',
     )).resolves.toMatchObject({ rows: [{ count: '0' }] })
     await expect(pipeline.claimPublisherJob('223e4567-e89b-42d3-a456-426614174002')).resolves.toBeNull()
-    await expect(buildJobs.retryBuildJob(1)).resolves.toMatchObject({
-      ok: true,
-      job: { status: 'queued', executionProfile: null, executionCycle: 1 },
-    })
-    await expect(database.query<{ activity_key: string }>(
-      `SELECT activity_key FROM constructor_activity_events
-        WHERE job_id=1 AND execution_cycle=1 ORDER BY id DESC LIMIT 1`,
-    )).resolves.toMatchObject({ rows: [{ activity_key: 'manual_owner_retry' }] })
+    // Reluarea manuala nu mai este necesara: ordinul este deja in coada, cu
+    // asteptare, si va fi revendicat automat de worker pe noua baza.
+    const dupa = await database.query<{ status: string; retry_not_before: Date | null }>(
+      'SELECT status, retry_not_before FROM build_jobs WHERE id=1',
+    )
+    expect(dupa.rows[0].status).toBe('queued')
+    expect(dupa.rows[0].retry_not_before).toBeInstanceOf(Date)
+    await expect(buildJobs.retryBuildJob(1)).resolves.toMatchObject({ ok: false })
   })
 
   it('keeps transport-only publisher recovery automatic for an external GitHub authority wait', { timeout: 30_000 }, async () => {
