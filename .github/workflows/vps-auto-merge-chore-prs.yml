@@ -94,7 +94,7 @@ jobs:
             --jq '.[] | {filename, status, previous_filename: (.previous_filename // null)}' | jq -s '.')
           files=$(jq '[.[].filename]' <<<"$file_entries")
           is_vps=$(jq -r --argjson allowed "$allowed" '
-            any(.[]; . as $entry |
+            length > 0 and all(.[]; . as $entry |
               ($allowed | index($entry.filename)) != null or
               ($entry.previous_filename != null and ($allowed | index($entry.previous_filename)) != null)
             )

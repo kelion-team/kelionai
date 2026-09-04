@@ -29,7 +29,7 @@ vi.mock('./dbPool.js', () => ({
         return { rows: [{ active: state.identityActive }], rowCount: 1 }
       }
       if (sql.includes("SELECT id, order_text, status FROM build_jobs")) return { rows: [], rowCount: 0 }
-      if (sql.includes('INSERT INTO build_jobs (ordered_by, order_text)')) {
+      if (sql.includes('INSERT INTO build_jobs (ordered_by, order_text, brain)')) {
         return { rows: [{ id: state.nextBuildId++ }], rowCount: 1 }
       }
       if (sql.includes('DELETE FROM auth_sessions')) state.identityActive = false

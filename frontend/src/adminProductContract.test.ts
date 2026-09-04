@@ -40,6 +40,52 @@ describe('admin product contract', () => {
     expect(admin).not.toMatch(/·\s*0\s+credite consumate/i)
   })
 
+  it('keeps Constructor model selection explicit, manual and fail-closed', () => {
+    const admin = source('components/admin/AdminProductie.tsx')
+    const api = source('lib/admin.ts')
+    const contract = source('lib/adminConstructorContract.ts')
+    expect(admin).toContain('A.constructorModelManualHint')
+    expect(admin).toContain("(['fast', 'powerful'] as const)")
+    expect(admin).toContain('onClick={() => selectConstructorModel(profile.id)}')
+    expect(admin).toContain('aria-pressed={active}')
+    expect(admin).toContain("constructorModelSnapshot.state === 'switching'")
+    const handlerGuard = admin.slice(
+      admin.indexOf('const selectConstructorModel ='),
+      admin.indexOf('setConstructorModelBusy(true)'),
+    )
+    expect(handlerGuard).toContain("constructorModel.state !== 'ready'")
+    const buttonGuard = admin.slice(
+      admin.indexOf('const disabled = constructorModelBusy'),
+      admin.indexOf('return (', admin.indexOf('const disabled = constructorModelBusy')),
+    )
+    expect(buttonGuard).toContain("constructorModelSnapshot.state !== 'ready'")
+    expect(api).toContain("apiFetch('/api/admin/constructor/model'")
+    expect(api).toContain('body: JSON.stringify({ profile })')
+    expect(contract).toContain("value.mode !== 'manual'")
+    expect(contract).toContain("value.defaultProfile !== 'fast'")
+    expect(admin.match(/switchConstructorModelAdmin/g)).toHaveLength(2)
+  })
+
+  it('recomandă powerful numai din verdictul explicit fast-unresolved, fără acțiune automată', () => {
+    const admin = source('components/admin/AdminProductie.tsx')
+    const outcomeStart = admin.indexOf('j.continuity?.modelOutcome')
+    const outcomeEnd = admin.indexOf('{j.workCard &&', outcomeStart)
+    const outcomeUi = admin.slice(outcomeStart, outcomeEnd)
+    expect(outcomeStart).toBeGreaterThan(0)
+    expect(outcomeEnd).toBeGreaterThan(outcomeStart)
+    expect(outcomeUi).toContain("outcome.result === 'technical_failure'")
+    expect(outcomeUi).toContain('outcome.manualRecommendation')
+    expect(outcomeUi).toContain('A.constructorOutcomeManualRecommendation')
+    expect(outcomeUi).toContain('A.constructorOutcomeTechnicalNoModelAdvice')
+    expect(outcomeUi).toContain('A.constructorOutcomeNoOtherModel')
+    expect(outcomeUi).toContain('href="#constructor-model-control-title"')
+    expect(outcomeUi).not.toMatch(/selectConstructorModel|switchConstructorModelAdmin|retryBuildOrder|apiFetch/)
+    const text = source('lib/adminText.ts')
+    expect(text).toContain('comută manual la ${profile}, apoi folosește explicit Reia')
+    expect(text).toContain('ciclu POWERFUL este terminal și nu recomandă Reia sau un model superior')
+    expect(text).toContain('verdict tehnic nu recomandă alt model sau Reia')
+  })
+
   it('distinguishes active signed-webhook settlement from fail-closed setup state', () => {
     const admin = source('components/admin/AdminBani.tsx')
     expect(admin).toContain("paymentCollection?.status === 'active'")

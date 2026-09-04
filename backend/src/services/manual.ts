@@ -394,7 +394,7 @@ export function buildAdminChapters(): ManualSection[] {
       paragraphs: [
         'Web-ul validează și pune ordine direct în coada canonică build_jobs; nu deține worktree, shell, credentiale Git sau chei AI. Workerul separat execută OpenCode 1.18.25 + Qwen local (llama.cpp).',
         'Un job are lease, heartbeat, progres și rezultate durabile. Executorul nu poate declara singur publicarea sau deploy-ul, iar un browser admin citește numai starea autorizată.',
-        'Fluxul verificabil este build_jobs, worktree izolat, OpenCode + Qwen local (llama.cpp), porți, PR, îmbinare și deploy separat cu backup și readiness.',
+        'Fluxul verificabil este build_jobs, worktree dedicat, OpenCode + Qwen local (llama.cpp), porți, PR, îmbinare și deploy separat cu backup și readiness.',
       ],
     },
     {

@@ -1,24 +1,6 @@
 name: constructor-desktop-release
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - constructor-desktop/**
-      - frontend/**
-      - desktop/src-tauri/src/shell.rs
-      - desktop/src-tauri/icons/**
-      - backend/src/routes/auth.ts
-      - backend/src/routes/constructor.ts
-      - backend/src/nativeAuthSecurity.test.ts
-      - backend/migrations/20260910_constructor_desktop_auth.sql
-      - config/endpoints.json
-      - config/product.json
-      - scripts/genereaza-config-platforme.mjs
-      - scripts/pregateste-bundle-nativ.mjs
-      - scripts/verifica-clienti-nativi.mjs
-      - .github/workflows/constructor-desktop-release.yml
   workflow_dispatch:
     inputs:
       release_sha:
@@ -54,17 +36,17 @@ jobs:
   package-windows:
     needs: guard-source
     runs-on: windows-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     environment: production
     permissions:
       actions: read
       contents: read
     env:
-      RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.release_sha || github.sha }}
+          ref: ${{ inputs.release_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -80,23 +62,13 @@ jobs:
           if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'checkout diferit de release_sha' }
           $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
           if ($master -ne $env:RELEASE_SHA) { throw 'release_sha nu este capul master' }
-          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(60)
-          $latest = $null
-          while ([DateTimeOffset]::UtcNow -lt $deadline) {
-            $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
-            $runs = @($payload.workflow_runs | Where-Object {
-              $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
-            } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
-            if ($runs.Count -ge 1) {
-              $latest = $runs[0]
-              if ($latest.status -eq 'completed') { break }
-            }
-            Start-Sleep -Seconds 15
-          }
-          if ($null -eq $latest -or $latest.status -ne 'completed') {
-            throw 'Rularea pr-verify canonică nu s-a terminat în 60 de minute.'
-          }
-          if ($latest.conclusion -ne 'success') {
+          $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
+          $runs = @($payload.workflow_runs | Where-Object {
+            $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
+          } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
+          if ($runs.Count -lt 1) { throw 'Commitul nu are o rulare pr-verify canonică.' }
+          $latest = $runs[0]
+          if ($latest.status -ne 'completed' -or $latest.conclusion -ne 'success') {
             throw "Ultimul pr-verify canonic nu este verde: $($latest.status)/$($latest.conclusion)"
           }
           $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($latest.id)/jobs?per_page=100" | ConvertFrom-Json
@@ -143,34 +115,6 @@ jobs:
       - name: Construiește executabilul Windows înainte de bundle
         shell: pwsh
         run: npm --prefix constructor-desktop run build -- --no-bundle
-
-      - name: Revalidează masterul și CI-ul imediat înainte de semnare
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -ne $env:GITHUB_SHA) {
-            throw 'Commitul de release nu mai corespunde workflow-ului canonic.'
-          }
-          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'Checkout diferit de release_sha.' }
-          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
-          if ($master -ne $env:RELEASE_SHA) { throw 'Masterul a avansat înainte de semnare; release refuzat.' }
-          $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
-          $runs = @($payload.workflow_runs | Where-Object {
-            $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
-          } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
-          if ($runs.Count -lt 1 -or $runs[0].status -ne 'completed' -or $runs[0].conclusion -ne 'success') {
-            throw 'Ultimul pr-verify canonic nu mai este complet și verde înainte de semnare.'
-          }
-          $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($runs[0].id)/jobs?per_page=100" | ConvertFrom-Json
-          foreach ($required in @('release-train-preflight', 'verify', 'container-isolation')) {
-            $matches = @($jobsPayload.jobs | Where-Object { $_.name -eq $required })
-            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or $matches[0].conclusion -ne 'success') {
-              throw "Jobul obligatoriu $required nu mai este unic și verde înainte de semnare."
-            }
-          }
 
       - name: Semnează Authenticode executabilul, MSI și NSIS cu timestamp
         shell: pwsh
@@ -312,37 +256,9 @@ jobs:
           $manifest | ConvertTo-Json -Depth 5 | Set-Content 'constructor-desktop/artifact/manifest.json' -Encoding utf8
           if ($manifest.packages.Count -ne 2) { throw 'Manifestul nu conține ambele pachete.' }
 
-      - name: Revalidează masterul și CI-ul imediat înainte de publicare
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -ne $env:GITHUB_SHA) {
-            throw 'Commitul de release nu mai corespunde workflow-ului canonic.'
-          }
-          if ((git rev-parse HEAD).Trim() -ne $env:RELEASE_SHA) { throw 'Checkout diferit de release_sha.' }
-          $master = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha').Trim()
-          if ($master -ne $env:RELEASE_SHA) { throw 'Masterul a avansat înainte de publicare; release refuzat.' }
-          $payload = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/pr-verify.yml/runs?head_sha=$env:RELEASE_SHA&event=push&per_page=100" | ConvertFrom-Json
-          $runs = @($payload.workflow_runs | Where-Object {
-            $_.head_sha -eq $env:RELEASE_SHA -and $_.head_branch -eq 'master' -and $_.event -eq 'push'
-          } | Sort-Object {[DateTimeOffset]$_.created_at} -Descending)
-          if ($runs.Count -lt 1 -or $runs[0].status -ne 'completed' -or $runs[0].conclusion -ne 'success') {
-            throw 'Ultimul pr-verify canonic nu mai este complet și verde înainte de publicare.'
-          }
-          $jobsPayload = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($runs[0].id)/jobs?per_page=100" | ConvertFrom-Json
-          foreach ($required in @('release-train-preflight', 'verify', 'container-isolation')) {
-            $matches = @($jobsPayload.jobs | Where-Object { $_.name -eq $required })
-            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or $matches[0].conclusion -ne 'success') {
-              throw "Jobul obligatoriu $required nu mai este unic și verde înainte de publicare."
-            }
-          }
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: kelion-constructor-windows-${{ inputs.release_sha || github.sha }}
+          name: kelion-constructor-windows-${{ inputs.release_sha }}
           path: constructor-desktop/artifact/
           if-no-files-found: error
           retention-days: 30

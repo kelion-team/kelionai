@@ -7,6 +7,16 @@ auditat `production-release` numai după CI și build verzi pentru vârful exact
 din `master`; mutatorul rulează în mediul GitHub `production`. Nu există cron
 care urmărește și publică un `master` mobil.
 
+Dispatcherul generic cere exact un PR merged canonic asociat commitului. Pentru
+un PR obișnuit, request ID-ul este determinist din repository/SHA/CI, iar
+rerularea buildului pentru același CI rămâne idempotentă; dispatcherul cere
+separat un singur build canonic verde și un singur artefact valid. Pentru un PR Constructor canonic,
+dispatcherul generic nu emite request: ownership-ul rămâne la lanțul Constructor.
+Orice asociere ambiguă sau marker Constructor incomplet se blochează fail-closed.
+De la merge-ul unui pilot Constructor până la starea terminală a deploy-ului
+acelui SHA, `master` rămâne obligatoriu înghețat și nu se lansează un request
+generic/manual concurent.
+
 ## Surse de adevăr
 
 - `config/product.json`: identitatea și originile first-party;
@@ -32,10 +42,13 @@ Containerul web nu montează repository-ul sau `/root/kelion`.
 2. `build-images` acceptă numai un run `push` verde pe `master`, construiește
    imaginile din SHA-ul exact, le publică prin digest și emite manifestul
    semnat.
-3. `release-dispatch` verifică buildul verde pentru vârful curent din `master`
-   și lansează `production-release` printr-un dispatch auditat. Acesta cere SHA
-   integral, rulează în mediul `production` și verifică runul CI, runul de
-   build, manifestul și semnăturile înainte de SSH.
+3. `release-dispatch` verifică PR-ul asociat și buildul verde pentru vârful
+   curent din `master`. Pentru un PR obișnuit lansează `production-release` cu
+   request ID-ul generic determinist; pentru un PR Constructor valid cedează
+   ownership-ul fără dispatch. Workflow-ul de deploy cere SHA integral, rulează
+   în mediul `production` și verifică runul CI, runul de build, manifestul și
+   semnăturile înainte de SSH. Verificatorul acceptă numai identitatea exactă și
+   o singură reușită al cărei job `release` este verde.
 4. `deploy.sh` planifică migrările și capturează slotul, proxy-ul, upstreamul,
    markerul, containerele și Caddyfile-ul înainte de orice mutație DB. Pentru o
    migrare distructivă pune proxy-ul managed în maintenance 503; la primul
@@ -102,8 +115,28 @@ payload personal brut.
 Fișierul `openai-project-key` conține unica cheie project-scoped de inferență.
 Backendul o montează read-only numai pentru funcțiile OpenAI ale clienților.
 `OPENAI_ADMIN_KEY` este distinctă și poate fi montată numai în backendul
-Admin. Niciuna nu ajunge în Constructor: workerul execută OpenCode 1.18.25 cu
-Qwen3.6-35B-A3B local prin endpointul loopback llama.cpp.
+Admin. Niciuna nu ajunge în Constructor. Workerul execută OpenCode 1.18.25
+numai prin endpointul loopback llama.cpp, cu profilul FAST implicit
+(Qwen3.6-35B-A3B) sau profilul POWERFUL (Qwen3.5-122B-A10B), selectat exclusiv
+manual de owner din Admin.
+
+### Profilurile locale Constructor
+
+FAST este profilul implicit și starea obligatorie după instalare și după boot
+sau reboot. În exploatarea normală, POWERFUL poate fi activat exclusiv printr-o
+cerere manuală din Admin. Workerul, backendul și interfața nu schimbă profilul
+și nu reexecută automat un ordin.
+
+O recomandare de comutare manuală la POWERFUL este emisă numai pentru un
+rezultat FAST `unresolved` real, validat de worker. O eroare
+`technical_failure` nu recomandă alt model. Un rezultat POWERFUL `unresolved`
+este terminal pentru ordin și nu produce recomandare, comutare sau reluare.
+
+Comutarea este serializată și păstrează exact un singur model servit și mapat
+de procesul `llama-server`; ambele GGUF-uri rămân instalate pe disc, dar nu sunt
+încărcate simultan ca două modele active în RAM. Profilul POWERFUL este numai un
+override de runtime; configurația persistentă rămâne FAST, astfel încât orice
+boot sau reboot normalizează runtime-ul la FAST.
 
 Constructorul are trei servicii host-only separate. Web-ul deține coada și câte
 un verificator HMAC per domeniu; nu primește cheie AI, token Git sau shell.
@@ -112,10 +145,16 @@ dedicat. Numai executorul OpenCode local este pornit explicit prin `sudo` root,
 cu config fixat la unicul provider `llama.cpp`; accesul complet la host este
 intenționat și verificat prin regula sudoers versionată. Lease-ul, timeoutul,
 porțile și handofful `gates_passed` rămân controlate de worker.
-Installerul permanent publică atomic configul și instrucțiunile din
+Installerul permanent publică atomic configul, comutatorul de model și
+instrucțiunile din
 `deploy/opencode-constructor.json` și
 `deploy/opencode-constructor-instructions.md`; configure și upgrade le compară
 byte-identic și refuză orice provider extern, `apiKey` sau permisiune restrânsă.
+Pentru instalarea dual-model, validarea controlată pornește și probează
+model-list plus inferența pe POWERFUL, revine la FAST, probează model-list plus
+inferența pe FAST și finalizează numai cu FAST activ și verificat. Validarea nu
+declară instalarea reușită dacă revenirea la FAST sau invariantul unui singur
+model activ nu pot fi dovedite.
 Publisherul are credentiala GitHub minimă, dar nu are OpenCode/root/VPS; dispatcherul
 are numai permisiune Actions pentru commituri deja merged, fără Git/VPS.
 Flagurile, markerii și timerele celor trei identități rămân implicit oprite.

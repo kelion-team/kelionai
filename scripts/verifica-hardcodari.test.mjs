@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { analizeazaLinie, esteIPv4Public } from './verifica-hardcodari.mjs'
+import { furnizoriRetrasiInLinie } from './verifica-creier-unic.mjs'
 
 const reguli = (cale, linie) => analizeazaLinie(cale, linie).map((gasit) => gasit.regula)
 
@@ -34,4 +35,13 @@ test('acceptă config central, loopback și constante tehnice explicate', () => 
 
 test('marcajul fără motiv nu devine portiță', () => {
   assert.ok(reguli('backend/src/x.ts', "fetch('https://api.example.com') // hardcod-permis: ok").some((r) => r.startsWith('R0')))
+})
+
+test('poarta obligatorie recunoaște căile de autentificare personală și backend privat', () => {
+  const authPath = ['.codex', 'auth.json'].join('/')
+  const privateBackend = `https://${['chat', 'gpt.com'].join('')}/${['backend', 'api'].join('-')}/codex`
+  const accountHeader = `${['Chat', 'GPT'].join('')}-${['Account', 'ID'].join('-')}`
+  assert.equal(furnizoriRetrasiInLinie(`readFileSync('~/${authPath}')`).length, 1)
+  assert.equal(furnizoriRetrasiInLinie(`fetch('${privateBackend}')`).length, 1)
+  assert.equal(furnizoriRetrasiInLinie(`'${accountHeader}': accountId`).length, 1)
 })

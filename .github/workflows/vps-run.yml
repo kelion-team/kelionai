@@ -66,7 +66,8 @@ jobs:
   control:
     if: github.ref == 'refs/heads/master' && github.ref_name == 'master'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Poll-ul gate poate consuma 30 min; restul rămâne pentru instalare, probe și cleanup.
+    timeout-minutes: 90
     environment: production
     env:
       VPS_HOST: ${{ vars.VPS_HOST }}
@@ -203,6 +204,7 @@ jobs:
           [ "$(stat -Lc '%d:%i' "$snapshot_root")" = "$snapshot_identity" ]
           printf '%s\n' "$source_commit"
           REMOTE
+          )
           [ "$(printf '%s\n' "$journal_source" | wc -l)" -eq 1 ]
 
           recovery=0
@@ -246,11 +248,111 @@ jobs:
               *) exit 1 ;;
             esac
           fi
-          runs=$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
-            -f event=workflow_run -f status=completed -f head_sha="$commit" -f per_page=50)
-          run_id=$(jq -er '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")][0].id' --arg sha "$commit" <<<"$runs")
-          gh run download "$run_id" --name "release-images-$commit" --dir "$RUNNER_TEMP/release-manifest"
-          gate_image=$(jq -er --arg commit "$commit" 'select(.schema == 1 and .commit == $commit and (.image | type == "string")) | .image' "$RUNNER_TEMP/release-manifest/codex-gates.json")
+          gate_deadline=$SECONDS
+          if [ "$OPERATION" = configure-constructor ]; then gate_deadline=$((SECONDS + 1800)); fi
+          build_run_id=''
+          artifact_id=''
+          artifact_name="release-images-$commit"
+          while :; do
+            runs=$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/build-images.yml/runs" \
+              -f event=workflow_run -f status=completed -f head_sha="$commit" -f per_page=100)
+            build_matches=$(jq -er --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
+              if ((.total_count | type) != "number" or .total_count > 100) then
+                error("build_images_run_inventory_incomplete")
+              else
+                [.workflow_runs[] | select(
+                  .head_sha == $sha and
+                  .head_branch == "master" and
+                  .event == "workflow_run" and
+                  .status == "completed" and
+                  .conclusion == "success" and
+                  .head_repository.full_name == $repo and
+                  (.path == ".github/workflows/build-images.yml" or
+                    ((.path // "") | startswith(".github/workflows/build-images.yml@")))
+                )] | length
+              end
+            ' <<<"$runs")
+            [ "$build_matches" -le 1 ] \
+              || { echo '::error::Buildurile release-images pentru commit sunt ambigue.'; exit 1; }
+            if [ "$build_matches" -eq 1 ]; then
+              build_run_id=$(jq -er --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
+                [.workflow_runs[] | select(
+                  .head_sha == $sha and .head_branch == "master" and
+                  .event == "workflow_run" and .status == "completed" and
+                  .conclusion == "success" and .head_repository.full_name == $repo and
+                  (.path == ".github/workflows/build-images.yml" or
+                    ((.path // "") | startswith(".github/workflows/build-images.yml@")))
+                )][0].id
+              ' <<<"$runs")
+              artifacts=$(gh api --method GET \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run_id}/artifacts" \
+                -f name="$artifact_name" -f per_page=100)
+              artifact_matches=$(jq -er --arg name "$artifact_name" '
+                if ((.total_count | type) != "number" or .total_count > 100) then
+                  error("release_artifact_inventory_incomplete")
+                else
+                  [.artifacts[] | select(.name == $name and .expired == false)] | length
+                end
+              ' <<<"$artifacts")
+              [ "$artifact_matches" -le 1 ] \
+                || { echo '::error::Artefactele release-images pentru commit sunt ambigue.'; exit 1; }
+              if [ "$artifact_matches" -eq 1 ]; then
+                artifact_id=$(jq -er --arg name "$artifact_name" \
+                  '[.artifacts[] | select(.name == $name and .expired == false)][0].id' <<<"$artifacts")
+                break
+              fi
+            fi
+            [ "$SECONDS" -lt "$gate_deadline" ] \
+              || { echo '::error::Dovada release-images exactă nu a apărut în intervalul bounded.'; exit 1; }
+            sleep 20
+          done
+          [[ "$build_run_id" =~ ^[1-9][0-9]*$ && "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          build_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${build_run_id}")
+          jq -e --argjson id "$build_run_id" --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
+            .id == $id and .head_sha == $sha and .head_branch == "master" and
+            .event == "workflow_run" and .status == "completed" and
+            .conclusion == "success" and .head_repository.full_name == $repo and
+            (.path == ".github/workflows/build-images.yml" or
+              ((.path // "") | startswith(".github/workflows/build-images.yml@")))
+          ' <<<"$build_run" >/dev/null
+
+          download_root=$(mktemp -d "$RUNNER_TEMP/constructor-gate-download.XXXXXX")
+          cleanup_gate_download() { rm -rf -- "$download_root"; }
+          trap cleanup_gate_download EXIT
+          artifact_zip="$download_root/release-images.zip"
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$artifact_zip"
+          [ -s "$artifact_zip" ] && [ ! -L "$artifact_zip" ]
+          entries=$(unzip -Z1 "$artifact_zip" | LC_ALL=C sort)
+          [ "$entries" = $'codex-gates.json\nimages.json' ]
+          manifest_candidate="$download_root/codex-gates.json"
+          unzip -p "$artifact_zip" codex-gates.json > "$manifest_candidate"
+          [ -s "$manifest_candidate" ] && [ ! -L "$manifest_candidate" ]
+          [ "$(stat -Lc '%s' "$manifest_candidate")" -le 4096 ]
+          jq -e --arg commit "$commit" '
+            type == "object" and
+            (keys == ["commit", "image", "schema", "sourceRunId"]) and
+            .schema == 1 and .commit == $commit and
+            (.sourceRunId | type == "number" and . > 0 and floor == .) and
+            (.image | type == "string")
+          ' "$manifest_candidate" >/dev/null
+          source_run_id=$(jq -er '.sourceRunId' "$manifest_candidate")
+          [[ "$source_run_id" =~ ^[1-9][0-9]*$ ]]
+          source_run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${source_run_id}")
+          jq -e --argjson id "$source_run_id" --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
+            .id == $id and .head_sha == $sha and .head_branch == "master" and
+            .event == "push" and .status == "completed" and .conclusion == "success" and
+            .repository.full_name == $repo and
+            (.path == ".github/workflows/pr-verify.yml" or
+              ((.path // "") | startswith(".github/workflows/pr-verify.yml@")))
+          ' <<<"$source_run" >/dev/null
+          latest_master=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq .object.sha)
+          [ "$latest_master" = "$remote_master" ]
+          if [ "$OPERATION" = configure-constructor ]; then [ "$commit" = "$latest_master" ]; fi
+
+          install -d -m 0700 "$RUNNER_TEMP/release-manifest"
+          install -m 0600 "$manifest_candidate" "$RUNNER_TEMP/release-manifest/codex-gates.json"
+          gate_image=$(jq -er '.image' "$manifest_candidate")
           gate_prefix="ghcr.io/${GITHUB_REPOSITORY,,}/codex-gates@sha256:"
           [[ "$gate_image" == "$gate_prefix"* ]]
           [[ "${gate_image#"$gate_prefix"}" =~ ^[0-9a-f]{64}$ ]]
@@ -512,15 +614,29 @@ jobs:
             exit 1
           fi
           constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
+          deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
+          reactivation_journal=/root/kelion/runtime/constructor-reactivation.journal
+          validate_configure_reactivation() {
+            [ -f "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$reactivation_journal")" = '0:0:600:1' ] \
+              && jq -e '
+                .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+                (keys == ["kind","phase","schema"])
+              ' "$reactivation_journal" >/dev/null
+          }
           if [ -e "$constructor_unit_pending" ] || [ -L "$constructor_unit_pending" ]; then
-            echo 'o barieră unit-only Constructor este pending; configure-constructor este refuzat' >&2
-            exit 1
+            [ -f "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$constructor_unit_pending")" = '0:0:600:1' ] \
+              && [ "$(wc -l < "$constructor_unit_pending")" -eq 1 ] \
+              && grep -qx 'schema=1' "$constructor_unit_pending" \
+              || { echo 'bariera unit-only Constructor este nesigură' >&2; exit 1; }
+            [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ] \
+              || { echo 'bariera unit-only fără jurnal installer autentic este refuzată' >&2; exit 1; }
           fi
           export KELION_CUTOVER_LOCK_HELD=1
           work=$(mktemp -d /root/kelion/runtime/constructor.XXXXXX)
           bootstrap=/run/kelion-constructor-bootstrap
           cutover_stage=''
-          codex_link_temporary=''
           cleanup_remote() {
             trap - ERR
             rm -f -- "$bundle" "$payload"; rm -rf -- "$bootstrap"
@@ -528,9 +644,6 @@ jobs:
             systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || true
             if [ -n "$cutover_stage" ]; then
               if [[ "$cutover_stage" =~ ^/root/kelion/runtime/runtime-cutover\.[A-Za-z0-9]+$ ]]; then rm -rf -- "$cutover_stage"; fi
-            fi
-            if [[ "$codex_link_temporary" =~ ^/opt/kelion-codex/bin/\.codex-link\.[A-Za-z0-9]+$ ]]; then
-              rm -f -- "$codex_link_temporary"
             fi
             case "$work" in /root/kelion/runtime/constructor.[A-Za-z0-9]*) rm -rf -- "$work" ;; esac
           }
@@ -549,19 +662,214 @@ jobs:
           if tar -tzf "$bundle" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then exit 1; fi
           tar -xzf "$bundle" -C "$work" --no-same-owner --no-same-permissions
 
-          deploy_quiesce_journal=/root/kelion/runtime/constructor-deploy-quiesce.journal
+          constructor_config_check='model-control-secret-bootstrap'
+          ensure_local_model_control_secret() {
+            local secret_dir=/root/kelion/secrets
+            local secret_path=$secret_dir/constructor-model-control-secret
+            local candidate='' bytes clean_bytes
+            getent group 10050 >/dev/null || return 1
+            if [ ! -e "$secret_dir" ] && [ ! -L "$secret_dir" ]; then
+              install -d -o root -g 10050 -m 0750 "$secret_dir" || return 1
+              sync -f /root/kelion || return 1
+            fi
+            [ -d "$secret_dir" ] && [ ! -L "$secret_dir" ] \
+              && [ "$(realpath -e -- "$secret_dir")" = "$secret_dir" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$secret_dir")" = '0:10050:750' ] || return 1
+            if [ ! -e "$secret_path" ] && [ ! -L "$secret_path" ]; then
+              candidate=$(mktemp "$secret_dir/.constructor-model-control-secret.XXXXXX") || return 1
+              if ! openssl rand -hex 32 > "$candidate" \
+                || ! chown root:10050 "$candidate" \
+                || ! chmod 0440 "$candidate" \
+                || ! sync -f "$candidate" \
+                || ! mv -f -- "$candidate" "$secret_path" \
+                || ! sync -f "$secret_path" \
+                || ! sync -f "$secret_dir"; then
+                rm -f -- "$candidate"
+                return 1
+              fi
+            fi
+            [ -f "$secret_path" ] && [ ! -L "$secret_path" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$secret_path")" = '0:10050:440:1' ] \
+              && [ "$(wc -l < "$secret_path")" -eq 1 ] || return 1
+            model_control_secret=$(<"$secret_path") || return 1
+            bytes=$(printf '%s' "$model_control_secret" | wc -c)
+            clean_bytes=$(printf '%s' "$model_control_secret" | LC_ALL=C tr -d '\000-\037\177' | wc -c)
+            [ "$bytes" -ge 32 ] && [ "$bytes" -le 8192 ] && [ "$bytes" -eq "$clean_bytes" ]
+          }
+          ensure_local_model_control_secret
+
           constructor_install_resume=0
           constructor_install_resumed=0
-          constructor_config_check='install-resume-contract'
-          if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
-            if [ -f "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
-              && [ "$(stat -c '%u:%g:%a' "$deploy_quiesce_journal")" = '0:0:600' ] \
-              && jq -e '.schema == 1 and .kind == "constructor-install" and
+          configure_install_root=''
+          configure_install_superseded_root=''
+          configure_install_previous_root=''
+          configure_install_request_id=''
+          configure_install_commit=''
+          configure_install_journal_source_sha256=''
+          configure_install_logicals=(
+            artifact.codex-worker
+            artifact.constructor-model-control
+            artifact.constructor-model-switch
+            authorization.kelion-codex-full-access
+            configuration.opencode
+            instructions.opencode
+            systemd-dropin.private-ai-web-full-access
+            artifact.constructor-publisher
+            artifact.constructor-release
+            artifact.github-askpass
+            artifact.constructor-sync-worker
+            artifact.constructor-service-client
+            artifact.service-auth
+            artifact.github-fixed-client
+            runtime-helper
+            compose-production
+            systemd-recovery.kelion-runtime-config-recovery.service
+            systemd-sync.kelion-constructor-sync.service
+            systemd-timer.kelion-codex-worker.timer
+            systemd-timer.kelion-constructor-publisher.timer
+            systemd-timer.kelion-constructor-release.timer
+            systemd-service.kelion-codex-worker.service
+            systemd-service.kelion-constructor-publisher.service
+            systemd-service.kelion-constructor-release.service
+            systemd-controller.kelion-constructor-model-control.service
+          )
+          configure_install_sources=(
+            "$work/deploy/codex-worker.mjs"
+            "$work/deploy/constructor-model-control.mjs"
+            "$work/deploy/constructor-model-switch.sh"
+            "$work/deploy/sudoers/kelion-codex-full-access"
+            "$work/deploy/opencode-constructor.json"
+            "$work/deploy/opencode-constructor-instructions.md"
+            "$work/deploy/systemd/private-ai-web-full-access.conf"
+            "$work/deploy/constructor-publisher.mjs"
+            "$work/deploy/constructor-release.mjs"
+            "$work/deploy/github-askpass.sh"
+            "$work/deploy/constructor-sync-worker.sh"
+            "$work/deploy/lib/constructor-service-client.mjs"
+            "$work/deploy/lib/service-auth.mjs"
+            "$work/deploy/lib/github-fixed-client.mjs"
+            "$work/deploy/lib/runtime-config-cutover.sh"
+            "$work/deploy/compose.production.yml"
+            "$work/deploy/systemd/kelion-runtime-config-recovery.service"
+            "$work/deploy/systemd/kelion-constructor-sync.service"
+            "$work/deploy/systemd/kelion-codex-worker.timer"
+            "$work/deploy/systemd/kelion-constructor-publisher.timer"
+            "$work/deploy/systemd/kelion-constructor-release.timer"
+            "$work/deploy/systemd/kelion-codex-worker.service"
+            "$work/deploy/systemd/kelion-constructor-publisher.service"
+            "$work/deploy/systemd/kelion-constructor-release.service"
+            "$work/deploy/systemd/kelion-constructor-model-control.service"
+          )
+          current_configure_install_source_sha256() {
+            local index
+            [ "${#configure_install_logicals[@]}" -eq 25 ] \
+              && [ "${#configure_install_logicals[@]}" -eq "${#configure_install_sources[@]}" ]
+            {
+              for index in "${!configure_install_logicals[@]}"; do
+                [ -f "${configure_install_sources[$index]}" ] \
+                  && [ ! -L "${configure_install_sources[$index]}" ] || return 1
+                printf '%s\t%s\n' "${configure_install_logicals[$index]}" \
+                  "$(sha256sum "${configure_install_sources[$index]}" | awk '{print $1}')"
+              done
+            } | sha256sum | awk '{print $1}'
+          }
+          configure_install_current_source_sha256=$(current_configure_install_source_sha256)
+          [[ "$configure_install_current_source_sha256" =~ ^[0-9a-f]{64}$ ]]
+          validate_configure_install_snapshot() {
+            local root=$1 expected_manifest=$2 expected_source=$3 logical digest extra count=0 file
+            local -A seen=()
+            [[ "$root" =~ ^/root/kelion/runtime/constructor-install\.[A-Za-z0-9]+$ ]] \
+              && [ -d "$root" ] && [ ! -L "$root" ] \
+              && [ "$(realpath -e -- "$root")" = "$root" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$root")" = '0:0:700' ]
+            [ -d "$root/files" ] && [ ! -L "$root/files" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$root/files")" = '0:0:700' ]
+            [ -f "$root/manifest" ] && [ ! -L "$root/manifest" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$root/manifest")" = '0:0:600:1' ] \
+              && [ "$(sha256sum "$root/manifest" | awk '{print $1}')" = "$expected_manifest" ] \
+              && [ "$expected_manifest" = "$expected_source" ]
+            while IFS=$'\t' read -r logical digest extra; do
+              [[ "$logical" =~ ^[a-z0-9.-]+$ ]] && [[ "$digest" =~ ^[0-9a-f]{64}$ ]] && [ -z "$extra" ]
+              [ -z "${seen[$logical]:-}" ]; seen[$logical]=1; count=$((count + 1))
+              file=$root/files/$logical
+              [ -f "$file" ] && [ ! -L "$file" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "$file")" = '0:0:600:1' ] \
+                && [ "$(sha256sum "$file" | awk '{print $1}')" = "$digest" ]
+            done < "$root/manifest"
+            [ "$count" -eq 25 ] \
+              && [ "$(find "$root/files" -mindepth 1 -maxdepth 1 -type f -links 1 | wc -l)" -eq 25 ]
+          }
+          load_configure_install_journal() {
+            [ -f "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$deploy_quiesce_journal")" = '0:0:600:1' ] \
+              && jq -e '
+                .schema == 1 and .kind == "constructor-install" and
                 (.phase == "armed" or .phase == "quiesced") and
+                (.requestId | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")) and
+                (.commit | strings | test("^[0-9a-f]{40}$")) and
                 (.transactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
                 (.manifestSha256 | strings | test("^[0-9a-f]{64}$")) and
-                (.sourceSha256 | strings | test("^[0-9a-f]{64}$"))' "$deploy_quiesce_journal" >/dev/null; then
-              constructor_install_resume=1
+                (.sourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+                .manifestSha256 == .sourceSha256 and
+                ((keys | sort) == ["commit","kind","manifestSha256","phase","requestId","schema","sourceSha256","transactionRoot"] or
+                 (keys | sort) == ["commit","kind","manifestSha256","phase","requestId","schema","sourceSha256","supersededManifestSha256","supersededSourceSha256","supersededTransactionRoot","transactionRoot"] or
+                 (keys | sort) == ["commit","kind","manifestSha256","phase","previousSupersededManifestSha256","previousSupersededSourceSha256","previousSupersededTransactionRoot","requestId","schema","sourceSha256","supersededManifestSha256","supersededSourceSha256","supersededTransactionRoot","transactionRoot"]) and
+                ((has("supersededTransactionRoot") | not) or
+                  ((.supersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+                   (.supersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+                   (.supersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+                   .supersededManifestSha256 == .supersededSourceSha256 and
+                   .supersededTransactionRoot != .transactionRoot)) and
+                ((has("previousSupersededTransactionRoot") | not) or
+                  ((has("supersededTransactionRoot")) and
+                   (.previousSupersededTransactionRoot | strings | test("^/root/kelion/runtime/constructor-install\\.[A-Za-z0-9]+$")) and
+                   (.previousSupersededManifestSha256 | strings | test("^[0-9a-f]{64}$")) and
+                   (.previousSupersededSourceSha256 | strings | test("^[0-9a-f]{64}$")) and
+                   .previousSupersededManifestSha256 == .previousSupersededSourceSha256 and
+                   .previousSupersededTransactionRoot != .transactionRoot and
+                   .previousSupersededTransactionRoot != .supersededTransactionRoot))
+              ' "$deploy_quiesce_journal" >/dev/null
+            configure_install_root=$(jq -er '.transactionRoot' "$deploy_quiesce_journal")
+            configure_install_request_id=$(jq -er '.requestId' "$deploy_quiesce_journal")
+            configure_install_commit=$(jq -er '.commit' "$deploy_quiesce_journal")
+            configure_install_journal_source_sha256=$(jq -er '.sourceSha256' "$deploy_quiesce_journal")
+            if [ "$configure_install_journal_source_sha256" != "$configure_install_current_source_sha256" ] \
+              || [ "${configure_install_journal_source_sha256:0:40}" != "$configure_install_commit" ]; then
+              echo 'Jurnalul installerului aparține altei generații de 25 artefacte; configure-constructor este refuzat' >&2
+              exit 1
+            fi
+            configure_install_superseded_root=$(jq -er '.supersededTransactionRoot // ""' "$deploy_quiesce_journal")
+            configure_install_previous_root=$(jq -er '.previousSupersededTransactionRoot // ""' "$deploy_quiesce_journal")
+            validate_configure_install_snapshot "$configure_install_root" \
+              "$(jq -er '.manifestSha256' "$deploy_quiesce_journal")" \
+              "$configure_install_journal_source_sha256"
+            if [ -n "$configure_install_superseded_root" ]; then
+              validate_configure_install_snapshot "$configure_install_superseded_root" \
+                "$(jq -er '.supersededManifestSha256' "$deploy_quiesce_journal")" \
+                "$(jq -er '.supersededSourceSha256' "$deploy_quiesce_journal")"
+            fi
+            if [ -n "$configure_install_previous_root" ]; then
+              validate_configure_install_snapshot "$configure_install_previous_root" \
+                "$(jq -er '.previousSupersededManifestSha256' "$deploy_quiesce_journal")" \
+                "$(jq -er '.previousSupersededSourceSha256' "$deploy_quiesce_journal")"
+            fi
+          }
+          constructor_config_check='install-resume-contract'
+          if [ -e "$deploy_quiesce_journal" ] || [ -L "$deploy_quiesce_journal" ]; then
+            if load_configure_install_journal; then
+              if [ -e "$reactivation_journal" ] || [ -L "$reactivation_journal" ]; then
+                validate_configure_reactivation
+                [ ! -e "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ]
+                [ ! -e /root/kelion/runtime/runtime-config-cutover.journal ] \
+                  && [ ! -L /root/kelion/runtime/runtime-config-cutover.journal ]
+                # Mixed cutover-ul a ajuns deja în tail-ul ownerului; rerulăm
+                # idempotent configurarea, nu installerul care ar confunda
+                # corect marker+outer cu o tranzacție nouă.
+                constructor_install_resume=0
+                constructor_install_resumed=1
+              else
+                constructor_install_resume=1
+              fi
             else
               [ -f /root/kelion/bin/runtime-config-cutover.sh ] && [ ! -L /root/kelion/bin/runtime-config-cutover.sh ] \
                 && [ "$(stat -c '%u:%g:%a' /root/kelion/bin/runtime-config-cutover.sh)" = '0:0:500' ]
@@ -581,6 +889,7 @@ jobs:
             constructor_config_phase='constructor-install'
             constructor_config_check='resume-installer'
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              KELION_CONSTRUCTOR_CONFIGURE_OWNER=1 \
               KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
             constructor_install_resumed=1
@@ -606,7 +915,8 @@ jobs:
             encoded=$(awk -F: -v wanted="$name" '$1 == wanted { print substr($0, index($0, ":") + 1) }' "$payload")
             [ -n "$encoded" ]; printf '%s' "$encoded" | base64 -d
           }
-          codex_secret=$(decode codex-worker); publisher_secret=$(decode constructor-publisher); release_secret=$(decode constructor-release)
+          codex_secret=$(decode codex-worker)
+          publisher_secret=$(decode constructor-publisher); release_secret=$(decode constructor-release)
           sync_token=$(decode github-sync); publisher_token=$(decode github-publisher); release_token=$(decode github-release); ghcr_read_token=$(decode github-ghcr-read)
           constructor_retry_base_seconds=$(decode constructor-retry-base-seconds)
           constructor_retry_max_seconds=$(decode constructor-retry-max-seconds)
@@ -629,6 +939,9 @@ jobs:
           validate_decoded_secret github-ghcr-read "$ghcr_read_token"
           [ "$codex_secret" != "$publisher_secret" ]
           [ "$codex_secret" != "$release_secret" ]
+          [ "$codex_secret" != "$model_control_secret" ]
+          [ "$model_control_secret" != "$publisher_secret" ]
+          [ "$model_control_secret" != "$release_secret" ]
           [ "$publisher_secret" != "$release_secret" ]
           github_tokens=("$sync_token" "$publisher_token" "$release_token" "$ghcr_read_token")
           for left in "${!github_tokens[@]}"; do
@@ -675,16 +988,15 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           constructor_config_check='package-dependencies'
-          apt-get install -y -qq ca-certificates curl git jq bubblewrap podman uidmap
+          apt-get install -y -qq ca-certificates curl git jq podman uidmap
           constructor_config_check='node-runtime'
           if [ ! -x /usr/bin/node ]; then apt-get install -y -qq nodejs; fi
-          if [ ! -x /usr/bin/npm ]; then apt-get install -y -qq npm; fi
           [ -x /usr/bin/node ]
-          [ -x /usr/bin/npm ]
           if [ "$constructor_install_resumed" = 0 ]; then
             constructor_config_phase='constructor-install'
             constructor_config_check='installer'
             KELION_CONSTRUCTOR_INSTALL=1 KELION_CUTOVER_LOCK_HELD=1 \
+              KELION_CONSTRUCTOR_CONFIGURE_OWNER=1 \
               KELION_CONSTRUCTOR_SOURCE_COMMIT="$source_commit" \
               bash "$work/deploy/instaleaza-constructor.sh"
           fi
@@ -708,110 +1020,35 @@ jobs:
             case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; exit 1 ;; esac
           done
 
-          constructor_config_check='codex-cli-layout'
-          validate_codex_cli_directory() {
-            local path=$1 path_mode
-            [ -d "$path" ] && [ ! -L "$path" ] && [ "$(realpath -e "$path")" = "$path" ]
-            [ "$(stat -c '%u:%g' "$path")" = '0:0' ]
-            path_mode=$(stat -c '%a' "$path")
-            [ $((8#$path_mode & 0022)) -eq 0 ]
-          }
-          validate_codex_cli_mounts() {
-            python3 - /opt/kelion-codex/npm <<'PY'
-          import os
-          import re
-          import sys
-
-          escapes = {'040': ' ', '011': '\t', '012': '\n', '134': '\\'}
-
-          def decode_mount_path(value):
-              return re.sub(r'\\(040|011|012|134)', lambda match: escapes[match.group(1)], value)
-
-          root = os.path.realpath(sys.argv[1])
-          with open('/proc/self/mountinfo', encoding='utf-8') as mountinfo:
-              for raw_line in mountinfo:
-                  fields = raw_line.split()
-                  if len(fields) < 6:
-                      raise SystemExit(1)
-                  mountpoint = os.path.realpath(decode_mount_path(fields[4]))
-                  if mountpoint == root or mountpoint.startswith(root + os.sep):
-                      raise SystemExit(1)
-          PY
-          }
-          validate_codex_cli_find_empty() {
-            local match
-            match=$(find -P /opt/kelion-codex/npm -xdev "$@" -print -quit) || return 1
-            [ -z "$match" ]
-          }
-          validate_codex_cli_symlinks() {
-            local policy=$1 link=/opt/kelion-codex/npm/bin/codex link_target present=0
-            validate_codex_cli_find_empty -type l ! -path "$link" || return 1
-            if [ -e "$link" ] || [ -L "$link" ]; then
-              [ -L "$link" ] || return 1
-              [ "$(readlink -- "$link")" = ../lib/node_modules/@openai/codex/bin/codex.js ] || return 1
-              link_target=$(realpath -e -- "$link") || return 1
-              [ "$link_target" = /opt/kelion-codex/npm/lib/node_modules/@openai/codex/bin/codex.js ] || return 1
-              present=1
-            fi
-            case "$policy" in
-              optional) ;;
-              required) [ "$present" -eq 1 ] ;;
-              *) return 1 ;;
-            esac
-          }
-          for path in / /opt /opt/kelion-codex; do
-            validate_codex_cli_directory "$path"
-          done
-          for path in /opt/kelion-codex/bin /opt/kelion-codex/npm; do
-            if [ -e "$path" ] || [ -L "$path" ]; then
-              validate_codex_cli_directory "$path"
-            else
-              install -d -o root -g root -m 0755 "$path"
-              validate_codex_cli_directory "$path"
-            fi
-          done
-          [ "$(stat -c '%d' /opt/kelion-codex/npm)" = "$(stat -c '%d' /opt/kelion-codex)" ]
-          validate_codex_cli_mounts
-          validate_codex_cli_find_empty ! -user root
-          validate_codex_cli_find_empty ! -group root
-          validate_codex_cli_find_empty -type f -links +1
-          validate_codex_cli_find_empty ! -type f ! -type d ! -type l
-          validate_codex_cli_symlinks optional
-          validate_codex_cli_find_empty \( -type f -o -type d \) -perm /022
-          constructor_config_check='codex-cli-install'
-          (umask 022; npm install --global --prefix /opt/kelion-codex/npm '@openai/codex@0.149.1' >/dev/null)
-          constructor_config_check='codex-cli-permissions'
-          validate_codex_cli_mounts
-          validate_codex_cli_find_empty ! -user root
-          validate_codex_cli_find_empty ! -group root
-          validate_codex_cli_find_empty -type f -links +1
-          validate_codex_cli_find_empty ! -type f ! -type d ! -type l
-          validate_codex_cli_symlinks required
-          find -P /opt/kelion-codex/npm -xdev \( -type f -o -type d \) -exec chmod u=rwX,go=rX {} +
-          validate_codex_cli_find_empty \( -type f -o -type d \) -perm /022
-          constructor_config_check='codex-cli-link'
-          codex_link=/opt/kelion-codex/bin/codex
-          if [ -e "$codex_link" ] || [ -L "$codex_link" ]; then
-            [ -L "$codex_link" ]
-            [ "$(readlink -- "$codex_link")" = /opt/kelion-codex/npm/bin/codex ]
-          fi
-          codex_link_temporary=$(mktemp /opt/kelion-codex/bin/.codex-link.XXXXXX)
-          rm -f -- "$codex_link_temporary"
-          [ ! -e "$codex_link_temporary" ] && [ ! -L "$codex_link_temporary" ]
-          ln -s /opt/kelion-codex/npm/bin/codex "$codex_link_temporary"
-          chown -h root:root "$codex_link_temporary"
-          mv -Tf -- "$codex_link_temporary" "$codex_link"
-          codex_link_temporary=''
-          sync -f /opt/kelion-codex/bin
-          [ -L "$codex_link" ]
-          [ "$(readlink -- "$codex_link")" = /opt/kelion-codex/npm/bin/codex ]
-          codex_target=$(realpath -e /opt/kelion-codex/bin/codex)
-          [ "$codex_target" = /opt/kelion-codex/npm/lib/node_modules/@openai/codex/bin/codex.js ]
-          [ -f "$codex_target" ] && [ ! -L "$codex_target" ]
-          runuser -u kelion-codex -- env -i HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth PATH=/opt/kelion-codex/bin:/usr/bin:/bin test -x /opt/kelion-codex/bin/codex
-          [ "$(runuser -u kelion-codex -- env -i HOME=/var/lib/kelion-codex-auth CODEX_HOME=/var/lib/kelion-codex-auth PATH=/opt/kelion-codex/bin:/usr/bin:/bin /opt/kelion-codex/bin/codex --version)" = 'codex-cli 0.149.1' ]
-          constructor_config_check='worker-profile-publication'
-          install -o root -g root -m 0444 /opt/kelion-codex/profile-home/kelion-worker.config.toml /var/lib/kelion-codex-auth/kelion-worker.config.toml
+          constructor_config_check='local-repair-executor'
+          opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
+          opencode_instructions=/srv/private-ai/home/.config/opencode/instructions.md
+          [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ]
+          [ "$(env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin /opt/private-ai/bin/opencode --version)" = '1.18.25' ]
+          [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
+          [ -f "$opencode_instructions" ] && [ ! -L "$opencode_instructions" ]
+          jq -e '
+            .autoupdate == false and .share == "disabled" and
+            .enabled_providers == ["llama.cpp"] and
+            (.provider | keys) == ["llama.cpp"] and
+            .model == "llama.cpp/qwen3.6-35b-a3b-local" and
+            (.provider["llama.cpp"].options | has("apiKey") | not) and
+            .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+            .instructions == ["instructions.md"] and
+            .server == {hostname:"127.0.0.1",port:24096,mdns:false}
+          ' "$opencode_config" >/dev/null
+          systemctl is-active --quiet private-ai-llm.service
+          curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null
+          active_model=$(curl --fail --silent --show-error --max-time 30 \
+            http://127.0.0.1:24080/v1/models \
+            | jq -er '.data | select(type == "array" and length == 1) | .[0].id')
+          case "$active_model" in
+            qwen3.6-35b-a3b-local) systemctl is-active --quiet private-ai-web.service ;;
+            qwen3.5-122b-a10b-local) ! systemctl is-active --quiet private-ai-web.service ;;
+            *) exit 1 ;;
+          esac
+          [ ! -e /var/lib/kelion-codex-auth ] && [ ! -L /var/lib/kelion-codex-auth ]
+          [ ! -e /opt/kelion-codex/profile-home ] && [ ! -L /opt/kelion-codex/profile-home ]
 
           constructor_config_check='cutover-stage'
           install -d -o root -g root -m 0750 /root/kelion/publisher-secrets
@@ -827,6 +1064,7 @@ jobs:
           }
           constructor_config_check='secret-stage'
           stage_value app-secret.codex-worker-secret "$codex_secret"
+          stage_value app-secret.constructor-model-control-secret "$model_control_secret"
           stage_value app-secret.constructor-publisher-secret "$publisher_secret"
           stage_value app-secret.constructor-release-secret "$release_secret"
           stage_value worker-secret.github-worker-token "$sync_token"
@@ -1143,12 +1381,125 @@ jobs:
           constructor_config_check='publisher-gate-image'
           pull_gate kelion-publisher /run/kelion-publisher "$ghcr_read_token"
           constructor_config_phase='runtime-config-cutover'
+          constructor_config_check='configure-owner-journal'
+          load_configure_install_journal
           constructor_config_check='apply'
-          KELION_CUTOVER_LOCK_HELD=1 bash "$work/deploy/lib/runtime-config-cutover.sh" "$cutover_stage" "$work/deploy/compose.production.yml"
+          KELION_CUTOVER_LOCK_HELD=1 \
+          KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$configure_install_request_id" \
+          KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$configure_install_commit" \
+            bash "$work/deploy/lib/runtime-config-cutover.sh" \
+            "$cutover_stage" "$work/deploy/compose.production.yml" --leave-constructor-quiesced
           cutover_stage=''
+          constructor_config_phase='configure-owner-commit'
+          constructor_config_check='installer-journal-finalize'
+          load_configure_install_journal
+          [ ! -e "$constructor_unit_pending" ] && [ ! -L "$constructor_unit_pending" ]
+          [ ! -e /root/kelion/runtime/runtime-config-cutover.journal ] \
+            && [ ! -L /root/kelion/runtime/runtime-config-cutover.journal ]
+          activation_pending=/run/kelion/constructor-activation.pending
+          ready_stamp=/run/kelion/runtime-config-recovery.ready
+          controller_socket=/run/kelion-constructor-model-control/control.sock
+          [ -f "$activation_pending" ] && [ ! -L "$activation_pending" ] \
+            && [ "$(stat -Lc '%u:%g:%a:%h' "$activation_pending")" = '0:0:444:1' ] \
+            && [ "$(wc -l < "$activation_pending")" -eq 1 ] \
+            && grep -qx 'schema=1' "$activation_pending"
+          [ ! -e "$ready_stamp" ] && [ ! -L "$ready_stamp" ]
+          controller_state=$(systemctl show kelion-constructor-model-control.service --property=ActiveState --value)
+          case "$controller_state" in inactive|failed) ;; *) exit 1 ;; esac
+          [ -z "$(systemctl list-jobs --no-legend --plain kelion-constructor-model-control.service 2>/dev/null)" ]
+          [ ! -e "$controller_socket" ] && [ ! -L "$controller_socket" ]
+
+          publish_configure_reactivation_intent() {
+            local temporary
+            if [ -e "$reactivation_journal" ] || [ -L "$reactivation_journal" ]; then
+              validate_configure_reactivation
+              return
+            fi
+            temporary=$(mktemp /root/kelion/runtime/.constructor-reactivation.journal.XXXXXX)
+            jq -nc '{schema:1,kind:"constructor-reactivation",phase:"pending"}' > "$temporary"
+            chown root:root "$temporary"; chmod 0600 "$temporary"
+            sync -f "$temporary"
+            mv -f -- "$temporary" "$reactivation_journal"
+            sync -f /root/kelion/runtime
+            [ -f "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$reactivation_journal")" = '0:0:600:1' ] \
+              && jq -e '
+                .schema == 1 and .kind == "constructor-reactivation" and .phase == "pending" and
+                (keys == ["kind","phase","schema"])
+              ' "$reactivation_journal" >/dev/null
+          }
+
+          # Handofful persistent este vizibil înainte de primul unlink exterior.
+          # Dacă procesul/hostul cade, un retry poate adopta exact markerul sub
+          # publication lock în loc să ghicească o stare clean-but-quiesced.
+          publish_configure_reactivation_intent
+          rm -f -- "$activation_pending"
+          sync -f /run/kelion
+          rm -f -- "$deploy_quiesce_journal"
+          sync -f /root/kelion/runtime
+          for install_snapshot in "$configure_install_root" "$configure_install_superseded_root" "$configure_install_previous_root"; do
+            [ -z "$install_snapshot" ] || rm -rf --one-file-system -- "$install_snapshot"
+          done
+          sync -f /root/kelion/runtime
+          [ ! -e "$activation_pending" ] && [ ! -L "$activation_pending" ]
+          [ ! -e "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ]
+
+          # Recovery a fost oprit de installer. Îi eliberăm lockul canonic,
+          # îl lăsăm să publice ready și să probeze controllerul sincron, fără
+          # ca helperul recovery să se blocheze pe propriul nostru FD9.
+          probe_configured_model_controller() {
+            local attempt
+            for attempt in $(seq 1 40); do
+              if [ -f "$ready_stamp" ] && [ ! -L "$ready_stamp" ] \
+                && [ "$(stat -Lc '%u:%g:%a:%h' "$ready_stamp")" = '0:0:444:1' ] \
+                && grep -qx 'schema=1' "$ready_stamp" \
+                && systemctl is-active --quiet kelion-constructor-model-control.service \
+                && [ -S "$controller_socket" ] && [ ! -L "$controller_socket" ] \
+                && [ "$(stat -Lc '%u:%g:%a' "$controller_socket")" = '0:10050:660' ]; then
+                return 0
+              fi
+              [ "$attempt" -lt 40 ] || break
+              sleep 0.25
+            done
+            return 1
+          }
+          restore_configure_recovery_and_controller() {
+            flock -u 9
+            exec 9>&-
+            systemctl reset-failed kelion-runtime-config-recovery.service kelion-constructor-model-control.service >/dev/null 2>&1 || :
+            systemctl start kelion-runtime-config-recovery.service
+            systemctl is-active --quiet kelion-runtime-config-recovery.service
+            systemctl restart kelion-constructor-model-control.service
+            probe_configured_model_controller
+            [ ! -e "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ]
+            configured_markers=(
+              /etc/kelion/codex-worker.enabled
+              /etc/kelion/constructor-publisher.enabled
+              /etc/kelion/constructor-release.enabled
+            )
+            configured_timers=(
+              kelion-codex-worker.timer
+              kelion-constructor-publisher.timer
+              kelion-constructor-release.timer
+            )
+            for configured_index in "${!configured_timers[@]}"; do
+              configured_timer=${configured_timers[$configured_index]}
+              configured_marker=${configured_markers[$configured_index]}
+              if [ -e "$configured_marker" ] || [ -L "$configured_marker" ]; then
+                [ -f "$configured_marker" ] && [ ! -L "$configured_marker" ] \
+                  && [ "$(stat -Lc '%u:%g:%a:%h' "$configured_marker")" = '0:0:444:1' ]
+                systemctl is-enabled --quiet "$configured_timer"
+                systemctl is-active --quiet "$configured_timer"
+              else
+                ! systemctl is-enabled --quiet "$configured_timer"
+                ! systemctl is-active --quiet "$configured_timer"
+              fi
+            done
+          }
+          restore_configure_recovery_and_controller
           constructor_config_phase='complete'
           constructor_config_check='success-message'
-          printf '%s\n' 'Constructor configurat; activarea asteapta redeploy si credentiala OpenAI project-scoped valida'
+          printf '%s\n' 'Constructor OpenCode 1.18.25 + Qwen local configurat; activarea așteaptă redeploy-ul și preflightul local'
           REMOTE
 
       - name: Valideaza dovada PR-ului pilot
@@ -1201,6 +1552,7 @@ jobs:
             [ -z "$pilot_commit" ]
           fi
           activation_journal=/root/kelion/runtime/constructor-activation.journal
+          reactivation_journal=/root/kelion/runtime/constructor-reactivation.journal
           activation_pending=/run/kelion/constructor-activation.pending
           constructor_upgrade_journal=/root/kelion/runtime/constructor-upgrade.journal
           constructor_unit_pending=/root/kelion/runtime/constructor-unit-migration.pending
@@ -1363,6 +1715,17 @@ jobs:
               fsync_remote /root/kelion/runtime
             fi
           }
+          prove_worker_oneshot_success() {
+            local active_state condition_result exec_status result
+            systemctl reset-failed kelion-codex-worker.service >/dev/null 2>&1 || :
+            systemctl start kelion-codex-worker.service
+            condition_result=$(systemctl show kelion-codex-worker.service --property=ConditionResult --value)
+            result=$(systemctl show kelion-codex-worker.service --property=Result --value)
+            exec_status=$(systemctl show kelion-codex-worker.service --property=ExecMainStatus --value)
+            active_state=$(systemctl show kelion-codex-worker.service --property=ActiveState --value)
+            [ "$condition_result" = yes ] && [ "$result" = success ] \
+              && [ "$exec_status" = 0 ] && [ "$active_state" = inactive ]
+          }
           recover_activation_preflight() {
             if [ -e "$activation_journal" ] || [ -L "$activation_journal" ]; then
               # Un applied rămas de la un caller căzut trebuie întâi rescris
@@ -1487,8 +1850,250 @@ jobs:
           }
           trap cleanup_activation EXIT
 
+          constructor_model_snapshot() {
+            local control_socket=/run/kelion-constructor-model-control/control.sock
+            local control_secret=/root/kelion/secrets/constructor-model-control-secret
+            local service_auth=/opt/kelion-constructor/lib/service-auth.mjs
+            systemctl is-active --quiet kelion-constructor-model-control.service || return 1
+            [ -S "$control_socket" ] && [ ! -L "$control_socket" ] \
+              && [ "$(stat -Lc '%u:%g:%a' "$control_socket")" = '0:10050:660' ] || return 1
+            [ -f "$control_secret" ] && [ ! -L "$control_secret" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$control_secret")" = '0:10050:440:1' ] || return 1
+            [ -f "$service_auth" ] && [ ! -L "$service_auth" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$service_auth")" = '0:0:444:1' ] || return 1
+            node --input-type=module - "$control_socket" "$control_secret" <<'NODE'
+            import http from 'node:http'
+            import { randomUUID } from 'node:crypto'
+            import { readServiceSecret, signServiceRequest } from 'file:///opt/kelion-constructor/lib/service-auth.mjs'
+
+            const [socketPath, secretPath] = process.argv.slice(2)
+            const path = '/v1/model/state'
+            const body = Buffer.from('{}', 'utf8')
+            const timestamp = String(Math.floor(Date.now() / 1000))
+            const nonce = randomUUID()
+            const secret = readServiceSecret(secretPath)
+            const signature = signServiceRequest(secret, timestamp, nonce, 'POST', path, body)
+            const payload = await new Promise((resolve, reject) => {
+              const request = http.request({
+                socketPath,
+                path,
+                method: 'POST',
+                headers: {
+                  'content-length': body.length,
+                  'content-type': 'application/json',
+                  'x-kelion-nonce': nonce,
+                  'x-kelion-signature': signature,
+                  'x-kelion-timestamp': timestamp,
+                },
+              }, (response) => {
+                const chunks = []
+                let bytes = 0
+                response.on('data', (chunk) => {
+                  bytes += chunk.length
+                  if (bytes > 16_384) request.destroy(new Error('response_size'))
+                  else chunks.push(chunk)
+                })
+                response.on('error', reject)
+                response.on('end', () => {
+                  const contentType = String(response.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase()
+                  if (response.statusCode !== 200 || contentType !== 'application/json') reject(new Error('response_contract'))
+                  else resolve(Buffer.concat(chunks).toString('utf8'))
+                })
+              })
+              request.setTimeout(10_000, () => request.destroy(new Error('response_timeout')))
+              request.on('error', reject)
+              request.end(body)
+            })
+            process.stdout.write(payload)
+          NODE
+          }
+          validate_fast_model_install() {
+            local receipt=/etc/private-ai/.install-complete ready=/var/lib/private-ai/model.ready
+            local model_cache=/srv/private-ai/models model_path
+            local -a lines=() candidates=()
+            [ -f "$receipt" ] && [ ! -L "$receipt" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
+            mapfile -t lines < "$receipt"
+            [ "${#lines[@]}" -eq 6 ] \
+              && [ "${lines[0]}" = 'installer_id=private-ai-contabo-v1' ] \
+              && [[ "${lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+              && [ "${lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ] \
+              && [ "${lines[3]}" = 'opencode_version=1.18.25' ] \
+              && [ "${lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ] \
+              && [ "${lines[5]}" = 'model_quant=Q4_K_M' ] || return 1
+            [ -f "$ready" ] && [ ! -L "$ready" ] \
+              && [ "$(stat -Lc '%U:%G:%a:%h' "$ready")" = 'privateai:privateai:600:1' ] || return 1
+            mapfile -d '' -t candidates < <(find "$model_cache" -xdev -type f -size 20419565568c -print0)
+            [ "${#candidates[@]}" -eq 1 ] || return 1
+            model_path=${candidates[0]}
+            [[ "$model_path" == /srv/private-ai/models/* ]] \
+              && [[ "$model_path" != *$'\n'* ]] \
+              && [[ "$model_path" != *$'\r'* ]] \
+              && [ "$(realpath -e -- "$model_path")" = "$model_path" ] \
+              && [ "$(stat -Lc '%U:%G:%s:%h' "$model_path")" = \
+                'privateai:privateai:20419565568:1' ] || return 1
+            printf '%s\n' "$model_path"
+          }
+          validate_powerful_model_install() {
+            local fast_model_path=$1
+            local sealed=/etc/private-ai/.max-model-sealed complete=/etc/private-ai/.max-model-complete
+            local powerful_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
+            local -a sealed_lines=() complete_lines=()
+            [ -f "$complete" ] && [ ! -L "$complete" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$complete")" = '0:0:600:1' ] || return 1
+            mapfile -t complete_lines < "$complete"
+            [ "${#complete_lines[@]}" -eq 20 ] \
+              && [ "${complete_lines[0]}" = 'schema=2' ] \
+              && [ "${complete_lines[1]}" = 'default_model=llama.cpp/qwen3.6-35b-a3b-local' ] \
+              && [ "${complete_lines[2]}" = 'powerful_model=llama.cpp/qwen3.5-122b-a10b-local' ] \
+              && [ "${complete_lines[3]}" = 'active_profile=fast' ] \
+              && [ "${complete_lines[4]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] \
+              && [ "${complete_lines[5]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] \
+              && [ "${complete_lines[6]}" = 'model_quant=Q4_K_M' ] \
+              && [ "${complete_lines[7]}" = 'model_total_bytes=76536964608' ] \
+              && [ "${complete_lines[8]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] \
+              && [ "${complete_lines[9]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] \
+              && [ "${complete_lines[10]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] \
+              && [ "${complete_lines[11]}" = 'fast_model_bytes=20419565568' ] \
+              && [ "${complete_lines[12]}" = 'fast_model_sha256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7' ] \
+              && [ "${complete_lines[13]}" = "fast_model_path=$fast_model_path" ] \
+              && [[ "${complete_lines[14]}" =~ ^installer_sha256=[0-9a-f]{64}$ ]] \
+              && [[ "${complete_lines[15]}" =~ ^worker_source_sha256=[0-9a-f]{64}$ ]] \
+              && [[ "${complete_lines[16]}" =~ ^config_source_sha256=[0-9a-f]{64}$ ]] \
+              && [[ "${complete_lines[17]}" =~ ^worker_unit_source_sha256=[0-9a-f]{64}$ ]] \
+              && [[ "${complete_lines[18]}" =~ ^switch_source_sha256=[0-9a-f]{64}$ ]] \
+              && [[ "${complete_lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+              || return 1
+            [ -f "$sealed" ] && [ ! -L "$sealed" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$sealed")" = '0:0:600:1' ] || return 1
+            mapfile -t sealed_lines < "$sealed"
+            [ "${#sealed_lines[@]}" -eq 9 ] \
+              && [ "${sealed_lines[0]}" = 'schema=1' ] \
+              && [ "${sealed_lines[1]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] \
+              && [ "${sealed_lines[2]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] \
+              && [ "${sealed_lines[3]}" = 'model_quant=Q4_K_M' ] \
+              && [ "${sealed_lines[4]}" = 'model_total_bytes=76536964608' ] \
+              && [ "${sealed_lines[5]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] \
+              && [ "${sealed_lines[6]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] \
+              && [ "${sealed_lines[7]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] \
+              && [[ "${sealed_lines[8]}" =~ ^sealed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+              || return 1
+            [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf")" = \
+              'root:privateai:440:10943552:1' ] \
+              && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf")" = \
+                'root:privateai:440:49968146912:1' ] \
+              && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf")" = \
+                'root:privateai:440:26557874144:1' ]
+          }
+          expected_powerful_status_dropin() {
+            cat <<'EOF'
+          [Service]
+          ExecStart=
+          ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
+          Restart=no
+          TimeoutStartSec=3600
+          CPUQuota=1600%
+          MemoryHigh=84G
+          MemoryMax=88G
+          EOF
+          }
+          validate_constructor_model_status() {
+            local opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
+            local model_lock=/run/lock/private-ai-model-switch.lock lock_identity
+            local legacy_dropin=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
+            local runtime_dropin=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf
+            local snapshot active_profile model_payload active_alias fast_model_path mapped_model
+            local dropins web_state llm_pid
+            [ -f "$model_lock" ] && [ ! -L "$model_lock" ] \
+              && [ "$(stat -Lc '%U:%G:%a:%h' "$model_lock")" = 'root:privateai:660:1' ] || return 1
+            lock_identity=$(stat -Lc '%d:%i' "$model_lock") || return 1
+            exec 8<>"$model_lock" || return 1
+            [ "$(readlink /proc/$$/fd/8)" = "$model_lock" ] \
+              && [ "$(stat -Lc '%d:%i' /proc/$$/fd/8)" = "$lock_identity" ] || return 1
+            flock --shared --wait 30 8 || return 1
+            [ ! -L "$model_lock" ] \
+              && [ "$(stat -Lc '%d:%i' "$model_lock")" = "$lock_identity" ] \
+              && [ "$(stat -Lc '%d:%i' /proc/$$/fd/8)" = "$lock_identity" ] || return 1
+            [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ] || return 1
+            [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ] \
+              && [ "$(stat -Lc '%U:%G:%a:%h' "$opencode_config")" = 'root:privateai:640:1' ] || return 1
+            [ "$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
+              HOME=/var/lib/kelion-codex \
+              XDG_CONFIG_HOME=/srv/private-ai/home/.config \
+              PATH=/opt/private-ai/bin:/usr/bin:/bin \
+              /opt/private-ai/bin/opencode --version 2>/dev/null)" = '1.18.25' ] || return 1
+            jq -e '
+              .autoupdate == false and .share == "disabled" and
+              .enabled_providers == ["llama.cpp"] and
+              (.provider | keys) == ["llama.cpp"] and
+              .model == "llama.cpp/qwen3.6-35b-a3b-local" and
+              .small_model == "llama.cpp/qwen3.6-35b-a3b-local" and
+              .provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
+              (.provider["llama.cpp"].options | has("apiKey") | not) and
+              .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
+              (.provider["llama.cpp"].models | keys) ==
+                ["qwen3.5-122b-a10b-local", "qwen3.6-35b-a3b-local"]
+            ' "$opencode_config" >/dev/null || return 1
+            fast_model_path=$(validate_fast_model_install) || return 1
+            validate_powerful_model_install "$fast_model_path" || return 1
+            snapshot=$(constructor_model_snapshot) || return 1
+            active_profile=$(jq -er '
+              if type == "object" and
+                (keys == ["activeProfile","defaultProfile","installedProfiles","mode","requestId","requestedProfile","status"]) and
+                .mode == "manual" and .defaultProfile == "fast" and .status == "ready" and
+                .requestedProfile == null and .requestId == null and
+                .installedProfiles == ["fast", "powerful"] and
+                (.activeProfile == "fast" or .activeProfile == "powerful")
+              then .activeProfile else error("model snapshot invalid") end
+            ' <<<"$snapshot") || return 1
+            systemctl is-active --quiet private-ai-llm.service || return 1
+            [ "$(systemctl show private-ai-llm.service --property=NeedDaemonReload --value)" = no ] || return 1
+            curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:24080/health >/dev/null || return 1
+            model_payload=$(curl --fail --silent --show-error --max-time 30 \
+              http://127.0.0.1:24080/v1/models) || return 1
+            active_alias=$(jq -er '
+              .data as $models |
+              if ($models | type) == "array" and ($models | length) == 1 and
+                ($models[0] | type) == "object" and
+                ($models[0].id | type) == "string"
+              then $models[0].id else error("model list invalid") end
+            ' <<<"$model_payload") || return 1
+            [ ! -e "$legacy_dropin" ] && [ ! -L "$legacy_dropin" ] || return 1
+            dropins=$(systemctl show private-ai-llm.service --property=DropInPaths --value) || return 1
+            web_state=$(systemctl show private-ai-web.service --property=ActiveState --value) || return 1
+            case "$active_profile:$active_alias" in
+              fast:qwen3.6-35b-a3b-local)
+                [ "$web_state" = active ] \
+                  && [ ! -e "$runtime_dropin" ] && [ ! -L "$runtime_dropin" ] \
+                  && [ -z "$dropins" ] || return 1
+                mapped_model=$fast_model_path
+                ;;
+              powerful:qwen3.5-122b-a10b-local)
+                [ "$web_state" = inactive ] \
+                  && [ -f "$runtime_dropin" ] && [ ! -L "$runtime_dropin" ] \
+                  && [ "$(stat -Lc '%u:%g:%a:%h' "$runtime_dropin")" = '0:0:644:1' ] \
+                  && [ "$(<"$runtime_dropin")" = "$(expected_powerful_status_dropin)" ] \
+                  && [ "$dropins" = "$runtime_dropin" ] || return 1
+                mapped_model=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
+                ;;
+              *) return 1 ;;
+            esac
+            llm_pid=$(systemctl show private-ai-llm.service --property=MainPID --value) || return 1
+            [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] \
+              && [ "$(readlink -f -- "/proc/$llm_pid/exe")" = /opt/private-ai/bin/llama-server ] \
+              && awk -v target="$mapped_model" '$NF == target { found=1 } END { exit !found }' \
+                "/proc/$llm_pid/maps" || return 1
+            [ "$active_alias" = "$(curl --fail --silent --show-error --max-time 30 \
+              http://127.0.0.1:24080/v1/models \
+              | jq -er '.data | select(type == "array" and length == 1) | .[0].id')" ] || return 1
+            systemctl is-active --quiet kelion-constructor-model-control.service \
+              && [ -S /run/kelion-constructor-model-control/control.sock ] \
+              && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
+              && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ]
+          }
           status() {
-            local unit marker state codex_auth_status
+            local unit marker state
             for unit in kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer; do
               state=$(systemctl show "$unit" --property=ActiveState --value)
               printf '%s=%s\n' "$unit" "$state"
@@ -1501,22 +2106,11 @@ jobs:
                 printf '%s=disabled\n' "$marker"
               fi
             done
-            codex_auth_status=''
-            if codex_auth_status=$(runuser -u kelion-codex -- env -i \
-              HOME=/var/lib/kelion-codex-auth \
-              CODEX_HOME=/var/lib/kelion-codex-auth \
-              PATH=/opt/kelion-codex/bin:/usr/bin:/bin \
-              /opt/kelion-codex/bin/codex \
-              -c 'forced_login_method="api"' \
-              -c 'cli_auth_credentials_store="file"' \
-              login status 2>&1) \
-              && [ "$(printf '%s\n' "$codex_auth_status" | awk 'END { print NR }')" -eq 1 ] \
-              && LC_ALL=C grep -Eq '^Logged in using an API key - sk-proj-[!-~]+$' <<<"$codex_auth_status"; then
-              echo 'codex-auth=ready'
+            if validate_constructor_model_status; then
+              echo 'opencode-qwen-local=ready'
             else
-              echo 'codex-auth=required'
+              echo 'opencode-qwen-local=required'
             fi
-            codex_auth_status=''
             assert_backend_side_effects_active
           }
           case "$operation" in
@@ -1538,8 +2132,8 @@ jobs:
               [ ! -e /etc/kelion/constructor-release.enabled ] && [ ! -L /etc/kelion/constructor-release.enabled ]
               require_enabled_flag CODEX_WORKER_ENABLED
               require_enabled_flag CONSTRUCTOR_PUBLISHER_ENABLED
-              # Primul start al serviciului validează credentiala systemd și
-              # creează fail-closed cache-ul API-key înainte de orice claim.
+              # Primul start validează self-testul OpenCode/Qwen local și
+              # transportul HMAC înainte de orice claim.
               assert_backend_side_effects_active >/dev/null
               if [ "$activation_resume_pending" = 0 ]; then
                 activation_dir=$(mktemp -d /root/kelion/runtime/constructor-activation.XXXXXX)
@@ -1593,15 +2187,33 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
-          status
           if [ "$activation_in_progress" = 1 ]; then
             jq -e --arg operation "$operation" --arg activationRoot "$activation_dir" \
               '.schema == 2 and .phase == "applied" and .operation == $operation and .activationRoot == $activationRoot' \
               "$activation_journal" >/dev/null
+            [ -f "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$reactivation_journal")" = '0:0:600:1' ]
             clear_activation_journal
+            # Jurnalul operației bloca în mod intenționat controllerul. După
+            # clear-ul său durabil, helperul generic adoptă intentul persistent,
+            # dovedește controller+UDS+timere și îl retrage ultimul.
+            KELION_CUTOVER_LOCK_HELD=1 /root/kelion/bin/runtime-config-cutover.sh \
+              --recover-only /root/kelion/config/compose.production.yml
+            [ ! -e "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ]
+            systemctl is-active --quiet kelion-constructor-model-control.service
+            [ -S /run/kelion-constructor-model-control/control.sock ] \
+              && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
+              && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ]
+            if [ "$operation" = activate-worker-publisher ]; then
+              # Acest start trebuie să execute efectiv self-testul+--once după
+              # retragerea Condition-ului; un start condition-skipped nu este
+              # acceptat drept activare reușită.
+              prove_worker_oneshot_success
+            fi
             activation_committed=1
             activation_in_progress=0
           fi
+          status
           REMOTE
 
       - name: Repara controlat layout-ul spool-ului handoff

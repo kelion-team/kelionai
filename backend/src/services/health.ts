@@ -303,8 +303,8 @@ export async function systemHealth(): Promise<string> {
 
   const constructor = await getConstructorChainStatus()
   const constructorReady = constructor.state === 'ready' || constructor.state === 'busy'
-  info.constructorExecutor = constructorReady
-    ? `Lanț Constructor ${constructor.state}: OpenCode + Qwen local (llama.cpp) + publisher + release; coadă build_jobs`
+  info.constructorLocal = constructorReady
+    ? `Lanț Constructor ${constructor.state}: worker + publisher + release`
     : `Lanț Constructor ${constructor.state}: ${constructor.reason}`
   if (!constructorReady) {
     problems.push({

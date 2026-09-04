@@ -1,4 +1,9 @@
 import type { ConstructorStrategy } from './constructorStrategist.js'
+import {
+  constructorModelOutcome,
+  constructorModelOutcomeNextAction,
+  type ConstructorModelOutcome,
+} from './constructorContinuity.js'
 
 export type ConstructorIncidentState =
   | 'open'
@@ -62,15 +67,55 @@ function stageFrom(log: string, progress: string): string {
   if (/test|vitest|jest|pytest|assert/i.test(source)) return 'tests'
   if (/typecheck|tsc|lint|oxlint|eslint/i.test(source)) return 'quality_gate'
   if (/build|compil|vite|webpack/i.test(source)) return 'build'
-  if (/(?:edit|modific|patch|fără nicio modificare|nu ai scris nimic)/i.test(source)) return 'implementation'
+  if (/worker_failure:(?:worker_internal_failure|codex_exec_failed)|opencode/i.test(source)) return 'local_executor'
+  if (/llama\.cpp|qwen3?|creier|brain|model/i.test(source)) return 'local_inference'
+  if (/worker_unresolved:no_changes|(?:edit|modific|patch|fără nicio modificare|nu ai scris nimic)/i.test(source)) return 'implementation'
   if (/clone|checkout|git\b|branch/i.test(source)) return 'repository'
-  if (/creier|brain|model|provider/i.test(source)) return 'planning_brain'
   return progress.trim() ? progress.trim().slice(0, 120) : 'unknown_stage'
+}
+
+function canonicalOutcomeAnalysis(outcome: ConstructorModelOutcome): ConstructorFailureAnalysis {
+  const responsible = 'kelion' as const
+  const nextAction = constructorModelOutcomeNextAction(outcome)
+  switch (outcome.reasonCode) {
+    case 'no_changes':
+      return {
+        stage: 'implementation', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'no_changes', causeSummary: outcome.reason,
+      }
+    case 'test_failure':
+      return {
+        stage: 'tests', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'test_failure', causeSummary: outcome.reason,
+      }
+    case 'quality_gate_failure':
+      return {
+        stage: 'quality_gate', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'build_failure', causeSummary: outcome.reason,
+      }
+    case 'execution_timeout':
+      return {
+        stage: 'local_executor', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'timeout', causeSummary: outcome.reason,
+      }
+    case 'brain_unavailable':
+      return {
+        stage: 'local_inference', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'brain_unavailable', causeSummary: outcome.reason,
+      }
+    case 'worker_internal_failure':
+      return {
+        stage: 'local_executor', responsible, nextAction, state: 'diagnosing',
+        causeCode: 'unknown', causeSummary: outcome.reason,
+      }
+  }
 }
 
 export function classifyConstructorFailure(logRaw: string, progressRaw = ''): ConstructorFailureAnalysis {
   const log = tail(logRaw, 20_000)
   const progress = tail(progressRaw, 500)
+  const canonicalOutcome = constructorModelOutcome(log)
+  if (canonicalOutcome) return canonicalOutcomeAnalysis(canonicalOutcome)
   const stage = stageFrom(log, progress)
   const base = { stage, responsible: 'kelion' as const }
 
@@ -83,21 +128,24 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/worker_failure:provider_auth|invalid x-api-key|authentication_error|API key not valid|API_KEY_INVALID|\b(401|403)\b.*(key|token|auth)/i.test(log)) {
+  // Aceste două coduri pot exista în incidente persistate de workerul vechi.
+  // Constructorul OpenCode/Qwen local nu le mai emite și nu transformă texte
+  // cloud arbitrare în incidente curente de autentificare sau credit.
+  if (/worker_failure:provider_auth/i.test(log)) {
     return {
       ...base,
       causeCode: 'provider_auth',
-      causeSummary: 'Furnizorul a respins autentificarea; repetarea codului nu poate repara configurația.',
-      nextAction: 'Verifică numele și publicarea secretului fără a-i expune valoarea, apoi reia o singură dată și cere CI verde.',
+      causeSummary: 'Un worker retras a persistat un incident legacy de autentificare; acesta nu descrie executorul local curent.',
+      nextAction: 'Nu relua vechea cale. Confirmă data incidentului și reexecută ordinul numai prin OpenCode cu Qwen local.',
       state: 'blocked',
     }
   }
-  if (/worker_failure:provider_credit|FĂRĂ CREDIT API|credit balance is too low|requires more credits|insufficient.*credit|payment required|\b402\b/i.test(log)) {
+  if (/worker_failure:provider_credit/i.test(log)) {
     return {
       ...base,
       causeCode: 'provider_credit',
-      causeSummary: 'Execuția a fost blocată de creditul furnizorului, nu de cod.',
-      nextAction: 'Oprește retry-urile, raportează exact furnizorul și reia numai după confirmarea creditului disponibil.',
+      causeSummary: 'Un worker retras a persistat un incident legacy de credit; acesta nu descrie executorul local curent.',
+      nextAction: 'Nu alimenta și nu relua vechea cale. Reexecută ordinul numai prin OpenCode cu Qwen local.',
       state: 'blocked',
     }
   }
@@ -110,7 +158,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/worker_failure:test_failure|(test|vitest|jest|pytest|assert)[^\n]{0,100}(failed|failure|picat|error)|\bfailed tests?\b/i.test(log)) {
+  if (/(test|vitest|jest|pytest|assert)[^\n]{0,100}(failed|failure|picat|error)|\bfailed tests?\b/i.test(log)) {
     return {
       ...base,
       causeCode: 'test_failure',
@@ -119,7 +167,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/worker_failure:quality_gate_failure|(build|compil|typecheck|tsc|lint|oxlint|eslint)[^\n]{0,100}(failed|failure|picat|error)|\bexit code [1-9]/i.test(log)) {
+  if (/(build|compil|typecheck|tsc|lint|oxlint|eslint)[^\n]{0,100}(failed|failure|picat|error)|\bexit code [1-9]/i.test(log)) {
     return {
       ...base,
       causeCode: 'build_failure',
@@ -128,12 +176,12 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/worker_failure:no_changes|fără nicio modificare|nu ai scris nimic|no changes|working tree clean|aSchimbat.?false/i.test(log)) {
+  if (/fără nicio modificare|nu ai scris nimic|no changes|working tree clean|aSchimbat.?false/i.test(log)) {
     return {
       ...base,
       causeCode: 'no_changes',
       causeSummary: 'Executorul nu a produs nicio modificare verificabilă pentru ordin.',
-      nextAction: 'Compară ordinul cu repo-ul, numește fișierele țintă și reformulează pașii tehnici înainte de o singură reluare.',
+      nextAction: 'Compară ordinul cu repo-ul, numește fișierele țintă și stabilește cauza înaintea oricărei decizii manuale.',
       state: 'diagnosing',
     }
   }
@@ -146,12 +194,21 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       state: 'diagnosing',
     }
   }
-  if (/worker_failure:brain_unavailable|creier|brain|r[ăa]spuns gol|model (invalid|refuzat|nu)|provider.*(unavailable|error)|indisponibil/i.test(log)) {
+  if (/worker_failure:brain_unavailable|llama\.cpp|qwen3?|127\.0\.0\.1:24080|ECONNREFUSED|connection refused|failed to connect|fetch failed|creier local|brain unavailable|r[ăa]spuns gol|model (invalid|refuzat|nu|unavailable|not found)/i.test(log)) {
     return {
       ...base,
       causeCode: 'brain_unavailable',
-      causeSummary: 'Planificatorul/modelul nu a produs un rezultat executabil.',
-      nextAction: 'Verifică disponibilitatea și răspunsul structurat al creierului, apoi folosește fallback-ul autorizat fără buclă de retry.',
+      causeSummary: 'Serverul local llama.cpp sau modelul Qwen nu a produs un rezultat executabil.',
+      nextAction: 'Verifică private-ai-llm.service, endpointurile loopback /health și /v1/models, apoi jurnalul privat OpenCode; remediază local, fără fallback cloud.',
+      state: 'diagnosing',
+    }
+  }
+  if (/worker_failure:(?:worker_internal_failure|codex_exec_failed)/i.test(log)) {
+    return {
+      ...base,
+      causeCode: 'unknown',
+      causeSummary: 'Executorul a raportat un eșec intern generic, iar cauza exactă nu este demonstrată de codul public.',
+      nextAction: 'Citește jurnalul privat al jobului, verifică OpenCode și serviciul local llama.cpp, apoi clasifică numai cauza susținută de dovadă.',
       state: 'diagnosing',
     }
   }
@@ -162,11 +219,4 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
     nextAction: 'Citește jurnalul complet, progresul, sursa și porțile; formulează și testează ipoteze până când există o cauză susținută de dovadă.',
     state: 'diagnosing',
   }
-}
-
-export function constructorIncidentLesson(
-  incident: Pick<ConstructorIncident, 'causeSummary' | 'nextAction'>,
-  verification: string,
-): string {
-  return `Cauză: ${incident.causeSummary} Prevenție: ${incident.nextAction} Verificare: ${verification}`.slice(0, 4000)
 }

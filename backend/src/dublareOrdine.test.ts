@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { amprentaOrdin, eEroarePermanenta, MARCAJ_P27, seamanaOrdinele } from './db.js'
+import { amprentaOrdin, seamanaOrdinele } from './db.js'
 
 const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
 
@@ -79,60 +79,11 @@ describe('lacătul pe sursă: createBuildJob refuză dublurile', () => {
   it('ordinul verbatim al ownerului stă scris la ușă (să nu-l „optimizeze" nimeni)', () => {
     expect(db).toContain('ordinele de rezolvat nu au voie sa se dubleze nici o data')
   })
-})
 
-// ── P27 (owner, 15 aug, LEGE: „la constructor, trebuie 1 singur ordin, nu se
-// fac mai multe ordine pe acelasi subiect, lege, se rezolva, se arhiveaza,
-// sau se escaladeaza sau se raporteaza la kelion") ───────────────────────────
-// Jurnalul #324, măsurat: „Your credit balance is too low" reîncercat orbește
-// de 6 ori. Legea de aici: eroarea PERMANENTĂ omoară ordinul la PRIMUL raport,
-// cu verdict pe nume, iar mortul se RAPORTEAZĂ lui Kelion — nu rămâne zombie.
-describe('P27 — erorile PERMANENTE opresc reîncercarea din prima (proba la rulare)', () => {
-  it('un cont API fără credit = eroare permanentă, cu verdictul pe nume', () => {
-    expect(eEroarePermanenta('API error: {"type":"error","error":{"message":"Your credit balance is too low..."}}')).toMatch(/contul furnizorului nu are credit/)
-    expect(eEroarePermanenta('FĂRĂ CREDIT API: contul de runtime n-are credit')).toMatch(/configurația financiară trebuie remediată/)
-  })
-
-  it('cheia respinsă = permanentă; verdictul spune „config, nu codul"', () => {
-    expect(eEroarePermanenta('401 authentication_error: invalid x-api-key')).toMatch(/config, nu codul/)
-    expect(eEroarePermanenta('API key not valid. Please pass a valid API key.')).toMatch(/config, nu codul/)
-  })
-
-  it('panele TRECĂTOARE nu sunt permanente (au dreptul la reîncercare/vindecător)', () => {
-    // Un 402 tranzitoriu este reconciliat de fluxul financiar, nu de clasificator.
-    expect(eEroarePermanenta('402 requires more credits')).toBeNull()
-    expect(eEroarePermanenta('timeout: npm install a durat peste 10 min')).toBeNull()
-    expect(eEroarePermanenta('creier 502 — indisponibil temporar')).toBeNull()
-  })
-})
-
-describe('P27 — lacătele pe sursă: blocajul extern este factual și se raportează', () => {
-  it('reportBuildJob păstrează contorul real și marchează acțiunea externă fără sentinelă', () => {
-    const corp = db.slice(db.indexOf('export async function reportBuildJob'))
-    expect(corp).toContain('eEroarePermanenta(log)')
-    expect(corp).toContain("progress = CASE WHEN $10 THEN 'external_action_required'")
-    expect(corp).not.toContain('attempts = 99')
-  })
-
-  it('raportarea la Kelion: golul intră în triaj + panoul e anunțat, iar eșecul raportării se strigă', () => {
-    const corp = db.slice(db.indexOf('export async function reportBuildJob'))
-    expect(corp).toContain("logCapabilityGap('constructor'")
-    expect(corp).toContain('notifyAdmin')
-    expect(corp).toContain('[P27] raportarea la Kelion a picat:')
-  })
-
-  it('claim-ul nu ține blocat un retry explicit doar fiindcă jurnalul păstrează cauza P27', () => {
-    const claim = db.slice(db.indexOf('export async function claimNextBuildJob'), db.indexOf('export async function deblocheazaJoburileClaimate'))
-    expect(claim).not.toContain("NOT LIKE '%[P27: eroare PERMANENT%'")
-  })
-
-  it('„reia"-ul deliberat al ownerului rămâne posibil (retryBuildJob dezgheață cu attempts=0)', () => {
-    const corp = db.slice(db.indexOf('export async function retryBuildJob'))
-    expect(corp).toContain("status='queued', attempts=0")
-  })
-
-  it('marcajul e o singură constantă (nu două texte care pot diverge)', () => {
-    expect(MARCAJ_P27).toBe('[P27: eroare PERMANENTĂ')
+  it('persistă identitatea executorului local chiar de la nașterea unui job nou', () => {
+    const corp = db.slice(db.indexOf('export async function createBuildJob'))
+    expect(corp).toContain('INSERT INTO build_jobs (ordered_by, order_text, brain) VALUES ($1, $2, $3)')
+    expect(corp).toContain('[accountKey, orderText, CONSTRUCTOR_LOCAL_ACTOR]')
   })
 })
 

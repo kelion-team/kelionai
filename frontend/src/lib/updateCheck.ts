@@ -1,3 +1,5 @@
+import { marcheazaPlecarea } from './errorReport'
+
 declare const __APP_VERSION__: string
 declare const __BUILD_DATE__: string
 
@@ -24,6 +26,9 @@ export function watchForPwaUpdate(onWaiting: (apply: ApplyPwaUpdate) => void): (
   const reloadOnControllerChange = (): void => {
     if (stopped || reloading) return
     reloading = true
+    // Marcăm ÎNAINTE de reload: altfel post-mortemul de la pornirea următoare nu
+    // poate distinge reload-ul ăsta (legitim) de un crash de randare.
+    marcheazaPlecarea('reload:sw-controllerchange')
     window.location.reload()
   }
 

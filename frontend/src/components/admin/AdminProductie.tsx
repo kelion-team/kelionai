@@ -5,6 +5,8 @@ import {
   type CreierAdmin,
   fetchConstructorWorkerAdmin,
   type ConstructorWorkerAdmin,
+  fetchConstructorModelAdmin,
+  switchConstructorModelAdmin,
   evalueazaOrdinConstructor,
   type EvalConstructor,
 } from '../../lib/admin'
@@ -12,6 +14,7 @@ import { fetchBalance, formatMinorMoney, type WalletStatus } from '../../lib/bil
 import { apiFetch } from '../../lib/transport'
 import {
   constructorAvailabilityFromSnapshot,
+  constructorActorLabel,
   constructorFinalResultText,
   constructorHasVerifiedLiveResult,
   constructorJobCanBeCancelled,
@@ -29,10 +32,12 @@ import {
   parseAdminConstructorSnapshot,
   parseAdminReleaseSnapshot,
   parseAdminRestoreAcknowledgement,
+  type AdminConstructorModelSnapshot,
   type AdminConstructorDiagnostic,
   type AdminReleaseSnapshot,
   type BuildArchiveCursor,
   type BuildJobRow,
+  type ConstructorModelProfile,
 } from '../../lib/adminConstructorContract'
 
 // ── CONSTRUCTOR tab ─────────────────────────────────────────────────────────
@@ -50,6 +55,9 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   const [constructorAcceptingWork, setConstructorAcceptingWork] = useState<boolean | null>(null)
   const [constructorWorkerCanStartNow, setConstructorWorkerCanStartNow] = useState<boolean | null>(null)
   const [constructorId, setConstructorId] = useState<ConstructorWorkerSummary | null>(null)
+  const [constructorModel, setConstructorModel] = useState<AdminConstructorModelSnapshot | null | 'necitit'>('necitit')
+  const [constructorModelBusy, setConstructorModelBusy] = useState(false)
+  const [constructorModelMessage, setConstructorModelMessage] = useState<{ kind: 'status' | 'error'; text: string } | null>(null)
   const [diagnostic, setDiagnostic] = useState<AdminConstructorDiagnostic | null>(null)
   const [release, setRelease] = useState<AdminReleaseSnapshot | null>(null)
   const [releaseBusy, setReleaseBusy] = useState(false)
@@ -175,6 +183,13 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
           nextAction: 'Conexiunea către starea de publicare a eșuat.',
         })
       })
+    void fetchConstructorModelAdmin(controller.signal).then((snapshot) => {
+      if (!isCurrent()) return
+      setConstructorModel(snapshot)
+      if (snapshot?.state === 'ready') {
+        setConstructorModelMessage((previous) => previous?.kind === 'status' ? null : previous)
+      }
+    })
   }
 
   const releaseAction = (): void => {
@@ -198,10 +213,59 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
       .finally(() => { setReleaseBusy(false); refreshBuildJobs() })
   }
 
+  const constructorModelProfileText = (profile: ConstructorModelProfile): string => {
+    if (typeof constructorModel === 'object' && constructorModel !== null) {
+      const descriptor = constructorModel.profiles.find((candidate) => candidate.id === profile)
+      if (descriptor) return `${descriptor.label} — ${descriptor.model}`
+    }
+    return profile === 'fast' ? A.constructorModelFastFallback : A.constructorModelPowerfulFallback
+  }
+
+  const selectConstructorModel = (profile: ConstructorModelProfile): void => {
+    if (
+      constructorModelBusy
+      || typeof constructorModel !== 'object'
+      || constructorModel === null
+      || constructorModel.state !== 'ready'
+      || constructorModel.activeProfile === profile
+      || !constructorModel.profiles.find((candidate) => candidate.id === profile)?.installed
+    ) return
+
+    setConstructorModelBusy(true)
+    setConstructorModelMessage(null)
+    void switchConstructorModelAdmin(profile)
+      .then((result) => {
+        if (result.kind === 'confirmed' || result.kind === 'accepted') {
+          setConstructorModel(result.snapshot)
+          const descriptor = result.snapshot.profiles.find((candidate) => candidate.id === profile)
+          const profileText = descriptor ? `${descriptor.label} — ${descriptor.model}` : constructorModelProfileText(profile)
+          setConstructorModelMessage(result.kind === 'accepted'
+            ? { kind: 'status', text: A.constructorModelSwitchAccepted(profileText) }
+            : null)
+          return
+        }
+        if (result.kind === 'conflict') {
+          setConstructorModelMessage({ kind: 'error', text: A.constructorModelConflict })
+        } else if (result.kind === 'unavailable') {
+          setConstructorModelMessage({ kind: 'error', text: A.constructorModelUnavailable })
+        } else {
+          setConstructorModelMessage({ kind: 'error', text: A.constructorModelSwitchFailed })
+        }
+      })
+      .finally(() => {
+        setConstructorModelBusy(false)
+        refreshBuildJobs()
+      })
+  }
+
   useEffect(() => {
     refreshBuildJobs()
     const id = window.setInterval(() => { refreshBuildJobs() }, 10_000)
-    return () => window.clearInterval(id)
+    return () => {
+      window.clearInterval(id)
+      buildRefreshRef.current.controller?.abort()
+      buildRefreshRef.current.generation += 1
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -365,6 +429,19 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   }
 
   const buildJobsData = Array.isArray(buildJobs) ? buildJobs : null
+  const constructorModelSnapshot = typeof constructorModel === 'object' && constructorModel !== null
+    ? constructorModel
+    : null
+  const displayedModelProfiles = (['fast', 'powerful'] as const).map((profile) => {
+    const descriptor = constructorModelSnapshot?.profiles.find((candidate) => candidate.id === profile)
+    return {
+      id: profile,
+      installed: descriptor?.installed === true,
+      text: descriptor
+        ? `${descriptor.label} — ${descriptor.model}`
+        : profile === 'fast' ? A.constructorModelFastFallback : A.constructorModelPowerfulFallback,
+    }
+  })
 
   return (
     <div className="admin-tab-content">
@@ -434,10 +511,92 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
           <div className="admin-constructor-meta">
             <><b>Worker privat: OpenCode + Qwen local (llama.cpp)</b> · coada canonică <b>build_jobs</b>. Stare:{' '}</>
             {constructorId == null ? 'se citește de pe server…'
-              : constructorAcceptingWork === true ? <><b>OpenCode + Qwen local (llama.cpp)</b> — {constructorId.motiv}</>
+              : constructorAcceptingWork === true ? <><b>OpenCode worker</b> — {constructorId.motiv}</>
               : <>{constructorId.motiv}</>}
           </div>
         </div>
+        <section
+          className="admin-constructor-model-control"
+          aria-labelledby="constructor-model-control-title"
+          aria-busy={constructorModelBusy || constructorModelSnapshot?.state === 'switching'}
+        >
+          <div className="admin-subcard-title" id="constructor-model-control-title">{A.constructorModelTitle}</div>
+          <p className="chat-hint">{A.constructorModelManualHint}</p>
+          {constructorModel === 'necitit' && <p className="chat-hint" role="status">{A.constructorModelLoading}</p>}
+          {constructorModel === null && <p className="chat-hint constructor-model-error" role="alert">{A.constructorModelUnreadable}</p>}
+          {constructorModelSnapshot && (
+            <>
+              {constructorModelSnapshot.state === 'ready' && constructorModelSnapshot.activeProfile && (
+                <p className="chat-hint constructor-model-ready" role="status">
+                  {A.constructorModelCurrent(constructorModelProfileText(constructorModelSnapshot.activeProfile))}
+                </p>
+              )}
+              {constructorModelSnapshot.state === 'switching' && constructorModelSnapshot.requestedProfile && (
+                <div className="chat-hint" role="status" aria-live="polite">
+                  <div>{constructorModelSnapshot.activeProfile
+                    ? A.constructorModelCurrent(constructorModelProfileText(constructorModelSnapshot.activeProfile))
+                    : A.constructorModelUnknown}</div>
+                  <div>{A.constructorModelSwitching(constructorModelProfileText(constructorModelSnapshot.requestedProfile))}</div>
+                </div>
+              )}
+              {constructorModelSnapshot.state === 'failed' && (
+                <div className="chat-hint constructor-model-error" role="alert">
+                  <div>{A.constructorModelSwitchFailed}</div>
+                  {constructorModelSnapshot.activeProfile && (
+                    <div>{A.constructorModelLastVerified(constructorModelProfileText(constructorModelSnapshot.activeProfile))}</div>
+                  )}
+                </div>
+              )}
+              {constructorModelSnapshot.state === 'unavailable' && (
+                <div className="chat-hint constructor-model-error" role="alert">
+                  <div>{A.constructorModelUnavailable}</div>
+                  {constructorModelSnapshot.activeProfile && (
+                    <div>{A.constructorModelLastVerified(constructorModelProfileText(constructorModelSnapshot.activeProfile))}</div>
+                  )}
+                </div>
+              )}
+              {constructorModelSnapshot.verifiedAt && (
+                <div className="chat-hint constructor-model-verified">
+                  {A.constructorModelVerifiedAt(new Date(constructorModelSnapshot.verifiedAt).toLocaleString())}
+                </div>
+              )}
+            </>
+          )}
+          <div className="admin-constructor-model-actions">
+            {displayedModelProfiles.map((profile) => {
+              const active = constructorModelSnapshot?.activeProfile === profile.id
+                && (constructorModelSnapshot.state === 'ready' || constructorModelSnapshot.state === 'switching')
+              const disabled = constructorModelBusy
+                || constructorModelSnapshot === null
+                || constructorModelSnapshot.state !== 'ready'
+                || active
+                || !profile.installed
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  className={`ghost constructor-model-button${active ? ' active' : ''}`}
+                  aria-pressed={active}
+                  disabled={disabled}
+                  title={!profile.installed ? A.constructorModelNotInstalled : undefined}
+                  onClick={() => selectConstructorModel(profile.id)}
+                >
+                  {active ? A.constructorModelActive(profile.text) : A.constructorModelActivate(profile.text)}
+                  {profile.id === 'fast' && <span className="constructor-model-default"> · {A.constructorModelDefault}</span>}
+                </button>
+              )
+            })}
+          </div>
+          {constructorModelMessage && (
+            <p
+              className={`chat-hint${constructorModelMessage.kind === 'error' ? ' constructor-model-error' : ''}`}
+              role={constructorModelMessage.kind === 'error' ? 'alert' : 'status'}
+              aria-live={constructorModelMessage.kind === 'status' ? 'polite' : undefined}
+            >
+              {constructorModelMessage.text}
+            </p>
+          )}
+        </section>
         <form className="admin-form-row" onSubmit={(e) => { e.preventDefault(); sendBuildOrder() }}>
           <input value={buildOrder} onChange={(e) => setBuildOrder(e.target.value)} placeholder={A.buildOrderPlaceholder} disabled={buildSubmitBusy} style={{ flex: 1, minWidth: 0 }} />
           <button type="submit" className="ghost" disabled={buildSubmitBusy}>{buildSubmitBusy ? 'Se trimite…' : 'Trimite ordinul'}</button>
@@ -589,6 +748,38 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                 {j.continuity.nextAction && <><br />Acțiune necesară: {j.continuity.nextAction}</>}
               </div>
             )}
+            {j.continuity?.modelOutcome && (() => {
+              const outcome = j.continuity.modelOutcome
+              const profileText = constructorModelProfileText(outcome.profile)
+              if (outcome.result === 'technical_failure') {
+                return (
+                  <div className="constructor-outcome technical" role="alert">
+                    <b>{A.constructorOutcomeTechnicalFailure(profileText)}</b>
+                    <div>{A.constructorOutcomeReason(outcome.reason)}</div>
+                    <div>{A.constructorOutcomeTechnicalNoModelAdvice}</div>
+                  </div>
+                )
+              }
+              if (outcome.manualRecommendation) {
+                const recommendedProfile = constructorModelProfileText(outcome.manualRecommendation.profile)
+                return (
+                  <aside className="constructor-outcome recommendation" aria-label={A.constructorOutcomeManualRecommendation(recommendedProfile)}>
+                    <b>{A.constructorOutcomeUnresolved(profileText)}</b>
+                    <div>{A.constructorOutcomeReason(outcome.reason)}</div>
+                    <div>{A.constructorOutcomeManualRecommendation(recommendedProfile)}</div>
+                    <div>{A.constructorOutcomeRecommendationReason(outcome.manualRecommendation.reason)}</div>
+                    <a href="#constructor-model-control-title">{A.constructorOutcomeGoToManualControl}</a>
+                  </aside>
+                )
+              }
+              return (
+                <div className="constructor-outcome unresolved">
+                  <b>{A.constructorOutcomeUnresolved(profileText)}</b>
+                  <div>{A.constructorOutcomeReason(outcome.reason)}</div>
+                  <div>{A.constructorOutcomeNoOtherModel}</div>
+                </div>
+              )
+            })()}
             {j.workCard && (
               <details id={`constructor-work-card-${j.id}`} className="build-progress" style={{ flexBasis: '100%', marginTop: 8 }}>
                 <summary>
@@ -597,7 +788,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                 </summary>
                 <div className="chat-hint" style={{ marginTop: 6 }}>
                   <b>Obiectiv:</b> {j.workCard.objective}<br />
-                  <b>Owner / actor:</b> {j.workCard.owner ?? 'neatribuit'} / {j.workCard.actor ?? 'în așteptare'}<br />
+                  <b>Owner / actor:</b> {j.workCard.owner ?? 'neatribuit'} / {constructorActorLabel(j.workCard.actor) ?? 'în așteptare'}<br />
                   <b>Heartbeat:</b> {j.workCard.heartbeatAt ? new Date(j.workCard.heartbeatAt).toLocaleString('ro-RO') : 'nepublicat'}{' · '}
                   <b>Evenimente persistente:</b> {constructorPersistentEventsText(j.workCard.progress, j.workCard.evidence.eventCount)}
                   {j.workCard.escalationCondition && <><br /><b>Escaladare:</b> {j.workCard.escalationCondition}</>}

@@ -1,0 +1,102 @@
+name: one-shot-clear-stale-codex-artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  guard-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validează sursa canonică fără secrete
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$GITHUB_REPOSITORY" = kelion-team/kelionai ] # hardcod-permis: identitatea tehnică imuabilă a repository-ului canonic
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [ "$GITHUB_REF_NAME" = master ]
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]
+
+  clear-stale-artifacts:
+    needs: guard-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      VPS_HOST_KEY: ${{ vars.VPS_HOST_KEY }}
+      SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Backup și elimină artefactele Codex orfane dinaintea finalize-ului nou
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [ "$VPS_USER" = root ]
+          [ -n "$VPS_HOST" ] && [ -n "$VPS_HOST_KEY" ] && [ -n "$SSH_KEY" ]
+          umask 077
+          key_file=$(mktemp)
+          known_hosts=$(mktemp)
+          cleanup() { rm -f -- "$key_file" "$known_hosts"; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_HOST_KEY" > "$known_hosts"
+          chmod 0600 "$key_file" "$known_hosts"
+          ssh_opts=(
+            -i "$key_file"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$known_hosts"
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+          )
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          backup_dir="/root/CONSTRUCTOR-BACKUP-$(date -u +%Y%m%dT%H%M%SZ)"
+          install -d -m 0700 -o root -g root "$backup_dir"
+          printf 'BACKUP_DIR=%s\n' "$backup_dir"
+
+          artifacts=(
+            /etc/systemd/system/kelion-constructor-model-control.service
+            /opt/kelion-constructor/constructor-model-control.mjs
+            /opt/kelion-codex/codex-worker.mjs
+            /root/kelion/config/codex-worker.env
+            /root/kelion/runtime/constructor-deploy-quiesce.journal
+            /root/kelion/runtime/constructor-upgrade.journal
+            /root/kelion/runtime/constructor-max-model.journal
+            /root/kelion/runtime/constructor-reactivation.journal
+            /run/kelion/constructor-activation.pending
+          )
+          for artifact in "${artifacts[@]}"; do
+            if [ -e "$artifact" ] || [ -L "$artifact" ]; then
+              dest="$backup_dir$(dirname "$artifact")"
+              install -d -m 0700 -o root -g root "$dest"
+              cp -a -- "$artifact" "$dest"/ 2>/dev/null || true
+              rm -f -- "$artifact"
+              printf 'REMOVED=%s\n' "$artifact"
+            else
+              printf 'ABSENT=%s\n' "$artifact"
+            fi
+          done
+
+          if systemctl cat kelion-constructor-model-control.service >/dev/null 2>&1; then
+            printf 'WARNING_UNIT_STILL_RESOLVES=kelion-constructor-model-control.service\n' >&2
+          fi
+
+          systemctl daemon-reload
+          printf 'CLEAR_STALE_ARTIFACTS_DONE=yes\n'
+          REMOTE

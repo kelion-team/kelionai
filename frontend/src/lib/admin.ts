@@ -7,6 +7,11 @@ import type {
   OpenAIAdminSnapshot,
   UserActivityRow,
 } from '../../../backend/src/shared/api-types'
+import {
+  parseAdminConstructorModelSnapshot,
+  type AdminConstructorModelSnapshot,
+  type ConstructorModelProfile,
+} from './adminConstructorContract'
 import { apiFetch } from './transport'
 export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
 
@@ -557,10 +562,10 @@ const CONSTRUCTOR_WORKER_STATES = new Set([
   'unknown',
 ])
 
-/** Starea workerului local; calea API păstrează numele vechi pentru compatibilitate. */
+/** Starea workerului local al Constructorului (OpenCode + Qwen local). */
 export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAdmin | null> {
   try {
-    const r = await apiFetch('/api/admin/codex', { cache: 'no-store' })
+    const r = await apiFetch('/api/admin/constructor/worker', { cache: 'no-store' })
     if (!r.ok) return null
     const raw = (await r.json()) as Record<string, unknown>
     const workerRaw = raw.worker && typeof raw.worker === 'object'
@@ -587,6 +592,52 @@ export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAd
     }
   } catch {
     return null
+  }
+}
+
+export async function fetchConstructorModelAdmin(
+  signal?: AbortSignal,
+): Promise<AdminConstructorModelSnapshot | null> {
+  try {
+    const response = await apiFetch('/api/admin/constructor/model', {
+      credentials: 'include',
+      cache: 'no-store',
+      signal,
+    })
+    if (!response.ok) return null
+    return parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
+  } catch {
+    return null
+  }
+}
+
+export type ConstructorModelSwitchResult =
+  | { kind: 'confirmed' | 'accepted'; snapshot: AdminConstructorModelSnapshot }
+  | { kind: 'conflict' | 'unavailable' | 'failed' }
+
+/** Trimite numai alegerea explicită a adminului; nu selectează și nu repetă automat. */
+export async function switchConstructorModelAdmin(
+  profile: ConstructorModelProfile,
+): Promise<ConstructorModelSwitchResult> {
+  try {
+    const response = await apiFetch('/api/admin/constructor/model', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profile }),
+    })
+    if (response.status === 200 || response.status === 202) {
+      const snapshot = parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
+      if (!snapshot) return { kind: 'failed' }
+      if (response.status === 200 && snapshot.state !== 'ready') return { kind: 'failed' }
+      if (response.status === 202 && snapshot.state !== 'switching') return { kind: 'failed' }
+      return { kind: response.status === 202 ? 'accepted' : 'confirmed', snapshot }
+    }
+    if (response.status === 409) return { kind: 'conflict' }
+    if (response.status === 503) return { kind: 'unavailable' }
+    return { kind: 'failed' }
+  } catch {
+    return { kind: 'failed' }
   }
 }
 

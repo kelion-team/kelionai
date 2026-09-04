@@ -54,6 +54,9 @@ secrete sau presupuneri din conversație.
 - Nicio rută publică nu primește căi de fișiere, SQL, shell, URL-uri arbitrare,
   PAN/CVC sau tokenuri. Orice input extern are schemă, limită de mărime și
   autorizare la obiectul utilizatorului.
+- Taskurile pentru agentul Copilot rămân strict în repository-ul curent; nu
+  includ comenzi de acces pe hosturi externe (SSH/VPS), mutații pe sisteme
+  private sau instrucțiuni în afara sandboxului de CI.
 - Mutațiile pe cookie cer protecție CSRF și verificare strictă Origin. Cookie-ul
   de sesiune este Secure, HttpOnly, host-only și nu conține tokenuri OAuth.
 - HTML generat/iframe este sandboxat cu CSP minim; autentificarea Google se
@@ -70,10 +73,14 @@ Fluxul unic este:
 
 1. admin Google autentificat creează un job validat;
 2. workerul HMAC îl revendică într-un checkout/worktree dedicat;
-3. OpenCode 1.18.25, fixat la Qwen3.6-35B-A3B local prin llama.cpp, produce
-   schimbarea. Executorul are acces complet la host prin sudo, conform cerinței
-   ownerului; ordinul, lease-ul, worktree-ul și jurnalul rămân controlate de
-   worker, iar secretele nu se publică în output;
+3. OpenCode 1.18.25 folosește prin llama.cpp profilul local ales manual de
+   owner: Qwen3.6-35B-A3B implicit sau Qwen3.5-122B-A10B. Workerul nu schimbă
+   profilul și nu reexecută automat ordinul. Numai un rezultat FAST
+   `unresolved` real poate recomanda POWERFUL; o eroare tehnică nu recomandă
+   alt model, iar POWERFUL `unresolved` este terminal. Un singur model este
+   servit în RAM, iar orice boot revine la FAST. Executorul are acces complet
+   la host prin sudo, conform cerinței ownerului; ordinul, lease-ul, worktree-ul
+   și jurnalul rămân controlate de worker, iar secretele nu se publică în output;
 4. schimbările dependente intră într-un singur release train bazat pe ultimul
    `origin/master`; rulează `node scripts/release-train-preflight.mjs` și toate
    porțile locale înainte de PR;

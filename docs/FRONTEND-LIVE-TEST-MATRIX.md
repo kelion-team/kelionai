@@ -4,9 +4,9 @@ Acest document este contractul curent de verificare, nu un istoric de decizii. T
 
 ## Acoperire inventar
 
-- `frontend/src`: 191 fișiere — 127 producție și 64 teste.
-- Cod/config/stil/manifest de producție: 33.586 linii.
-- Teste frontend: 4.599 linii.
+- `frontend/src`: 189 fișiere — 126 producție și 63 teste.
+- Cod/config/stil/manifest de producție: 33.469 linii.
+- Teste frontend: 4.553 linii.
 - Configurație/build inspectată: `package.json`, lockfile, toate tsconfig-urile, `vite.config.ts`, `index.html`, `public/sw.js`, scripturile frontend și workflow-ul PR.
 - Fișiere de producție neclasificate: **0**.
 
@@ -15,8 +15,8 @@ Acest document este contractul curent de verificare, nu un istoric de decizii. T
 | Fișier | Responsabilitate |
 | --- | --- |
 | `main.tsx` | bootstrap web/native și înregistrare PWA permisă de runtime |
-| `ConstructorDesktopApp.tsx` | shell-ul dedicat laptopului pentru autentificare externă și aceeași coadă Constructor server-side |
 | `App.tsx` | sesiune, mod offline, actualizare SW și rutare lazy |
+| `ConstructorDesktopApp.tsx` | shell desktop dedicat Constructorului, cu autentificare Google Admin și coada canonică partajată |
 | `index.css` | sistem vizual și layout responsive |
 | `assets/background-image.png` | fundal static |
 | `offline-kit.manifest.json` | inventarul pinuit al kitului offline |
@@ -38,7 +38,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
 | `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
 | `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
-| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada `build_jobs`, workerul OpenCode/Qwen local, modelele OpenAI ale produsului) |
+| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, OpenCode/Qwen local, modele OpenAI ale produsului) |
 | `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |
@@ -76,7 +76,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 
 - `chat.ts`: stream chat și idempotency; `chatReplayPolicy.ts`: oprirea retry-ului ambiguu; `offlineStore.ts`: istoric/outbox tranzacțional account-scoped; `coadaOffline.ts`: compatibilitate și ACK strict; `offlineSync.ts`: drenare mutex la mount/reconnect în batch-uri de maximum 100; `contextOffline.ts`: context local minim; `callMedia.ts`: envelope și segmentare media pentru apel.
 - `vocalLive.ts`: client unic OpenAI Realtime prin backend; `vocalLiveAvailability.ts`: coduri publice fără body provider, terminale fără retry și maximum cinci reluări tranzitorii; `voiceHeartbeat.ts`, `voceUnica.ts`, `rutaAudio.ts`, `audioFocus.ts`: o singură voce și ownership audio.
-- `micStream.ts`, `vad.ts`, `pcm.ts`, `pcmWorklet.ts`, `opusVoce.ts`, `audioGraph.ts`, `audioIO.ts`: captură, VAD, codec și redare.
+- `micStream.ts`, `vad.ts`, `pcm.ts`, `pcmWorklet.ts`, `opusVoce.ts`, `audioGraph.ts`, `audioContextPartajat.ts`, `audioIO.ts`: captură, VAD, codec și redare (un singur AudioContext partajat de toată aplicația).
 - `apel.ts`, `apelMic.ts`, `apelSonerie.ts`: apel și semnalizare; `voceBrowser.ts`, `vociKelion.ts`: fallback senzorial local.
 - `camera.ts`, `cameraConsent.ts`, `avatarCamera.ts`: cameră și consimțământ; `auzAmbiental.ts`: indicii FFT neconcludente pe streamul comun.
 - `facialQueue.ts`, `gestures.ts`: animații comandate ale avatarului; `audioSpatial.ts`, `companionCreativ.ts`, `dansMuzica.ts`, `motorBit.ts`, `carMode.ts`, `recorder.ts`: media locală și mod mașină.
@@ -184,8 +184,8 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | A10 | Constructor | evaluate/send/cancel/retry/clean | worker OpenCode/Qwen local, status și progres reale; idempotency și autoritate server |
 | A11 | Agent specializat | create | numai formular React → POST JSON `/api/enterprise/agent-nou`; fără consolă HTML paralelă |
 | A12 | Creier | afișare | OpenAI read-only; trepte din GET, fără selector/POST/KV mutabil |
-| A13 | Constructor local | heartbeat/setup/task | workerul execută direct OpenCode 1.18.25 cu Qwen3.6 prin llama.cpp local; nu primește `openai-project-key`, nu face login extern, iar aplicațiile client păstrează numai autentificarea lor și aceeași coadă server-side |
-| A14 | Constructor local | cost/capabilități | execuția Constructorului nu consumă un furnizor AI plătit; Realtime/TTS/image/video ale produsului rămân exclusiv server-side, cu cost intern separat și debit Kelion admin zero din `/balance` |
+| A13 | OpenCode local | heartbeat/setup/model | workerul dovedește OpenCode `1.18.25`, endpointul llama.cpp loopback și Qwen3.6-35B-A3B fixat; nu există cheie OpenAI, login/cache Codex, task URL extern sau secret AI în DOM/DB/log |
+| A14 | Separare AI | capabilități | Constructorul folosește numai Qwen local fără cheie ori cost cloud afișat; Realtime/TTS/image/video ale produsului rămân exclusiv server-side și debitul Kelion admin rămâne zero din `/balance` |
 | A15 | VPS/diagnostic | citire/autoverificare | status real, eșec explicit; fără restart/deploy VPS direct din browser |
 
 ## Matrice live — native și securitate
@@ -206,4 +206,4 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 
 Porțile obligatorii sunt: `npm test`, `npm run lint`, `npm run build`, `npm audit --omit=dev`, contractul butoane-rute, exporturi, hardcodări, creier unic, inventar/hash și scanare secrete. Testele unitare acoperă politicile offline, transport, native auth, XSS/iframe/playground, billing, idempotency, senzori și PWA.
 
-Aceste porți nu înlocuiesc probele live pentru cameră, microfon, OpenAI Realtime, WebGPU, instalarea reală a kitului de ~904 MB, browserul de sistem native, execuția privată OpenCode/Qwen a Constructorului și fault-injection PostgreSQL pentru O12–O15. Pentru ele sunt necesare un browser/dispozitiv compatibil, backend de staging, conturi public/client/admin izolate și permisiuni explicite. Local este dovedită siguranța anti-dublare și redarea terminalului; un crash după marcajul efectului, dar înaintea rezultatului durabil, rămâne intenționat nedeterminat și cere verificare umană, nu reexecuție.
+Aceste porți nu înlocuiesc probele live pentru cameră, microfon, OpenAI Realtime, WebGPU, instalarea reală a kitului de ~904 MB, browserul de sistem native, execuția Constructorului OpenCode/Qwen pe Contabo și fault-injection PostgreSQL pentru O12–O15. Pentru ele sunt necesare un browser/dispozitiv compatibil, backend de staging, conturi public/client/admin izolate și permisiuni explicite. Local este dovedită siguranța anti-dublare și redarea terminalului; un crash după marcajul efectului, dar înaintea rezultatului durabil, rămâne intenționat nedeterminat și cere verificare umană, nu reexecuție.

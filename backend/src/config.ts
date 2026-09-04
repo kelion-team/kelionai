@@ -60,9 +60,10 @@ export const ENV_ALIASES: Record<string, string[]> = {
   openaiCallTranscription: ['OPENAI_CALL_TRANSCRIPTION_MODEL'],
   openaiTts: ['OPENAI_TTS_MODEL'],
   openaiImage: ['OPENAI_IMAGE_MODEL'],
-  codexWorkerSecret: ['CODEX_WORKER_SECRET'],
+  constructorWorkerSecret: ['CODEX_WORKER_SECRET'],
   constructorPublisherSecret: ['CONSTRUCTOR_PUBLISHER_SECRET'],
   constructorReleaseSecret: ['CONSTRUCTOR_RELEASE_SECRET'],
+  constructorModelControlSecret: ['CONSTRUCTOR_MODEL_CONTROL_SECRET'],
   browserWorkerSecret: ['BROWSER_WORKER_SECRET'],
   converterWorkerSecret: ['CONVERTER_WORKER_SECRET'],
   vapidPublicKey: ['VAPID_PUBLIC_KEY'],
@@ -117,9 +118,10 @@ function fileOnlySecret(name: string): string {
 }
 
 const isProd = process.env.NODE_ENV === 'production'
-const codexWorkerEnabled = process.env.CODEX_WORKER_ENABLED === '1'
+const constructorWorkerEnabled = process.env.CODEX_WORKER_ENABLED === '1'
 const constructorPublisherEnabled = process.env.CONSTRUCTOR_PUBLISHER_ENABLED === '1'
 const constructorReleaseEnabled = process.env.CONSTRUCTOR_RELEASE_ENABLED === '1'
+const constructorModelControlEnabled = process.env.CONSTRUCTOR_MODEL_CONTROL_ENABLED === '1'
 const pushEnabled = process.env.PUSH_ENABLED === '1'
 
 function constructorServiceSecret(name: string, enabled: boolean): string {
@@ -543,11 +545,11 @@ export const config = {
     projectId: '',
     apiBaseUrl: endpointConfig.openaiApiBase,
   },
-  codexWorker: {
-    enabled: codexWorkerEnabled,
+  constructorWorker: {
+    enabled: constructorWorkerEnabled,
     // Numele câmpului rămâne compatibil cu serviciul instalat. Secretul este
     // exclusiv pentru HMAC-ul cozii build_jobs, nu o credențială AI sau GitHub.
-    secret: constructorServiceSecret(ENV_ALIASES.codexWorkerSecret[0], codexWorkerEnabled),
+    secret: constructorServiceSecret(ENV_ALIASES.constructorWorkerSecret[0], constructorWorkerEnabled),
   },
   constructorPublisher: {
     enabled: constructorPublisherEnabled,
@@ -561,6 +563,16 @@ export const config = {
     secret: constructorServiceSecret(
       ENV_ALIASES.constructorReleaseSecret[0],
       constructorReleaseEnabled,
+    ),
+  },
+  constructorModelControl: {
+    enabled: constructorModelControlEnabled,
+    socket: env('CONSTRUCTOR_MODEL_CONTROL_SOCKET'),
+    // Identitate separată de worker: această cheie autorizează numai cele două
+    // operații fixe ale controllerului de profil local, niciodată coada sau AI-ul.
+    secret: constructorServiceSecret(
+      ENV_ALIASES.constructorModelControlSecret[0],
+      constructorModelControlEnabled,
     ),
   },
   browserWorker: {
@@ -737,7 +749,7 @@ if (config.googleTokenEncryptionPreviousKeyId
 
 if (isProd) {
   const constructorIdentities = [
-    { name: 'CODEX_WORKER_SECRET', enabled: config.codexWorker.enabled, secret: config.codexWorker.secret },
+    { name: 'CODEX_WORKER_SECRET', enabled: config.constructorWorker.enabled, secret: config.constructorWorker.secret },
     { name: 'CONSTRUCTOR_PUBLISHER_SECRET', enabled: config.constructorPublisher.enabled, secret: config.constructorPublisher.secret },
     { name: 'CONSTRUCTOR_RELEASE_SECRET', enabled: config.constructorRelease.enabled, secret: config.constructorRelease.secret },
   ].filter((identity) => identity.enabled)

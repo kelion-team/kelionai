@@ -100,6 +100,15 @@ export const UNELTE_VORBIRE: readonly string[] = [
   'list_source',
   'read_source',
   'search_source',
+  // Patru unelte marcate `chat: true` în brainCapabilities.ts, dar care lipseau
+  // de aici — o întrebare simplă („ce e pe ecran?", „a fost un zgomot?", „unde
+  // e cea mai apropiată farmacie?") era clasificată VORBIRE și nu avea de unde
+  // să le cheme fără să treacă întâi prin ask_brain. READ-ONLY, fără efecte:
+  // citesc tab-ul activ / indicii FFT ambientale / caută pe hartă.
+  'get_monitor',
+  'evenimente_sonore',
+  'maps_search',
+  'lookup_address',
 ]
 
 // ── CE NU ARE VOIE SĂ CALCE PE FAZA DE VORBIRE ─────────────────────────────

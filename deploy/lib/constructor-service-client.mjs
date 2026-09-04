@@ -57,7 +57,17 @@ export function systemdCredentialPath(name, explicitEnv, maxBytes = 65_536) {
   if (!path) fail(`Lipsește credentiala systemd ${name}`)
   const info = statSync(path)
   if (!info.isFile() || info.size < 1 || info.size > maxBytes) fail(`Credentiala ${name} este invalidă`)
-  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) fail(`Credentiala ${name} are permisiuni prea largi`)
+  // systemd copiaza credentiala pastrand modul sursei (instalatorul le creeaza
+  // 0440) si o expune intr-un mount privat, inaccesibil altor procese. Cerinta
+  // reala acolo este sa ramana nemodificabila - exact distinctia pe care o face
+  // codex-worker.mjs. Regula stricta se aplica numai cailor explicite.
+  if (process.platform !== 'win32') {
+    if (!explicitEnv && process.env.CREDENTIALS_DIRECTORY) {
+      if ((info.mode & 0o222) !== 0) fail(`Credentiala ${name} este modificabila`)
+    } else if ((info.mode & 0o077) !== 0) {
+      fail(`Credentiala ${name} are permisiuni prea largi`)
+    }
+  }
   return path
 }
 
@@ -81,6 +91,12 @@ export async function postInternal({ api, secret, prefix, path, body, timeoutMs 
   if (response.status === 204) return null
   const payload = await response.json().catch(() => null)
   if (!response.ok) fail(`API intern ${path}: HTTP ${response.status}`)
+  if (
+    payload !== null
+    && typeof payload === 'object'
+    && Object.prototype.hasOwnProperty.call(payload, 'heartbeatPersisted')
+    && payload.heartbeatPersisted !== true
+  ) fail(`API intern ${path}: heartbeat nepersistat`)
   return payload
 }
 

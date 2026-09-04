@@ -1,11 +1,12 @@
 [Unit]
 Description=Kelion Constructor queue with local OpenCode/Qwen full-host executor
-After=network-online.target private-ai-llm.service kelion-constructor-sync.service kelion-runtime-config-recovery.service
-Wants=network-online.target
-Requires=private-ai-llm.service kelion-constructor-sync.service
+After=network-online.target private-ai-llm.service kelion-constructor-sync.service kelion-constructor-model-control.service kelion-runtime-config-recovery.service
+Wants=network-online.target private-ai-llm.service
+Requires=kelion-constructor-sync.service kelion-constructor-model-control.service
 ConditionPathExists=/etc/kelion/codex-worker.enabled
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
 
 [Service]
 Type=oneshot
@@ -26,7 +27,7 @@ Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
 EnvironmentFile=/root/kelion/config/codex-worker.env
 LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
 ExecStartPre=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test
-ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
 NoNewPrivileges=false
 KeyringMode=shared
 PrivateIPC=false
@@ -55,5 +56,6 @@ AmbientCapabilities=
 SystemCallArchitectures=
 MemoryMax=6G
 TasksMax=512
-TimeoutStartSec=100min
+TimeoutStartSec=240min
+TimeoutStopSec=40min
 KillMode=control-group

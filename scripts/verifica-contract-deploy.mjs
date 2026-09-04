@@ -25,6 +25,7 @@ export function runtimeContractNames(source = contract) {
     ...source.requiredNonSecret.map(String),
     ...source.generatedRuntime.map(String),
     ...Object.keys(source.secretFiles).map((name) => `${name}_FILE`),
+    ...Object.keys(source.hostGeneratedRuntimeSecretFiles ?? {}).map((name) => `${name}_FILE`),
   ])
 }
 
@@ -80,11 +81,12 @@ export function contractErrors() {
   const requiredNonSecret = setOf(contract.requiredNonSecret)
   const generatedRuntime = setOf(contract.generatedRuntime)
   const secretFiles = new Map(Object.entries(contract.secretFiles))
+  const hostGeneratedRuntime = new Map(Object.entries(contract.hostGeneratedRuntimeSecretFiles ?? {}))
   const hostOnly = new Map(Object.entries(contract.hostOnlySecretFiles))
   const hostProvisioned = new Map(Object.entries(contract.hostProvisionedSecretFiles))
   const workflowControlVariables = setOf(contract.workflowControlVariables)
   const workflowControlSecrets = setOf(contract.workflowControlSecrets)
-  const covered = new Set([...requiredNonSecret, ...secretFiles.keys()])
+  const covered = new Set([...requiredNonSecret, ...secretFiles.keys(), ...hostGeneratedRuntime.keys()])
 
   compareNameSets(
     errors,
@@ -142,6 +144,28 @@ export function contractErrors() {
       `source:\\s*[^\\n]*/${escapeRegex(file)}\\s*\\n\\s*target:\\s*/run/secrets/${escapeRegex(file)}\\s*\\n\\s*read_only:\\s*true`,
     )
     if (!readOnlyMount.test(compose)) errors.push(`compose nu montează read-only secretul: ${name}`)
+  }
+  for (const [name, raw] of hostGeneratedRuntime) {
+    const file = String(raw ?? '')
+    if (!file) {
+      errors.push(`secret runtime generat local are definiție invalidă: ${name}`)
+      continue
+    }
+    if (workflow.includes(`secrets.${name}`) || workflow.includes(`${name}: \${{ secrets.`)) {
+      errors.push(`secret runtime generat local nu poate proveni din GitHub: ${name}`)
+    }
+    if (!workflow.includes(`secret_path=$secret_dir/${file}`)
+      || !workflow.includes('openssl rand -hex 32')
+      || !workflow.includes(`stage_value app-secret.${file} "$model_control_secret"`)) {
+      errors.push(`workflow nu generează și persistă local secretul runtime: ${name}`)
+    }
+    if (!compose.includes(`/run/secrets/${file}`)) errors.push(`compose nu montează secretul local: ${name}`)
+    if (!compose.includes(`${name}_FILE: /run/secrets/${file}`)) errors.push(`compose nu setează ${name}_FILE`)
+    if (!prVerify.includes(file)) errors.push(`proba de container CI omite secret-file local: ${file}`)
+    const readOnlyMount = new RegExp(
+      `source:\\s*[^\\n]*/${escapeRegex(file)}\\s*\\n\\s*target:\\s*/run/secrets/${escapeRegex(file)}\\s*\\n\\s*read_only:\\s*true`,
+    )
+    if (!readOnlyMount.test(compose)) errors.push(`compose nu montează read-only secretul local: ${name}`)
   }
   for (const [_name, file] of hostOnly) {
     if (!workflow.includes(`/root/kelion/secrets/${file}`)) errors.push(`workflow nu creează secretul host-only: ${file}`)
