@@ -5820,7 +5820,8 @@ const CONSTRUCTOR_WORKER_MAX_ATTEMPTS = 3
 
 // Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
 // la dovada live sau un rezultat terminal. Claim-ul persistă profilul ales
-// manual înainte de execuție; watchdog-ul nu îl schimbă și nu îl reîncearcă.
+// manual înainte de execuție; watchdog-ul nu schimbă profilul, dar repune
+// ordinul în coadă dacă lucrătorul a murit, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS.
 export type ClaimNextBuildJobResult =
   | { state: 'claimed'; job: BuildJob }
   | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
@@ -5899,10 +5900,14 @@ export async function claimNextBuildJob(
 }
 
 // ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR ───────────────────────────
-// Un worker tăcut nu este o invitație la o a doua execuție. După pragul măsurat
-// jobul devine un eșec tehnic terminal pe ACELAȘI profil persistat la claim.
-// execution_cycle, attempts și codex_task_id rămân dovezi ale acelei execuții;
-// numai comanda explicită Reia poate crea ciclul următor.
+// Un worker tăcut nu este o invitație la o a doua execuție SIMULTANĂ: revendicarea
+// este serializată de advisory lock și de flock-ul de pe mașină. Dar un lucrător
+// mort nu este vina ordinului — se întâmplă la fiecare deploy, care oprește
+// unitatea. După pragul măsurat ordinul se repune în coadă pe ACELAȘI profil
+// persistat la claim, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS; codex_task_id se
+// eliberează, ca revendicarea următoare să fie curată, iar execution_cycle și
+// attempts rămân dovezi. Abia la epuizarea plafonului ordinul devine terminal și
+// se deschide incidentul pentru owner.
 export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: number }> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   const client = await conexiuneDb()
@@ -6501,9 +6506,10 @@ export async function archiveBuildJobsByScope(
  *  jobul actualizat sau null.
  *
  *  Numai un rezultat terminal poate fi reluat explicit. Un job viu nu poate fi
- *  resetat concurent din Admin: dacă workerul tace, watchdogul îl închide mai
- *  întâi ca eșec tehnic terminal, fără retry; abia apoi ownerul poate folosi
- *  Reia. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
+ *  resetat concurent din Admin: dacă workerul tace, watchdogul îl repune întâi
+ *  în coadă, iar la epuizarea plafonului îl închide terminal; abia atunci
+ *  ownerul poate folosi Reia. Cât ordinul este `queued` nu are nevoie de Reia,
+ *  fiindcă va fi revendicat automat. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
  *  un job deja publicat. */
 export type RetryBuildJobResult =
   | { ok: true; job: BuildJob }

@@ -510,8 +510,17 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ state: claim.state, job: null })
     }
     const job = claim.job
-    const recoveryCodes = new Set(['stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed'])
-    const persistedFailureCode = job.log?.split('\n', 1)[0] ?? null
+    const recoveryCodes = new Set([
+      'stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed',
+      // Codurile tehnice ale workerului: de când ordinul se reia automat după o
+      // pană trecătoare, execuția următoare trebuie să știe de ce a căzut cea
+      // dinainte. Dovada persistată are forma worker_failure:COD;profile=...
+      'execution_timeout', 'brain_unavailable', 'worker_internal_failure',
+    ])
+    const persistedLine = job.log?.split('\n', 1)[0] ?? null
+    const persistedFailureCode = persistedLine?.startsWith('worker_failure:')
+      ? persistedLine.slice('worker_failure:'.length).split(';', 1)[0]
+      : persistedLine
     const recoveryCode = persistedFailureCode && recoveryCodes.has(persistedFailureCode)
       ? persistedFailureCode
       : null
