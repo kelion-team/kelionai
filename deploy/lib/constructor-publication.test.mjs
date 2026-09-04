@@ -2711,6 +2711,21 @@ test('ledger-ul release permite retry numai după rollback dovedit și oprește 
   assert.match(cutover, /quiesce_units_for_recovery[\s\S]*publish_runtime_ready_stamp[\s\S]*restore_constructor_timers[\s\S]*clear_deploy_quiesce_journal/)
 })
 
+test('o cerere nouă pentru commitul deja activ este no-op fără nicio mutație pe VPS', () => {
+  const deploy = read('deploy/deploy.sh')
+  const successNoop = deploy.indexOf('status=already-succeeded')
+  const activeNoop = deploy.indexOf('status=already-active', successNoop)
+  const arm = deploy.indexOf('write_constructor_deploy_quiesce_journal armed', activeNoop)
+  assert.ok(successNoop >= 0 && activeNoop > successNoop && arm > activeNoop,
+    'no-op-ul already-active precede armarea jurnalului quiesce și ledger-ul started')
+  const guard = deploy.slice(deploy.lastIndexOf('\nif [', activeNoop), activeNoop)
+  assert.match(guard, /release_request_state" = none/)
+  assert.match(guard, /-z "\$recovered_constructor_quiesce_phase"/)
+  assert.match(guard, /release_request_live_proof; then/)
+  assert.match(guard, /constructor_gate_matches_candidate \\\n\s*\|\| die 'commitul este deja activ, dar gate-ul Constructor nu îi corespunde/)
+  assert.doesNotMatch(guard, /reconcile_constructor_after_completed_release|write_release_request_ledger|write_constructor_deploy_quiesce_journal/)
+})
+
 test('jurnalul deploy leagă markerul activ de gate și nu poate fi consumat de recovery generic', () => {
   const deploy = read('deploy/deploy.sh')
   const cutover = read('deploy/lib/runtime-config-cutover.sh')

@@ -80,7 +80,13 @@ async function flush(): Promise<void> {
  *  ține cererea vie după ce documentul moare. */
 function trimiteUltimaSuflare(): void {
   if (queue.length === 0) return
-  const errors = queue.splice(0, 10)
+  // `slice`, nu `splice`: cererea `keepalive` poate pica (offline, sesiune
+  // expirată), iar un `pagehide` de bfcache nu este o moarte — pagina poate
+  // reveni și trebuie să-și găsească erorile. În plus, un `flush()` în zbor
+  // deține deja primele zece: dacă le-am scoate aici, `splice`-ul lui de la
+  // răspuns ar șterge intrările următoare, netrimise niciodată. Serverul
+  // deduplică mesajele identice, deci retrimiterea e inofensivă.
+  const errors = queue.slice(0, 10)
   try {
     void apiFetch('/api/client-errors', {
       method: 'POST',
@@ -168,7 +174,12 @@ function heapMb(): number | undefined {
 /** Ce face aplicația ACUM — apelat din calea vocală, ca post-mortemul de la
  *  următoarea pornire să spună în ce fază a murit tabul. */
 export function marcheazaFaza(faza: string): void {
-  urmaCurenta = { ...urmaCurenta, at: Date.now(), faza, heapMb: heapMb() }
+  // `motivPlecare` NU se propagă: pagina restaurată din bfcache nu reevaluează
+  // modulul, deci un `pagehide` de la o simplă comutare de aplicație ar rămâne
+  // lipit și ar face ca un crash ulterior să fie raportat drept plecare curată —
+  // exact inversul verdictului. Orice activitate nouă înseamnă că pagina trăiește.
+  const { motivPlecare: _plecat, ...vie } = urmaCurenta
+  urmaCurenta = { ...vie, at: Date.now(), faza, heapMb: heapMb() }
   scrieUrma()
 }
 
@@ -204,6 +215,13 @@ function pornesteCutiaNeagra(): void {
   window.addEventListener('pagehide', () => {
     if (!urmaCurenta.motivPlecare) marcheazaPlecarea('pagehide')
     else trimiteUltimaSuflare()
+  })
+  // Pagina restaurată din bfcache nu reevaluează modulul, deci motivul plecării
+  // ar rămâne lipit peste o sesiune care de fapt trăiește mai departe. Fără asta,
+  // un crash de după o simplă comutare de aplicație ar fi raportat drept plecare
+  // curată, adică fix pe dos.
+  window.addEventListener('pageshow', () => {
+    if (urmaCurenta.motivPlecare) marcheazaFaza(urmaCurenta.faza)
   })
 }
 

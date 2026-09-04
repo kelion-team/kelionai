@@ -164,7 +164,13 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
     // este `stale_base`, unde ordinul nu are nicio vină — cineva a împins un
     // commit în master cât el trecea porțile — iar PR-ul și ramura sunt retrase
     // corect înainte de reluare. Restul codurilor rămân definitive.
-    expect(failure).toContain("const reluabil = code === 'stale_base' && Number(row.publisher_attempts) < 3")
+    expect(failure).toContain("code === 'stale_base'")
+    // Plafonul se numără în jurnalul append-only de retrageri, NU în rândul de
+    // pipeline: acela tocmai a fost șters, deci contorul lui ar fi permanent 1
+    // și ordinul ar reexecuta modelul la nesfârșit.
+    expect(failure).toContain('FROM constructor_publication_retirements')
+    expect(failure).toContain('STALE_BASE_MAX_REQUEUES')
+    expect(failure).not.toContain('row.publisher_attempts) < 3')
     expect(failure).toContain("reluabil ? 'queued' : 'failed'")
     expect(failure).toContain("reluabil ? 'queued' : 'publisher_manual_restart_required'")
     expect(failure).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)

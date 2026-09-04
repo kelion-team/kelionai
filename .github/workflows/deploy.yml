@@ -88,6 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REQUEST_ID: ${{ inputs.release_request_id }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
           CANDIDATE_SHA: ${{ inputs.commit_sha }}
           CANONICAL_WORKFLOW_SHA: ${{ github.sha }}
           CI_RUN_ID: ${{ inputs.ci_run_id }}
@@ -112,7 +113,21 @@ jobs:
           canonical=$(node scripts/release-dispatch-owner.mjs canonical-production-run \
             "$work/deploy-runs-pages.json" "$title" "$CANONICAL_WORKFLOW_SHA" "$GITHUB_RUN_ID")
           [[ "$canonical" =~ ^[1-9][0-9]*$ ]]
-          if [ "$canonical" = "$GITHUB_RUN_ID" ]; then
+          [[ "$RELEASE_MODE" = release || "$RELEASE_MODE" = rollback ]]
+          # Un request nou (alt UUID) pentru aceeași tuplă commit+CI+build deja
+          # publicată cu succes este un dispatch duplicat: candidatul ar boota cu
+          # markerul activ egal cu propriul RELEASE_ID și s-ar declara activ, iar
+          # rollback-ul ar lăsa Constructor quiesced. Nu atingem VPS-ul.
+          released=0
+          if [ "$RELEASE_MODE" = release ] && [ -n "$CI_RUN_ID" ] && [ -n "$BUILD_RUN_ID" ]; then
+            released=$(node scripts/release-dispatch-owner.mjs released-production-run \
+              "$work/deploy-runs-pages.json" "$CANDIDATE_SHA" "$CI_RUN_ID" "$BUILD_RUN_ID" "$GITHUB_RUN_ID")
+            [[ "$released" =~ ^[0-9]+$ ]]
+          fi
+          if [ "$released" != 0 ]; then
+            echo 'execute=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::Commitul $CANDIDATE_SHA a fost deja publicat de runul $released; requestul $RELEASE_REQUEST_ID este un duplicat și nu atinge producția."
+          elif [ "$canonical" = "$GITHUB_RUN_ID" ]; then
             echo 'execute=true' >> "$GITHUB_OUTPUT"
           else
             echo 'execute=false' >> "$GITHUB_OUTPUT"

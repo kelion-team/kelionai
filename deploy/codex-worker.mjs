@@ -88,6 +88,9 @@ const RECOVERY_GUIDANCE = Object.freeze({
   ci_failed: 'Versiunea anterioară a fost respinsă de un control CI obligatoriu. Auditează cauza probabilă și produce o remediere nouă, verificată complet.',
   local_gate_failed: 'Revalidarea izolată a publisherului a respins versiunea anterioară. Reproduce toate porțile și repară orice diferență deterministă.',
   pr_closed: 'PR-ul anterior a fost închis fără merge. Reexecută ordinul curat și produce un handoff nou, fără a reutiliza branch-ul anterior.',
+  execution_timeout: 'Execuția anterioară a depășit fereastra de timp. Lucrează concentrat pe ordin, fără explorare inutilă, și oprește-te când ordinul este îndeplinit.',
+  brain_unavailable: 'Execuția anterioară a căzut fiindcă modelul local era indisponibil, nu din vina ordinului. Reia lucrul de la zero, fără a presupune nimic despre starea anterioară.',
+  worker_internal_failure: 'Execuția anterioară a căzut dintr-o cauză tehnică a lucrătorului, nu din vina ordinului. Reia lucrul de la zero, pe worktree curat.',
 })
 const WORKER_FAILURE_CODES = new Set([
   'execution_timeout',

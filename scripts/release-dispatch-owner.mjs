@@ -56,6 +56,32 @@ export function canonicalProductionRunId(workflowRunPages, title, headSha, curre
   return Math.min(current, ...ids)
 }
 
+/**
+ * Un request nou pentru o tuplă commit+CI+build deja publicată cu succes
+ * este un dispatch duplicat, nu un release. Candidatul ar boota cu markerul
+ * activ egal cu propriul RELEASE_ID, s-ar declara activ, iar rollback-ul ar
+ * lăsa Constructor quiesced. Returnează runul care a publicat deja tupla
+ * sau 0 dacă nu există.
+ */
+export function releasedProductionRunId(workflowRunPages, candidateSha, ciRunId, buildRunId, currentRunId) {
+  const normalizedSha = String(candidateSha ?? '').toLowerCase()
+  const ci = positiveRunId(ciRunId, 'CI run ID')
+  const build = positiveRunId(buildRunId, 'Build run ID')
+  const current = positiveRunId(currentRunId, 'Runul production curent')
+  if (!SHA.test(normalizedSha)) fail('Identitatea production-release este invalidă')
+  const title = new RegExp(`^production-${TASK_UUID}-${normalizedSha}-${ci}-${build}$`)
+  const released = paginatedEntries(workflowRunPages, 'workflow_runs', 'runurilor production-release')
+    .filter((run) => run?.event === 'workflow_dispatch'
+      && run?.status === 'completed'
+      && run?.conclusion === 'success'
+      && run?.head_branch === 'master'
+      && String(run?.head_sha ?? '').toLowerCase() === normalizedSha
+      && title.test(String(run?.display_title ?? '')))
+    .map((run) => positiveRunId(run?.id, 'Runul production publicat'))
+    .filter((id) => id !== current)
+  return released.length > 0 ? Math.min(...released) : 0
+}
+
 export function canonicalCiRunIdFromBuild(buildRun, candidateSha, buildRunId) {
   const normalizedSha = String(candidateSha ?? '').toLowerCase()
   const expectedBuildRunId = positiveRunId(buildRunId, 'Build run ID')
@@ -226,6 +252,12 @@ function main() {
     const [pagesPath, title, headSha, currentRunId] = args
     const workflowRunPages = JSON.parse(readFileSync(pagesPath, 'utf8'))
     process.stdout.write(`${canonicalProductionRunId(workflowRunPages, title, headSha, currentRunId)}\n`)
+    return
+  }
+  if (operation === 'released-production-run' && args.length === 5) {
+    const [pagesPath, candidateSha, ciRunId, buildRunId, currentRunId] = args
+    const workflowRunPages = JSON.parse(readFileSync(pagesPath, 'utf8'))
+    process.stdout.write(`${releasedProductionRunId(workflowRunPages, candidateSha, ciRunId, buildRunId, currentRunId)}\n`)
     return
   }
   if (operation === 'build-ci' && args.length === 3) {
