@@ -414,8 +414,8 @@ INSTRUCTIONS
       "name": "Qwen local",
       "options": {
         "baseURL": "http://127.0.0.1:24080/v1",
-        "timeout": 1800000,
-        "chunkTimeout": 600000
+        "timeout": 15000000,
+        "chunkTimeout": 15000000
       },
       "models": {
         "qwen3.6-35b-a3b-local": {

@@ -29,6 +29,7 @@ import {
 import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const API = new URL(process.env.KELION_CODEX_API ?? 'http://127.0.0.1:8080/')
 const OPENCODE_BIN = resolve(process.env.OPENCODE_BIN ?? '/opt/private-ai/bin/opencode')
@@ -67,6 +68,13 @@ const POWERFUL_OPENCODE_MODEL = 'llama.cpp/qwen3.5-122b-a10b-local'
 const POWERFUL_OPENCODE_MODEL_ID = 'qwen3.5-122b-a10b-local'
 const OPENCODE_PROMPT = 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
 const WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024
+const MIN_EXECUTION_TIMEOUT_MS = 5 * 60_000
+const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60_000
+const DEFAULT_GATE_TIMEOUT_MS = 45 * 60_000
+const DEFAULT_SMOKE_TIMEOUT_MS = 30 * 60_000
+const EXECUTION_TIMEOUT_GRACE_MS = 5 * 60_000
+const MAX_EXECUTION_TIMEOUT_MS = 4 * 60 * 60_000
+const AUDIT_DURATION_WINDOW_CHARS = 160
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
 const REQUIRED_LAYOUT = Object.freeze({
   openCodeBin: '/opt/private-ai/bin/opencode',
@@ -101,6 +109,65 @@ const WORKER_UNRESOLVED_REASONS = new Set(['no_changes', 'test_failure', 'qualit
 
 function fail(message) {
   throw new Error(message)
+}
+
+const AUDIT_WORD_PATTERN = '(?:audit(?:eaz[aă]?|are[aă]?|area)?|auditeaz[aă]?)'
+const DURATION_UNIT_PATTERN = '(minute|min|mins?|m|ore|ora|hours?|h)'
+const AUDIT_WORD = `(?<![\\p{L}])${AUDIT_WORD_PATTERN}(?![\\p{L}])`
+
+/**
+ * Detectează numai o durată explicită asociată unui ordin de audit. Nu
+ * interpretăm numere arbitrare din ordin ca timeout: durata trebuie să apară
+ * lângă cuvântul audit/auditează, în ambele ordini uzuale.
+ */
+export function parseRequestedAuditMinutes(order) {
+  const text = String(order ?? '')
+  const patterns = [
+    new RegExp(`${AUDIT_WORD}[\\s\\S]{0,${AUDIT_DURATION_WINDOW_CHARS}}?\\b(\\d{1,4})\\s*(?:de\\s*)?${DURATION_UNIT_PATTERN}\\b`, 'iu'),
+    new RegExp(`\\b(\\d{1,4})\\s*(?:de\\s*)?${DURATION_UNIT_PATTERN}\\b[\\s\\S]{0,50}?${AUDIT_WORD}`, 'iu'),
+  ]
+  for (const pattern of patterns) {
+    const match = pattern.exec(text)
+    if (!match) continue
+    const amount = Number(match[1])
+    const unit = String(match[2]).toLocaleLowerCase('en-US')
+    const minutes = /^(?:ore|ora|hours?|h)$/.test(unit) ? amount * 60 : amount
+    if (Number.isSafeInteger(minutes) && minutes > 0) return minutes
+  }
+  return null
+}
+
+function configuredTimeoutMs(value, fallback, label) {
+  if (value === undefined || value === null || value === '') return fallback
+  if (!/^\d+$/.test(String(value))) fail(`${label} trebuie să fie un număr întreg de secunde`)
+  const seconds = Number(value)
+  const milliseconds = seconds * 1_000
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < MIN_EXECUTION_TIMEOUT_MS || milliseconds > MAX_EXECUTION_TIMEOUT_MS) {
+    fail(`${label} trebuie să fie între 300 și 14400 secunde`)
+  }
+  return milliseconds
+}
+
+/** Timeout efectiv pentru executorul OpenCode al unui ordin Constructor. */
+export function executionTimeoutMsForOrder(order, env = process.env) {
+  const configured = configuredTimeoutMs(
+    env.CODEX_WORKER_EXEC_TIMEOUT_SECONDS,
+    DEFAULT_EXECUTION_TIMEOUT_MS,
+    'CODEX_WORKER_EXEC_TIMEOUT_SECONDS',
+  )
+  const requestedMinutes = parseRequestedAuditMinutes(order)
+  if (requestedMinutes === null) return configured
+  const requestedMs = requestedMinutes * 60_000
+  if (!Number.isSafeInteger(requestedMs)) return MAX_EXECUTION_TIMEOUT_MS
+  return Math.min(MAX_EXECUTION_TIMEOUT_MS, Math.max(MIN_EXECUTION_TIMEOUT_MS, requestedMs + EXECUTION_TIMEOUT_GRACE_MS))
+}
+
+export function gateTimeoutMs(env = process.env) {
+  return configuredTimeoutMs(env.CODEX_WORKER_GATE_TIMEOUT_SECONDS, DEFAULT_GATE_TIMEOUT_MS, 'CODEX_WORKER_GATE_TIMEOUT_SECONDS')
+}
+
+export function smokeTimeoutMs(env = process.env) {
+  return configuredTimeoutMs(env.CODEX_WORKER_SMOKE_TIMEOUT_SECONDS, DEFAULT_SMOKE_TIMEOUT_MS, 'CODEX_WORKER_SMOKE_TIMEOUT_SECONDS')
 }
 
 class WorkerApiError extends Error {
@@ -848,8 +915,12 @@ export function runSucceeded(result) {
     && result.outputExceeded === false
 }
 
-function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = 30 * 60_000, signal = undefined, privilegedKill = false, maxLogBytes = WORKER_LOG_MAX_BYTES) {
+function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = DEFAULT_EXECUTION_TIMEOUT_MS, signal = undefined, privilegedKill = false, maxLogBytes = WORKER_LOG_MAX_BYTES) {
   return new Promise((done, reject) => {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_EXECUTION_TIMEOUT_MS) {
+      reject(new Error('Timeout-ul execuției worker este invalid'))
+      return
+    }
     if (!Number.isSafeInteger(maxLogBytes) || maxLogBytes <= 0 || maxLogBytes > WORKER_LOG_MAX_BYTES) {
       reject(new Error('Limita jurnalului worker este invalidă'))
       return
@@ -1231,15 +1302,29 @@ function worktreeHasChanges(jobDir) {
   return Buffer.byteLength(String(status.stdout ?? ''), 'utf8') > 0
 }
 
-async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, ownershipScope, turn) {
+async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, ownershipScope, turn, order) {
   const logPrefix = `model-${turn.tier}`
   const executorLogPath = join(jobStateDir, `${logPrefix}-opencode.log`)
   const gateLogPath = join(jobStateDir, `${logPrefix}-gates.log`)
+  const requestedAuditMinutes = parseRequestedAuditMinutes(order)
+  const executorTimeout = executionTimeoutMsForOrder(order)
+  const gateTimeout = gateTimeoutMs()
+  writeFileSync(
+    executorLogPath,
+    [
+      `CONSTRUCTOR_AUDIT_REQUESTED_MINUTES=${requestedAuditMinutes ?? 'default'}`,
+      `CONSTRUCTOR_EXECUTION_TIMEOUT_MS=${executorTimeout}`,
+      `CONSTRUCTOR_EXECUTION_TIMEOUT_CAPPED=${requestedAuditMinutes !== null && requestedAuditMinutes * 60_000 + EXECUTION_TIMEOUT_GRACE_MS > MAX_EXECUTION_TIMEOUT_MS ? 'yes' : 'no'}`,
+      `CONSTRUCTOR_GATE_TIMEOUT_MS=${gateTimeout}`,
+      '',
+    ].join('\n'),
+    { flag: 'a', mode: 0o600 },
+  )
   const stopExecLease = startJobLease(
     secret,
     jobId,
     taskId,
-    `Model selectat manual ${turn.label}: OpenCode execută ordinul`,
+    `Model selectat manual ${turn.label}: OpenCode execută ordinul (timeout=${Math.round(executorTimeout / 60_000)}m)`,
   )
   let executorAttempted = false
   let executorResult = null
@@ -1254,7 +1339,7 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
         executorLogPath,
         openCodeParentEnv(),
         null,
-        30 * 60_000,
+        executorTimeout,
         stopExecLease.signal,
         true,
       )
@@ -1297,7 +1382,7 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
         gateLogPath,
         podmanSupervisorEnv(),
         null,
-        45 * 60_000,
+        gateTimeout,
         stopGateLease.signal,
       )
     } catch (error) {
@@ -1375,6 +1460,7 @@ async function runOnce() {
       orderPath,
       ownershipScope,
       profile,
+      effectiveOrder,
     )
     logPath = finalOutcome.logPath
     if (!finalOutcome.ok) {
@@ -1491,7 +1577,7 @@ async function executorSmoke() {
         logPath,
         openCodeParentEnv(),
         null,
-        15 * 60_000,
+        smokeTimeoutMs(),
         undefined,
         true,
       )
@@ -1576,6 +1662,30 @@ async function selfTest() {
     POWERFUL_OPENCODE_MODEL,
   )
   if (powerfulArgs[4] !== 'llama.cpp/qwen3.5-122b-a10b-local') fail('Selecția manuală POWERFUL nu fixează modelul local 122B')
+  const requestedAuditDurations = [
+    ['audit pentru 90 de minute', 90],
+    ['auditează timp de 2 ore', 120],
+    ['30 min audit Constructor', 30],
+    ['ordin fără durată explicită', null],
+  ]
+  for (const [order, expectedMinutes] of requestedAuditDurations) {
+    if (parseRequestedAuditMinutes(order) !== expectedMinutes) fail(`Durata auditului nu a fost interpretată corect: ${order}`)
+  }
+  if (executionTimeoutMsForOrder('audit pentru 60 minute', {}) !== 65 * 60_000) {
+    fail('Timeout-ul auditului nu include marja de finalizare')
+  }
+  if (executionTimeoutMsForOrder('ordin generic', { CODEX_WORKER_EXEC_TIMEOUT_SECONDS: '3600' }) !== 60 * 60_000) {
+    fail('Override-ul timeout-ului generic nu este respectat')
+  }
+  if (executionTimeoutMsForOrder('audit 500 minute', {}) !== MAX_EXECUTION_TIMEOUT_MS) {
+    fail('Timeout-ul auditului nu este plafonat la limita sigură')
+  }
+  if (gateTimeoutMs({ CODEX_WORKER_GATE_TIMEOUT_SECONDS: '3600' }) !== 60 * 60_000) {
+    fail('Override-ul timeout-ului gate nu este respectat')
+  }
+  if (smokeTimeoutMs({ CODEX_WORKER_SMOKE_TIMEOUT_SECONDS: '1800' }) !== 30 * 60_000) {
+    fail('Timeout-ul smoke implicit/configurabil este inconsistent')
+  }
   const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')
   if (
     rootArgs.slice(0, 6).join(' ') !== '-n -u root -- /usr/bin/env -i'
@@ -1984,10 +2094,12 @@ async function preflightOnly() {
   process.stdout.write(`opencode ${OPENCODE_VERSION}\nmodel=${profile.modelId}\nopencode-local-full-access: TRECE\n`)
 }
 
-const mode = process.argv[2] ?? '--once'
-if (mode === '--self-test') await selfTest()
-else if (mode === '--preflight') await preflightOnly()
-else if (mode === '--executor-smoke') await executorSmoke()
-else if (mode === '--transport-smoke') await transportSmoke()
-else if (mode === '--once') await runOnce()
-else fail(`Mod necunoscut: ${mode}`)
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const mode = process.argv[2] ?? '--once'
+  if (mode === '--self-test') await selfTest()
+  else if (mode === '--preflight') await preflightOnly()
+  else if (mode === '--executor-smoke') await executorSmoke()
+  else if (mode === '--transport-smoke') await transportSmoke()
+  else if (mode === '--once') await runOnce()
+  else fail(`Mod necunoscut: ${mode}`)
+}

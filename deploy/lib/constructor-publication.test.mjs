@@ -1294,8 +1294,8 @@ test('workerul oprește copilul activ la pierderea lease-ului și păstrează ad
   assert.match(runLogged, /child\.kill\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*child\.kill\('SIGKILL'\)[\s\S]*2_000/)
   }
   assert.match(jobLease, /new AbortController\(\)[\s\S]*controller\.abort\(error\)[\s\S]*stop\.signal = controller\.signal/)
-  assert.match(worker, /30 \* 60_000,\s*stopExecLease\.signal/)
-  assert.match(worker, /45 \* 60_000,\s*stopGateLease\.signal/)
+  assert.match(worker, /executionTimeoutMsForOrder\(order\)[\s\S]*executorTimeout[\s\S]*stopExecLease\.signal/)
+  assert.match(worker, /gateTimeoutMs\(\)[\s\S]*gateTimeout[\s\S]*stopGateLease\.signal/)
   assert.equal([...worker.matchAll(/\bci:\s*'local_gates'/g)].length, 2)
   assert.doesNotMatch(worker, /\bci:\s*'green'/)
 })

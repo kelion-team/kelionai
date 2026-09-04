@@ -1,11 +1,11 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-01T14:35:00Z`
+Actualizat: `2026-09-04T21:13:36Z`
 
 ## Stare verificată
 
-- `origin/master` este la `f57c77b395e1f17ff3d498b120173971442a5f6e`;
-  PR-ul liniar `#1571` a fost îmbinat prin rebase.
+- `origin/master` este la `7ace63e8ead06c2a475c9e13f52a00695158871e`;
+  PR-urile operaționale `#1642` și `#1644` au fost îmbinate prin rebase.
 - AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
   `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
 - Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
@@ -41,6 +41,12 @@ Actualizat: `2026-09-01T14:35:00Z`
 - Planul de migrare pentru starea live măsurată are exact versiunile
   `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
   sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
+- Finalizerul live `33915591080` a confirmat o limită tehnică ascunsă în
+  executor: OpenCode primește SIGTERM la exact 15 minute în smoke și la exact
+  30 de minute în execuția reală, apoi SIGKILL după două secunde. Modelul local
+  apucă să scrie o parte din dovadă, dar jobul este raportat eșuat înainte de
+  finalizare; acesta este motivul măsurat pentru auditurile cerute pe durate mai
+  lungi.
 
 ## Schimbarea în curs
 
@@ -65,6 +71,11 @@ Actualizat: `2026-09-01T14:35:00Z`
 - Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
   măsurători valide de inferență sau de durată a comutării; în această etapă nu
   este cerut și nu este pretins niciun benchmark valid de viteză.
+- Remedierea în curs pentru limita de audit face timeout-ul executorului
+  dependent de durata explicită din ordin (durata cerută + 5 minute pentru
+  dovadă/handoff, plafonată la patru ore) și ridică smoke-ul la 30 de minute.
+  Codul nu este încă publicat pe Contabo și nu se raportează ca funcțional live
+  până când finalizerul și proba reală nu trec pe același commit.
 - Prima rotație post-merge a refuzat corect markerul live
   `constructor-unit-migration.pending` înainte de mutațiile runtime. Calea
   owner-aware următoare este `configure-constructor`, iar `vps-set-env` poate fi
@@ -89,10 +100,10 @@ Actualizat: `2026-09-01T14:35:00Z`
 Nu se raportează finalizat până când finalizerul Contabo, claimul real al
 workerului și verificarea clientului Windows nu sunt toate verzi pentru același
 commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este PR-ul liniar al fixului read-only, CI/buildul canonic și
-merge-ul prin rebase. După buildul verde se reia `configure-constructor`; numai
-după succesul lui se reia `vps-set-env`, apoi deployul serializat pe Contabo.
-Până la dovada live exactă nu se raportează instalat sau finalizat.
+Următorul pas sigur este PR-ul liniar al fixului de timeout, CI/buildul canonic
+și merge-ul prin rebase. După buildul verde se reia finalizerul și deployul
+serializat pe Contabo. Până la dovada live exactă nu se raportează instalat sau
+finalizat.
 
 ## Legături canonice
 
