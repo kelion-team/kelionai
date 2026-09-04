@@ -213,6 +213,14 @@ login ChatGPT, provider AI cloud sau task extern.
 Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
 sau deploy.
 
+Timeout-ul executorului nu mai este o limită fixă ascunsă: pentru un ordin care
+menționează explicit o durată de audit (de exemplu `audit pentru 90 de minute`
+sau `audit timp de 2 ore`), workerul acordă durata cerută plus cinci minute
+pentru scrierea dovezilor și handoff, cu plafon sigur de patru ore. Ordinele
+fără durată explicită păstrează fereastra implicită de 30 de minute. Smoke-ul
+determinist al executorului are aceeași fereastră de 30 de minute, astfel încât
+un model local lent nu mai este omorât la 15 minute înainte să termine dovada.
+
 ## Profilurile locale și comutarea manuală din Admin
 
 | Profil Admin | Model local | Activare permisă | Stare implicită |
