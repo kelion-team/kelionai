@@ -568,7 +568,7 @@ async function validateProtection(token) {
     || protection?.required_conversation_resolution?.enabled !== true
     || protection?.required_linear_history?.enabled !== true
     || requiredSignatures?.enabled !== true
-    || !emptyNamedActorSet(protection?.restrictions)
+    || !emptyNamedActorSet(protection?.restrictions ?? null)
     || protection?.allow_force_pushes?.enabled !== false
     || protection?.allow_deletions?.enabled !== false
   ) throw publisherError('branch_protection_invalid', 'Protecția ramurii master nu corespunde politicii Constructor')
