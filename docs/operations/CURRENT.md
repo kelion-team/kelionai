@@ -1,6 +1,6 @@
 # Checkpoint operațional curent
 
-Actualizat: 2026-09-05T13:15:00Z (14:15 Europe/London)
+Actualizat: 2026-09-05T13:17:51.116Z (Europe/London: UTC+1 la această dată)
 
 ## Producție verificată, distinctă de candidat
 
@@ -14,8 +14,9 @@ Actualizat: 2026-09-05T13:15:00Z (14:15 Europe/London)
   motorului nu dovedește încheierea unui ordin. Nu se schimbă modelul/costurile.
 - Repo autoritativ exclusiv VPS vmi3415434:
   /var/tmp/kelion-maintenance.yQKdV92n/repo,
-  branch fix/doctor-vps-live-20260905, HEAD candidat 29fb004fe3443e546cd36ea10ab29277a3696a59
-  plus modificările necomise monitor/pause/UI. Nu există încă PR pentru train.
+  branch fix/doctor-vps-live-20260905, HEAD publicat
+  8272ec5153bd20ee0653f0246a71c7831d91f2d4, PR1662 OPEN, auto-rebase activ.
+  Codul este înghețat; doar checkpointul operațional se actualizează necomis.
 - SSH/browser sunt clienți. Aplicația/codul/testele/artefactele sunt pe VPS.
   Documentele predate explicit de owner se copiază byte-exact din Windows;
   nu se lucrează într-un worktree Windows. Sesiunea desktop nu este serviciu VPS.
@@ -177,3 +178,32 @@ Actualizat: 2026-09-05T13:15:00Z (14:15 Europe/London)
 - Backlogul executanților reutilizabili este separat, neimplementat:
   docs/backlog/approved/2026-09-05/De-facut-Kelion-executanti-reutilizabili.md,
   SHA79122855c4c0eaf15f59d65b483dcd69988a19925ad58c64235bce8ecebbfe87.
+
+## Publicare în curs
+
+- PR https://github.com/kelion-team/kelionai/pull/1662 creat și deschis în browser;
+  auto-rebase confirmat13:16:15Z. Nu cere review manual și nu ocolește checks.
+- CI https://github.com/kelion-team/kelionai/actions/runs/33968410862 a eșuat
+  la static: 442PASS/9FAIL/1SKIP. Backend1743/1743 și frontend467/467 PASS.
+  container-isolation nu a rulat; nu este declarat trecut.
+- Live încăa32; PR1662 este al remedierii infrastructurii, NU PR executat de#666.
+  Nicio dovadă de finalizare a ordinului nu este înlocuită de acest PR.
+- Citirea jobului13:16:09.339Z: calendar2h13m28sde lacreare; cele2ferestre
+  claim→failure35m17s, nu inferență continuă. Ultimul workerreport11:41:29.609Z;
+  failure11:41:30.173Z; logsmodelindividualeabsente, ultimaunealtăutilăneconfirmată.
+
+## Incident CI fixture owner: corecție verificată, publicare în curs
+
+- Cele9 eșecuri provin din candidatul bootstrap runner-owned în checkoutul CI.
+  sudo nu schimbă proprietarul; validatorul root:root a refuzat corect candidatul.
+  Proba anterioară VPS copia checkoutul ca root și nu exercita această diferență.
+- Lovelace a reprodus exact17PASS/9FAIL/0SKIP cu NodeUID1000+sudo și checkoutUID1000.
+  Fixul pregătește candidatul în fixture privat root:root și verifică bytes prin cmp.
+  Nu schimbă checkoutul ori validările de producție. Regresie nouă: owner străin
+  refuzat fără marker/journal. După fix:27/27PASS0SKIP UID1000+sudo (8.53s),
+  27/27PASS0SKIP root pe același checkout nonroot-owned (10.14s).
+- Test SHA813790cb4c6550e232c80b3ab1a217f5d5399ac0da76af0dfecbfe2838571356.
+  Runtime helper, root guard și bootstrap neschimbate. Responsabil fix:Lovelace;
+  integrare/CI/deploy:root. Detalii:docs/operations/incidents/2026-09-05-ci-fixture-owner.md.
+- Închiderea CI cere noul GitHub HEAD cu toate porțile trecute. Deploy și ordin666
+  au acceptări separate; nu sunt declarate finalizate din probele fixture.

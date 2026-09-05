@@ -153,7 +153,12 @@ chmod 0750 "$FIXTURE/runtime"
 ROOT=$FIXTURE
 RUNTIME_ROOT=$FIXTURE/runtime
 CONFIG_ROOT=$FIXTURE/config
-worker_pause_candidate_source=${new URL('./runtime-config-cutover.sh', import.meta.url).pathname}
+# CI checks out sources as runner, not root. Stage authentic candidate bytes in
+# the isolated fixture just as the root deployment bundle does; never chown the
+# checkout or weaken the production candidate ownership check.
+worker_pause_candidate_source=$FIXTURE/candidate.sh
+install -o root -g root -m 0644 ${new URL('./runtime-config-cutover.sh', import.meta.url).pathname} "$worker_pause_candidate_source"
+cmp -s ${new URL('./runtime-config-cutover.sh', import.meta.url).pathname} "$worker_pause_candidate_source"
 install -o root -g root -m 0500 "$worker_pause_candidate_source" "$FIXTURE/bin/runtime-config-cutover.sh"
 KELION_CUTOVER_LOCK_HELD=1
 constructor_upgrade_owner=0
@@ -194,6 +199,11 @@ case "$mode" in
     capture_worker_pause
     [ "$before" = "$(stat -c '%i' "$marker")" ] ;;
   active) worker_active=active; capture_worker_pause; [ ! -e "$marker" ] ;;
+  candidate-foreign-owner)
+    chown 1000:1000 "$worker_pause_candidate_source"
+    if capture_worker_pause; then exit 91; fi
+    [ ! -e "$marker" ]
+    [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] ;;
   boot) boot_recovery=1; if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ] ;;
   journals)
     for name in runtime-config-cutover.journal constructor-activation.journal constructor-gate-refresh.journal constructor-deploy-quiesce.journal constructor-upgrade.journal constructor-reactivation.journal constructor-unit-migration.pending constructor-max-model.journal destructive-cutover-recovery.json; do
@@ -272,7 +282,7 @@ printf 'verified:%s\\n' "$mode"
   }
 }
 
-for (const mode of ['capture', 'active', 'boot', 'journals', 'no-ready', 'query-error', 'sync-before', 'sync-after', 'snapshot', 'legacy-unit', 'symlink', 'hardlink', 'writable', 'foreign-owner', 'malformed', 'unsafe-parent']) {
+for (const mode of ['capture', 'active', 'candidate-foreign-owner', 'boot', 'journals', 'no-ready', 'query-error', 'sync-before', 'sync-after', 'snapshot', 'legacy-unit', 'symlink', 'hardlink', 'writable', 'foreign-owner', 'malformed', 'unsafe-parent']) {
   rootFilesystemTest(`durable worker pause with real filesystem: ${mode}`, () => {
     const result = filesystemCase(mode)
     assert.equal(result.status, 0, `${mode}: ${result.error ?? ''}${result.stderr}${result.stdout}`)
