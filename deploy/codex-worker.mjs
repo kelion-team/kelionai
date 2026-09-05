@@ -69,11 +69,16 @@ const POWERFUL_OPENCODE_MODEL_ID = 'qwen3.5-122b-a10b-local'
 const OPENCODE_PROMPT = 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
 const WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024
 const MIN_EXECUTION_TIMEOUT_MS = 5 * 60_000
-const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60_000
+const MAX_EXECUTION_TIMEOUT_MS = 4 * 60 * 60_000
+// A generic Constructor order has no explicit duration to parse.  The old
+// 30-minute default killed real repository/audio audits mid-run even though
+// the systemd worker itself is allowed to run for four hours.  Keep the
+// explicit audit-duration path below (duration + grace), but give an
+// undelimited order the same safe ceiling as the worker service.
+const DEFAULT_EXECUTION_TIMEOUT_MS = MAX_EXECUTION_TIMEOUT_MS
 const DEFAULT_GATE_TIMEOUT_MS = 45 * 60_000
 const DEFAULT_SMOKE_TIMEOUT_MS = 30 * 60_000
 const EXECUTION_TIMEOUT_GRACE_MS = 5 * 60_000
-const MAX_EXECUTION_TIMEOUT_MS = 4 * 60 * 60_000
 const AUDIT_DURATION_WINDOW_CHARS = 160
 const GITHUB_REPOSITORY = process.env.KELION_GITHUB_REPOSITORY ?? ''
 const REQUIRED_LAYOUT = Object.freeze({
