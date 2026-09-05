@@ -913,7 +913,7 @@ async function waitForGreen(token, prNumber, headCommit, protectionPolicy, renew
     ) return
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 15_000))
   }
-  fail('Timeout așteptând controalele CI obligatorii și aprobarea umană')
+  fail('Timeout așteptând controalele CI și condițiile obligatorii ale protecției GitHub')
 }
 
 async function requiredChecksAreGreen(token, prNumber, headCommit, headBranch, baseCommit, policies, completedNoLaterThan = null) {
@@ -1170,7 +1170,7 @@ async function runOnce() {
       // Păstrează handoff-ul pentru reconciliere; eroarea originală rămâne cea
       // raportată de oneshot, iar lease-ul expiră durabil.
     }
-    if (failureRecorded && retirement && rebuild.has(code)) {
+    if (failureRecorded && retirement && rebuild.has(code) && code !== 'stale_base') {
       cleanupAcknowledgedHandoff(claim.job.handoffId)
     }
     throw error

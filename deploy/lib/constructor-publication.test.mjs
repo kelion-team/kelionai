@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import { startLease } from './constructor-service-client.mjs'
 import { correctPinnedInstaller, applyPinnedInstallerCorrection } from '../../scripts/constructor-upgrade-compat.mjs'
 
@@ -212,13 +213,14 @@ test('cele trei identități nu își pot împrumuta credentialele', () => {
   assert.doesNotMatch(release, /new URL\('\/api\/version', PUBLIC_ORIGIN\)[\s\S]*new URL\('\/readyz', PUBLIC_ORIGIN\)/)
 })
 
-test('toate controalele Constructor folosesc strategia canonică rebase', () => {
+test('numai publisherul îmbină automat prin rebase; Admin nu aprobă sau îmbină PR-uri', () => {
   const publisher = read('deploy/constructor-publisher.mjs')
   const adminRelease = read('backend/src/services/githubReleaseIntegration.ts')
   assert.match(publisher, /merge_method:\s*'rebase'/)
   assert.doesNotMatch(publisher, /merge_method:\s*'squash'/)
-  assert.match(adminRelease, /pulls\/[$][{]number[}]\/reviews[\s\S]*event:\s*'APPROVE'/)
+  assert.doesNotMatch(adminRelease, /event:\s*'APPROVE'|\bapproveRelease\b/)
   assert.doesNotMatch(adminRelease, /merge_method|pulls\/[$][{]number[}]\/merge/)
+  assert.doesNotMatch(read('backend/src/routes/constructor.ts'), /['"]\/api\/admin\/constructor\/release\/action['"]|\bapproveRelease\b/)
 })
 
 test('publisherul raportează coduri deterministe și tratează schimbarea bazei ca stale_base', () => {
@@ -685,11 +687,11 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   assert.match(repair, /systemctl is-active --quiet "\$unit"/)
   assert.match(repair, /codex-worker\.enabled[\s\S]*constructor-publisher\.enabled[\s\S]*constructor-release\.enabled/)
   assert.match(repair, /find "\$spool" -mindepth 1 -maxdepth 1 -printf '%f\\n'/)
-  assert.match(repair, /case "\$child" in ready\|ack\|retired\)/)
+  assert.match(repair, /case "\$child" in ready\|ack\|retired\|staging\)/)
   assert.match(repair, /\[ -d "\$spool" \] && \[ ! -L "\$spool" \]/)
-  assert.match(repair, /install -d -o root -g kelion-handoff -m 2770 "\$spool\/retired"/)
+  assert.match(repair, /for child in retired staging; do[\s\S]*install -d -o root -g kelion-handoff -m 2770 "\$spool\/\$child"/)
   assert.match(repair, /chmod 2770 "\$spool\/\$child"/)
-  const childInstall = repair.indexOf('install -d -o root -g kelion-handoff -m 2770 "$spool/retired"')
+  const childInstall = repair.indexOf('install -d -o root -g kelion-handoff -m 2770 "$spool/$child"')
   const firstParentChown = repair.indexOf('chown root:kelion-handoff "$spool"')
   const firstParentChmod = repair.indexOf('chmod 00750 "$spool"')
   const finalParentChown = repair.lastIndexOf('chown root:kelion-handoff "$spool"')
@@ -705,6 +707,84 @@ test('repair-spool-layout normalizează numai layout-ul canonic cu Constructorul
   assert.match(repair, /root:kelion-handoff:2770/)
   assert.doesNotMatch(repair, /\$\{\{\s*inputs\.[^}]+\}\}/, 'payload-ul nu trebuie să interpoleze inputuri în shell')
   assert.doesNotMatch(repair, /^\s*(?:sudo\s+)?(?:rm|mv|tee|cp|setfacl)\b/m, 'remedierea nu trebuie să șteargă, mute sau suprascrie conținut')
+})
+
+test('installerul și repair-spool provisionază staging fără să relaxeze părintele sau să atingă handoffurile', { skip: process.platform === 'win32' ? 'NTFS/Git Bash nu implementează bitul POSIX setgid; proba se execută obligatoriu în poarta Linux' : false }, () => {
+  const installer = shellFunction(read('deploy/instaleaza-constructor.sh'), 'secure_handoff_spool')
+  const workflow = read('.github/workflows/vps-run.yml').replace(/^ {10}/gm, '')
+  const repairStart = workflow.indexOf("current_check='spool-identity'")
+  const repairEnd = workflow.indexOf('echo "{\\"ok\\":true', repairStart)
+  assert.ok(repairStart >= 0 && repairEnd > repairStart)
+  const repair = workflow.slice(repairStart, repairEnd)
+  for (const kind of ['installer', 'repair']) for (const fault of ['missing', 'existing', 'symlink', 'file']) {
+    const result = spawnSync(bashExecutable, ['-s', '--', kind, fault], {
+      input: `set -euo pipefail
+kind=$1; fault=$2
+test_root=$(mktemp -d)
+trap 'rm -rf -- "$test_root"' EXIT
+spool=$test_root/var/lib/kelion-constructor-handoff
+mkdir -p "$spool/ready/existing" "$spool/ack" "$spool/retired" "$test_root/victim"
+chmod 0755 "$test_root/var/lib"
+chmod 0750 "$spool"
+printf 'receipt-unchanged' > "$spool/ready/existing/receipt.json"
+printf 'victim-unchanged' > "$test_root/victim/sentinel"
+chmod 0711 "$test_root/victim"
+case "$fault" in
+  existing) mkdir "$spool/staging"; chmod 0700 "$spool/staging"; printf 'partial-unchanged' > "$spool/staging/partial" ;;
+  symlink) ln -s "$test_root/victim" "$spool/staging" ;;
+  file) printf 'not-a-directory' > "$spool/staging"; chmod 0640 "$spool/staging" ;;
+esac
+# Portable ownership adapter only: all real filesystem/mode operations stay in
+# the task's private prefix. A separate POSIX test proves cross-user/group access.
+real_stat=$(type -P stat); real_install=$(type -P install)
+stat() {
+  local format=$2 target=$3 mode
+  case "$target" in "$test_root/"*) ;; *) return 81 ;; esac
+  mode=$("$real_stat" -c '%a' "$target") || return 1
+  case "$format" in
+    '%u') printf '0\\n' ;;
+    '%u:%g:%a') printf '0:0:%s\\n' "$mode" ;;
+    '%U:%G') printf 'root:kelion-handoff\\n' ;;
+    '%U:%G:%a') printf 'root:kelion-handoff:%s\\n' "$mode" ;;
+    *) return 82 ;;
+  esac
+}
+chown() { case "$2" in "$test_root/"*) ;; *) return 83 ;; esac; }
+sync() { :; }
+install() {
+  [ "$1" = -d ] && [ "$2" = -o ] && [ "$3" = root ] && [ "$4" = -g ] && [ "$5" = kelion-handoff ] && [ "$6" = -m ]
+  case "$8" in "$test_root/"*) ;; *) return 84 ;; esac
+  "$real_install" -d -m "$7" "$8"
+}
+${installer}
+repair_layout() {
+${repair}
+}
+operation() { if [ "$kind" = installer ]; then secure_handoff_spool "$test_root"; else repair_layout; fi; }
+set +e
+(set -e; operation)
+operation_status=$?
+set -e
+if [ "$fault" = symlink ] || [ "$fault" = file ]; then
+  [ "$operation_status" -ne 0 ]
+  if [ "$fault" = file ]; then
+    [ "$(cat "$spool/staging")" = not-a-directory ]
+    [ "$("$real_stat" -c '%a' "$spool/staging")" = 640 ]
+  else [ -L "$spool/staging" ]; fi
+else
+  [ "$operation_status" -eq 0 ]
+  [ -d "$spool/staging" ] && [ ! -L "$spool/staging" ]
+  [ "$("$real_stat" -c '%a' "$spool/staging")" = 2770 ]
+  if [ "$fault" = existing ]; then [ "$(cat "$spool/staging/partial")" = partial-unchanged ]; fi
+fi
+[ "$("$real_stat" -c '%a' "$spool")" = 750 ]
+[ "$(cat "$spool/ready/existing/receipt.json")" = receipt-unchanged ]
+[ "$("$real_stat" -c '%a' "$test_root/victim")" = 711 ]
+[ "$(cat "$test_root/victim/sentinel")" = victim-unchanged ]
+`, encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, `${kind}/${fault}: ${result.stderr || result.stdout}`)
+  }
 })
 
 test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-installer fără date secrete', () => {
@@ -862,21 +942,27 @@ test('configurarea Constructor păstrează ACL-ul canonic al secretelor de produ
 test('recovery e65 corectează numai installerul digest-pinned și păstrează cele 23 artefacte', () => {
   const sourceCommit = 'e65f0112aa2265fea12bfd248b8da645b428017a'
   const executorCommit = 'a'.repeat(40)
-  const fixed = read('deploy/instaleaza-constructor.sh')
-  const predicate = shellFunction(fixed, 'validate_source_systemd_text_files')
-  const original = Buffer.from(fixed.replace(predicate, predicate.replace('[ "$count" -eq 9 ]', '[ "$count" -eq 10 ]')))
+  // Immutable, compressed Git blob e65: later installer edits must not rewrite
+  // the historical input accepted by this single-release recovery executor.
+  const original = gunzipSync(Buffer.from(read('deploy/lib/fixtures/installer-e65.sh.gz.base64'), 'base64'), { maxOutputLength: 100_000 })
+  assert.equal(createHash('sha256').update(original).digest('hex'), 'f1a1d60e83bfcd247f8af137f18aa181b30dd5578c6250f68f373c9a9949561e')
+  const fixed = original.toString().replace('[ "$count" -eq 10 ]', '[ "$count" -eq 9 ]')
+    .replace('for child in ready ack retired; do', 'for child in ready ack retired staging; do')
   const result = correctPinnedInstaller(sourceCommit, executorCommit, original)
   assert.equal(result.fixed.toString(), fixed)
   assert.deepEqual(result.provenance, {
-    schema: 1, event: 'constructor_upgrade_compatibility', correction: 'e65-systemd-unit-count', sourceCommit, executorCommit,
+    schema: 1, event: 'constructor_upgrade_compatibility',
+    corrections: ['e65-systemd-unit-count', 'e65-handoff-staging-provisioning'], sourceCommit, executorCommit,
     originalInstallerSha256: 'f1a1d60e83bfcd247f8af137f18aa181b30dd5578c6250f68f373c9a9949561e',
-    fixedInstallerSha256: '801e14436d8ac8341614f04fb7b9d327172db7523535c31868832ef597be7ab5',
+    fixedInstallerSha256: 'b3b4a2a6b3189eb0f352c56feed3f5164e0c07fbeaa631bff5901b3a5815d0cd',
     installedArtifactsChanged: false, journalChanged: false,
   })
   for (const [owner, executor, bytes] of [
     ['b'.repeat(40), executorCommit, original], [sourceCommit, 'master', original], [sourceCommit, sourceCommit, original],
     [sourceCommit, executorCommit, Buffer.from(original.toString().replace('set -Eeuo pipefail', 'set +e'))],
     [sourceCommit, executorCommit, Buffer.concat([original, Buffer.from('\n')])],
+    [sourceCommit, executorCommit, Buffer.from(original.toString().replace('[ "$count" -eq 10 ]', '[ "$count" -eq 9 ]'))],
+    [sourceCommit, executorCommit, Buffer.from(original.toString().replace('for child in ready ack retired; do', 'for child in ready ack retired staging; do'))],
     [sourceCommit, executorCommit, result.fixed],
   ]) assert.throws(() => correctPinnedInstaller(owner, executor, bytes), /not_authorized/)
   const temp = mkdtempSync(join(tmpdir(), 'kelion-e65-compat-'))
@@ -1343,7 +1429,7 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
   assert.match(publisher, /LoadCredential=github-publisher-token:/)
   assert.match(publisher, /LoadCredential=github-publisher-signing-key:/)
   assert.match(publisher, /ReadWritePaths=[^\n]*\/var\/lib\/kelion-constructor-handoff/)
-  assert.match(read('deploy/constructor-publisher.mjs'), /cleanupAcknowledgedHandoff[\s\S]*failureRecorded && retirement/)
+  assert.match(read('deploy/constructor-publisher.mjs'), /cleanupAcknowledgedHandoff[\s\S]*failureRecorded && retirement && rebuild\.has\(code\) && code !== 'stale_base'/)
   assert.doesNotMatch(publisher, /codex-worker-secret|constructor-release-secret|github-release-token|VPS/)
 
   assert.match(release, /User=kelion-release/)

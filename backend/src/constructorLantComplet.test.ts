@@ -7,6 +7,20 @@ const aici = dirname(fileURLToPath(import.meta.url))
 const cod = (rel: string): string => readFileSync(join(aici, rel), 'utf8')
 
 describe('lanțul unic Admin → worker Constructor → gates → master → live', () => {
+  it('publică automat conform GitHub fără endpoint sau gate manual Kelion', () => {
+    const route = cod('routes/constructor.ts')
+    const release = cod('services/githubReleaseIntegration.ts')
+    const publisher = cod('../../deploy/constructor-publisher.mjs')
+    expect(route).not.toContain('/api/admin/constructor/release/action')
+    expect(release).not.toContain('approveRelease')
+    expect(release).not.toContain("event: 'APPROVE'")
+    expect(release).not.toContain('Aprobă PR-ul din Kelion')
+    expect(publisher).toContain('approvalCount >= protectionPolicy.requiredApprovalCount')
+    expect(publisher).toContain('await revalidateBeforeMerge(')
+    expect(publisher).not.toContain('approvalProtocol')
+    expect(publisher).not.toContain('strictAdminAuthorization')
+  })
+
   it('web-ul doar pune ordinul validat în DB și întoarce același jobId', () => {
     const route = cod('routes/constructor.ts')
     expect(route).toMatch(/evalueazaOrdin\(order\)[\s\S]{0,1000}createBuildJob\(user\.email, orderCuPlan\)/)
@@ -160,19 +174,14 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
       pipeline.indexOf('export async function failPublisherLease'),
       pipeline.indexOf('export async function claimReleaseJob'),
     )
-    // Modelul NU se reinvocă pentru un handoff respins pe fond. Singura excepție
-    // este `stale_base`, unde ordinul nu are nicio vină — cineva a împins un
-    // commit în master cât el trecea porțile — iar PR-ul și ramura sunt retrase
-    // corect înainte de reluare. Restul codurilor rămân definitive.
+    // Nici schimbarea bazei după claim nu autorizează o altă execuție AI.
     expect(failure).toContain("code === 'stale_base'")
-    // Plafonul se numără în jurnalul append-only de retrageri, NU în rândul de
-    // pipeline: acela tocmai a fost șters, deci contorul lui ar fi permanent 1
-    // și ordinul ar reexecuta modelul la nesfârșit.
-    expect(failure).toContain('FROM constructor_publication_retirements')
-    expect(failure).toContain('STALE_BASE_MAX_REQUEUES')
-    expect(failure).not.toContain('row.publisher_attempts) < 3')
-    expect(failure).toContain("reluabil ? 'queued' : 'failed'")
-    expect(failure).toContain("reluabil ? 'queued' : 'publisher_manual_restart_required'")
+    expect(failure).toContain('INSERT INTO constructor_publication_retirements')
+    expect(failure).not.toMatch(/STALE_BASE_MAX_REQUEUES|'queued'|attempts\s*=/)
+    expect(failure).toContain("progress='publisher_manual_restart_required'")
+    const stale = failure.slice(failure.indexOf("if (code === 'stale_base')"), failure.indexOf("await sql.query('DELETE FROM constructor_pipeline"))
+    expect(stale).toContain("status='failed', constructor_stage='failed'")
+    expect(stale).not.toMatch(/DELETE|branch=NULL|commit_sha=NULL/)
     expect(failure).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)
   })
 

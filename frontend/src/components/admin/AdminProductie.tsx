@@ -25,7 +25,6 @@ import {
 import {
   adminContractText,
   adminMutationAcknowledged,
-  adminReleaseActionAcknowledged,
   parseAdminArchiveAcknowledgement,
   parseAdminBuildArchive,
   parseAdminConstructorDiagnostic,
@@ -58,7 +57,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   const [constructorModel, setConstructorModel] = useState<AdminConstructorModelSnapshot | null | 'necitit'>('necitit')
   const [diagnostic, setDiagnostic] = useState<AdminConstructorDiagnostic | null>(null)
   const [release, setRelease] = useState<AdminReleaseSnapshot | null>(null)
-  const [releaseBusy, setReleaseBusy] = useState(false)
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
   const [buildSubmitBusy, setBuildSubmitBusy] = useState(false)
@@ -185,27 +183,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
       if (!isCurrent()) return
       setConstructorModel(snapshot)
     })
-  }
-
-  const releaseAction = (): void => {
-    if (!release?.jobId || !release.pr || releaseBusy) return
-    setReleaseBusy(true)
-    setBuildMsg('')
-    void apiFetch('/api/admin/constructor/release/action', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify({ jobId: release.jobId, action: 'approve', prNumber: release.pr.number, headSha: release.pr.headSha }),
-    })
-      .then(async (response) => {
-        const body: unknown = await response.json().catch(() => null)
-        if (response.ok && adminReleaseActionAcknowledged(body)) {
-          setBuildMsg('Aprobarea a fost înregistrată; publisherul separat va integra schimbarea după verificările obligatorii.')
-          return
-        }
-        const error = adminContractText(body, 'error')
-        setBuildMsg(`Acțiunea de publicare a eșuat${error ? `: ${error}` : '.'}`)
-      })
-      .catch(() => setBuildMsg('Acțiunea de publicare a eșuat: conexiunea cu serverul a căzut.'))
-      .finally(() => { setReleaseBusy(false); refreshBuildJobs() })
   }
 
   useEffect(() => {
@@ -387,7 +364,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
     <div className="admin-tab-content">
       <div className="admin-card">
         <div className="admin-card-head">
-          Constructor admin — ordin → modificări și teste → PR → aprobare → deploy verificat. Acest executor poate modifica Kelion numai pentru administrator; nu deservește spații de utilizator.
+          Constructor admin — ordin → modificări și teste → PR verificat → merge automat → deploy verificat. Nu este necesară aprobarea manuală a fiecărui PR în Kelion. Acest executor poate modifica Kelion numai pentru administrator; nu deservește spații de utilizator.
         </div>
         <div className="admin-constructor-status">
           <span
@@ -437,13 +414,8 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
               ) : (
                 <>
                   <div style={{ marginTop: 5 }}><b>PR:</b>{' '}<a href={release.pr.url} target="_blank" rel="noreferrer">{release.pr.title}</a></div>
-                  <div className="chat-hint" style={{ marginTop: 4 }}>Verificări: {release.checks} · Review: {release.approval} · Merge: {release.merge}</div>
+                  <div className="chat-hint" style={{ marginTop: 4 }}>Verificări: {release.checks} · Politică review GitHub: {release.approval} · Merge automat: {release.merge}</div>
                   <div style={{ marginTop: 5 }}>{release.nextAction}</div>
-                  {!release.pr.merged && release.pr.state === 'open' && release.pr.baseRef === 'master' && release.checks === 'passed' && release.approval === 'required' && (
-                    <button className="ghost" type="button" disabled={releaseBusy} style={{ marginTop: 7 }} onClick={releaseAction}>
-                      {releaseBusy ? 'Se procesează…' : 'Aprobă în Kelion'}
-                    </button>
-                  )}
                 </>
               )}
             </div>

@@ -359,12 +359,6 @@ export function parseAdminRestoreAcknowledgement(value: unknown): BuildJobRow | 
   return value.job
 }
 
-export function adminReleaseActionAcknowledged(value: unknown): boolean {
-  return adminMutationAcknowledged(value)
-    && isObject(value)
-    && parseAdminReleaseDetails(value.release) !== null
-}
-
 export function adminContractText(value: unknown, key: string): string | null {
   if (!isObject(value)) return null
   const text = value[key]

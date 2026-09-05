@@ -29,12 +29,6 @@ const RETRY_BASE_SECONDS = configuredRetrySeconds('CONSTRUCTOR_RETRY_BASE_SECOND
 const RETRY_MAX_SECONDS = configuredRetrySeconds('CONSTRUCTOR_RETRY_MAX_SECONDS', 1800, 30, 86_400)
 const EXTERNAL_RETRY_SECONDS = configuredRetrySeconds('CONSTRUCTOR_EXTERNAL_RETRY_SECONDS', 900, 60, 86_400)
 
-// De câte ori se reia un ordin căruia i s-a mișcat baza sub picioare. Fiecare
-// reluare costă o execuție completă a modelului local, deci plafonul trebuie să
-// existe: dacă masterul se mișcă necontenit, ordinul trebuie să se oprească și
-// să ceară atenția ownerului, nu să macine la nesfârșit.
-const STALE_BASE_MAX_REQUEUES = 3
-
 function retryDelay(attempts: number, external: boolean): number {
   if (external) return EXTERNAL_RETRY_SECONDS
   const exponent = Math.min(10, Math.max(0, attempts - 1))
@@ -51,6 +45,7 @@ interface PipelineRow {
   publisher_attempts: number
   publisher_lease_id: string | null
   publisher_retry_not_before: Date | string | null
+  publisher_last_error: string | null
   publisher_branch: string | null
   publisher_head_sha: string | null
   publisher_pr_number: string | number | null
@@ -273,7 +268,13 @@ export async function recordWorkerHandoff(
           && current.base_commit_sha === handoff.baseCommit
           && current.patch_sha256 === handoff.patchSha256
           && current.gate_receipt_sha256 === handoff.gateReceiptSha256
-          && ['gates_passed', 'pr_opened', 'merged', 'release_dispatched', 'deployed'].includes(current.constructor_stage)
+          && (
+            ['gates_passed', 'pr_opened', 'merged', 'release_dispatched', 'deployed'].includes(current.constructor_stage)
+            // A terminal stale-base handoff remains immutable evidence. ACK
+            // reconciliation must not retire it or restart the execution.
+            || (current.status === 'failed' && current.constructor_stage === 'failed'
+              && current.publisher_last_error === 'stale_base')
+          )
         return same
           ? { ok: true, event: eventResult(current) }
           : { ok: false, reason: 'handoff_conflict' as const }
@@ -503,16 +504,11 @@ function publisherIncident(code: string): {
     summary: 'Revalidarea izolată a publisherului a respins handoff-ul workerului.',
     nextAction: 'Verifică dovada porții; numai ownerul poate porni o implementare nouă prin comanda Reia.',
   }
-  // Patch-ul vechi nu se reutilizează niciodată: PR-ul și ramura sunt retrase cu
-  // dovadă, iar ordinul repornește de la zero pe noua bază. Reluarea este
-  // automată, mărginită de STALE_BASE_MAX_REQUEUES, deci textul NU trebuie să
-  // trimită ownerul la comanda Reia — aceasta ar fi și refuzată, fiindcă ordinul
-  // este `queued`, nu `failed`.
   if (code === 'stale_base') return {
     state: 'diagnosing',
     causeCode: 'build_failure',
     summary: 'Masterul s-a schimbat după crearea handoff-ului, iar baza declarată a devenit stale.',
-    nextAction: 'Patch-ul vechi a fost retras; ordinul se reia automat pe noua bază, fără intervenție.',
+    nextAction: 'Ciclul s-a oprit pe baza declarată; handoff-ul și dovezile se păstrează. Schimbarea bazei nu pornește automat o nouă execuție AI.',
   }
   if (code === 'pr_closed') return {
     state: 'diagnosing',
@@ -592,49 +588,35 @@ export async function failPublisherLease(
             retirementProof.cleanupReceiptSha256,
           ],
         )
+        if (code === 'stale_base') {
+          await sql.query(
+            `UPDATE constructor_pipeline SET publisher_lease_id=NULL,
+                publisher_lease_until=NULL, publisher_last_error=$2,
+                publisher_retry_not_before=NULL, updated_at=now()
+              WHERE job_id=$1`,
+            [jobId, code],
+          )
+          const terminal = await sql.query<PipelineRow>(
+            `UPDATE build_jobs SET status='failed', constructor_stage='failed',
+                progress='publisher_manual_restart_required', log=$2,
+                retry_not_before=NULL, progress_at=now(), updated_at=now()
+              WHERE id=$1
+              RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
+            [jobId, code],
+          )
+          return terminal.rows[0] ? eventResult(terminal.rows[0]) : null
+        }
         await sql.query('DELETE FROM constructor_pipeline WHERE job_id=$1', [jobId])
-        // `stale_base` nu este vina ordinului: cineva a împins un commit în
-        // master cât el trecea porțile. Retragerea PR-ului și a ramurii rămâne
-        // necesară, dar ordinul se reia automat pe noua bază, în loc să ceară
-        // repornire manuală și să arunce toată execuția modelului. Celelalte
-        // coduri rămân terminale: acolo chiar a eșuat conținutul.
-        //
-        // Plafonul NU se poate citi din `constructor_pipeline.publisher_attempts`:
-        // rândul acela tocmai a fost șters mai sus, iar următorul handoff începe
-        // de la zero, deci valoarea ar fi permanent 1 și ordinul ar reexecuta
-        // modelul la nesfârșit. Numărăm în jurnalul de retrageri, care este
-        // append-only și scris înainte de ștergere.
-        const retrageri = await sql.query<{ count: string }>(
-          `SELECT count(*)::text AS count
-             FROM constructor_publication_retirements
-            WHERE job_id=$1 AND failure_code='stale_base'`,
-          [jobId],
-        )
-        const reluabil = code === 'stale_base' && Number(retrageri.rows[0]?.count ?? '0') < STALE_BASE_MAX_REQUEUES
         const terminal = await sql.query<PipelineRow>(
-          // `attempts` numără penele tehnice ale workerului. O reluare pe
-          // `stale_base` nu este o pană tehnică, iar claim-ul următor ar
-          // incrementa contorul degeaba: ordinul ar rămâne fără reluări tocmai
-          // când chiar are nevoie de ele. Îl readucem la zero, ca la o reluare
-          // pornită de owner. Plafonul propriu al lui `stale_base` se numără
-          // separat, în jurnalul de retrageri.
           `UPDATE build_jobs
-              SET status=$3, constructor_stage=$4,
+              SET status='failed', constructor_stage='failed',
                   branch=NULL, pr_url=NULL, commit_sha=NULL, live_version=NULL, ci=NULL,
-                  progress=$5, log=$2,
-                  retry_not_before=$6,
-                  attempts=CASE WHEN $3='queued' THEN 0 ELSE attempts END,
+                  progress='publisher_manual_restart_required', log=$2,
+                  retry_not_before=NULL,
                   progress_at=now(), updated_at=now()
             WHERE id=$1
             RETURNING id AS job_id, status, constructor_stage, commit_sha, live_version`,
-          [
-            jobId,
-            code,
-            reluabil ? 'queued' : 'failed',
-            reluabil ? 'queued' : 'failed',
-            reluabil ? 'queued' : 'publisher_manual_restart_required',
-            reluabil ? new Date(Date.now() + 60_000) : null,
-          ],
+          [jobId, code],
         )
         return terminal.rows[0] ? eventResult(terminal.rows[0]) : null
       }

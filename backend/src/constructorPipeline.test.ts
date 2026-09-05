@@ -1054,7 +1054,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
     })
   })
 
-  it('retrage PR-ul si ramura pe stale_base, apoi reia ordinul pe noua baza', { timeout: 30_000 }, async () => {
+  it('păstrează handoff-ul și istoricul stale_base terminal fără reset attempts sau o nouă execuție AI', { timeout: 30_000 }, async () => {
     await pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,
       baseCommit: base,
@@ -1073,8 +1073,11 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       receiptSha256: hash3,
     })
     await database.query(
-      'UPDATE build_jobs SET commit_sha=$2, live_version=$3 WHERE id=$1',
+      'UPDATE build_jobs SET commit_sha=$2, live_version=$3, attempts=2 WHERE id=$1',
       [1, merged, merged.slice(0, 7)],
+    )
+    const historyBefore = await database.query<{ id: number }>(
+      'SELECT id FROM constructor_activity_events WHERE job_id=1 ORDER BY id',
     )
 
     await expect(pipeline.failPublisherLease(1, taskId, publisherLease, 'stale_base', {
@@ -1083,14 +1086,11 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       prNumber: 42,
       cleanupReceiptSha256: hash2,
     })).resolves.toEqual({
-      // Ordinul nu are nicio vina: cineva a impins un commit in master cat el
-      // trecea portile. PR-ul si ramura sunt retrase, dar munca modelului nu se
-      // arunca — ordinul se reia pe noua baza.
       jobId: '1',
-      status: 'queued',
-      stage: 'queued',
-      commit: null,
-      liveVersion: null,
+      status: 'failed',
+      stage: 'failed',
+      commit: merged,
+      liveVersion: merged.slice(0, 7),
     })
     await expect(database.query<{
       id: string
@@ -1104,37 +1104,66 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       commit_sha: string | null
       live_version: string | null
       ci: string | null
+      attempts: number
+      retry_not_before: Date | null
     }>(
       `SELECT id::text, status, codex_task_id, execution_profile, execution_cycle,
-              constructor_stage, branch, pr_url, commit_sha, live_version, ci
+              constructor_stage, branch, pr_url, commit_sha, live_version, ci,
+              attempts, retry_not_before
          FROM build_jobs WHERE id=1`,
     )).resolves.toMatchObject({
       rows: [{
         id: '1',
-        status: 'queued',
+        status: 'failed',
         codex_task_id: taskId,
         execution_profile: 'fast',
         execution_cycle: 0,
-        constructor_stage: 'queued',
-        branch: null,
-        pr_url: null,
-        commit_sha: null,
-        live_version: null,
-        ci: null,
+        constructor_stage: 'failed',
+        branch: `codex/${taskId.slice(6)}`,
+        pr_url: 'https://github.example.invalid/pull/42',
+        commit_sha: merged,
+        live_version: merged.slice(0, 7),
+        ci: 'local_gates',
+        attempts: 2,
+        retry_not_before: null,
       }],
     })
-    await expect(database.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM constructor_pipeline WHERE job_id=1',
-    )).resolves.toMatchObject({ rows: [{ count: '0' }] })
+    await expect(database.query(
+      `SELECT task_id, handoff_id::text, base_commit_sha, patch_sha256,
+              gate_receipt_sha256, publisher_receipt_sha256,
+              publisher_attempts, publisher_lease_id, publisher_retry_not_before,
+              publisher_last_error FROM constructor_pipeline WHERE job_id=1`,
+    )).resolves.toMatchObject({ rows: [{
+      task_id: taskId, handoff_id: handoffId, base_commit_sha: base,
+      patch_sha256: hash1, gate_receipt_sha256: hash2,
+      publisher_receipt_sha256: hash3, publisher_attempts: 1,
+      publisher_lease_id: null, publisher_retry_not_before: null,
+      publisher_last_error: 'stale_base',
+    }] })
     await expect(pipeline.claimPublisherJob('223e4567-e89b-42d3-a456-426614174002')).resolves.toBeNull()
-    // Reluarea manuala nu mai este necesara: ordinul este deja in coada, cu
-    // asteptare, si va fi revendicat automat de worker pe noua baza.
-    const dupa = await database.query<{ status: string; retry_not_before: Date | null }>(
-      'SELECT status, retry_not_before FROM build_jobs WHERE id=1',
+    await expect(pipeline.recordWorkerHandoff(1, taskId, {
+      handoffId, baseCommit: base, patchSha256: hash1, gateReceiptSha256: hash2,
+    })).resolves.toMatchObject({ ok: true, event: { status: 'failed', stage: 'failed' } })
+    await expect(pipeline.recordWorkerHandoff(1, taskId, {
+      handoffId, baseCommit: base, patchSha256: hash4, gateReceiptSha256: hash2,
+    })).resolves.toMatchObject({ ok: false, reason: 'handoff_conflict' })
+    await expect(pipeline.failPublisherLease(1, taskId, publisherLease, 'stale_base', {
+      branch: `codex/${taskId.slice(6)}`, headCommit: head, prNumber: 42,
+      cleanupReceiptSha256: hash2,
+    })).resolves.toBeNull()
+    const historyAfter = await database.query<{ id: number; status: string }>(
+      'SELECT id, status FROM constructor_activity_events WHERE job_id=1 ORDER BY id',
     )
-    expect(dupa.rows[0].status).toBe('queued')
-    expect(dupa.rows[0].retry_not_before).toBeInstanceOf(Date)
-    await expect(buildJobs.retryBuildJob(1)).resolves.toMatchObject({ ok: false })
+    expect(historyAfter.rows.slice(0, historyBefore.rows.length).map(({ id }) => ({ id })))
+      .toEqual(historyBefore.rows)
+    expect(historyAfter.rows.slice(historyBefore.rows.length).some(({ status }) => status === 'queued')).toBe(false)
+    await expect(database.query(
+      `SELECT task_id, handoff_id::text, head_sha, pr_number, failure_code, cleanup_receipt_sha256
+         FROM constructor_publication_retirements WHERE job_id=1`,
+    )).resolves.toMatchObject({ rows: [{
+      task_id: taskId, handoff_id: handoffId, head_sha: head, pr_number: 42,
+      failure_code: 'stale_base', cleanup_receipt_sha256: hash2,
+    }] })
   })
 
   it('keeps transport-only publisher recovery automatic for an external GitHub authority wait', { timeout: 30_000 }, async () => {

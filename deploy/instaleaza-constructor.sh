@@ -722,7 +722,7 @@ secure_handoff_spool() {
   [ "$(stat -Lc '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ] || return 1
   sync -f "$spool" && sync -f "$var_lib" || return 1
 
-  for child in ready ack retired; do
+  for child in ready ack retired staging; do
     child=$spool/$child
     if [ -e "$child" ] || [ -L "$child" ]; then
       # Numele este acum stabil sub părintele root-owned, non-group-writable.

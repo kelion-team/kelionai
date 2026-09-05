@@ -76,7 +76,7 @@ export function projectRequiredChecks(
 
 export function projectBranchProtection(
   protection: Record<string, any>,
-  requiredSignatures: Record<string, any>,
+  requiredSignatures: Record<string, any> | null,
   requiredChecks = requiredConstructorChecks(),
 ): { requiredApprovalCount: number; requiredChecks: RequiredCheckPolicy[] } | null {
   const statusChecks = protection.required_status_checks
@@ -110,19 +110,18 @@ export function projectBranchProtection(
     || contexts.size !== requiredChecks.length
     || !requiredChecks.every((name) => contexts.has(name))
     || protection.enforce_admins?.enabled !== true
+    || typeof reviews?.required_approving_review_count !== 'number'
     || !Number.isSafeInteger(requiredApprovalCount)
-    || requiredApprovalCount <= 0
-    || reviews?.dismiss_stale_reviews !== true
+    || requiredApprovalCount < 0
+    || (requiredApprovalCount >= 1 && reviews?.dismiss_stale_reviews !== true)
     || reviews?.require_code_owner_reviews !== false
     || reviews?.require_last_push_approval !== false
-    || !emptyNamedActorSet(dismissalRestrictions)
-    || !Array.isArray(bypass?.users) || bypass.users.length !== 0
-    || !Array.isArray(bypass?.teams) || bypass.teams.length !== 0
-    || !Array.isArray(bypass?.apps) || bypass.apps.length !== 0
+    || !emptyNamedActorSet(dismissalRestrictions ?? null)
+    || !emptyNamedActorSet(bypass ?? null)
     || protection.required_conversation_resolution?.enabled !== true
     || protection.required_linear_history?.enabled !== true
-    || requiredSignatures.enabled !== true
-    || !emptyNamedActorSet(protection.restrictions)
+    || (requiredSignatures !== null && typeof requiredSignatures.enabled !== 'boolean')
+    || !emptyNamedActorSet(protection.restrictions ?? null)
     || protection.allow_force_pushes?.enabled !== false
     || protection.allow_deletions?.enabled !== false
   ) return null
@@ -428,10 +427,10 @@ export async function readReleaseSnapshot(prUrl: string | null, fetcher: FetchLi
       github('/branches/master/protection/required_signatures', fetcher),
       githubActiveBranchRules(fetcher),
     ])
-    if (!prResponse.ok || !protectionResponse.ok || !signaturesResponse.ok) throw new Error('github_pr_or_protection_unreadable')
+    if (!prResponse.ok || !protectionResponse.ok || (!signaturesResponse.ok && signaturesResponse.status !== 404)) throw new Error('github_pr_or_protection_unreadable')
     const pr = await prResponse.json() as Record<string, unknown>
     const protection = await protectionResponse.json() as Record<string, any>
-    const requiredSignatures = await signaturesResponse.json() as Record<string, any>
+    const requiredSignatures = signaturesResponse.status === 404 ? null : await signaturesResponse.json() as Record<string, any>
     if (!hasNoActiveBranchRules(activeBranchRules)) throw new Error('github_branch_rules_unsupported')
     const policy = projectBranchProtection(protection, requiredSignatures)
     if (!policy) throw new Error('github_branch_policy_invalid')
@@ -466,48 +465,19 @@ export async function readReleaseSnapshot(prUrl: string | null, fetcher: FetchLi
     const checkState: CheckState = projectRequiredChecks(checkRuns, requiredConstructorChecks(), requiredChecks, canonicalCheckIds)
     const headSha = typeof head?.sha === 'string' ? head.sha : ''
     const approvalCount = await eligibleCurrentHeadApprovalCount(reviews, headSha, fetcher)
-    const approved = approvalCount >= requiredApprovalCount
+    const githubApproved = approvalCount >= requiredApprovalCount
     const merged = pr.merged === true
     const mergeable = pr.mergeable === true
     const state: 'open' | 'closed' = pr.state === 'open' ? 'open' : 'closed'
     const baseRef = base.ref
-    const merge = projectReleaseMergeState({ merged, state, baseRef, checks: checkState, approved, mergeable })
+    const merge = projectReleaseMergeState({ merged, state, baseRef, checks: checkState, approved: githubApproved, mergeable })
     return {
       integration: 'ready', setupInstructions: null,
       pr: { number, title: typeof pr.title === 'string' ? pr.title.slice(0, 240) : `PR #${number}`, url: expectedUrl, state, merged, headSha, baseRef },
-      checks: checkState, approval: approved ? 'approved' : 'required', merge,
-      nextAction: merged ? 'PR-ul este integrat; așteaptă dovada separată de deploy live.' : baseRef !== 'master' ? 'PR-ul a fost mutat de pe master; publisherul și Adminul îl refuză.' : state !== 'open' ? 'PR-ul este închis fără merge; reluarea trebuie să urmeze fluxul Constructor.' : checkState !== 'passed' ? 'Așteaptă sau repară verificările GitHub înainte de review.' : !approved ? 'Aprobă PR-ul din Kelion; GitHub poate aplica reguli suplimentare.' : merge === 'ready' ? 'Aprobarea și verificările sunt valide; publisherul separat va integra PR-ul și va înregistra receiptul.' : 'GitHub încă nu permite merge-ul; citește starea PR-ului.',
+      checks: checkState, approval: githubApproved ? 'approved' : 'required', merge,
+      nextAction: merged ? 'PR-ul este integrat; așteaptă dovada separată de deploy live.' : baseRef !== 'master' ? 'PR-ul a fost mutat de pe master; publisherul și Adminul îl refuză.' : state !== 'open' ? 'PR-ul este închis fără merge; reluarea trebuie să urmeze fluxul Constructor.' : checkState !== 'passed' ? 'Publisherul așteaptă verificările GitHub obligatorii.' : !githubApproved ? 'Protecția GitHub cere review-uri eligibile independente pentru acest commit; Kelion nu o ocolește.' : merge === 'ready' ? 'Condițiile GitHub sunt îndeplinite; publisherul separat integrează automat și înregistrează receiptul.' : 'GitHub încă nu permite merge-ul; citește starea PR-ului.',
     }
   } catch {
     return { integration: 'unavailable', setupInstructions: null, pr: null, checks: 'unknown', approval: 'unknown', merge: 'unknown', nextAction: 'Integrarea GitHub nu poate fi citită acum. Verifică permisiunile OAuth și reîncearcă; nu presupune starea PR-ului.' }
   }
-}
-
-/** Adminul poate acorda review, dar publisherul este singura identitate care
- * execută merge-ul și persistă receiptul aferent. */
-export async function approveRelease(
-  prUrl: string | null,
-  expectedPrNumber: number,
-  expectedHeadSha: string,
-  fetcher: FetchLike = fetch,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!configured()) return { ok: false, error: 'github_integration_setup_required' }
-  const number = prNumber(prUrl)
-  if (!number) return { ok: false, error: 'invalid_pr_url' }
-  const snapshot = await readReleaseSnapshot(prUrl, fetcher)
-  if (
-    snapshot.integration !== 'ready'
-    || !snapshot.pr
-    || snapshot.pr.merged
-    || snapshot.pr.state !== 'open'
-    || snapshot.pr.baseRef !== 'master'
-    || snapshot.checks !== 'passed'
-  ) return { ok: false, error: 'release_not_actionable' }
-  if (snapshot.pr.number !== expectedPrNumber || snapshot.pr.headSha !== expectedHeadSha) {
-    return { ok: false, error: 'release_snapshot_changed' }
-  }
-  try {
-    const response = await fetcher(`https://api.github.com/repos/${config.githubRepo}/pulls/${number}/reviews`, { method: 'POST', headers: { ...headers(), 'content-type': 'application/json' }, body: JSON.stringify({ event: 'APPROVE', commit_id: expectedHeadSha }), signal: AbortSignal.timeout(10_000) })
-    return response.ok ? { ok: true } : { ok: false, error: 'github_approval_rejected' }
-  } catch { return { ok: false, error: 'github_unavailable' } }
 }

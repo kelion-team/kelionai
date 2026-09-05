@@ -314,12 +314,14 @@ repository-ul unic; ultimul scope este necesar exclusiv pentru verificarea
 branch protection și nu permite schimbarea ei. Nu are environments ori secrets.
 Credentiala dispatcherului are numai metadata, Contents și Pull requests read,
 plus Actions read/write; nu are Contents write sau acces VPS. Branch protection
-pentru `master` trebuie să impună reviews, controalele
-nominalizate în strict mode, cel puțin o aprobare, respingerea aprobărilor stale,
-rezolvarea conversațiilor, istoric liniar și commituri semnate; force-push și
-deletion sunt interzise inclusiv administratorilor. Publisherul citește și
-validează toate aceste proprietăți înainte de push și verifică local semnătura
-commitului înainte să trimită ramura.
+pentru `master` trebuie să impună controalele nominalizate în strict mode,
+rezolvarea conversațiilor și istoric liniar; force-push și deletion sunt
+interzise inclusiv administratorilor. Publisherul respectă pragul de review
+configurat efectiv (zero este permis pentru publicare automată), iar când
+pragul este pozitiv cere respingerea aprobărilor stale. Nu adaugă un acord
+manual în Kelion și nu micșorează pragul GitHub. Setarea GitHub pentru
+semnăturile obligatorii este citită, nu activată sau ocolită de aplicație;
+publisherul verifică local semnătura commitului înainte să trimită ramura.
 
 Porțile de activare sunt cumulative și rămân implicit absente/zero:
 

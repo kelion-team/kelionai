@@ -42,6 +42,16 @@ function staticGateTests(source) {
   return [...source.matchAll(/[.A-Za-z0-9_/-]+[.]test[.]mjs/g)].map((match) => match[0])
 }
 
+function staticGateStep(workflow) {
+  const marker = '      - name: Teste pentru porțile statice'
+  const start = workflow.indexOf(marker)
+  assert.ok(start >= 0, 'static gate step missing')
+  assert.equal(workflow.indexOf(marker, start + marker.length), -1, 'ambiguous static gate step')
+  const end = workflow.indexOf('\n      - name:', start + marker.length)
+  assert.ok(end > start, 'static gate step boundary missing')
+  return workflow.slice(start, end)
+}
+
 const CRITICAL_APP_SUITES = [
   {
     id: 'release-proof',
@@ -298,10 +308,7 @@ test('PR verification checks the actual pull-request head and runs release-train
 
 test('PR CI sigilează proba root a publication lock fără a rupe gate-ul non-root', async () => {
   const workflow = await readFile(new URL('../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
-  const stepStart = workflow.indexOf('      - name: Teste pentru porțile statice')
-  const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
-  assert.ok(stepStart >= 0 && stepEnd > stepStart)
-  const staticStep = workflow.slice(stepStart, stepEnd)
+  const staticStep = staticGateStep(workflow)
   assert.match(
     staticStep,
     /\n\s+env:\n\s+KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE: '1'\n\s+run:/,
@@ -333,8 +340,32 @@ test('canonical CI and both local mirrors execute the exact same static test man
     '../deploy/porti-pr.sh',
   ]) {
     const source = await readFile(new URL(path, import.meta.url), 'utf8')
-    assert.deepEqual(staticGateTests(source), STATIC_GATE_TESTS, path)
+    const staticSource = path.endsWith('.yml') ? staticGateStep(source) : source
+    assert.deepEqual(staticGateTests(staticSource), STATIC_GATE_TESTS, path)
   }
+})
+
+test('static manifest excludes isolated container probes without ignoring missing or duplicate gates', () => {
+  const step = '      - name: Teste pentru porțile statice\n        run: node --test scripts/example.test.mjs\n'
+  const other = '      - name: Container probe\n        run: node --test /probe/isolated.test.mjs\n'
+  assert.deepEqual(staticGateTests(staticGateStep(step + other)), ['scripts/example.test.mjs'])
+  assert.throws(() => staticGateStep(other), /missing/)
+  assert.throws(() => staticGateStep(step + other + step), /ambiguous/)
+})
+
+test('handoff identities are verified by a mandatory isolated read-only container probe', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
+  const start = workflow.indexOf('      - name: Predare worker către publisher cu identități separate')
+  const end = workflow.indexOf('\n      - name:', start + 1)
+  assert.ok(start >= 0 && end > start)
+  const probe = workflow.slice(start, end)
+  assert.doesNotMatch(probe, /continue-on-error|\|\|\s*true|\n\s+if:/)
+  for (const flag of ['--read-only', '--network none', '--cap-drop ALL', '--security-opt no-new-privileges', '--user 0:0']) {
+    assert.ok(probe.includes(flag), flag)
+  }
+  assert.match(probe, /src="\$PWD\/deploy\/codex-worker\.mjs",dst=\/probe\/deploy\/codex-worker\.mjs,readonly/)
+  assert.match(probe, /src="\$PWD\/deploy\/lib\/constructor-handoff-permissions\.test\.mjs",dst=\/probe\/deploy\/lib\/constructor-handoff-permissions\.test\.mjs,readonly/)
+  assert.match(probe, /--test \/probe\/deploy\/lib\/constructor-handoff-permissions\.test\.mjs/)
 })
 
 test('critical App regressions remain present, executable and unskipped', async () => {

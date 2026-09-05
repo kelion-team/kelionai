@@ -163,6 +163,10 @@ describe('GitHub release integration', () => {
     expect(projectReleaseMergeState(valid)).toBe('ready')
     expect(projectReleaseMergeState({ ...valid, baseRef: 'release' })).toBe('blocked')
     expect(projectReleaseMergeState({ ...valid, state: 'closed' })).toBe('blocked')
+    expect(projectReleaseMergeState({ ...valid, checks: 'failed' })).toBe('blocked')
+    expect(projectReleaseMergeState({ ...valid, checks: 'pending' })).toBe('blocked')
+    expect(projectReleaseMergeState({ ...valid, approved: false })).toBe('blocked')
+    expect(projectReleaseMergeState({ ...valid, mergeable: false })).toBe('blocked')
   })
 
   it('reports ready only under the complete publisher branch policy', () => {
@@ -258,7 +262,26 @@ describe('GitHub release integration', () => {
       ...protection,
       restrictions: { users: [], teams: [{ slug: 'release' }], apps: [] },
     }, { enabled: true })).toBeNull()
-    expect(projectBranchProtection(protection, { enabled: false })).toBeNull()
+    expect(projectBranchProtection(protection, { enabled: false })?.requiredApprovalCount).toBe(2)
+    expect(projectBranchProtection(protection, null)?.requiredApprovalCount).toBe(2)
+    expect(projectBranchProtection({
+      ...protection,
+      required_pull_request_reviews: {
+        required_approving_review_count: 0,
+        require_code_owner_reviews: false,
+        require_last_push_approval: false,
+      },
+      restrictions: undefined,
+    }, { enabled: false })?.requiredApprovalCount).toBe(0)
+    for (const invalid of [null, undefined, '0', -1, 0.5]) {
+      expect(projectBranchProtection({ ...protection, required_pull_request_reviews: {
+        ...protection.required_pull_request_reviews, required_approving_review_count: invalid,
+      } }, { enabled: false })).toBeNull()
+    }
+    expect(projectBranchProtection({ ...protection, required_pull_request_reviews: {
+      ...protection.required_pull_request_reviews, required_approving_review_count: 1, dismiss_stale_reviews: false,
+    } }, { enabled: false })).toBeNull()
+    expect(projectBranchProtection(protection, {})).toBeNull()
     expect(hasNoActiveBranchRules([])).toBe(true)
     expect(hasNoActiveBranchRules([{ type: 'required_status_checks', ruleset_id: 42 }])).toBe(false)
     expect(hasNoActiveBranchRules(null)).toBe(false)
