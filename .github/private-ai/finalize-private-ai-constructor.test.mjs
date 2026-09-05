@@ -553,6 +553,11 @@ test('bundle-ul finalizerului conține control-plane-ul manual complet și îl d
     'inventarul remote trebuie să fie identic și în aceeași ordine cu membrii arhivei')
 })
 
+test('finalizerul păstrează modul executabil canonic pentru helperul de schimbare model', () => {
+  assert.match(finalizer,
+    /install -o root -g root -m 0755 "\$MODEL_SWITCH_SOURCE" "\$model_switch_candidate"/)
+})
+
 test('finalizerul armează intentul înainte de snapshot și publică workerul numai după control-plane', () => {
   const lock = finalizer.indexOf('flock -n 9')
   const marker = finalizer.indexOf('\npublish_finalizer_reactivation_intent \\', lock)

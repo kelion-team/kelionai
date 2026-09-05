@@ -1312,7 +1312,9 @@ sync -f "$MODEL_CONTROL_TARGET"
 sync -f "$(dirname -- "$MODEL_CONTROL_TARGET")"
 
 model_switch_candidate=$(mktemp "$MODEL_SWITCH_TARGET.candidate.XXXXXX")
-install -o root -g root -m 0555 "$MODEL_SWITCH_SOURCE" "$model_switch_candidate"
+# Acest helper este executat direct de control-plane și trebuie să rămână
+# executabil pentru root, conform contractului de instalare al release-ului.
+install -o root -g root -m 0755 "$MODEL_SWITCH_SOURCE" "$model_switch_candidate"
 bash -n "$model_switch_candidate"
 mv -f -- "$model_switch_candidate" "$MODEL_SWITCH_TARGET"
 model_switch_candidate=''
