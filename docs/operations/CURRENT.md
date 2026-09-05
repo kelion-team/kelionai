@@ -37,13 +37,42 @@ readonly and mounts no host credentials or parser from the worktree` (`:45`),
 `a running old process cannot advertise replacement bytes as the new
 capability`, plus încă două.
 
-**Ipoteză, marcată explicit ca ipoteză, nu cauză demonstrată:** containerul
-rulează `--user 0:0` cu `--cap-drop ALL --cap-add CHOWN`, deci root este fără
-`CAP_DAC_OVERRIDE`. Dacă testul creează tupla instalată root-owned fără bit de
-scriere și apoi copiază în ea, root nu mai poate ocoli permisiunea și primește
-EPERM. Montarea nu este cauza: `/opt` este tmpfs
-`rw,nosuid,nodev,noexec,mode=0755,size=8m`, deci permite scrierea. Nu am
-verificat testul în cod; verificarea îți revine.
+**Pistă cu dovadă prin contrast, nu încă demonstrată de mine prin rulare.**
+Am citit fixture-ul (`deploy/lib/doctor-runtime-capability.test.mjs`, nou în
+acest PR) și pasul de CI care îl lansează. Secvența este: `mkdirSync` pe
+`/opt/kelion-codex/lib` la `0755`, apoi `writeFileSync` + `chmodSync 0555` pe
+worker/publisher, apoi `copyFileSync(guardSource, ...)` + `chmodSync 0444` pe
+cele două copii guard. EPERM apare pe `copyFileSync`, deci `mkdirSync` a
+reușit — directorul există și este al procesului.
+
+Contrastul decisiv este în același workflow: pasul imediat următor,
+**«Predare worker către publisher cu identități separate»**, rulează tot cu
+`--user 0:0` și `--cap-drop ALL`, dar **trece**, iar diferența este exact
+setul de capabilități:
+
+```
+pasul care pică:  --cap-drop ALL --cap-add CHOWN
+pasul care trece: --cap-drop ALL --cap-add CHOWN --cap-add FSETID \
+                  --cap-add SETUID --cap-add SETGID
+```
+
+Un root fără capabilități este tratat de kernel ca utilizator obișnuit la
+verificările DAC: uid 0 în sine nu mai acordă nimic. Fixture-ul copiază
+fișiere și le fixează imediat pe `0555`/`0444`, iar `copyFileSync` din Node
+face `open(dest, …, mode-ul sursei)` urmat de `fchmod` pe destinație.
+
+Verificările de făcut, în ordinea probabilității:
+1. adaugă `--cap-add FSETID` (și, dacă mai e nevoie, `DAC_OVERRIDE`, `FOWNER`)
+   la pasul care pică, aliniindu-l cu pasul vecin care trece — probabil o
+   corecție de o linie în `pr-verify.yml`, nu în test;
+2. confirmă `umask` din imaginea `kelion-ci-gates`: un umask neobișnuit ar face
+   ca `mkdirSync(mode 0o755)` să producă un director fără bit de scriere;
+3. exclude `copy_file_range` între bind-mountul read-only `/proof/deploy` și
+   tmpfs-ul `/opt` — dacă e cauza, o copiere prin `readFileSync` +
+   `writeFileSync` o ocolește.
+
+Montarea nu este cauza: `/opt` este tmpfs
+`rw,nosuid,nodev,noexec,mode=0755,size=8m`, deci permite scrierea.
 
 ## Stare verificată de mine (măsurători directe, 14:47–14:52 UTC)
 
