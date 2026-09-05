@@ -22,7 +22,10 @@ test('real pinned OpenCode reproduces EROFS without HOME and succeeds with priva
   const before = homes()
   const original = spawnSync(OPENCODE_BIN, ['--version'], { env: safeEnv, encoding: 'utf8', timeout: 5_000 })
   assert.equal(original.status, 1)
-  assert.match(original.stderr, /EROFS.*read-only file system[\s\S]*\/root\/\.local/)
+  // Proba este ca OpenCode fara HOME privat esueaza pe filesystemul read-only,
+  // nu care subdirector din /root il atinge primul: binarul incearca .config sau
+  // .local dupa versiune, iar fixarea unei singure cai facea proba fragila.
+  assert.match(original.stderr, /EROFS.*read-only file system[\s\S]*\/root\/\.(?:local|config)/)
   const pending = runCommand(OPENCODE_BIN, ['--version'], 5_000)
   const created = homes().filter((name) => !before.includes(name))
   try {
