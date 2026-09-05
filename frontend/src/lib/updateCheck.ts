@@ -1,11 +1,12 @@
 import { marcheazaPlecarea } from './errorReport'
+import { installedBuildLabel } from './versionEvidence'
 
 declare const __APP_VERSION__: string
 declare const __BUILD_DATE__: string
 
 /** Eticheta este proprietatea buildului instalat, nu rezultatul unui poll. */
 export function versionLabel(): string {
-  return `V${__APP_VERSION__} · ${__BUILD_DATE__}`
+  return installedBuildLabel(__APP_VERSION__, __BUILD_DATE__)
 }
 
 export type ApplyPwaUpdate = () => void

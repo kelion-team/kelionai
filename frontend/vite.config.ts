@@ -17,8 +17,7 @@ if (!Array.isArray(productConfig.nativeOrigins) || typeof productConfig.nativeRe
   throw new Error('config/product.json: native auth config invalid')
 }
 
-const now = new Date()
-const buildDate = now.toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+const buildDate = new Date().toISOString()
 const appVersion = String(productConfig.appVersion)
 const checkoutOrigins = [
   endpointConfig.external?.revolutCheckoutProductionOrigin,

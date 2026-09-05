@@ -33,6 +33,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | Fișier | Responsabilitate |
 | --- | --- |
 | `AdminPanel.tsx` | panoul Google-admin — shell cu tab-uri, push telefon, peek gesturi |
+| `VersionBadge.tsx` | build UI și commit/pornire server citite separat; ora Europe/London cu GMT/BST; citirea eșuată rămâne necunoscută |
 | `admin/shared.tsx` | componente comune admin: BecuriCredit, CreditAICard, ErrRow, RegistruAudit, ShareGrid |
 | `admin/adminHelpers.ts` | helper-e non-componente: fmtDur, aiLabel, groupByDay, rangVerdict, tipuri |
 | `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
@@ -69,6 +70,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 - `clientState.ts`: namespace opac per cont și purge la switch/logout/delete; `submissionSession.ts`: UUID de sesiune pentru lead; `retryIdempotency.ts`: UUID stabil pe retry.
 - `prefs.ts`: preferințe user-scoped; `productConfig.ts`: config public generat din `config/product.json`; `manualPolicy.ts`: limbi/chrome și filtrare fail-closed a capitolelor admin; `publicText.ts`, `i18n.ts`, `adminText.ts`, `languages.ts`, `langList.ts`: text și limbă fără dubluri comerciale locale.
 - `conexiune.ts`, `retea.ts`, `latency.ts`, `watchdog.ts`, `energie.ts`, `usePolledJson.ts`, `updateCheck.ts`: conectivitate, măsurare și lifecycle PWA.
+- `versionEvidence.ts`: validarea datelor `/api/version` și formatarea orelor build/pornire în Europe/London; `versionEvidence.test.ts` verifică GMT/BST, ambele tranziții DST, date invalide și citiri eșuate. Acceptarea live cere compararea commitului afișat cu release-proof după deploy; data pornirii nu este numită data deploy-ului.
 - `billing.ts`, `praguri.ts`: penny integers, politică server-side, reminder și istoric strict.
 - `admin.ts`: contractele API admin; `adminConstructorContract.ts`: validarea strictă a snapshoturilor, diagnosticelor și confirmărilor Constructor din Admin; `constructorContract.ts`: stările și dovezile canonice comune panoului Admin și monitorului Stage; `deployProgress.ts`: contract unic pentru polling/SSE de release; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
 - `markdown.ts`: DOMPurify; `workspace.ts`: taskuri monitor, iframe allowlist și CSP playground; `tradingBridge.ts`: origin/source binding pentru iframe-ul Trading; `theme.ts`, `ceas.ts`, `wakelock.ts`, `notificari.ts`, `pushTelefon.ts`: utilitare UI/runtime.

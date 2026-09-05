@@ -140,6 +140,15 @@ jobs:
           [[ "$master_commit" =~ ^[0-9a-f]{40}$ ]]
           [ "$(git rev-parse HEAD)" = "$master_commit" ]
           [ "$(git rev-parse origin/master)" = "$master_commit" ]
+          # The recovery owner remains pinned to its journal. Save the reviewed
+          # compatibility executor from current master BEFORE checking out that
+          # older owner; its digest is carried independently, never as source.
+          compatibility_helper="$RUNNER_TEMP/constructor-upgrade-compat.mjs"
+          [ -f scripts/constructor-upgrade-compat.mjs ] && [ ! -L scripts/constructor-upgrade-compat.mjs ]
+          install -m 0600 scripts/constructor-upgrade-compat.mjs "$compatibility_helper"
+          compatibility_sha=$(git cat-file blob "$master_commit:scripts/constructor-upgrade-compat.mjs" | sha256sum | awk '{print $1}')
+          [[ "$compatibility_sha" =~ ^[0-9a-f]{64}$ ]]
+          [ "$(sha256sum "$compatibility_helper" | awk '{print $1}')" = "$compatibility_sha" ]
 
           current_host_key=$(ssh-keyscan -T 20 -t ed25519 "$VPS_HOST" 2>/dev/null)
           [ -n "$current_host_key" ]
@@ -220,6 +229,7 @@ jobs:
           [ "$(git rev-parse HEAD)" = "$source_commit" ]
           printf 'commit=%s\nmaster=%s\nrecovery=%s\n' \
             "$source_commit" "$master_commit" "$recovery" >> "$GITHUB_OUTPUT"
+          printf 'compatibility_sha=%s\n' "$compatibility_sha" >> "$GITHUB_OUTPUT"
 
       - name: Leaga imaginea gate de sursa Constructor
         if: inputs.operation == 'configure-constructor' || inputs.operation == 'upgrade-constructor'
@@ -229,6 +239,7 @@ jobs:
           UPGRADE_SOURCE_COMMIT: ${{ steps.upgrade-source.outputs.commit }}
           UPGRADE_MASTER_COMMIT: ${{ steps.upgrade-source.outputs.master }}
           UPGRADE_RECOVERY: ${{ steps.upgrade-source.outputs.recovery }}
+          UPGRADE_COMPATIBILITY_SHA: ${{ steps.upgrade-source.outputs.compatibility_sha }}
         run: |
           set -euo pipefail
           commit=$(git rev-parse HEAD)
@@ -364,6 +375,22 @@ jobs:
             git cat-file -e "HEAD:$input"
           done
           git archive --format=tar HEAD AGENTS.md deploy | gzip -n > "$RUNNER_TEMP/constructor-bundle.tar.gz"
+          if [ "$OPERATION" = upgrade-constructor ] && [ "$UPGRADE_RECOVERY" = 1 ] \
+            && [ "$commit" = e65f0112aa2265fea12bfd248b8da645b428017a ]; then
+            compatibility_helper="$RUNNER_TEMP/constructor-upgrade-compat.mjs"
+            [ -f "$compatibility_helper" ] && [ ! -L "$compatibility_helper" ]
+            [[ "$UPGRADE_COMPATIBILITY_SHA" =~ ^[0-9a-f]{64}$ ]]
+            [ "$(sha256sum "$compatibility_helper" | awk '{print $1}')" = "$UPGRADE_COMPATIBILITY_SHA" ]
+            compatibility_root="$download_root/compatibility-bundle"
+            install -d -m 0700 "$compatibility_root"
+            tar -xzf "$RUNNER_TEMP/constructor-bundle.tar.gz" -C "$compatibility_root" --no-same-owner --no-same-permissions
+            # This helper accepts only the exact original e65 installer digest
+            # and the exact one-byte correction digest. All 23 runtime artefacts,
+            # the journal owner and the original activation snapshot stay e65.
+            node "$compatibility_helper" --apply "$commit" "$UPGRADE_MASTER_COMMIT" \
+              "$compatibility_root/deploy/instaleaza-constructor.sh"
+            tar -C "$compatibility_root" -cf - AGENTS.md deploy | gzip -n > "$RUNNER_TEMP/constructor-bundle.tar.gz"
+          fi
           # Nu pune `grep -q` direct după `tar`: cu pipefail, închiderea
           # timpurie a grep ar transforma SIGPIPE-ul tar într-un fals eșec.
           tar -tzf "$RUNNER_TEMP/constructor-bundle.tar.gz" > "$RUNNER_TEMP/constructor-bundle.entries"
