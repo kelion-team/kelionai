@@ -2024,7 +2024,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=51fb7beff6f8396383fbabe806df28ddaadffbd410fc58425f44045aeab5d8fd
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ebc12ea5dc03064778a281f65e04e8cf5631841caaaf53bb4ab97af56a99c95e
 
 validate_compatible_activation_blocker() {
   local blocker=$1

@@ -1564,7 +1564,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=51fb7beff6f8396383fbabe806df28ddaadffbd410fc58425f44045aeab5d8fd
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=ebc12ea5dc03064778a281f65e04e8cf5631841caaaf53bb4ab97af56a99c95e
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
