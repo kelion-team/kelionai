@@ -24,6 +24,7 @@ vi.mock('./lib/transport', () => ({ apiFetch: hooks.request }))
 vi.mock('./lib/adminText', () => ({ adminStrings: () => ({ constructorModelVerifiedAt: (at: string) => `Verified engine: ${at}` }) }))
 import { AdminConstructor, AdminCreier } from './components/admin/AdminProductie'
 
+vi.mock('./lib/useConstructorMonitor', () => ({ useConstructorMonitor: () => ({ snapshot: null, connected: false, elapsedMs: 0 }) }))
 type Props = {
   children?: ReactNode; placeholder?: string; type?: string; checked?: boolean; dateTime?: string
   onChange?: (event: { target: { value?: string; checked?: boolean } }) => void

@@ -1,3 +1,6 @@
+import './constructor-pause-bootstrap.test.mjs'
+import './constructor-workflow-pause.test.mjs'
+import './constructor-pause.test.mjs'
 import test from 'node:test'
 import './constructor-upgrade-cleanup.test.mjs'
 import './constructor-recovery-postproof.test.mjs'
@@ -1170,6 +1173,7 @@ systemctl() {
   esac
 }
 probe_configured_model_controller() { record probe; }
+function /root/kelion/bin/runtime-config-cutover.sh { [ "$1" = --worker-pause-state ] && printf 'unpaused\\n'; }
 reactivation_journal="$fixture_root/reactivation-journal-absent"
 exec 9>/dev/null
 ${restore}
@@ -2137,6 +2141,7 @@ test('validatorii unităților derivă identitatea exclusiv din argumentul expli
   const validateService = shellFunction(cutover, 'validate_constructor_service_unit')
   const script = `set -euo pipefail
 ${validateText}
+${shellFunction(cutover, 'validate_worker_pause_unit')}
 ${validateTimer}
 ${validateService}
 validate_from_conflicting_scope() {

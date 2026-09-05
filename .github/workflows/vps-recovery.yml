@@ -524,11 +524,13 @@ jobs:
           }
 
           validate_constructor_vector() {
-            local index marker timer timer_state
+            local index marker timer timer_state expected_timer_vector
             local opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
             local opencode_instructions=/srv/private-ai/home/.config/opencode/instructions.md
             local -a markers=(codex-worker constructor-publisher constructor-release)
             local -a timers=(kelion-codex-worker.timer kelion-constructor-publisher.timer kelion-constructor-release.timer)
+            worker_pause=$(KELION_CUTOVER_LOCK_HELD=1 "$helper" --worker-pause-state) || return 1
+            case "$worker_pause" in paused|unpaused) ;; *) return 1 ;; esac
             marker_vector=''
             timer_vector=''
             for index in "${!markers[@]}"; do
@@ -539,9 +541,15 @@ jobs:
                 [ ! -L "$marker" ]
                 [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ]
                 systemctl is-enabled --quiet "$timer"
-                systemctl is-active --quiet "$timer"
                 marker_vector+=1
-                timer_vector+=1
+                if [ "$timer" = kelion-codex-worker.timer ] && [ "$worker_pause" = paused ]; then
+                  [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ]
+                  if systemctl is-active --quiet "$timer"; then return 1; fi
+                  timer_vector+=0
+                else
+                  systemctl is-active --quiet "$timer"
+                  timer_vector+=1
+                fi
               else
                 if systemctl is-enabled --quiet "$timer"; then return 1; fi
                 timer_state=$(systemctl show "$timer" --property=ActiveState --value)
@@ -550,7 +558,11 @@ jobs:
                 timer_vector+=0
               fi
             done
-            [ "$marker_vector" = "$timer_vector" ]
+            expected_timer_vector=$marker_vector
+            if [ "$worker_pause" = paused ] && [ "${marker_vector:0:1}" = 1 ]; then
+              expected_timer_vector="0${marker_vector:1}"
+            fi
+            [ "$expected_timer_vector" = "$timer_vector" ]
             case "$marker_vector" in 000|100|110|111) ;; *) return 1 ;; esac
             [ -x /opt/private-ai/bin/opencode ]
             [ ! -L /opt/private-ai/bin/opencode ]
@@ -629,6 +641,7 @@ jobs:
               --argjson failedRun "$failed_run" --argjson failedJob "$failed_job" \
               --arg ledger "$ledger_state" --arg activeSlot "$active_slot" \
               --arg inactiveSlot "$inactive_slot" --arg vector "$marker_vector" \
+              --arg timerVector "$timer_vector" --arg workerPause "$worker_pause" \
               --arg mode "$recovery_mode" \
               '{ok:true,event:"incident_recovery_complete",recovery_mode:$mode,
                 hotfix_commit:$hotfix,helper_sha256:$helper,request_id:$request,
@@ -640,7 +653,8 @@ jobs:
                   deploy_journal:"absent",reactivation_journal:"absent",runtime_ready:true,
                   runtime_recovery:"active",model_control:"active",
                   model_control_socket:"root:10050:660",
-                  constructor_vector:$vector,codex_auth:"ready"}}'
+                  constructor_vector:$vector,constructor_timer_active_vector:$timerVector,
+                  worker_pause:$workerPause,codex_auth:"ready"}}'
           }
 
           validate_rejected_journals_absent

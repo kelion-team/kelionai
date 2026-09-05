@@ -340,7 +340,8 @@ fi
 }
 
 constructor_reactivation_postcondition() {
-  local index marker timer socket=/run/kelion-constructor-model-control/control.sock
+  local index marker timer pause socket=/run/kelion-constructor-model-control/control.sock
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --worker-pause-state) || return 1
   [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
     && [ -f "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$READY_STAMP")" = '0:0:444:1' ] \
@@ -362,8 +363,12 @@ constructor_reactivation_postcondition() {
     if [ -e "$marker" ] || [ -L "$marker" ]; then
       [ -f "$marker" ] && [ ! -L "$marker" ] \
         && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ] \
-        && systemctl is-enabled --quiet "$timer" \
-        && systemctl is-active --quiet "$timer" || return 1
+        && systemctl is-enabled --quiet "$timer" || return 1
+      if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+        [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ] || return 1
+      else
+        systemctl is-active --quiet "$timer" || return 1
+      fi
     elif systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then
       return 1
     fi
@@ -1559,7 +1564,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=833b28bd8a879c077440a2563eabd37da86dc8b19208c72f95823b2c12881cbc
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=51fb7beff6f8396383fbabe806df28ddaadffbd410fc58425f44045aeab5d8fd
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal

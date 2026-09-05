@@ -7,6 +7,7 @@ ConditionPathExists=/etc/kelion/codex-worker.enabled
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
 ConditionPathExists=!/root/kelion/runtime/constructor-reactivation.journal
+ConditionPathExists=!/etc/kelion/codex-worker.paused
 
 [Service]
 Type=oneshot

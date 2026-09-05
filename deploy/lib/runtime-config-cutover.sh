@@ -8,6 +8,8 @@ die() { printf 'runtime-cutover: %s\n' "$1" >&2; exit 1; }
 recover_only=0
 validate_only=0
 leave_constructor_quiesced=0
+worker_pause_operation=''
+worker_pause_candidate_source=${BASH_SOURCE[0]}
 discard_unmutated_prepared=0
 discard_target_commit=''
 discard_unmutated_gate_prepared=0
@@ -50,6 +52,10 @@ validation_logical=''
 validation_file=''
 compose_file=''
 case "${1:-}" in
+  --worker-pause-state|--capture-worker-pause|--validate-worker-pause-bootstrap)
+    [ "$#" -eq 1 ] || die 'operația de pauză nu acceptă argumente suplimentare'
+    worker_pause_operation=$1
+    ;;
   --discard-unmutated-gate-prepared)
     [ "$#" -eq 5 ] \
       || die 'utilizare: runtime-config-cutover.sh --discard-unmutated-gate-prepared REQUEST_ID COMMIT ACTIVE_COMMIT COMPOSE_FILE'
@@ -215,6 +221,184 @@ early_recover_only_barrier() {
   [ "$failed" = 0 ]
 }
 
+# Capture belongs only to fresh validated deploy/upgrade preflight. Recovery
+# never infers operator intent from the inactive state it produced itself.
+worker_pause_state() {
+  local directory=/etc/kelion marker=/etc/kelion/codex-worker.paused
+  if [ -e "$directory" ] || [ -L "$directory" ]; then
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+      && [ "$(realpath -e -- "$directory")" = "$directory" ] \
+      && [ "$(stat -Lc '%u:%g:%a' "$directory")" = '0:0:755' ] || return 1
+  fi
+  if [ ! -e "$marker" ] && [ ! -L "$marker" ]; then printf 'unpaused\n'; return 0; fi
+  [ -f "$marker" ] && [ ! -L "$marker" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h:%s' "$marker")" = '0:0:444:1:9' ] \
+    && [ "$(wc -l < "$marker")" -eq 1 ] \
+    && grep -qx 'schema=1' "$marker" || return 1
+  printf 'paused\n'
+}
+
+# A32 knows this path, but rejects this exact new schema before restoration.
+# It is the durable boot barrier while the pause-aware helper rolls forward.
+worker_pause_bootstrap_context() {
+  local metadata directory
+  [ "${boot_recovery:-0}" = 0 ] || return 1
+  pause_owner='' pause_request='' pause_commit=''
+  if [ "${constructor_upgrade_owner:-0}" = 1 ]; then
+    [ -z "${deploy_owner_request_id:-}" ] && [ -z "${deploy_owner_commit:-}" ] || return 1
+    pause_owner=upgrade; pause_commit=$constructor_upgrade_source_commit
+  else
+    pause_owner=release; pause_request=${deploy_owner_request_id:-}; pause_commit=${deploy_owner_commit:-}
+    [[ "$pause_request" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || return 1
+  fi
+  [[ "$pause_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+  for directory in "$ROOT" "$ROOT/bin" "$RUNTIME_ROOT"; do
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+      && [ "$(realpath -e -- "$directory")" = "$directory" ] || return 1
+  done
+  [ "$(stat -Lc '%u:%g:%a' "$ROOT")" = '0:0:755' ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$ROOT/bin")" = '0:0:755' ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$RUNTIME_ROOT")" = '0:10050:750' ] || return 1
+  [ -f "$worker_pause_candidate_source" ] && [ ! -L "$worker_pause_candidate_source" ] \
+    && [ "$(realpath -e -- "$worker_pause_candidate_source")" = "$worker_pause_candidate_source" ] || return 1
+  metadata=$(stat -Lc '%u:%g:%a:%h' "$worker_pause_candidate_source") || return 1
+  case "$metadata" in 0:0:444:1|0:0:500:1|0:0:555:1|0:0:600:1|0:0:644:1|0:0:700:1|0:0:755:1) ;; *) return 1 ;; esac
+  pause_target_sha=$(sha256sum "$worker_pause_candidate_source" | awk '{print $1}') || return 1
+  pause_helper=$ROOT/bin/runtime-config-cutover.sh
+  [ -f "$pause_helper" ] && [ ! -L "$pause_helper" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$pause_helper")" = '0:0:500:1' ] || return 1
+  pause_live_sha=$(sha256sum "$pause_helper" | awk '{print $1}') || return 1
+  pause_legacy_sha=833b28bd8a879c077440a2563eabd37da86dc8b19208c72f95823b2c12881cbc
+  [ "$pause_live_sha" = "$pause_legacy_sha" ] || [ "$pause_live_sha" = "$pause_target_sha" ] || return 1
+}
+
+validate_worker_pause_bootstrap() {
+  local pending=$RUNTIME_ROOT/constructor-unit-migration.pending
+  worker_pause_bootstrap_context || return 1
+  [ -f "$pending" ] && [ ! -L "$pending" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$pending")" = '0:0:600:1' ] || return 1
+  jq -e --arg owner "$pause_owner" --arg request "$pause_request" --arg commit "$pause_commit" \
+    --arg target "$pause_target_sha" --arg legacy "$pause_legacy_sha" --arg live "$pause_live_sha" '
+    .schema == 2 and .kind == "worker-pause-bootstrap" and .owner == $owner and
+    .requestId == $request and .sourceCommit == $commit and .targetHelperSha == $target and
+    (.oldHelperSha == $legacy or .oldHelperSha == $target) and
+    ($live == .oldHelperSha or $live == .targetHelperSha) and
+    (keys == ["kind","oldHelperSha","owner","requestId","schema","sourceCommit","targetHelperSha"])
+  ' "$pending" >/dev/null
+}
+
+publish_worker_pause() {
+  local marker=/etc/kelion/codex-worker.paused temporary state
+  state=$(worker_pause_state) || return 1
+  if [ "$state" = paused ]; then sync -f /etc/kelion; return; fi
+  temporary=$(mktemp /etc/kelion/.codex-worker.paused.XXXXXX) || return 1
+  if printf 'schema=1\n' > "$temporary" \
+    && chown root:root "$temporary" && chmod 0444 "$temporary" \
+    && sync -f "$temporary" && mv -T -- "$temporary" "$marker" \
+    && sync -f /etc/kelion; then
+    [ "$(worker_pause_state)" = paused ]
+    return
+  fi
+  rm -f -- "$temporary"
+  return 1
+}
+
+finish_worker_pause_bootstrap() {
+  local pending=$RUNTIME_ROOT/constructor-unit-migration.pending temporary identity
+  validate_worker_pause_bootstrap || return 1
+  identity=$(stat -Lc '%d:%i' "$pending") || return 1
+  # Re-sync visible renames after an interrupted fsync, before the next stage.
+  sync -f "$pending" && sync -f "$RUNTIME_ROOT" || return 1
+  publish_worker_pause || return 1
+  if [ "$pause_live_sha" != "$pause_target_sha" ]; then
+    temporary=$(mktemp "$ROOT/bin/.worker-pause-helper.XXXXXX") || return 1
+    if ! install -o root -g root -m 0500 "$worker_pause_candidate_source" "$temporary" \
+      || [ "$(sha256sum "$temporary" | awk '{print $1}')" != "$pause_target_sha" ] \
+      || ! sync -f "$temporary" || ! mv -T -- "$temporary" "$pause_helper" \
+      || ! sync -f "$ROOT/bin"; then
+      rm -f -- "$temporary"
+      return 1
+    fi
+  fi
+  validate_worker_pause_bootstrap \
+    && [ "$pause_live_sha" = "$pause_target_sha" ] \
+    && [ "$(worker_pause_state)" = paused ] \
+    && sync -f "$pause_helper" && sync -f "$ROOT/bin" \
+    && [ "$identity" = "$(stat -Lc '%d:%i' "$pending")" ] || return 1
+  # Only our authenticated bootstrap is consumed; no transaction is rewritten.
+  rm -- "$pending" && sync -f "$RUNTIME_ROOT"
+}
+
+bootstrap_worker_pause() {
+  local pending=$RUNTIME_ROOT/constructor-unit-migration.pending temporary
+  worker_pause_bootstrap_context || return 1
+  [ ! -e "$pending" ] && [ ! -L "$pending" ] || return 1
+  temporary=$(mktemp "$RUNTIME_ROOT/.worker-pause-bootstrap.XXXXXX") || return 1
+  if ! jq -cn --arg owner "$pause_owner" --arg request "$pause_request" --arg commit "$pause_commit" \
+    --arg target "$pause_target_sha" --arg old "$pause_live_sha" \
+    '{schema:2,kind:"worker-pause-bootstrap",owner:$owner,requestId:$request,sourceCommit:$commit,
+      oldHelperSha:$old,targetHelperSha:$target}' > "$temporary" \
+    || ! chown root:root "$temporary" || ! chmod 0600 "$temporary" \
+    || ! sync -f "$temporary" || ! mv -T -- "$temporary" "$pending" \
+    || ! sync -f "$RUNTIME_ROOT"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
+  finish_worker_pause_bootstrap
+}
+
+worker_pause_no_foreign_transaction() {
+  local journal
+  for journal in runtime-config-cutover.journal constructor-activation.journal constructor-gate-refresh.journal \
+    constructor-deploy-quiesce.journal constructor-upgrade.journal constructor-reactivation.journal \
+    constructor-max-model.journal destructive-cutover-recovery.json; do
+    [ ! -e "$RUNTIME_ROOT/$journal" ] && [ ! -L "$RUNTIME_ROOT/$journal" ] || return 1
+  done
+  [ ! -e /run/kelion/constructor-activation.pending ] && [ ! -L /run/kelion/constructor-activation.pending ]
+}
+
+capture_worker_pause() {
+  local state timer=kelion-codex-worker.timer marker=/etc/kelion/codex-worker.paused
+  local enabled active pending
+  [ "${boot_recovery:-0}" = 0 ] && [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] || return 1
+  worker_pause_no_foreign_transaction || return 1
+  if [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ]; then
+    finish_worker_pause_bootstrap || return 1
+    printf 'resumed\n'
+    return 0
+  fi
+  state=$(worker_pause_state) || return 1
+  if [ "$state" = paused ]; then
+    worker_pause_bootstrap_context || return 1
+    if [ "$pause_live_sha" = "$pause_target_sha" ]; then sync -f /etc/kelion; return; fi
+    bootstrap_worker_pause; return
+  fi
+  if [ ! -e /etc/kelion/codex-worker.enabled ] && [ ! -L /etc/kelion/codex-worker.enabled ]; then return 0; fi
+  [ -f /etc/kelion/codex-worker.enabled ] && [ ! -L /etc/kelion/codex-worker.enabled ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' /etc/kelion/codex-worker.enabled)" = '0:0:444:1' ] || return 1
+  enabled=$(systemctl show "$timer" --property=UnitFileState --value) || return 1
+  active=$(systemctl show "$timer" --property=ActiveState --value) || return 1
+  [ "$enabled" = enabled ] && systemctl is-enabled --quiet "$timer" || return 1
+  if [ "$active" = active ]; then systemctl is-active --quiet "$timer"; return; fi
+  [ "$active" = inactive ] || return 1
+  if systemctl is-active --quiet "$timer"; then return 1; fi
+  [ -d /run/kelion ] && [ ! -L /run/kelion ] \
+    && [ "$(stat -Lc '%u:%g:%a' /run/kelion)" = '0:0:755' ] \
+    && [ -f "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h:%s' "$READY_STAMP")" = '0:0:444:1:9' ] \
+    && grep -qx 'schema=1' "$READY_STAMP" || return 1
+  [ -f "$CONFIG_ROOT/codex-worker.env" ] && [ ! -L "$CONFIG_ROOT/codex-worker.env" ] \
+    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONFIG_ROOT/codex-worker.env")" = '0:0:640:1' ] \
+    && grep -qx 'CODEX_WORKER_EXEC_ENABLED=1' "$CONFIG_ROOT/codex-worker.env" || return 1
+  state=$(systemctl show kelion-codex-worker.service --property=ActiveState --value) || return 1
+  case "$state" in inactive|failed) ;; *) return 1 ;; esac
+  for state in "$timer" kelion-codex-worker.service; do
+    pending=$(systemctl list-jobs --no-legend --plain "$state") || return 1
+    [ -z "$pending" ] || return 1
+  done
+  bootstrap_worker_pause
+}
+
 ROOT=/root/kelion
 CONFIG_ROOT=$ROOT/config
 SECRET_ROOT=$ROOT/secrets
@@ -263,6 +447,15 @@ fi
   && [ "$(stat -Lc '%u:%g:%a:%h' /proc/$$/fd/9)" = '0:0:600:1' ] \
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'lock-ul de publicare s-a schimbat după flock'
+
+if [ -n "$worker_pause_operation" ]; then
+  case "$worker_pause_operation" in
+    --worker-pause-state) worker_pause_state || die 'markerul pauzei worker este nesigur' ;;
+    --capture-worker-pause) capture_worker_pause || die 'pauza worker nu poate fi capturată sigur' ;;
+    --validate-worker-pause-bootstrap) worker_pause_no_foreign_transaction && validate_worker_pause_bootstrap || die 'bootstrapul pauzei este străin sau neautentic' ;;
+  esac
+  exit 0
+fi
 
 if [ -e "$MAX_MODEL_JOURNAL" ] || [ -L "$MAX_MODEL_JOURNAL" ]; then
   die 'o tranzacție max-model este pending; cutover-ul runtime este refuzat'
@@ -1154,6 +1347,25 @@ validate_constructor_checks_contract() {
     && [ "$release_checks" = 'verify,container-isolation' ]
 }
 
+# a32 is a real rollout consumer: its installed units precede this helper and
+# are replaced later under quiesce. Accept only their exact bytes, never an
+# arbitrary unit missing the pause condition. The helper enforces pause even
+# for this legacy tuple, including cancellation of queued boot starts.
+validate_worker_pause_unit() {
+  local file=$1 unit=$2 actual expected legacy
+  case "$unit" in
+    kelion-codex-worker.timer)
+      expected=89d942748e6758203b3ba7613cb90dd2b7c98c179b71add47d3e624b1efa9d20
+      legacy=0c73bfc0d3d4c2db74f9088f56f5fd2bef96cf968c5636283911e5ab4ba57f80 ;;
+    kelion-codex-worker.service)
+      expected=4ff3b62f02d4e4423907100c60aefda8eb7c81b6304a9a61e6239352df5c28a0
+      legacy=33ef71cc0705b6de79df3f20035f09493d05a2bf853994478d6bca2e9c62bc94 ;;
+    *) return 1 ;;
+  esac
+  actual=$(sha256sum "$file" | awk '{print $1}') || return 1
+  [ "$actual" = "$expected" ] || [ "$actual" = "$legacy" ]
+}
+
 validate_constructor_timer_unit() {
   local file logical timer service
   file=$1
@@ -1171,7 +1383,10 @@ validate_constructor_timer_unit() {
     && [ "$(grep -c '^ConditionPathExists=!/run/kelion/constructor-activation.pending$' "$file")" -eq 1 ] \
     && [ "$(grep -c '^Requires=kelion-runtime-config-recovery.service$' "$file")" -eq 0 ] \
     && [ "$(grep -c "^Unit=$service$" "$file")" -eq 1 ] \
-    && [ "$(grep -c '^WantedBy=timers.target$' "$file")" -eq 1 ]
+    && [ "$(grep -c '^WantedBy=timers.target$' "$file")" -eq 1 ] || return 1
+  if [ "$timer" = kelion-codex-worker.timer ]; then
+    validate_worker_pause_unit "$file" "$timer" || return 1
+  fi
 }
 
 validate_constructor_service_unit() {
@@ -1201,7 +1416,10 @@ validate_constructor_service_unit() {
     && [ "$(grep -c "^User=$user$" "$file")" -eq 1 ] \
     && [ "$(grep -Fxc "ExecStart=$exec_start" "$file")" -eq 1 ] \
     && [ "$(grep -c '^WantedBy=' "$file")" -eq 0 ] \
-    && [ "$(grep -c '^\[Install\]$' "$file")" -eq 0 ]
+    && [ "$(grep -c '^\[Install\]$' "$file")" -eq 0 ] || return 1
+  if [ "$service" = kelion-codex-worker.service ]; then
+    validate_worker_pause_unit "$file" "$service" || return 1
+  fi
 }
 
 report_live_constructor_quiesce_failure() {
@@ -1736,8 +1954,9 @@ restore_runtime_controller_or_quiesce() {
 }
 
 restore_constructor_timers() {
-  local index timer marker state unit_count=0 unit failed=0
+  local index timer marker state pause pending unit_count=0 unit failed=0
   [ "$units_quiesced" = 1 ] || return 0
+  pause=$(worker_pause_state) || { force_quiesce_constructor_units || true; return 1; }
   systemctl daemon-reload || failed=1
   for unit in "${constructor_timers[@]}" "${constructor_services[@]}"; do
     if systemctl cat "$unit" >/dev/null 2>&1; then unit_count=$((unit_count + 1)); fi
@@ -1752,9 +1971,17 @@ restore_constructor_timers() {
     marker=${constructor_markers[$index]}
     if [ -f "$marker" ]; then
       systemctl enable "$timer" >/dev/null || failed=1
-      start_constructor_unit "$timer" || failed=1
+      if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+        systemctl stop "$timer" >/dev/null || failed=1
+        state=$(systemctl show "$timer" --property=ActiveState --value) || failed=1
+        [ "$state" = inactive ] || failed=1
+        pending=$(systemctl list-jobs --no-legend --plain "$timer") || failed=1
+        [ -z "$pending" ] || failed=1
+      else
+        start_constructor_unit "$timer" || failed=1
+        if [ "$boot_recovery" = 0 ]; then systemctl is-active --quiet "$timer" || failed=1; fi
+      fi
       systemctl is-enabled --quiet "$timer" || failed=1
-      if [ "$boot_recovery" = 0 ]; then systemctl is-active --quiet "$timer" || failed=1; fi
     else
       systemctl disable --now "$timer" >/dev/null || failed=1
       if systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then failed=1; fi

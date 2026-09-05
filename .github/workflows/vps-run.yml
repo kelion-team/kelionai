@@ -1506,6 +1506,7 @@ jobs:
             return 1
           }
           restore_configure_recovery_and_controller() {
+            local worker_pause
             flock -u 9
             exec 9>&-
             systemctl reset-failed kelion-runtime-config-recovery.service kelion-constructor-model-control.service >/dev/null 2>&1 || :
@@ -1514,6 +1515,8 @@ jobs:
             systemctl restart kelion-constructor-model-control.service
             probe_configured_model_controller
             [ ! -e "$reactivation_journal" ] && [ ! -L "$reactivation_journal" ]
+            worker_pause=$(/root/kelion/bin/runtime-config-cutover.sh --worker-pause-state) || return 1
+            case "$worker_pause" in paused|unpaused) ;; *) return 1 ;; esac
             configured_markers=(
               /etc/kelion/codex-worker.enabled
               /etc/kelion/constructor-publisher.enabled
@@ -1531,7 +1534,12 @@ jobs:
                 [ -f "$configured_marker" ] && [ ! -L "$configured_marker" ] \
                   && [ "$(stat -Lc '%u:%g:%a:%h' "$configured_marker")" = '0:0:444:1' ]
                 systemctl is-enabled --quiet "$configured_timer"
-                systemctl is-active --quiet "$configured_timer"
+                if [ "$configured_timer" = kelion-codex-worker.timer ] && [ "$worker_pause" = paused ]; then
+                  [ "$(systemctl show "$configured_timer" --property=ActiveState --value)" = inactive ]
+                  if systemctl is-active --quiet "$configured_timer"; then return 1; fi
+                else
+                  systemctl is-active --quiet "$configured_timer"
+                fi
               else
                 ! systemctl is-enabled --quiet "$configured_timer"
                 ! systemctl is-active --quiet "$configured_timer"

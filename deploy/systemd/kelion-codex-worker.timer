@@ -3,6 +3,7 @@ Description=Poll Kelion Constructor queue with the isolated server OpenCode exec
 After=kelion-runtime-config-recovery.service
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
+ConditionPathExists=!/etc/kelion/codex-worker.paused
 
 [Timer]
 OnBootSec=2min

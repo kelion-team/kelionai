@@ -30,6 +30,8 @@ import { constructorRoutes } from './routes/constructor.js'
 import { constructorModelControlRoutes } from './routes/constructorModelControl.js'
 import { doctorRoutes } from './routes/doctor.js'
 import { tickDoctor } from './services/doctor.js'
+import { constructorMonitorRoutes } from './routes/constructorMonitor.js'
+import { tickConstructorMonitor, CONSTRUCTOR_MONITOR_LIMITS } from './services/constructorMonitor.js'
 import { publicHealthPayload, publicVersionPayload } from './services/publicRuntimeContract.js'
 import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
@@ -333,6 +335,7 @@ await app.register(browserRoutes)
 await app.register(constructorRoutes)
 await app.register(constructorModelControlRoutes)
 await app.register(doctorRoutes)
+await app.register(constructorMonitorRoutes)
 await app.register(offlineRoutes)
 await app.register(auzRoutes)
 await app.register(authLocalRoutes)
@@ -440,6 +443,14 @@ try {
     void archiveCompletedConstructorJobs().catch((error) => {
       app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor archive retention failed')
     })
+    // Independent observer: a worker/watchdog failure cannot prevent this tick.
+    const monitorTick = (): void => {
+      void tickConstructorMonitor().catch(() => { app.log.warn('constructor monitor check unavailable') })
+    }
+    monitorTick()
+    const constructorMonitorTimer = setInterval(monitorTick, CONSTRUCTOR_MONITOR_LIMITS.tickMs)
+    constructorMonitorTimer.unref()
+    app.addHook('onClose', async () => { clearInterval(constructorMonitorTimer) })
     const constructorWatchdog = async (): Promise<void> => {
       if (!releaseSideEffectsEnabled()) return
       const result = await deblocheazaJoburileClaimate()

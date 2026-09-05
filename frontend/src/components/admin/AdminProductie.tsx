@@ -1,4 +1,6 @@
 import { ConstructorJobProgress } from './ConstructorJobProgress'
+import { ConstructorJobActivity } from './ConstructorJobActivity'
+import { useConstructorMonitor } from '../../lib/useConstructorMonitor'
 import { AdminAgentRegistry } from './AdminAgentRegistry'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { adminStrings } from '../../lib/adminText'
@@ -45,6 +47,7 @@ import {
 
 export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?: boolean } = {}) {
   const A = adminStrings()
+  const constructorMonitor = useConstructorMonitor()
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
   const [buildArchive, setBuildArchive] = useState<{
     status: 'idle' | 'loading' | 'ready' | 'error'
@@ -570,6 +573,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
               {j.deletable && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => deleteBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title="Șterge definitiv ordinul">✕</button>}
               {constructorJobCanBeCancelled(j.status, j.constructorStage) && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => cancelBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title={j.status === 'queued' ? 'Anulează ordinul aflat în coadă' : 'Oprește ordinul aflat în lucru (devine „anulat")'}>⏹ oprește</button>}
             </span>
+            <ConstructorJobActivity jobId={j.id} cycle={j.executionCycle} status={j.status} connection={constructorMonitor} />
             <ConstructorJobProgress job={j} />
             {j.continuity && (
               <div className="chat-hint" style={{ flexBasis: '100%', fontSize: 11, marginTop: 2 }}>

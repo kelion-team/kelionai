@@ -26,7 +26,9 @@ const RADACINI = ['backend/src', 'frontend/src']
 const EXTENSII = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
 // Entry points delivered independently by package scripts are roots too; the
 // migrator never belongs to the long-running web process.
-const INTRARI = ['backend/src/index.ts', 'backend/src/migrate.ts', 'frontend/src/main.tsx']
+// The root-only VPS reporter is also shipped in backend/dist by the image build;
+// its header documents the operator command. It is not a web/AI-tool route.
+const INTRARI = ['backend/src/index.ts', 'backend/src/migrate.ts', 'backend/src/constructorRemediationReporter.ts', 'frontend/src/main.tsx']
 
 function norm(cale) {
   return cale.replaceAll('\\', '/')

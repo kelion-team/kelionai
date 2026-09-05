@@ -1724,6 +1724,20 @@ validate_constructor_reactivation_intent() {
 
 constructor_model_control_preflight() {
   constructor_model_control_installation_proof || return 1
+  if [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ] \
+    && jq -e '.kind == "worker-pause-bootstrap"' "$RUNTIME_ROOT/constructor-unit-migration.pending" >/dev/null 2>&1; then
+    KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+      KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+      bash "$BUNDLE_DIR/lib/runtime-config-cutover.sh" --validate-worker-pause-bootstrap
+    return
+  fi
+  if [ -f /etc/kelion/codex-worker.paused ] \
+    && cmp -s -- "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+    && [ ! -e /run/kelion/runtime-config-recovery.ready ]; then
+    [ "$(bash "$BUNDLE_DIR/lib/runtime-config-cutover.sh" --worker-pause-state)" = paused ] \
+      && constructor_model_control_quiesced_proof
+    return
+  fi
   if [ -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
     || [ -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ]; then
     [ -f "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] \
@@ -1794,6 +1808,42 @@ flock 8
   && [ ! -L "$PUBLICATION_LOCK" ] \
   && [ "$publication_fd_identity" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || die 'lock-ul de publicare s-a schimbat după flock'
+
+# Capture fresh intent before quiesce. Existing transactions keep their own
+# recovery path; only this exact bootstrap owner may consume schema 2.
+worker_pause_capture_fresh=1
+for worker_pause_conflict in runtime-config-cutover.journal constructor-activation.journal \
+  constructor-gate-refresh.journal constructor-deploy-quiesce.journal constructor-upgrade.journal \
+  constructor-reactivation.journal constructor-max-model.journal destructive-cutover-recovery.json; do
+  if [ -e "$RUNTIME_ROOT/$worker_pause_conflict" ] || [ -L "$RUNTIME_ROOT/$worker_pause_conflict" ]; then
+    worker_pause_capture_fresh=0
+  fi
+done
+if [ -e /run/kelion/constructor-activation.pending ] || [ -L /run/kelion/constructor-activation.pending ]; then
+  worker_pause_capture_fresh=0
+fi
+if [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ]; then
+  if ! jq -e '.kind == "worker-pause-bootstrap"' "$RUNTIME_ROOT/constructor-unit-migration.pending" >/dev/null 2>&1; then
+    worker_pause_capture_fresh=0
+  fi
+fi
+if [ "$worker_pause_capture_fresh" = 1 ]; then
+  exec 9>&8
+  worker_pause_capture_result=$(KELION_CUTOVER_LOCK_HELD=1 \
+    KELION_DEPLOY_QUIESCE_OWNER_REQUEST_ID="$KELION_RELEASE_REQUEST_ID" \
+    KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
+    bash "$BUNDLE_DIR/lib/runtime-config-cutover.sh" --capture-worker-pause) \
+    || die 'pauza operațională a workerului nu poate fi păstrată durabil'
+  if [ "$worker_pause_capture_result" = resumed ] \
+    || { [ -f /etc/kelion/codex-worker.paused ] && [ ! -e /run/kelion/runtime-config-recovery.ready ]; }; then
+    cmp -s -- "$BUNDLE_DIR/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+      || die 'helperul bootstrap nu este candidatul exact'
+    KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" \
+      --recover-only "$ROOT/config/compose.production.yml" \
+      || die 'reactivarea control-plane după bootstrapul pauzei a eșuat'
+  fi
+  exec 9>&-
+fi
 
 # Un crash după clear-ul jurnalului interior, dar înainte de proba controllerului,
 # lasă numai markerul persistent și control-plane-ul quiesced. Îl adoptăm sub
@@ -1974,7 +2024,7 @@ fi
 # `constructor-activation.*`. Nu înlocuiește helperul live și nu acceptă
 # runtime/gate/deploy journals mixte.
 readonly LEGACY_ACTIVATION_GC_RUNTIME_HELPER_SHA256=ce136f70aa3c9672f14916055644b1e0eedf9a95944bb30066689dcaa68c318e
-readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=833b28bd8a879c077440a2563eabd37da86dc8b19208c72f95823b2c12881cbc
+readonly COMPATIBLE_ACTIVATION_GC_RUNTIME_HELPER_SHA256=51fb7beff6f8396383fbabe806df28ddaadffbd410fc58425f44045aeab5d8fd
 
 validate_compatible_activation_blocker() {
   local blocker=$1
@@ -3990,7 +4040,7 @@ constructor_recovery_unit_postproof() {
 }
 
 restore_constructor_after_release() {
-  local index timer marker failed=0
+  local index timer marker pause failed=0
   [ "$constructor_release_quiesced" = 1 ] || return 0
   constructor_deploy_quiesce_restore_proof || return 1
   exec 9>&8
@@ -4000,6 +4050,7 @@ restore_constructor_after_release() {
     KELION_DEPLOY_QUIESCE_OWNER_COMMIT="$COMMIT_SHA" \
     "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$ROOT/config/compose.production.yml" \
     || failed=1
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --worker-pause-state) || failed=1
   exec 9>&-
   if [ "$failed" = 0 ]; then
     systemctl daemon-reload || failed=1
@@ -4014,7 +4065,11 @@ restore_constructor_after_release() {
       marker=${constructor_release_markers[$index]}
       if [ -f "$marker" ]; then
         systemctl is-enabled --quiet "$timer" || failed=1
-        systemctl is-active --quiet "$timer" || failed=1
+        if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+          [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ] || failed=1
+        else
+          systemctl is-active --quiet "$timer" || failed=1
+        fi
       else
         if systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then failed=1; fi
       fi
@@ -4028,11 +4083,12 @@ restore_constructor_after_release() {
 }
 
 reconcile_constructor_after_completed_release() {
-  local index timer marker failed=0
+  local index timer marker pause failed=0
   [ ! -e "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] && [ ! -L "$CONSTRUCTOR_DEPLOY_QUIESCE_JOURNAL" ] || return 1
   exec 9>&8
   KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" \
     --recover-only "$ROOT/config/compose.production.yml" || failed=1
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --worker-pause-state) || failed=1
   exec 9>&-
   if [ "$failed" = 0 ]; then
     constructor_recovery_unit_postproof || failed=1
@@ -4041,7 +4097,11 @@ reconcile_constructor_after_completed_release() {
       marker=${constructor_release_markers[$index]}
       if [ -f "$marker" ]; then
         systemctl is-enabled --quiet "$timer" || failed=1
-        systemctl is-active --quiet "$timer" || failed=1
+        if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+          [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ] || failed=1
+        else
+          systemctl is-active --quiet "$timer" || failed=1
+        fi
       elif systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then
         failed=1
       fi

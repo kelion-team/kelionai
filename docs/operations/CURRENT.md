@@ -1,132 +1,179 @@
 # Checkpoint operațional curent
 
-Actualizat: 2026-09-05T11:52:00Z (12:52 Londra)
+Actualizat: 2026-09-05T13:15:00Z (14:15 Europe/London)
 
-## Current verified state
+## Producție verificată, distinctă de candidat
 
-- Master și live rămân a32bab142cc2cf1eca2b514c92732308232155b2.
-  /api/release-proof a confirmat ready=true, candidate=false și
-  sideEffectsActive=true. App Docker are restart unless-stopped.
-- Deploy a32: https://github.com/kelion-team/kelionai/actions/runs/33954248146,
-  success. PR1660 merge: https://github.com/kelion-team/kelionai/pull/1660.
-- Upgrade Constructor a32, attempt2 success:
-  https://github.com/kelion-team/kelionai/actions/runs/33954585185.
-  Controllerul a probat modelul autorizat opencode-free/big-pickle.
-  Pregătirea motorului nu este dovadă că un ordin a ajuns la deploy.
-- Lucrul autoritativ este exclusiv pe VPS vmi3415434:
+- Master și live: a32bab142cc2cf1eca2b514c92732308232155b2.
+  Release-proof: ready=true, candidate=false, sideEffectsActive=true.
+  Browserul live la 13:06 UTC afișează server a32bab1, UI build 08:56 BST.
+- Deploy: https://github.com/kelion-team/kelionai/actions/runs/33954248146 success.
+  Upgrade Constructor a32 attempt2: https://github.com/kelion-team/kelionai/actions/runs/33954585185 success.
+  PR1660: https://github.com/kelion-team/kelionai/pull/1660.
+- Motor aprobat: OpenCode 1.18.25 / opencode-free/big-pickle. Disponibilitatea
+  motorului nu dovedește încheierea unui ordin. Nu se schimbă modelul/costurile.
+- Repo autoritativ exclusiv VPS vmi3415434:
   /var/tmp/kelion-maintenance.yQKdV92n/repo,
-  branch fix/doctor-vps-live-20260905, bază a32. Exportul unic din laptop
-  este încheiat; nu se mai citesc/editează/testează worktree-uri Windows.
-  SSH și browserul sunt numai clienți. Sesiunea desktop nu este declarată
-  serviciu AI permanent pe VPS.
+  branch fix/doctor-vps-live-20260905, HEAD candidat 29fb004fe3443e546cd36ea10ab29277a3696a59
+  plus modificările necomise monitor/pause/UI. Nu există încă PR pentru train.
+- SSH/browser sunt clienți. Aplicația/codul/testele/artefactele sunt pe VPS.
+  Documentele predate explicit de owner se copiază byte-exact din Windows;
+  nu se lucrează într-un worktree Windows. Sesiunea desktop nu este serviciu VPS.
 
-## Incident pilot #666 și măsura de protecție
+## Ordinul #666: prioritate, nefinalizat
 
-- Creat prin Admin live la 11:02:40.862 UTC pentru parserul Admin Erori.
-  Prima execuție: task codex-f30fe4f1-637d-49b6-86ef-c8e718d38f9a.
-  Modelul a încheiat la 11:24:33.967; gate-ul a refuzat la 11:24:35.061
-  node_modules backend necontrolat, rămas din pregătirea executorului.
-- Backendul a32 a transformat greșit failure în queued, fără Reia, și a
-  preluat din nou la 11:27:05 cu attempts2/cycle0, task
-  codex-a812fe88-1ccf-4344-905c-a6c450c1deaf. La 11:43:19 citirea DB arată
-  din nou queued/technical_failure, task null, updated11:41:30.173.
-  Nu există PR, handoff, commit sau deploy pentru acest pilot.
-- Root a oprit numai kelion-codex-worker.timer pentru a preveni a treia
-  reexecuție. Rămâne enabled, dar inactive; publisher/release sunt active.
-  Execuția a doua nu a fost întreruptă. Nu reporni timerul înaintea
-  remedierii instalate și reconcilierii stricte a cozii.
-- Nu recrea ordinul și nu relansa modelul automat. Reia explicit pornește
-  numai un ciclu nou; istoricul și verdictul terminal se păstrează.
+- Creat live 11:02:40.862Z pentru parserul Admin Erori. Cele două execuții au
+  eșuat după oprirea modelului, la gate, din cauza linkului node_modules backend
+  creat de worker și lăsat în worktree. Nu se atribuie slăbiciunii modelului.
+- Task1 codex-f30fe4f1-637d-49b6-86ef-c8e718d38f9a; task2
+  codex-a812fe88-1ccf-4344-905c-a6c450c1deaf. Backendul a32 a reîncadrat greșit
+  primul eșec drept queued și a reluat fără Reia.
+- DB verificată 12:56:00.637Z: queued/queued, cycle0, attempts2,
+  updated_at11:41:30.173Z, 144 evenimente, niciun pipeline/PR/commit/deploy.
+  Este singurul ordin nearchivat queued/running. Schema live nu conține încă
+  automation_origin; nu rula interogări cu această coloană înainte de migrare.
+- Worker timer: enabled/inactive, oprit intenționat ca să prevină încercarea3.
+  Jurnalul systemd confirmă oprirea la 11:29:33.345Z.
+  Worker inactiv/PID0. Publisher/release timers și controllerul rămân active.
+  Nu se reactivează până la noua tuplă instalată și reconcilierea strictă.
+- Hash evenimente preexistente ordonate:
+  5264db52cbfbbc569b17a2eaaafd20ad09eba8def3916af1f6c2ba69f84f1610.
+  Migrația terminală păstrează istoricul. Reia autorizat explicit folosește
+  același ID cu snapshot proaspăt status+updatedAt; cycle1/attempts0.
+- Notificarea live646 creată 12:30:17.408Z și647 creată13:01:45.972Z au fost
+  văzute în Admin→Notificări în browser. Sunt dovezi istorice de remediere/test;
+  ambele afirmă că #666 nu a avansat. Nu modifică procente/ciclu/încercări.
 
-## Unfinished work: train unificat comis pe VPS, push refuzat
+## Train candidat: implementare înghețată, încă NU live
 
-- Worker: supervisorul deține două linkuri de dependențe, le elimină numai
-  după oprire confirmată. Timeout/error cu exit0 nu este succes. Stop sau
-  cleanup neverificat păstrează worktree-ul și jurnalul, fără rm/prune.
-- DB: failure și watchdog devin terminale; claim admite numai queued,
-  attempts0, fără pipeline. Migrația nouă reconciliază strict vechile
-  auto-requeue-uri cu dovezi, fără a șterge istoric sau receipturi.
-- Doctor: grant permanent revocabil, probe/lease durabile pe backend VPS,
-  protocol2 și manifest al surselor instalate, scope AST limitat la două
-  formattere publice. Chat/audio/cameră/memorie/quota/auth nu sunt declarate
-  autoreparabile. Închiderea cere receipt și reproba pe exact SHA live.
-- UI: registru agenți, opțiune low/high efectivă, ore Europe/London,
-  progres pe etape distinct de activitatea AI și de heartbeat, SHA integral
-  UI/runtime/proof. PWA păstrează asseturile taburilor vechi; nu forțează reload.
-- Admin: remedieri de notificări, statistici cu baseline, istoric,
-  prezență magazine și gesturi. Restul suprafețelor au nevoie de probe live.
-- Restore: fixul ACL root:10050 0750 și regresiile sunt incluse, nu sunt în a32.
-  Comentariul https://github.com/kelion-team/kelionai/pull/1660#discussion_r3939942944
-  nu se închide fără publicarea și dovada corecției.
+- Worker: cleanup numai pentru linkurile proprii, numai după stop confirmat;
+  timeout/error cu exit0 nu este succes. No-auto-retry, watchdog terminal,
+  claim attempts0 fără pipeline; migrare strictă pentru auto-requeue vechi.
+- Pause: marker root-owned durabil și helper comun pentru deploy/upgrade/
+  rollback/boot; unitățile blochează și pornirea directă. Compatibilitate a32
+  numai pe bytes autentici și jurnal bootstrap fail-closed cu fsync.
+  Helper final 51fb7beff6f8396383fbabe806df28ddaadffbd410fc58425f44045aeab5d8fd.
+- Controller: HMAC POST /v1/worker/state, numai systemctl show argumente fixe.
+  Marker verificat cu parent/inode/root ownership/mode/nlink/no-follow; eroarea
+  de citire nu înseamnă sănătate. Nu există endpoint shell/executare.
+- Monitor: interval60s independent în backend VPS, lease, istoric/incidente/
+  responsabil/nextAction. Se disting ultima încercare și ultima verificare
+  reușită; heartbeatul repetat nu este progres real.
+- Remediere externă: owner unic per job/ciclu, UUID, CAS takeover explicit,
+  evenimente deduplicate, baseline inactiv; doar dovadă nouă proaspătă aprinde
+  activitatea maximum60s. Nu scrie în build_jobs. Writerii au acum entrypoint strict root-only stdin livrat în imagine;
+  24 teste CLI reale PASS și review independent aprobat.
+  Fără HTTP/AI/tool, fără dependențe noi, fără inferență sau execuții live.
+- UI: clepsidră la ordin pe activitate validă în ciclul/starea curentă, separat
+  de procent; dispare la offline/eroare/expirare. Snapshot server no-store,
+  timp server și RTT, nu ceas local pentru prospețime. Registry agenți, low/high,
+  ore Europe/London, SHA și PWA old-assets sunt incluse în train.
+- Doctor: backend VPS cu grant revocabil, protocol2, manifest exact, scope AST
+  limitat la două formattere publice. Receipt + reproba exact SHA live obligatorii.
+  Nu se pretinde autoreparare universală chat/audio/cameră/memorie/quota/auth.
+- Admin: remedieri notificări/statistici baseline/istoric/gesturi/magazine.
+  Întreaga aplicație rămâne neacceptată până la probele live ale fiecărei funcții.
 
-## Verificări candidat pe VPS, nu dovezi live
+## Probe preventive pe VPS
 
-- Frontend complet: 425/425 PASS, build și lint PASS (container detached,
-  network none, copie izolată, dependențe pinned). Fără SHA release în buildul
-  de validare; nu este artefact de producție.
-- Worker Linux: 38/38 PASS, zero skip, inclusiv red→green stop-timeout și
-  toate probele POSIX. Self-test și sintaxă PASS.
-- Doctor/wire/build/capability backend: 70/70 PASS. Runtime capability cu
-  /opt sintetic privat: 5/5 PASS; fără acces la instalarea reală.
-- PWA și UI low/high/London: regresii red înainte și green după fix.
-- Backend complet: 1677/1677 PASS, typecheck, build și lint PASS.
-- Static complet: 331/331 PASS, zero skip, trei self-testuri și 11 scannere
-  PASS. Bariera POSIX de publicare a fost executată real ca root izolat.
-- DB/no-auto-retry: 55/55 PASS; două review-uri independente fără blocante.
-- Gitleaks snapshot și bundle: PASS, zero constatări. JSCPD: zero clone în
-  337 fișiere analizate. Istoria Git: 11 constatări, nu este curată.
-- Audit dependențe npm registry: backend, frontend și deploy/gates au zero
-  vulnerabilități inclusiv devDependencies; lockurile au rămas identice.
-- Toate containerele de verificare au încheiat; codul este înghețat.
-  Singura corecție finală a sursei testelor a eliminat un spațiu terminal
-  în doctor-repair-scope.test.mjs; sintaxa și preflightul au trecut.
-- Imaginea gates a32 este numai cache de dependențe pentru aceste teste.
-  Full canonical gates cer imagine nouă din SHA final: backend/package.json
-  s-a schimbat prin generatorul manifestului. Comparația strictă rămâne.
+### Surse finale înainte de adaptorul reporter
 
-## Blockers / owner action
+- Backend1719/1719 teste, 225 fișiere, 376.29s; typecheck/build/lint PASS,
+  zero warning/error, 419 fișiere. Snapshot56818edaeabf46985acef7760a3e70f9b41d47ff01a66affe73efbfd4b0e4d37.
+- Frontend467/467, 83 fișiere, 42.04s; build/tsc/precache/lint PASS,
+  zero warning/error, 224 fișiere. Include46 probe hook HTTP/abort, projection/SSR.
+- Static448/448, zero skip, 165.72s, root mandatory; 10 scanere și3 self-testuri
+  PASS. Scanner exporturi găsise2 writeri neconsumați: remediat prin entrypointul
+  real, nu allowlist. Acum329/329 module accesibile,0 exporturi neconsumate.
+- Pause/publication/recovery250/250 includebootstrap53 și32 cutpoints SIGKILL.
+  Nu se adună rezultate suprapuse.
+- Controller worker-state14/14 PASS, inclusiv marker/parent/race/fd cleanup.
+- Prima probă statică a eșuat din TMPDIR harness /work/tmp. Rerulată în /tmp
+  privat cu aceleași permisiuni/teste:448/448 PASS, fără relaxări.
+- Gitleaks snapshot/bundle anterior29fb:0; istorie Git:11 constatări preexistente.
+  Istoria nu este declarată curată și nu se rescrie. Lockuri npm neschimbate;
+  audit registry anterior:0 vulnerabilități în cele3 arbori.
 
-- AUDIT PREVENTIV, BLOCANT NOU: deploy/deploy.sh:3992-4020 și :4839
-  restaurează timer-ele pe baza markerelor, fără a păstra pauza curentă
-  enabled/inactive. Poate reporni workerul vechi înainte de upgrade separat.
-  deploy/upgrade-constructor.sh:377-405 refuză starea paused la preflight.
-  Codul nu este încă remediat pentru acest caz. NU publica și NU porni timerul
-  ca workaround; remediază conservarea pauzei/ordonarea și adaugă regresii.
-  Protocolul Doctor2 nu blochează global claimurile ownerului.
+### Canonical exact29fb, probă distinctă
 
-- PUBLICARE BLOCATĂ: GitHub a refuzat push-ul ramurii deoarece identitatea
-  OAuth gh existentă pe VPS nu are scope workflow pentru modificările din
-  .github/workflows/build-images.yml. Nicio ramură remote/PR nu a fost creată.
-  Nu s-au schimbat credențialele sau protecțiile și nu s-a încercat ocolirea.
-  Următorul pas necesită autorizarea ownerului pentru reautorizarea GitHub
-  pe VPS cu dreptul workflow; aceasta nu este aprobare individuală de PR.
+- Full gate Docker standard, UID1000, docker-default, networknone, RO,
+  capdropALL: PASS exit0, fărăOOM, 12:43:51–12:55:10UTC (11m19.6s).
+  Backend1677/1677, frontend425/425, build/lint; static330PASS+1SKIP root-only.
+  Proba statică finală448 de mai sus rulează root obligatoriu și nu omite nimic.
+- Log /var/tmp/kelion-canonical-gate.3MJz2Rp9/docker-gates.log
+  SHA531d53d1716bf11e25e1c546e2c4ccd89fa53d65b010ce4eff6c3ab9ecbd44f2.
+- Podman root avusese AppArmor signal denial137, nuOOM. Identitatea reală
+  rootless kelion-codex cu crun existent a trecut SIGTERM și oprirea canonică
+  cu SIGKILL după10s; parent/child dispăruți, zero containere/procese de probă.
+  Nu s-a schimbat runtime sau profil de securitate.
+- Imaginea de TEST poate fi reutilizată pentru sursele finale numai dacă toate
+  intrările Dockerfile/6manifeste/entrypoint/2vendor corespund. Nu conține codul
+  aplicației și nu înlocuiește noua imagine de RELEASE semnată pentru SHA final.
+- GitHub container-isolation rămâne obligatoriu în CI. Nu se rulează fixture-uri
+  cu nume de servicii care ar coliziona cu producția pe VPS.
 
-- Nicio aprobare suplimentară pentru PR/merge/deploy autorizate deja.
-  GitHub cere verify, container-isolation, current-tree, merge-policy,
-  branch actualizat și conversații rezolvate; review_count0, enforce_admins=true.
-  Nu ocoli protecțiile. Nu rezolva conversații fără remediere și dovadă.
-- OpenAI insufficient_quota și Costs/Usage invalid_key rămân nerezolvate.
-  Nu modifica modelul, providerul, credențialele sau facturarea pentru a ascunde.
-- Eventualul nou ciclu pilot necesită Reia explicit după remediere; momentan
-  nu se cere ownerului să repete ordinul sau să aprobe un PR.
+## Publicare și reluare: următorii pași autorizați
 
-## Next ordered steps
+1. Adaptorul root-only și status-proof sunt încheiate, teste și peer review
+   aprobate. Source freeze. Încheie commit/preflight și publică trainul.
+2. Recalculează manifestul, gitdiffcheck, commit, preflight clean/currentmaster,
+   push branch și PR protejat; rebase auto-merge numai pe verde. Nu cere o
+   aprobare manuală suplimentară. Nu bypass checks/conversații.
+3. Push master CI → imagini semnate → deploy autorizat → upgrade-constructor,
+   toate corelate exact cu SHA nou și păstrând markerul de pauză.
+4. Verifică master/live/gates/runtime/DB și cele144 evenimente intacte.
+   După migrare, Reia același666; verifică ordinea reală a cozii și lipsa unui
+   running înainte de clear marker global sub publication lock și start timer.
+5. Urmărește același666 până la gate/handoff/PR/merge/deploy și repetă scenariul
+   Admin Erori în browserul live. Progresul nu este fabricat și nu se repetă AI
+   automat după eșec.
+6. După666 continuă cerințele aprobate din docs/requirements/TRACEABILITY-v1.1.md.
+   Backlogul executanților reutilizabili rămâne separat, fără implementare acum.
 
-1. Obține autorizarea GitHub workflow prin fluxul normal, apoi recitește
-   master și preflightul. Nu schimba identitatea sau tokenurile fără acord.
-   Peer review-ul migrației este încheiat. Remediază blocantul preventiv
-   deploy/upgrade descris mai sus și repetă porțile relevante înainte de PR.
-   Nu porni alt pilot înaintea instalării și probelor live.
-2. Recalculează manifestul din bytes finali; păstrează toate remedierile într-un
-   singur train bazat pe master actual, apoi commit/preflight/PR pe verde.
-3. Build semnat → deploy pe VPS → upgrade atomic al tuplei Constructor.
-   Verifică migrația și coada înainte de reactivarea timerului.
-4. Verifică exact master/producție/live/browser și funcțiile vizibile.
-   Doctorul încă nu este live; niciun „gata” înainte de dovezi.
+## Protecții / limite actuale
 
-## Limite
+- Auth gh VPS persistent rootroot0600, identitatekelion-team cuworkflow scope;
+  nu depinde de laptop. No credential transfer către worker/publisher.
+- GitHub strict/enforceadmins/conversation/linearhistory, review_count0;
+  verify/container-isolation/current-tree/merge-policy obligatorii.
+- Verifierul incident1661 are corecție candidată bounded în
+  scripts/lib/vps-release-verification.mjs, 19/19 și API read-only PASS.
+  Nicio protecție GitHub nu a fost modificată.
+- Comentariul1660#discussion_r3939942944 nu se închide fără corecție publicată.
+- OpenAI insufficient_quota, Admin Costs/Usage invalid_key și Serper necitit
+  rămân reale/nerezolvate. Nu se ascund prin zero inventat sau alt provider.
+- Fără fixture-uri pe host, restart/retry AI orb, force-push, secrete în loguri,
+  progres fabricat sau pretinsă finalizare pe baza testelor de candidat.
 
-Fără teste de fixture pe host, date de producție fabricate, retry AI automat,
-force-push sau ocolire de securitate. Istoria Git are 11 constatări preexistente;
-nu este declarată curată. Un test offline, heartbeat sau merge nu dovedește
-funcționarea completă pe live.
+
+## Freeze final și dovezi suplimentare, 13:15 UTC
+
+- Reporter livrat: backend/dist/constructorRemediationReporter.js, numai register
+  sau report. Operatorul root din containerul activ verificat transmite un JSON
+  stdin {input, expectedExecutionId?}; CAS numai register, maximum8192bytes/5s.
+  Fără override env, HTTP, AI, shell primit sau acces browser. Environment
+  blue/green + SHA + marker activ exact și release guard real; poolclosefinally.
+  66/66 target (24CLI +42existente) PASS, typecheck/build/lint/export PASS.
+  Entry SHA ec2130e26cc88e6534f913a7ce91b45a3ebbc6389127301aaa3b60795eb1dbc8.
+- Status-proof P1: helperul instalat nehashat nu mai este executat. HMAC
+  worker/state de la controller verificat, schema/freshness15s/max2048 și
+  systemctl independent. 5red înainte,22statusgreen/36affectedgreen după,
+  zero skip; peerreview aprobat. SHA bb3bb9e6d3519cad2f3f92fb5fe27d59a6cd132d5f0b3d2e939639e790d57a3b.
+- Cele11 scanere finale pe snapshotul cu reporter au trecut. Containerul
+  kelion-final-integration-20260905T1312 s-a oprit ulterior la self-test numai
+  din lipsa tmpfs /tmp; logSHA19419839fd4bc06a5158224d8c6fa252cab13d90ae3cd7d750d1050d9d48127a.
+  Proba anterioară T1315 s-a oprit înainte de execuție (UID tmpfs nepotrivit).
+  Nu se pretinde că aceste două containere au trecut.
+- Containerul corect kelion-final-bundle-20260905T1313: 13:12:54.481–13:13:49.254Z,
+  exit0/noOOM; toate3 self-testuri, frontend build, Gitleaks snapshot+bundle
+ 50.62MB zero constatări, JSCPD347fișiere zero clone. LogSHA
+  8ca6706ea058ecede072d995186b4c8f8afb4302d7ee7c9a7af906e7e351790d.
+  Rootfs RO/networknone/capdropALL și tmpfs private; niciun fixture pe host.
+- Monitorul doar observă și notifică; nu atribuie automat un executor Codex.
+  Reporterul atestă activitatea operatorului, nu repară. Doctorul candidat
+  are scope limitat2module publice; #666 este în afara lui. Nu există încă
+  executor autonom general incident→reparație. Codex coordonează această
+  remediere pe VPS; supravegherea nu este declarată autoreparare universală.
+- Backlogul executanților reutilizabili este separat, neimplementat:
+  docs/backlog/approved/2026-09-05/De-facut-Kelion-executanti-reutilizabili.md,
+  SHA79122855c4c0eaf15f59d65b483dcd69988a19925ad58c64235bce8ecebbfe87.

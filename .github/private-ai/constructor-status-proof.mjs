@@ -77,7 +77,7 @@ function command(file, args, input) {
   }).trim()
 }
 
-function boundedJSON(requestFn, options, body) {
+function boundedJSON(requestFn, options, body, { maxBytes = MAX_BYTES } = {}) {
   return new Promise((resolve, reject) => {
     let complete = false
     let request
@@ -97,7 +97,7 @@ function boundedJSON(requestFn, options, body) {
       const chunks = []
       response.on('data', (chunk) => {
         length += chunk.length
-        if (length > MAX_BYTES) return finish(new Error('proof_response_limit'))
+        if (length > maxBytes) return finish(new Error('proof_response_limit'))
         chunks.push(chunk)
       })
       response.on('error', () => finish(new Error('proof_response_failed')))
@@ -183,23 +183,51 @@ export async function installedProof(args) {
   const auth = await import(pathToFileURL(LAYOUT[1][1]).href)
   const model = controller.validateProviderConfig(JSON.parse(readFileSync(LAYOUT[4][1], 'utf8')))
   if (command('/usr/bin/node', [LAYOUT[0][1], '--verify-runtime-binary']) !== 'OPENCODE_BINARY_VERIFIED=yes') throw new Error('binary_unverified')
-  const body = Buffer.from('{}')
-  const timestamp = String(Math.floor(Date.now() / 1000))
-  const nonce = randomUUID()
-  const path = '/v1/model/state'
-  const state = await boundedJSON(httpRequest, {
-    socketPath: controller.CONTROL_SOCKET, path, method: 'POST',
-    headers: { 'content-type': 'application/json', 'content-length': String(body.length),
-      'x-kelion-timestamp': timestamp, 'x-kelion-nonce': nonce,
-      'x-kelion-signature': auth.signServiceRequest(auth.readServiceSecret(controller.CONTROL_SECRET), timestamp, nonce, 'POST', path, body) },
-  }, body)
-  const readiness = validateControllerState(state, model)
+  const requestState = async (path, maxBytes = MAX_BYTES) => {
+    const body = Buffer.from('{}')
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    const nonce = randomUUID()
+    return boundedJSON(httpRequest, {
+      socketPath: controller.CONTROL_SOCKET, path, method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(body.length),
+        'x-kelion-timestamp': timestamp, 'x-kelion-nonce': nonce,
+        'x-kelion-signature': auth.signServiceRequest(auth.readServiceSecret(controller.CONTROL_SECRET), timestamp, nonce, 'POST', path, body) },
+    }, body, { maxBytes })
+  }
+  const readiness = validateControllerState(await requestState('/v1/model/state'), model)
+  // Only the already byte-verified controller observes host state. Never execute
+  // another installed helper whose source was not authenticated by LAYOUT.
+  const host = await requestState('/v1/worker/state', 2048)
+  const exact = (value, keys) => value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key))
+  const measuredAt = typeof host?.measuredAt === 'string' ? Date.parse(host.measuredAt) : NaN
+  const fresh = () => Number.isFinite(measuredAt) && measuredAt <= Date.now() && Date.now() - measuredAt <= 15_000
+  if (!exact(host, ['schema', 'measuredAt', 'worker', 'intentionalPause', 'deployGate'])
+    || host.schema !== 1 || !fresh() || new Date(measuredAt).toISOString() !== host.measuredAt
+    || typeof host.intentionalPause !== 'boolean' || host.deployGate !== false
+    || !exact(host.worker, ['timer', 'service', 'mainPid'])
+    || !['active', 'inactive', 'failed'].includes(host.worker.timer)
+    || !['active', 'activating', 'inactive', 'failed'].includes(host.worker.service)
+    || !Number.isSafeInteger(host.worker.mainPid) || host.worker.mainPid < 0
+    || (['inactive', 'failed'].includes(host.worker.service) && host.worker.mainPid !== 0)
+    || (host.intentionalPause
+      ? host.worker.timer !== 'inactive' || !['inactive', 'failed'].includes(host.worker.service)
+      : host.worker.timer !== 'active')) throw new Error('worker_state_unverified')
+  const workerPause = host.intentionalPause ? 'paused' : 'unpaused'
   const services = {}
   for (const unit of ['kelion-constructor-model-control.service', 'kelion-codex-worker.timer',
     'kelion-constructor-publisher.timer', 'kelion-constructor-release.timer']) {
     services[unit] = command('/usr/bin/systemctl', ['show', unit, '--property=ActiveState', '--value'])
-    if (services[unit] !== 'active') throw new Error('constructor_service_not_active')
+    const expected = unit === 'kelion-codex-worker.timer' && workerPause === 'paused' ? 'inactive' : 'active'
+    if (services[unit] !== expected) throw new Error('constructor_service_state_mismatch')
   }
+  if (command('/usr/bin/systemctl', ['show', 'kelion-codex-worker.timer',
+    '--property=UnitFileState', '--value']) !== 'enabled') throw new Error('worker_timer_not_enabled')
+  if (command('/usr/bin/systemctl', ['show', 'kelion-codex-worker.service',
+    '--property=ActiveState', '--value']) !== host.worker.service
+    || command('/usr/bin/systemctl', ['show', 'kelion-codex-worker.service',
+      '--property=MainPID', '--value']) !== String(host.worker.mainPid)
+    || !fresh()) throw new Error('worker_host_state_mismatch')
   // These retired identities must never retain root escalation into the host.
   for (const path of ['/etc/sudoers.d/kelion-constructor-full-access',
     '/etc/sudoers.d/kelion-local-qwen-constructor',
@@ -210,7 +238,14 @@ export async function installedProof(args) {
     catch (error) { if (error?.code !== 'ENOENT') throw error }
   }
   const result = { schema: 1, measuredAt: new Date().toISOString(), kind: 'constructor-readiness-proof',
-    readOnly: true, inferenceRequests: 0, readiness, services, endToEnd: false }
+    readOnly: true, inferenceRequests: 0, readiness, services, workerPause, endToEnd: false }
+  if (workerPause === 'paused') {
+    // A deliberate pause is observable status, never readiness or completed work.
+    // Even a requested job proof remains incomplete until the worker is resumed.
+    result.kind = 'constructor-paused-status'
+    result.readiness = { status: 'paused', model: { ...model } }
+    return result
+  }
   if (jobId !== 'status') {
     const container = activeContainer()
     const row = JSON.parse(command('/usr/bin/docker', ['exec', '-i', container,
@@ -228,7 +263,10 @@ export async function installedProof(args) {
 }
 
 if (process.argv[2] === '--installed') {
-  installedProof(process.argv.slice(3)).then((value) => process.stdout.write(JSON.stringify(value) + '\n'))
+  installedProof(process.argv.slice(3)).then((value) => {
+    process.stdout.write(JSON.stringify(value) + '\n')
+    if (value.readiness.status === 'paused') process.exitCode = 1
+  })
     .catch(() => {
       // No raw exceptions, process argv, environment or provider/user logs leave VPS.
       process.stdout.write(JSON.stringify({ schema: 1, measuredAt: new Date().toISOString(),

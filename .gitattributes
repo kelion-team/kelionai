@@ -3,3 +3,8 @@
 # iar `.` în JS nu se potrivește cu `\r` → comentariile nu se curăță, regex-urile
 # cu `\n` nu se potrivesc). Standard pentru repo-uri cross-platform.
 * text=auto eol=lf
+
+# Approved evidence copies are immutable bytes; Markdown hard breaks are original.
+# No runtime/code whitespace checks are changed.
+docs/requirements/approved/2026-09-05/*.md -text whitespace=-blank-at-eol
+docs/backlog/approved/2026-09-05/*.md -text whitespace=-blank-at-eol
