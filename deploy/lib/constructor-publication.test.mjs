@@ -1,4 +1,6 @@
 import test from 'node:test'
+import './constructor-upgrade-cleanup.test.mjs'
+import './constructor-recovery-postproof.test.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -1771,7 +1773,7 @@ if restore_runtime_controller_or_quiesce; then exit 90; fi`
   const deploy = read('deploy/deploy.sh')
   const releaseRestore = shellFunction(deploy, 'restore_constructor_after_release')
   assert.match(releaseRestore,
-    /kelion-runtime-config-recovery\.service[\s\S]*kelion-constructor-model-control\.service[\s\S]*control\.sock[\s\S]*0:10050:660/)
+    /constructor_recovery_unit_postproof[\s\S]*kelion-constructor-model-control\.service[\s\S]*control\.sock[\s\S]*0:10050:660/)
 })
 
 test('reactivarea păstrează un intent persistent până după controller și toate timerele', () => {

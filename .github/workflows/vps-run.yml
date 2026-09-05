@@ -492,16 +492,44 @@ jobs:
             && grep -qx "$source_commit" "$active_marker"
           work=''
           cleanup_remote() {
-            local rc=$? cleanup_failed=0
+            local rc=$? cleanup_failed=0 unit operation load_state active_state jobs suffix
             trap - ERR EXIT
             set +e
-            rm -f -- "$bundle" || cleanup_failed=1
-            systemctl stop "$cleanup_unit.timer" >/dev/null 2>&1 || cleanup_failed=1
-            systemctl stop "$cleanup_unit.service" >/dev/null 2>&1 || cleanup_failed=1
-            systemctl reset-failed "$cleanup_unit.service" >/dev/null 2>&1 || cleanup_failed=1
+            cleanup_problem() {
+              cleanup_failed=1
+              printf '{"ok":false,"event":"constructor_upgrade_cleanup_failure","component":"%s"}\n' "$1" >&2
+            }
+            rm -f -- "$bundle" || cleanup_problem bundle-removal
+            # Transient units may be garbage-collected immediately after stop.
+            # Only a successful not-found query makes a nonzero stop/reset benign;
+            # transport errors, surviving units and filesystem failures remain red.
+            for operation in stop reset-failed; do
+              for suffix in timer service; do
+                [ "$operation:$suffix" != reset-failed:timer ] || continue
+                unit=$cleanup_unit.$suffix
+                if ! systemctl "$operation" "$unit" >/dev/null 2>&1; then
+                  load_state=$(systemctl show "$unit" --property=LoadState --value 2>/dev/null) || load_state=query-failed
+                  [ "$load_state" = not-found ] || cleanup_problem "$suffix-$operation"
+                fi
+              done
+            done
+            for suffix in timer service; do
+              unit=$cleanup_unit.$suffix
+              load_state=$(systemctl show "$unit" --property=LoadState --value 2>/dev/null) || load_state=query-failed
+              case "$load_state" in
+                not-found) ;;
+                loaded)
+                  active_state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) || active_state=query-failed
+                  [ "$active_state" = inactive ] || cleanup_problem "$suffix-state"
+                  ;;
+                *) cleanup_problem "$suffix-query" ;;
+              esac
+              jobs=$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null) || jobs=query-failed
+              [ -z "$jobs" ] || cleanup_problem "$suffix-jobs"
+            done
             if [[ "$work" =~ ^/root/kelion/runtime/constructor-upgrade-source\.[A-Za-z0-9]+$ ]] \
               && [ -d "$work" ] && [ ! -L "$work" ]; then
-              rm -rf --one-file-system -- "$work" || cleanup_failed=1
+              rm -rf --one-file-system -- "$work" || cleanup_problem source-removal
             fi
             if [ "$rc" = 0 ] && [ "$cleanup_failed" != 0 ]; then rc=1; fi
             exit "$rc"

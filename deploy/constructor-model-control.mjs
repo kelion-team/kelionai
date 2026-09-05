@@ -5,9 +5,10 @@ import https from 'node:https'
 import { spawn } from 'node:child_process'
 import {
   closeSync, chmodSync, constants as fsConstants, existsSync, fstatSync,
-  openSync, lstatSync, readFileSync, realpathSync, unlinkSync,
+  openSync, lstatSync, readFileSync, realpathSync, unlinkSync, mkdirSync, mkdtempSync, rmSync,
 } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { createServiceVerifier, readServiceSecret, requireRequestId } from './lib/service-auth.mjs'
 
@@ -106,21 +107,60 @@ function exactRawJson(raw, value) {
 export function runCommand(command, args, timeoutMs = 30_000) {
   return new Promise((resolvePromise) => {
     let child
+    let timer
+    let settled = false
+    let versionHome = null
+    let versionHomeIdentity = null
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (versionHome !== null) {
+        try {
+          const current = lstatSync(versionHome)
+          if (!versionHomeIdentity || !current.isDirectory() || current.isSymbolicLink()
+            || current.dev !== versionHomeIdentity.dev || current.ino !== versionHomeIdentity.ino
+            || current.uid !== versionHomeIdentity.uid || (current.mode & 0o777) !== 0o700
+            || realpathSync(versionHome) !== versionHome) throw new Error('version_home_changed')
+          // Only the exact mkdtemp-created directory is removed, never HOME,
+          // /tmp, a caller-supplied path, or a replaced/symlinked target.
+          rmSync(versionHome, { recursive: true, force: false })
+        } catch { result = { ...result, failed: true } }
+      }
+      resolvePromise(result)
+    }
     try {
+      let env = SAFE_ENV
+      if (command === OPENCODE_BIN && args.length === 1 && args[0] === '--version') {
+        // OpenCode/Bun initializes XDG directories even for --version. The
+        // controller keeps ProtectHome/ProtectSystem; its private /tmp hosts
+        // one empty, owner-only home per version probe, with no credentials.
+        versionHome = mkdtempSync(join(realpathSync(tmpdir()), 'kelion-constructor-version-'))
+        versionHomeIdentity = lstatSync(versionHome)
+        if (!versionHomeIdentity.isDirectory() || versionHomeIdentity.isSymbolicLink()
+          || (versionHomeIdentity.mode & 0o777) !== 0o700
+          || (process.getuid && versionHomeIdentity.uid !== process.getuid())
+          || realpathSync(versionHome) !== versionHome) throw new Error('version_home_invalid')
+        const xdg = { XDG_CACHE_HOME: 'cache', XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_STATE_HOME: 'state', XDG_RUNTIME_DIR: 'runtime' }
+        env = { ...SAFE_ENV, HOME: versionHome }
+        for (const [key, directory] of Object.entries(xdg)) {
+          env[key] = join(versionHome, directory)
+          mkdirSync(env[key], { mode: 0o700 })
+        }
+      }
       child = spawn(command, args, {
-        env: SAFE_ENV,
+        env,
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       })
     } catch {
-      resolvePromise({ code: null, signal: null, stdout: '', failed: true })
+      finish({ code: null, signal: null, stdout: '', failed: true })
       return
     }
     const chunks = []
     let bytes = 0
     let failed = false
-    let settled = false
     const append = (chunk) => {
       if (failed) return
       bytes += chunk.length
@@ -131,22 +171,16 @@ export function runCommand(command, args, timeoutMs = 30_000) {
     }
     child.stdout.on('data', append)
     child.stderr.on('data', () => undefined)
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       failed = true
       child.kill('SIGKILL')
     }, timeoutMs)
     timer.unref()
     child.once('error', () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolvePromise({ code: null, signal: null, stdout: '', failed: true })
+      finish({ code: null, signal: null, stdout: '', failed: true })
     })
     child.once('close', (code, signal) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolvePromise({
+      finish({
         code,
         signal,
         stdout: Buffer.concat(chunks).toString('utf8').trim(),

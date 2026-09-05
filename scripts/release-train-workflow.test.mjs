@@ -368,6 +368,42 @@ test('handoff identities are verified by a mandatory isolated read-only containe
   assert.match(probe, /--test \/probe\/deploy\/lib\/constructor-handoff-permissions\.test\.mjs/)
 })
 
+test('real pinned OpenCode HOME regression is a mandatory isolated CI gate', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/pr-verify.yml', import.meta.url), 'utf8')
+  const controller = await readFile(new URL('../deploy/constructor-model-control.mjs', import.meta.url), 'utf8')
+  const start = workflow.indexOf('      - name: OpenCode version probe cu HOME privat în rootfs read-only')
+  const end = workflow.indexOf('\n      - name:', start + 1)
+  assert.ok(start > workflow.indexOf('\n  container-isolation:') && end > start)
+  const probe = workflow.slice(start, end)
+  assert.doesNotMatch(probe, /continue-on-error|\|\|\s*true|\n\s+if:|--cap-add|sudo|install-private-ai/)
+  const version = controller.match(/^const OPENCODE_VERSION = '([^']+)'$/m)?.[1]
+  const binarySha = controller.match(/^const OPENCODE_SHA256 = '([a-f0-9]{64})'$/m)?.[1]
+  assert.equal(version, '1.18.25')
+  assert.equal(binarySha, 'd91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb')
+  assert.ok(probe.includes(`https://github.com/anomalyco/opencode/releases/download/v${version}/opencode-linux-x64-baseline.tar.gz`))
+  const archiveCheck = probe.indexOf('ccd10586611b598b1eaed7c05cfbcbc68e3ec09e736b360da09b1d615d922968')
+  const extraction = probe.indexOf('tar -xzOf "$probe_dir/opencode.tar.gz" opencode > "$probe_dir/opencode"')
+  const executableCheck = probe.indexOf(binarySha)
+  const container = probe.indexOf('docker run ')
+  assert.ok(archiveCheck >= 0 && extraction > archiveCheck && executableCheck > extraction && container > executableCheck)
+  assert.equal((probe.match(/sha256sum --check --strict -/g) || []).length, 2)
+  assert.match(probe, /--proto '=https' --proto-redir '=https' --tlsv1\.2/)
+  assert.match(probe, /mktemp -d "\$\{RUNNER_TEMP\}\/kelion-opencode-version\.XXXXXXXX"/)
+  assert.match(probe, /trap cleanup EXIT/)
+  assert.match(probe, /test -f "\$probe_dir\/opencode" && test ! -L "\$probe_dir\/opencode"/)
+  assert.doesNotMatch(probe.slice(0, container), /(?:^|\n)\s*(?:exec\s+)?["']?\$probe_dir\/opencode["']?\s+--/)
+  for (const flag of ['--read-only', '--network none', '--cap-drop ALL', '--security-opt no-new-privileges', '--user 0:0', '--memory 256m', '--pids-limit 96', '--cpus 2']) {
+    assert.ok(probe.includes(flag), flag)
+  }
+  assert.match(probe, /src="\$probe_dir\/opencode",dst=\/opt\/private-ai\/bin\/opencode,readonly/)
+  for (const file of ['constructor-model-control.mjs', 'constructor-model-control-home.test.mjs', 'lib/service-auth.mjs']) {
+    assert.ok(probe.includes(`src="$PWD/deploy/${file}",dst=/probe/deploy/${file},readonly`), file)
+  }
+  assert.match(probe, /--entrypoint node kelion-ci-app:\$\{GITHUB_SHA\}/)
+  assert.match(probe, /--test \/probe\/deploy\/constructor-model-control-home\.test\.mjs/)
+  assert.ok(!staticGateTests(staticGateStep(workflow)).includes('deploy/constructor-model-control-home.test.mjs'))
+})
+
 test('critical App regressions remain present, executable and unskipped', async () => {
   const manifestUrl = new URL('../config/regression-seal-v1.json', import.meta.url)
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'))

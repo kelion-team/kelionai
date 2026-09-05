@@ -3965,6 +3965,30 @@ classify_gate_prepared_failure() {
   gate_matches_active_release=0
 }
 
+constructor_recovery_unit_postproof() {
+  local unit=kelion-runtime-config-recovery.service expected property actual state substate jobs
+  # The canonical CLI helper has just succeeded under the publication lock.
+  # Its oneshot boot wrapper may legitimately be inactive/dead after the
+  # installer stopped it. Starting it here would wait on this same lock;
+  # wrapper liveness is not proof of the already completed CLI execution.
+  actual=$(LC_ALL=C stat -c '%F:%u:%g:%a:%h' "$SYSTEMD_UNIT_ROOT/$unit") || return 1
+  [ "$actual" = 'regular file:0:0:444:1' ] || return 1
+  cmp -s -- "$BUNDLE_DIR/systemd/$unit" "$SYSTEMD_UNIT_ROOT/$unit" || return 1
+  for expected in \
+    "FragmentPath=$SYSTEMD_UNIT_ROOT/$unit" 'DropInPaths=' 'LoadState=loaded' \
+    'NeedDaemonReload=no' 'UnitFileState=enabled' 'Type=oneshot' \
+    'RemainAfterExit=yes' 'Result=success' 'ExecMainStatus=0' 'MainPID=0'; do
+    property=${expected%%=*}
+    actual=$(systemctl show "$unit" "--property=$property" --value) || return 1
+    [ "$actual" = "${expected#*=}" ] || return 1
+  done
+  state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+  substate=$(systemctl show "$unit" --property=SubState --value) || return 1
+  case "$state:$substate" in active:exited|inactive:dead) ;; *) return 1 ;; esac
+  jobs=$(systemctl list-jobs --no-legend --plain "$unit") || return 1
+  [ -z "$jobs" ]
+}
+
 restore_constructor_after_release() {
   local index timer marker failed=0
   [ "$constructor_release_quiesced" = 1 ] || return 0
@@ -3979,7 +4003,7 @@ restore_constructor_after_release() {
   exec 9>&-
   if [ "$failed" = 0 ]; then
     systemctl daemon-reload || failed=1
-    systemctl is-active --quiet kelion-runtime-config-recovery.service || failed=1
+    constructor_recovery_unit_postproof || failed=1
     systemctl is-active --quiet kelion-constructor-model-control.service || failed=1
     [ -S /run/kelion-constructor-model-control/control.sock ] \
       && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
@@ -4011,6 +4035,7 @@ reconcile_constructor_after_completed_release() {
     --recover-only "$ROOT/config/compose.production.yml" || failed=1
   exec 9>&-
   if [ "$failed" = 0 ]; then
+    constructor_recovery_unit_postproof || failed=1
     for index in "${!constructor_release_timers[@]}"; do
       timer=${constructor_release_timers[$index]}
       marker=${constructor_release_markers[$index]}
