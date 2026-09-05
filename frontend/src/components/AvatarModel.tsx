@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
-import { fetchDisabledGestures, GESTURE_CATALOG } from '../lib/gestures'
+import { watchDisabledGestures, GESTURE_CATALOG } from '../lib/gestures'
 
 // ── FACIAL EXPRESSIONS (ARKit blendshapes) — kept from the constructor's "avatar
 // v2.3" release (its good part: the face on morphs, allowed), while
@@ -292,16 +292,13 @@ export default function AvatarModel() {
   }, [scene])
 
   // Ce gesturi a scos Adrian din Admin → Gesturi (public /api/gestures/state).
-  // Reloaded every 30s, so panel changes take effect without a reload.
+  // Salvările confirmate se aplică imediat; pollingul păstrează sincronizarea între clienți.
   useEffect(() => {
     // null = politica nu poate fi demonstrată: blocăm întregul catalog. Asta
     // acoperă și prima citire, când nu există încă o ultimă listă bună.
-    const load = (): void => void fetchDisabledGestures().then((list) => {
+    return watchDisabledGestures((list) => {
       disabledG.current = new Set(list ?? GESTURE_CATALOG.map(({ clip }) => clip))
     })
-    load()
-    const id = window.setInterval(load, 30_000)
-    return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {

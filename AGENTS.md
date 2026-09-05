@@ -13,6 +13,19 @@ citește mai întâi `docs/operations/CURRENT.md`. Actualizează-l înainte de a
 numai starea curentă verificată și următorul pas sigur; nu copiază loguri,
 secrete sau presupuneri din conversație.
 
+Ownerul cere explicit execuție independentă de laptop: mentenanța, editările,
+testele și artefactele acestui release se lucrează pe VPS într-un repository
+izolat, nu într-un worktree Windows. SSH și browserul sunt numai clienți de
+control/observare. Constructorul, Doctorul și reluările downstream permise
+trebuie supravegheate pe server, cu stare durabilă; nu depind de un terminal,
+tab sau sesiune Codex deschisă. O sesiune AI desktop nu se declară migrată pe
+VPS doar pentru că transmite comenzi SSH.
+
+Înaintea următorului ordin pilot, verifică integral compatibilitatea coadă →
+claim → executor → cleanup → porți → handoff → publisher → release → UI,
+inclusiv eșec, timeout și restart. Proba live confirmă analiza și regresiile;
+nu înlocuiește auditul preventiv al interfețelor dintre componente.
+
 ## Invariante de produs
 
 - OpenAI Responses este singurul creier online al conversației Kelion. OpenAI
@@ -111,6 +124,14 @@ unor loguri noi sau trecerea testelor locale nu reprezintă dovadă de remediere
 
 Regula completă și setările GitHub cerute ownerului sunt în
 `docs/RELEASE-TRAIN.md`.
+
+Actualizările de branch, conflictele, conversațiile de review nerezolvate și
+celelalte blocaje se tratează obligatoriu prin procedura din același document.
+Fiecare corecție păstrează identitatea dovezilor și repetă verificările cerute
+pentru noul head. Nu marca o conversație rezolvată fără răspuns și dovadă.
+Urmărește permanent branch → master → release de producție → live → buildul
+încărcat în browser; comparația se face pe commituri și manifeste, nu doar pe
+eticheta semantică sau oră. Orice diferență rămâne vizibilă până la reconciliere.
 
 ## Calitatea codului
 

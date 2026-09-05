@@ -39,9 +39,12 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
 | `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
 | `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
+| `admin/AdminVizitatori.tsx` | vizite agregate în perioada internă, fără persoane unice inventate sau date individuale; indisponibil separat de zero măsurat |
 | `admin/ConstructorJobProgress.tsx` | progres din etape persistente, necunoscut fără procent; 100% numai cu dovadă live exactă |
 | `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, motor Constructor configurat separat, modele OpenAI ale produsului) |
+| `admin/AdminAgentRegistry.tsx` | registrul canonic owner-only: grupuri integrated/custom din backend, reîncărcare după creare, fără activitate permanentă presupusă |
 | `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
+| `admin/AdminDoctor.tsx` | un singur panou Doctor în Sistem: observații backend, autorizare permanentă sau temporară revocabilă, limită pe fereastră, progres Constructor canonic și închidere cu dovadă live |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |
 | `AvatarModel.tsx` | model, animații, lip-sync și micro-expresii comandate |
@@ -63,6 +66,7 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | `VisitorChatWidget.tsx` | chat public cu sesiune cookie HttpOnly |
 | `WalletButton.tsx` | sold server-side, scutire și prompt de plată |
 | `WorkClock.tsx` | timp de lucru măsurat |
+| `VersionBadge.tsx` | SHA complet compilat în UI comparat cu runtime și două probe ale release-ului activ; build și pornire distincte, ore Europe/London cu GMT/BST; necunoscut la citire invalidă, fără reload automat |
 
 ### Biblioteci — identitate, transport și date
 
@@ -72,6 +76,11 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 - `conexiune.ts`, `retea.ts`, `latency.ts`, `watchdog.ts`, `energie.ts`, `usePolledJson.ts`, `updateCheck.ts`: conectivitate, măsurare și lifecycle PWA.
 - `versionEvidence.ts`: validarea datelor `/api/version` și formatarea orelor build/pornire în Europe/London; `versionEvidence.test.ts` verifică GMT/BST, ambele tranziții DST, date invalide și citiri eșuate. Acceptarea live cere compararea commitului afișat cu release-proof după deploy; data pornirii nu este numită data deploy-ului.
 - `billing.ts`, `praguri.ts`: penny integers, politică server-side, reminder și istoric strict.
+- `versionEvidence.ts`: comparație SHA complet UI/runtime/release activ cu citire înainte și după, validare timestamp ISO, formatare Europe/London, separare build/pornire; fără timestamp curent drept fallback de versiune.
+- `adminHistory.ts`: paginare canonică a istoricului, cursor compus server-side și date recente implicit, fără trunchiere permanentă la primele mesaje.
+- `adminStatistics.ts`: agregate măsurate și perioadă internă nouă numai cu ACK nedestructiv și timestamp server; costurile furnizorilor și istoricul sunt păstrate.
+- `agentRegistry.ts`: citire și validare metadata admin din registrul A2A existent, refuzul dublurilor/absenței dovezii fără listă goală fictivă.
+- `doctor.ts`: contract strict Doctor, autorizare explicită/revocare și verificare fără armare; refuză închiderile fără SHA live și reproba sănătoasă a aceluiași simptom.
 - `admin.ts`: contractele API admin; `adminConstructorContract.ts`: validarea strictă a snapshoturilor, diagnosticelor și confirmărilor Constructor din Admin; `constructorContract.ts`: stările și dovezile canonice comune panoului Admin și monitorului Stage; `deployProgress.ts`: contract unic pentru polling/SSE de release; `errorReport.ts`: raportare redactată; `vizita.ts`: vizită agregată fără fingerprint.
 - `markdown.ts`: DOMPurify; `workspace.ts`: taskuri monitor, iframe allowlist și CSP playground; `tradingBridge.ts`: origin/source binding pentru iframe-ul Trading; `theme.ts`, `ceas.ts`, `wakelock.ts`, `notificari.ts`, `pushTelefon.ts`: utilitare UI/runtime.
 
@@ -150,6 +159,7 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | C24 | Mod mașină | start/stop/mic | UI voice-first; live unic; exit accesibil |
 | C25 | Avatar/media | gest, vorbire, dans, muzică | animațiile reale răspund la eveniment/audio; fără polling de „emoție” falsă |
 | C26 | PWA | update disponibil | aplicare numai la gest, fără hard-reset/cache clear |
+| C27 | Versiune | build UI / runtime / release | SHA complet identic în cele trei surse și release activ stabil înainte/după citire pentru verde; orice probă lipsă rămâne neverificată; build/pornire în London GMT/BST, fără schimbare automată a chatului |
 
 ## Matrice live — kit offline și recuperare
 
@@ -185,11 +195,12 @@ Niciun model local nu este selectabil pe traseul cloud. Kitul mobil implicit est
 | A08 | Tokenuri/env | refresh | numai prezență/status, niciun secret în DOM/log |
 | A09 | Recovery | list/save/restore | eroare body afișată; mutații doar în staging |
 | A10 | Constructor | evaluate/send/cancel/retry/clean | worker OpenCode/Qwen local, status și progres reale; idempotency și autoritate server |
-| A11 | Agent specializat | create | numai formular React → POST JSON `/api/enterprise/agent-nou`; fără consolă HTML paralelă |
+| A11 | Agent specializat | create/list/refresh | numai formular React → POST JSON `/api/enterprise/agent-nou`; ACK explicit apoi registru A2A owner-only recitit, grupuri integrated/custom din server, DB indisponibil nu devine listă goală; fără consolă HTML sau roster client paralel |
 | A12 | Creier | afișare | OpenAI read-only; trepte din GET, fără selector/POST/KV mutabil |
 | A13 | OpenCode local | heartbeat/setup/model | workerul dovedește OpenCode `1.18.25`, endpointul llama.cpp loopback și Qwen3.6-35B-A3B fixat; nu există cheie OpenAI, login/cache Codex, task URL extern sau secret AI în DOM/DB/log |
 | A14 | Separare AI | capabilități | Constructorul folosește numai Qwen local fără cheie ori cost cloud afișat; Realtime/TTS/image/video ale produsului rămân exclusiv server-side și debitul Kelion admin rămâne zero din `/balance` |
 | A15 | VPS/diagnostic | citire/autoverificare | status real, eșec explicit; fără restart/deploy VPS direct din browser |
+| A16 | Sistem/Doctor | citire/verificare/autorizare/revocare | GET nu autorizează; fereastra și limita vin de la server; niciun 100% fără progres canonic și nicio închidere fără SHA live exact și reproba simptomului; revocarea oprește intake-ul, nu inversează publicarea |
 
 ## Matrice live — native și securitate
 

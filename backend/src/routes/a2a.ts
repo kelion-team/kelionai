@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { randomUUID } from 'node:crypto'
-import { rosterViu, gasesteAgentViu, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
-import { getSessionUser } from '../session.js'
+import { rosterViu, adminAgentRegistry, gasesteAgentViu, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
+import { getSessionUser, type SessionUser } from '../session.js'
 import { debitWalletMinorAtomar, grantCreditMinor, recordCost } from '../db.js'
 import { config } from '../config.js'
 import { esteAdminKelion } from '../services/adminIdentity.js'
+import { publicAgentRoster } from '../services/publicAgentContract.js'
 
 // ── ENDPOINTUL AGENȚILOR A2A ────────────────────────────────────────────────
 //
@@ -22,6 +23,10 @@ import { esteAdminKelion } from '../services/adminIdentity.js'
 // Doar cărțile sunt publice. Execuția cere sesiune și trece prin billing.
 
 const MAX_TEXT = 8_000 // hardcod-permis: plafon tehnic anti-abuz pentru o sarcină A2A
+
+function verifiedOwner(user: SessionUser | null): boolean {
+  return user?.role === 'admin' && user.authProvider === 'google' && esteAdminKelion(user.email)
+}
 
 function mesajId(): string {
   return `m_${randomUUID()}`
@@ -50,16 +55,17 @@ export function extrageText(body: Record<string, unknown>): string {
 }
 
 export async function a2aRoutes(app: FastifyInstance): Promise<void> {
-  // Registrul: dovada că agenții există și sunt accesibili (verificare live).
-  // Rosterul VIU = codul + agenții puși de owner din admin (4 aug).
+  // Discovery proves the configured roster, not successful agent execution.
   app.get('/api/a2a', async (req, reply) => {
     reply.header('Cache-Control', 'private, no-store')
     const user = getSessionUser(req)
-    const owner = user !== null && esteAdminKelion(user.email)
-    const roster = (await rosterViu()).filter((a) => !a.doarAdmin || owner)
-    return {
-      count: roster.length,
-      agents: roster.map((a) => ({ id: a.id, nume: a.nume, rol: a.rol, url: `/api/a2a/${a.id}` })),
+    const owner = verifiedOwner(user)
+    try {
+      const roster = (await rosterViu(owner)).filter((a) => !a.doarAdmin || owner)
+      const publicRoster = publicAgentRoster(roster)
+      return owner ? { ...publicRoster,adminRegistry:adminAgentRegistry(roster) } : publicRoster
+    } catch {
+      return reply.code(503).send({ error:'agent_registry_unavailable' })
     }
   })
 
@@ -68,7 +74,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
     reply.header('Cache-Control', 'private, no-store')
     const a = await gasesteAgentViu((req.params as { id: string }).id)
     const user = getSessionUser(req)
-    if (!a || (a.doarAdmin && (!user || !esteAdminKelion(user.email)))) {
+    if (!a || (a.doarAdmin && !verifiedOwner(user))) {
       reply.code(404)
       return { error: 'agent necunoscut' }
     }
@@ -88,6 +94,13 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
       if (esteRpc) return rpcEroare(body.id, -32001, 'autentificare necesară')
       return reply.code(401).send({ error: 'unauthorized' })
     }
+    const adminExempt = verifiedOwner(user)
+    // Email-keyed billing and personal tools cannot receive the configured
+    // owner identity from a local/non-admin session. Fail closed before either.
+    if (esteAdminKelion(user.email) && !adminExempt) {
+      if (esteRpc) return rpcEroare(body.id, -32003, 'identitate Google de admin necesară')
+      return reply.code(403).send({ error:'forbidden' })
+    }
     if (esteRpc && body.method !== 'message/send') return rpcEroare(body.id, -32601, 'metodă nesuportată')
 
     if (!a) {
@@ -100,7 +113,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
     // admin"): endpointul e public pentru restul rosterului, dar aceștia refuză
     // orice apel fără sesiunea ownerului; descoperirea păstrează aceeași limită.
     if (a.doarAdmin) {
-      if (!esteAdminKelion(user.email)) {
+      if (!adminExempt) {
         // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug) — și
         // mesajul spune cauza REALĂ, nu „nu ești owner" pe un cookie expirat.
         const motiv = 'doar ownerul poate chema acest agent'
@@ -121,7 +134,6 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(413).send({ error: 'text_prea_lung', max: MAX_TEXT })
     }
 
-    const adminExempt = esteAdminKelion(user.email)
     const clientEvent = String(body.id ?? req.headers['idempotency-key'] ?? '').trim()
     if (!adminExempt && (!clientEvent || clientEvent.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(clientEvent))) {
       return reply.code(400).send({ error: 'idempotency_key_required' })
@@ -137,7 +149,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
     try {
       // Blindat (4 aug): sesiunea ownerului aprinde și memoria lui Kelion;
       // un apel public primește specialistul cu căutare + citit pagini.
-      r = await cheamaAgent(a, sarcina, esteAdminKelion(user.email), user.email)
+      r = await cheamaAgent(a, sarcina, adminExempt, user.email)
     } catch (e) {
       if (!adminExempt) await grantCreditMinor(user.email, config.billing.chatTurnMinor, `${debitRef}:refund`)
       const msg = e instanceof Error ? e.message : String(e)

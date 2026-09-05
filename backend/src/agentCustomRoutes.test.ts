@@ -16,7 +16,7 @@ vi.mock('./session.js', () => ({
 }))
 
 const { enterpriseRoutes } = await import('./routes/enterprise.js')
-const { ROSTER, executaAgentNou, rosterViu } = await import('./services/agentiKelion.js')
+const { ROSTER, executaAgentNou, rosterViu,adminAgentRegistry } = await import('./services/agentiKelion.js')
 
 async function app() {
   const server = Fastify()
@@ -90,6 +90,26 @@ describe('specialist creation uses one validated live-roster contract', () => {
       expect(response.statusCode).toBe(400)
     }
     expect(adaugaAgentCustom).not.toHaveBeenCalled()
+    await server.close()
+  })
+
+  it('keeps explicit low effort and inventories the same deduplicated roster without an execution claim', async () => {
+    const server = await app()
+    const payload = { nume:'Agent standard verificat',rol:'Rol standard de test',efort:'low',doarAdmin:true }
+    const response = await server.inject({ method:'POST',url:'/api/enterprise/agent-nou',headers:{ 'x-test-user':'owner' },payload })
+    expect(response.statusCode).toBe(200)
+    const persisted = adaugaAgentCustom.mock.calls[0][0]
+    expect(persisted.efort).toBe('low')
+    listaAgentiCustom.mockResolvedValue([ { ...ROSTER[0],rol:'Nu înlocuiește codul integrat' },persisted,persisted ])
+    const roster = await rosterViu(true)
+    expect(listaAgentiCustom).toHaveBeenLastCalledWith(true)
+    expect(new Set(roster.map((agent) => agent.id)).size).toBe(roster.length)
+    expect(roster[0]).toEqual(ROSTER[0])
+    const registry = adminAgentRegistry(roster)
+    expect(Number.isFinite(Date.parse(registry.checkedAt))).toBe(true)
+    expect(registry.agents.find((agent) => agent.id === persisted.id)).toEqual({ ...persisted,source:'custom',status:null })
+    for (const builtin of ROSTER) expect(registry.agents.find((agent) => agent.id === builtin.id))
+      .toMatchObject({ source:'integrated',efort:builtin.efort ?? 'high',doarAdmin:builtin.doarAdmin === true,status:null })
     await server.close()
   })
 })

@@ -774,6 +774,8 @@ jobs:
             artifact.constructor-service-client
             artifact.service-auth
             artifact.github-fixed-client
+            artifact.worker-doctor-repair-scope
+            artifact.publisher-doctor-repair-scope
             runtime-helper
             compose-production
             systemd-recovery.kelion-runtime-config-recovery.service
@@ -799,6 +801,8 @@ jobs:
             "$work/deploy/lib/constructor-service-client.mjs"
             "$work/deploy/lib/service-auth.mjs"
             "$work/deploy/lib/github-fixed-client.mjs"
+            "$work/deploy/lib/doctor-repair-scope.mjs"
+            "$work/deploy/lib/doctor-repair-scope.mjs"
             "$work/deploy/lib/runtime-config-cutover.sh"
             "$work/deploy/compose.production.yml"
             "$work/deploy/systemd/kelion-runtime-config-recovery.service"
@@ -813,7 +817,7 @@ jobs:
           )
           current_configure_install_source_sha256() {
             local index
-            [ "${#configure_install_logicals[@]}" -eq 23 ] \
+            [ "${#configure_install_logicals[@]}" -eq 25 ] \
               && [ "${#configure_install_logicals[@]}" -eq "${#configure_install_sources[@]}" ]
             {
               for index in "${!configure_install_logicals[@]}"; do

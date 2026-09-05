@@ -1066,7 +1066,7 @@ test('configure leagă retry-ul installerului de aceeași tuplă exactă de arte
   const configureLogicals = arrayValues(normalized, 'configure_install_logicals', /^  ([a-z0-9.-]+)$/gm)
   const installerSources = arrayValues(installer, 'install_sources', /^  "\$repo_root\/([^"]+)"$/gm)
   const configureSources = arrayValues(normalized, 'configure_install_sources', /^  "\$work\/([^"]+)"$/gm)
-  assert.equal(installerLogicals.length, 23)
+  assert.equal(installerLogicals.length, 25)
   assert.deepEqual(configureLogicals, installerLogicals,
     'workflowul trebuie să folosească ordinea logică exactă a producerului jurnalului')
   assert.deepEqual(configureSources, installerSources,
@@ -1609,7 +1609,7 @@ test('installerul lasă capabilitățile dezactivate și pornește controllerul 
   assert.ok(lock >= 0 && identities > lock && transaction > lock,
     'identitățile și tranzacția durabilă se modifică numai sub lock-ul comun dovedit')
   const logicalBlock = installer.slice(installer.indexOf('install_logicals=('), installer.indexOf('\n)', installer.indexOf('install_logicals=(')))
-  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 23)
+  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 25)
   assert.doesNotMatch(installer, /systemctl (?:start|restart) private-ai-(?:web|llm)\.service/)
   assert.equal(installer.split('systemctl enable kelion-runtime-config-recovery.service').length - 1, 1)
   const retirement = shellFunction(installer, 'retire_legacy_model_dropin')

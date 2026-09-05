@@ -101,14 +101,11 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
       route.indexOf("'/api/internal/constructor-publisher/jobs/claim'"),
     )
 
-    // Un eșec tehnic al workerului este trecător prin natura lui (modelul local
-    // se reîncarcă, un deploy oprește unitatea, procesul e omorât la memorie),
-    // deci ordinul se reia automat, mărginit de plafon. Un verdict `unresolved`
-    // este despre conținutul ordinului, nu o pană, și rămâne definitiv.
-    expect(transition).toContain("const reluabil = input.event === 'failed'")
-    expect(transition).toContain("WHEN $8 AND attempts < $9 THEN 'queued'")
-    expect(transition).toContain("WHEN $3 THEN 'failed'")
-    expect(transition).toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
+    // SQL behavior is exercised in constructorPipeline.test.ts; this boundary
+    // additionally prevents a hidden scheduling branch in the worker handler.
+    expect(transition).toContain("status=CASE WHEN $3 THEN 'failed' ELSE status END")
+    expect(transition).not.toContain("THEN 'queued'")
+    expect(transition).not.toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
     expect(transition).toContain("failedRow.status === 'failed'")
     expect(transition).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)
     expect(workerEvent).toContain("['taskId', 'event', 'code', 'profile', 'progress']")
@@ -127,14 +124,14 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
     const claim = db.slice(db.indexOf('export async function claimNextBuildJob'), db.indexOf('export async function deblocheazaJoburileClaimate'))
     expect(claim).toContain("state: active.rows[0]?.active === true ? 'pipeline_active' : 'no_claimable_job'")
     expect(claim).toContain('execution_profile=$3')
-    expect(route).toContain("exactKeys(req.body, ['profile'])")
+    expect(route).toContain("exactKeys(req.body, ['profile', 'doctorCapability'])")
     expect(route).toContain('const model = await readConstructorModelSnapshot()')
     expect(route).toContain("model.state !== 'ready'")
     expect(route).toContain('model.activeProfile !== profile')
     expect(route).toContain('measuredProfile = model.activeProfile')
-    expect(route).toContain('claimNextBuildJob(taskId, measuredProfile)')
+    expect(route).toContain('claimNextBuildJob(taskId, measuredProfile, req.body.doctorCapability)')
     expect(route).not.toContain('claimNextBuildJob(taskId, profile)')
-    expect(worker).toContain("post(value, '/api/internal/codex/jobs/claim', { profile })")
+    expect(worker).toContain("post(value, '/api/internal/codex/jobs/claim', { profile, doctorCapability: measureDoctorCapability() })")
     expect(route).toMatch(/claim\.state !== 'claimed'[\s\S]*state: claim\.state, job: null/)
     expect(worker).toMatch(/response\.state === 'no_claimable_job'[\s\S]*'ready'/)
     expect(worker).toMatch(/response\.state === 'pipeline_active'[\s\S]*'busy'/)
@@ -152,17 +149,15 @@ describe('lanțul unic Admin → worker Constructor → gates → master → liv
     expect(transition).not.toContain("unresolved: ['claimed'")
   })
 
-  it('watchdog-ul repune în coadă execuția tăcută, mărginit, fără schimbare de profil', () => {
+  it('watchdog-ul păstrează terminală execuția tăcută, fără schimbare de profil', () => {
     const db = cod('db.ts')
     const watchdog = db.slice(
       db.indexOf('export async function deblocheazaJoburileClaimate'),
       db.indexOf('// AUDIT ADMIN', db.indexOf('export async function deblocheazaJoburileClaimate')),
     )
-    // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy, care
-    // oprește unitatea. Ordinul se repune în coadă până la plafon, iar incidentul
-    // se deschide doar când chiar a murit. Profilul măsurat rămâne neatins.
-    expect(watchdog).toContain("status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END")
-    expect(watchdog).toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
+    expect(watchdog).toContain("status='failed'")
+    expect(watchdog).not.toContain("THEN 'queued'")
+    expect(watchdog).not.toContain('CONSTRUCTOR_WORKER_MAX_ATTEMPTS')
     expect(watchdog).toContain("constructorWorkerTechnicalFailureRecord('execution_timeout', profile)")
     expect(watchdog).toContain("if (failedRow.status !== 'failed') continue")
     expect(watchdog).not.toMatch(/execution_cycle\s*=|worker_retry_scheduled/)

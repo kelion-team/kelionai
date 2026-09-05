@@ -21,9 +21,12 @@ export type TipFunctie = 'citire' | 'efect'
 
 export interface RezultatProba {
   ok: boolean
+  cod?: 'proba_read_only_absenta'
   rezultat?: string // ce a întors real (scurt)
   eroare?: string // motivul erorii, dacă a picat
 }
+
+const PROBA_READ_ONLY_ABSENTA = 'capabilitatea nu are o probă read-only sigură în procesul web'
 
 export interface VerificareFunctie {
   functie: string
@@ -81,6 +84,12 @@ export function interpreteazaProba(
   }
 
   // ── FUNCȚIE DE CITIRE: probată REAL. Clasificăm rezultatul măsurat.
+  if (p.cod === 'proba_read_only_absenta' || p.eroare === PROBA_READ_ONLY_ABSENTA)
+    return {
+      verdict: 'nu_pot_verifica',
+      deCe: 'nu există o probă read-only sigură pe această cale — funcția nu a fost executată',
+      recomandare: 'Verifică funcția pe calea ei reală, cu intrarea și autorizarea necesare; lipsa probei nu dovedește un defect.',
+    }
   if (p.eroare) {
     // PROBĂ INDISPONIBILĂ PE ACEASTĂ CALE: unealta EXISTĂ, dar se execută pe calea
     // CHAT (executorul din chat.ts), nu prin dispecerul de probă (`uneltele`) —
@@ -191,8 +200,9 @@ export async function ruleazaAutoverificare(deps: DepsAutoverificare): Promise<R
     })
   }
 
-  // ── DIAGNOSTIC AI (inteligent) pe cele care NU merg — îmbogățește „de ce".
-  const picate = functii.filter((f) => f.verdict !== 'merge')
+  // Diagnosticul primește numai eșecuri măsurate. O probă absentă sau fără
+  // autentificare nu dovedește un defect și nu justifică inventarea unei cauze.
+  const picate = functii.filter((f) => f.verdict === 'stricat')
   if (deps.creierDiag && picate.length) {
     try {
       const harta = await deps.creierDiag(picate.map((f) => ({ functie: f.functie, face: f.face, deCe: f.deCe })))
@@ -235,7 +245,9 @@ export function decideDinMasuratori(functii: VerificareFunctie[]): DecizieMasura
     if (f.verdict === 'merge') continue
     const c = f.deCe.toLowerCase()
     if (f.verdict === 'nu_pot_verifica') {
-      if (/calea chat/.test(c))
+      if (c.includes('probă read-only'))
+        out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 'verifică pe calea reală, numai cu intrarea și autorizarea necesare; nu executa efecte pentru a suplini o probă absentă', deCe: f.deCe })
+      else if (/calea chat/.test(c))
         out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 'probeaz-o direct din chat (ea merge pe calea chat) — proba din dispecer n-o atinge', deCe: f.deCe })
       else if (/autentificare|drepturi|sesiun/.test(c))
         out.push({ functie: f.functie, actiune: 'masoara_intai', urmatoareaMasuratoare: 're-probează logat, din sesiunea reală — NU e cod de reparat', deCe: f.deCe })
@@ -341,7 +353,7 @@ export async function autoverificareLive(): Promise<RaportAutoverificare> {
            // de citire din adminTools.ts/chat.ts care sunt safe.
            const probaChat = await probaCapabilitateChat(c.name, adminEmail, true)
            if (probaChat !== null) return probaChat
-           return { ok: false, eroare: 'capabilitatea nu are o probă read-only sigură în procesul web' }
+           return { ok: false, cod: 'proba_read_only_absenta', eroare: PROBA_READ_ONLY_ABSENTA }
          }
          const out = await execSharedAdminTool(c.name, {}, { email: adminEmail })
         return { ok: true, rezultat: String(out ?? '') }

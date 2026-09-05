@@ -45,48 +45,8 @@ import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/
 import { fetchRecentInbox, deleteInboxMessages } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
 import { uitaToateSesiunile } from '../services/stareSesiune.js'
-
-// ── Store presence (the admin's REAL market control) ───────────────────────
-// Live checks against the four public install locations. Cached 5 minutes so
-// the admin tab never hammers the stores. `listed` is the truth of the moment:
-// a store page that 404s is NOT listed, no matter what the dashboard promises.
-interface StoreCheck {
-  key: string
-  name: string
-  store: string
-  url: string
-  listed: boolean
-}
-let storeCache: { at: number; checks: StoreCheck[] } | null = null
-
-const STORE_TARGETS: { key: string; name: string; store: string; url: string }[] = [
-  { key: 'windows', name: 'Windows', store: 'Microsoft Store', url: 'https://apps.microsoft.com/detail/9NBW313FHN44' },
-  { key: 'android', name: 'Android', store: 'Google Play', url: 'https://play.google.com/store/apps/details?id=app.kelionai.twa' },
-  { key: 'ios', name: 'iOS', store: 'App Store', url: 'https://apps.apple.com/app/id6786766714' },
-  { key: 'linux', name: 'Linux', store: `Web app (${new URL(config.publicOrigin).hostname})`, url: `${config.publicOrigin}/health` },
-]
-
-async function checkStores(): Promise<StoreCheck[]> {
-  if (storeCache && Date.now() - storeCache.at < 5 * 60_000) return storeCache.checks
-  const checks = await Promise.all(
-    STORE_TARGETS.map(async (t) => {
-      let listed = false
-      try {
-        const res = await fetch(t.url, {
-          redirect: 'follow',
-          signal: AbortSignal.timeout(8000),
-          headers: { 'User-Agent': config.httpUserAgent },
-        })
-        listed = res.ok
-      } catch {
-        /* unreachable → not listed right now */
-      }
-      return { ...t, listed }
-    }),
-  )
-  storeCache = { at: Date.now(), checks }
-  return checks
-}
+import { parseAdminHistoryQuery } from '../services/adminHistory.js'
+import { checkStores } from '../services/storePresence.js'
 
 async function configuratieCreier(): Promise<Record<string, unknown>> {
   const m = config.openai
@@ -195,18 +155,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // când baza nu răspundea — panoul desena „niciun utilizator" peste o citire
     // imposibilă. Acum eșecul iese 503 cu motivul, nu ca listă goală.
     if (!u.citit) return reply.code(503).send({ error: 'utilizatori_necititi', motiv: u.motiv })
-    return reply.send({ users: u.valoare })
+    return reply.send(u.valoare)
   })
 
   // Full chat history for one user (admin only).
-  app.get<{ Querystring: { email?: string } }>('/api/admin/history', async (req, reply) => {
+  app.get<{ Querystring: Record<string,unknown> }>('/api/admin/history', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
-    const email = req.query.email
-    if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
-    const h = await citesteIstoric(email)
+    const query = parseAdminHistoryQuery(req.query)
+    if (!query) return reply.code(400).send({ error:'history_query_invalid' })
+    const h = await citesteIstoric(query.email,query)
     if (!h.citit) return reply.code(503).send({ error: 'istoric_necitit', motiv: h.motiv })
-    return reply.send({ history: h.valoare })
+    reply.header('Cache-Control','private, no-store')
+    return reply.send(h.valoare)
   })
 
   // Batch-translate a conversation's messages into Romanian (the "Translate
@@ -317,7 +278,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string } }>('/api/admin/notificari/:id/citit', async (req, reply) => {
     const id = adminSiId(req, reply, req.params.id)
     if (id === null) return
-    return reply.send({ ok: await markAdminNotificationRead(id) })
+    const result = await markAdminNotificationRead(id)
+    if (result === 'not_found') return reply.code(404).send({ error: 'notificare_negasita' })
+    if (result !== 'read') return reply.code(503).send({ error: 'notificare_nemarcata' })
+    return reply.send({ ok: true })
   })
 
   // (Ruta GET /api/admin/pool a fost ȘTEARSĂ DE-ADEVĂRATELEA — auditul admin,
@@ -410,6 +374,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // The cost journal is kept in USD micros end to end —
       // the Money tab never mixes "total £" with "azi $".
       spentUsd: costs.total,
+      statsSince:costs.statsSince,
       currency: config.billing.currency,
       byKind: costs.byKind,
       // Consumed TODAY (USD, real) — for the "Consumed today" card in the
@@ -646,6 +611,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // next to the money: total, today, and what it went on. It cuts nothing;
       // it shows.
       costReal: cost.citit ? cost.valoare : null,
+      statsSince:cost.citit ? cost.valoare.statsSince : null,
       costRealMotiv: cost.citit ? undefined : cost.motiv,
       // P29 (15 aug): comutatorul „video plătit" — citit, nu presupus; null =
       // citirea a picat (se spune „necitit", nu se inventează un OPRIT).

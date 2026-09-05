@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { adminStrings } from '../../lib/adminText'
 import {
   fetchInbound,
@@ -156,13 +156,35 @@ export function AdminInbox() {
 
 export function AdminNotificari() {
   const [notificari, setNotificari] = useState<NotificareAdmin[] | null | 'necitit'>('necitit')
+  const [marking, setMarking] = useState<Set<number>>(new Set())
+  const markingRef = useRef(new Set<number>())
+  const [markErrors, setMarkErrors] = useState<Record<number, string>>({})
+  const reads = useRef({ generation: 0 })
 
-  const loadNotificari = (): void => { fetchNotificari().then((n) => setNotificari(n)) }
+  const loadNotificari = (): void => {
+    const generation = ++reads.current.generation
+    void fetchNotificari().then((n) => { if (generation === reads.current.generation) setNotificari(n) })
+  }
+
+  const markRead = async (id: number): Promise<void> => {
+    if (markingRef.current.has(id)) return
+    markingRef.current.add(id)
+    setMarking(new Set(markingRef.current))
+    setMarkErrors((errors) => ({ ...errors, [id]: '' }))
+    try {
+      if (await markNotificareCitit(id)) loadNotificari()
+      else setMarkErrors((errors) => ({ ...errors, [id]: 'Marcarea ca citită nu a putut fi confirmată. Încearcă din nou.' }))
+    } finally {
+      markingRef.current.delete(id)
+      setMarking(new Set(markingRef.current))
+    }
+  }
 
   useEffect(() => {
+    const pendingReads = reads.current
     loadNotificari()
     const id = window.setInterval(loadNotificari, 20000)
-    return () => window.clearInterval(id)
+    return () => { ++pendingReads.generation; window.clearInterval(id) }
   }, [])
 
   return (
@@ -180,12 +202,13 @@ export function AdminNotificari() {
               <span className="chat-hint" style={{ fontSize: 12 }}>{n.type}</span>
               {!n.read && (
                 <button type="button" className="ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '2px 8px' }}
-                  onClick={async () => { if (await markNotificareCitit(n.id)) loadNotificari() }}>
-                  Marchează citit
+                  disabled={marking.has(n.id)} onClick={() => void markRead(n.id)}>
+                  {marking.has(n.id) ? 'Se confirmă…' : 'Marchează citit'}
                 </button>
               )}
             </div>
             <div style={{ marginTop: 3 }}>{n.message}</div>
+            {markErrors[n.id] && <div className="chat-hint" role="alert">{markErrors[n.id]}</div>}
           </div>
         ))}
       </div>

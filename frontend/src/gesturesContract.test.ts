@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 
 const state = vi.hoisted(() => ({
@@ -23,6 +23,7 @@ import {
   fetchDisabledGestures,
   parseDisabledGesturesResponse,
   saveDisabledGesturesCanonical,
+  watchDisabledGestures,
 } from './lib/gestures'
 
 beforeEach(() => {
@@ -30,6 +31,11 @@ beforeEach(() => {
   state.body = {}
   state.jsonFails = false
   vi.mocked(apiFetch).mockClear()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 describe('gesture response parsing is strict', () => {
@@ -59,6 +65,41 @@ describe('gesture response parsing is strict', () => {
 })
 
 describe('gesture save requires a canonical server echo', () => {
+  it('applies a confirmed save immediately and does not let an earlier read restore the old policy', async () => {
+    vi.useFakeTimers()
+    const target = new EventTarget()
+    vi.stubGlobal('window', target)
+    let finishOldRead!: (value: Awaited<ReturnType<typeof apiFetch>>) => void
+    vi.mocked(apiFetch).mockImplementationOnce(() => new Promise((resolve) => { finishOldRead = resolve }))
+    const onChange = vi.fn()
+    const stop = watchDisabledGestures(onChange, target)
+    state.body = { ok: true, disabled: ['dans'] }
+    await expect(saveDisabledGesturesCanonical(['dans'])).resolves.toEqual(['dans'])
+    expect(onChange).toHaveBeenLastCalledWith(['dans'])
+    expect(onChange).toHaveBeenCalledOnce()
+    finishOldRead({ ok: true, json: async () => ({ disabled: [] }) } as Response)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(onChange).toHaveBeenCalledOnce()
+    stop()
+    state.body = { ok: true, disabled: [] }
+    await saveDisabledGesturesCanonical([])
+    expect(onChange).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the policy unchanged when a save fails verification', async () => {
+    vi.useFakeTimers()
+    const target = new EventTarget()
+    vi.stubGlobal('window', target)
+    state.body = { disabled: [] }
+    const onChange = vi.fn()
+    const stop = watchDisabledGestures(onChange, target)
+    await vi.advanceTimersByTimeAsync(0)
+    onChange.mockClear()
+    state.body = { ok: true, disabled: [] }
+    await expect(saveDisabledGesturesCanonical(['dans'])).resolves.toBeNull()
+    expect(onChange).not.toHaveBeenCalled()
+    stop()
+  })
   it('accepts only ok:true plus the exact persisted canonical list', async () => {
     state.body = { ok: true, disabled: ['dans'] }
     await expect(saveDisabledGesturesCanonical(['dans'])).resolves.toEqual(['dans'])

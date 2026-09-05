@@ -855,6 +855,7 @@ need pg_restore
 need df
 need stat
 need readlink
+need realpath
 need chown
 need sha256sum
 need sync
@@ -866,7 +867,10 @@ pg_restore_version=$(pg_restore --version)
 [[ "$pg_restore_version" =~ \(PostgreSQL\)[[:space:]]16\. ]] || fail pg_restore_16_required
 
 [ -d "$RUNTIME_DIRECTORY" ] && [ ! -L "$RUNTIME_DIRECTORY" ] || fail restore_runtime_directory_invalid
-[ "$(stat -Lc '%u:%g:%a' -- "$RUNTIME_DIRECTORY")" = '0:0:700' ] \
+# Shared application/Constructor runtime; only the restore work and evidence
+# below remain root-only. Validate this directory without rewriting its ACL.
+[ "$(realpath -e -- "$RUNTIME_DIRECTORY")" = "$RUNTIME_DIRECTORY" ] \
+  && [ "$(stat -Lc '%u:%g:%a' -- "$RUNTIME_DIRECTORY")" = '0:10050:750' ] \
   || fail restore_runtime_directory_invalid
 [ -f "$VALIDATOR" ] && [ ! -L "$VALIDATOR" ] || fail restore_validator_invalid
 

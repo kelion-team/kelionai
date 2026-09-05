@@ -28,6 +28,9 @@ import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
 import { constructorRoutes } from './routes/constructor.js'
 import { constructorModelControlRoutes } from './routes/constructorModelControl.js'
+import { doctorRoutes } from './routes/doctor.js'
+import { tickDoctor } from './services/doctor.js'
+import { publicHealthPayload, publicVersionPayload } from './services/publicRuntimeContract.js'
 import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
@@ -229,7 +232,7 @@ app.get('/livez', async () => ({ status: 'alive' }))
 // reia mesajul singur. Backend-ul servea doar `/health` → `/api/health` da 404,
 // deci reveniirea nu se detecta NICIODATĂ, iar bannerul „Serverul nu răspunde"
 // rămânea agățat pe un server VIU. Aceeași rută, sub ambele căi.
-app.get('/api/health', async () => ({ status: 'ok' }))
+app.get('/api/health', async () => publicHealthPayload())
 
 async function readinessSnapshot() {
   const requiredConfig = Boolean(
@@ -281,17 +284,15 @@ app.get('/readyz', async (_req, reply) => {
   return reply.code(snapshot.ready ? 200 : 503).send(snapshot)
 })
 
-// THE DEPLOY VERSION (Adrian, 10 Jul: "on every new deploy the watermark
-// updates, the browser restarts clean"). The host can inject the published
-// commit sha through GIT_COMMIT_SHA; the frontend polls it and, when it
-// changes, does the clean reset to the latest version. The watermark displays
-// it — so it CHANGES on ANY publish, even if the interface wasn't touched.
+// Runtime revision is injected by the release workflow. The UI compares the
+// full SHA with its compiled revision and active release proof; a read cannot
+// activate an update, reload the current chat or fabricate a deployment time.
 const RAW_DEPLOY_COMMIT = String(process.env.GIT_COMMIT_SHA ?? '').toLowerCase()
 const DEPLOY_COMMIT = /^[0-9a-f]{40}$/.test(RAW_DEPLOY_COMMIT) ? RAW_DEPLOY_COMMIT : ''
 const DEPLOY_SHA = DEPLOY_COMMIT.slice(0, 7)
 const BOOT_AT = new Date().toISOString()
-// Without an injected sha, the boot moment IS the version: it changes on every
-// real publish.
+// Legacy v/ver retain their timestamp fallback. The separate commit field is
+// null without a full revision, so a boot timestamp is never evidence of SHA.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/release-proof', async (_req, reply) => {
   const snapshot = await readinessSnapshot()
@@ -306,17 +307,9 @@ app.get('/api/release-proof', async (_req, reply) => {
   })
 })
 
-// AUTO-VERSIUNE (owner, 13 aug: „se incrementează singură la fiecare publicare,
-// +0.1"). Se calculează o dată la boot, din KV (vezi mai jos, după initDb) —
-// V0.0, V0.1, V0.2 … Până când KV răspunde (sau fără DB), cade pe „1.0".
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
-  // `adminCfg` (9 aug, „flux admin 403 — trebuie 200"): spune dacă emailul de
-  // admin REZOLVAT pe server e cel implicit al ownerului (valoarea implicită e
-  // deja publică, în repo — nu se scurge nimic). `false` = env-ul VPS cară un
-  // ADMIN_EMAIL stricat/diferit → rolul iese „customer" cu sesiune validă.
-  // Diagnostic măsurabil de oriunde cu un curl, fără SSH.
-  return { v: DEPLOY_V, at: BOOT_AT, ver: DEPLOY_V }
+  return { ...publicVersionPayload(DEPLOY_V,BOOT_AT),commit:DEPLOY_COMMIT || null }
 })
 
 
@@ -339,6 +332,7 @@ await app.register(ingestRoutes)
 await app.register(browserRoutes)
 await app.register(constructorRoutes)
 await app.register(constructorModelControlRoutes)
+await app.register(doctorRoutes)
 await app.register(offlineRoutes)
 await app.register(auzRoutes)
 await app.register(authLocalRoutes)
@@ -447,10 +441,12 @@ try {
       app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor archive retention failed')
     })
     const constructorWatchdog = async (): Promise<void> => {
+      if (!releaseSideEffectsEnabled()) return
       const result = await deblocheazaJoburileClaimate()
       if (result.terminalizate > 0) {
         app.log.warn(result, 'constructor watchdog terminalized stale jobs')
       }
+      await tickDoctor()
     }
     void constructorWatchdog().catch((error) => {
       app.log.warn({ error: curataTextJurnal(error, 160) }, 'constructor watchdog failed')

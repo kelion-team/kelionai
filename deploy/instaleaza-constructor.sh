@@ -681,7 +681,7 @@ validate_root_owned_protected_directory() {
 ensure_root_owned_install_directory() {
   local path=$1 mode=$2 parent
   case "$path" in
-    /opt/kelion-codex|/opt/kelion-constructor|/opt/kelion-constructor/lib|/etc/systemd/system/private-ai-web.service.d) ;;
+    /opt/kelion-codex|/opt/kelion-codex/lib|/opt/kelion-constructor|/opt/kelion-constructor/lib|/etc/systemd/system/private-ai-web.service.d) ;;
     *) return 1 ;;
   esac
   parent=$(dirname -- "$path")
@@ -876,6 +876,7 @@ validate_root_owned_install_directory /etc
 validate_root_owned_install_directory /etc/sudoers.d
 validate_root_owned_install_directory /etc/systemd/system
 ensure_root_owned_install_directory /opt/kelion-codex 0755
+ensure_root_owned_install_directory /opt/kelion-codex/lib 0755
 ensure_root_owned_install_directory /opt/kelion-constructor 0755
 ensure_root_owned_install_directory /opt/kelion-constructor/lib 0755
 ensure_root_owned_install_directory /etc/systemd/system/private-ai-web.service.d 0755
@@ -916,6 +917,8 @@ install_logicals=(
   artifact.constructor-service-client
   artifact.service-auth
   artifact.github-fixed-client
+  artifact.worker-doctor-repair-scope
+  artifact.publisher-doctor-repair-scope
   runtime-helper
   compose-production
   systemd-recovery.kelion-runtime-config-recovery.service
@@ -941,6 +944,8 @@ install_sources=(
   "$repo_root/deploy/lib/constructor-service-client.mjs"
   "$repo_root/deploy/lib/service-auth.mjs"
   "$repo_root/deploy/lib/github-fixed-client.mjs"
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs"
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs"
   "$repo_root/deploy/lib/runtime-config-cutover.sh"
   "$repo_root/deploy/compose.production.yml"
   "$repo_root/deploy/systemd/kelion-runtime-config-recovery.service"
@@ -972,6 +977,8 @@ map_install_logical() {
     artifact.constructor-service-client) install_target=/opt/kelion-constructor/lib/constructor-service-client.mjs; install_mode=444 ;;
     artifact.service-auth) install_target=/opt/kelion-constructor/lib/service-auth.mjs; install_mode=444 ;;
     artifact.github-fixed-client) install_target=/opt/kelion-constructor/lib/github-fixed-client.mjs; install_mode=444 ;;
+    artifact.worker-doctor-repair-scope) install_target=/opt/kelion-codex/lib/doctor-repair-scope.mjs; install_mode=444 ;;
+    artifact.publisher-doctor-repair-scope) install_target=/opt/kelion-constructor/lib/doctor-repair-scope.mjs; install_mode=444 ;;
     runtime-helper) install_target=$ROOT/bin/runtime-config-cutover.sh; install_mode=500 ;;
     compose-production) install_target=$ROOT/config/compose.production.yml; install_mode=444 ;;
     systemd-recovery.kelion-runtime-config-recovery.service) install_target=/etc/systemd/system/kelion-runtime-config-recovery.service; install_mode=444 ;;
@@ -1683,6 +1690,7 @@ if [ "$resume_different_source" = 1 ]; then
     configuration.opencode instructions.opencode \
     artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
     artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
+    artifact.worker-doctor-repair-scope artifact.publisher-doctor-repair-scope \
     runtime-helper compose-production; do
     validate_published_candidate "$logical"
   done
@@ -1706,6 +1714,7 @@ for logical in \
   configuration.opencode instructions.opencode \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
   artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
+  artifact.worker-doctor-repair-scope artifact.publisher-doctor-repair-scope \
   runtime-helper compose-production; do
   publish_install_candidate "$logical"
 done

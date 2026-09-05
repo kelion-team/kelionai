@@ -1,5 +1,5 @@
 [Unit]
-Description=Poll Kelion Constructor queue with the local OpenCode/Qwen executor
+Description=Poll Kelion Constructor queue with the isolated server OpenCode executor
 After=kelion-runtime-config-recovery.service
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending

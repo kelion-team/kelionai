@@ -12,6 +12,7 @@ import {
   type RecoveryRow,
 } from './adminHelpers'
 import type { BrainCredit } from '../../pages/Stage'
+import { AdminDoctor } from './AdminDoctor'
 
 // ── SISTEM tab ──────────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export function AdminSistem({ brainCredit }: { brainCredit?: BrainCredit | null 
 
   return (
     <div className="admin-tab-content">
+      <AdminDoctor />
       <div className="admin-card">
         <div className="admin-card-head">Sistem (VPS)</div>
         {brainCredit?.vps ? (

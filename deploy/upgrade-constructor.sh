@@ -99,6 +99,7 @@ for source in \
   "$repo_root/deploy/constructor-model-control.mjs" \
   "$repo_root/deploy/constructor-model-switch.sh" \
   "$repo_root/deploy/lib/service-auth.mjs" \
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs" \
   "$repo_root/deploy/opencode-constructor.json" \
   "$repo_root/deploy/opencode-constructor-instructions.md" \
   "$repo_root/deploy/systemd/kelion-codex-worker.service" \
@@ -557,7 +558,7 @@ validate_private_ai_executor() {
   local expected_controller_state=${1:-active}
   local config=/srv/private-ai/home/.config/opencode/opencode.json
   local instructions=/srv/private-ai/home/.config/opencode/instructions.md
-  local unit_text self_test_output retired unit state
+  local unit_text self_test_output retired unit state scope_target
   env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
     /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
     --verify-runtime-binary >/dev/null || return 1
@@ -572,6 +573,12 @@ validate_private_ai_executor() {
   cmp -s -- "$repo_root/deploy/constructor-model-control.mjs" /opt/kelion-constructor/constructor-model-control.mjs || return 1
   cmp -s -- "$repo_root/deploy/constructor-model-switch.sh" /opt/private-ai/bin/constructor-model-switch || return 1
   cmp -s -- "$repo_root/deploy/lib/service-auth.mjs" /opt/kelion-constructor/lib/service-auth.mjs || return 1
+  for scope_target in /opt/kelion-codex/lib/doctor-repair-scope.mjs /opt/kelion-constructor/lib/doctor-repair-scope.mjs; do
+    [ -f "$scope_target" ] && [ ! -L "$scope_target" ] \
+      && [ "$(realpath -e -- "$scope_target")" = "$scope_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$scope_target")" = '0:0:444:1' ] \
+      && cmp -s -- "$repo_root/deploy/lib/doctor-repair-scope.mjs" "$scope_target" || return 1
+  done
   cmp -s -- "$repo_root/deploy/systemd/kelion-codex-worker.service" /etc/systemd/system/kelion-codex-worker.service || return 1
   cmp -s -- "$repo_root/deploy/systemd/kelion-constructor-model-control.service" /etc/systemd/system/kelion-constructor-model-control.service || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-codex/codex-worker.mjs)" = '0:0:555:1' ] || return 1

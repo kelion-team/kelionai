@@ -30,6 +30,7 @@ export interface DemoRecent {
 }
 
 export interface DemoStats {
+  statsSince:string | null
   visitsTotal: number
   visitsToday: number
   byCountry: { code: string; count: number }[]

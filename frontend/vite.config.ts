@@ -18,6 +18,9 @@ if (!Array.isArray(productConfig.nativeOrigins) || typeof productConfig.nativeRe
 }
 
 const buildDate = new Date().toISOString()
+const rawBuildCommit = process.env.GIT_COMMIT_SHA?.trim() ?? ''
+if (rawBuildCommit && !/^[0-9a-f]{40}$/.test(rawBuildCommit)) throw new Error('GIT_COMMIT_SHA: expected exact lowercase full release SHA')
+const buildCommit = rawBuildCommit || null
 const appVersion = String(productConfig.appVersion)
 const checkoutOrigins = [
   endpointConfig.external?.revolutCheckoutProductionOrigin,
@@ -44,10 +47,16 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_DATE__: JSON.stringify(buildDate),
+    __BUILD_COMMIT__: JSON.stringify(buildCommit),
     __PRODUCT_CONFIG__: JSON.stringify(productConfig),
     __CHECKOUT_ORIGINS__: JSON.stringify(checkoutOrigins),
   },
-  plugins: [react()],
+  plugins: [react(), {
+    name:'kelion-ui-build-evidence',
+    generateBundle() {
+      this.emitFile({ type:'asset',fileName:'ui-build.json',source:JSON.stringify({ schema:1,commit:buildCommit }) })
+    },
+  }],
   server: {
     port: 5173,
     proxy: {

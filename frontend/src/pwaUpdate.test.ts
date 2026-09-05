@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 
 describe('actualizarea PWA controlată', () => {
-  it('nu face polling, XHR, hard reset sau ștergere de storage/cache', () => {
+  it('verifică periodic numai SW standard, fără hard reset sau ștergere de storage/cache', () => {
     const source = readFileSync(join(here, 'lib/updateCheck.ts'), 'utf8')
     expect(source).toContain('registration.update()')
     expect(source).toContain("waiting.postMessage('kelion-activate-update')")
-    expect(source).not.toMatch(/api\/version|XMLHttpRequest|localStorage\.clear|sessionStorage\.clear|caches\.delete|setInterval/)
+    expect(source).toContain('setInterval(checkForUpdate,PWA_UPDATE_CHECK_MS)')
+    expect(source).not.toMatch(/api\/version|XMLHttpRequest|localStorage\.clear|sessionStorage\.clear|caches\.delete/)
   })
 
   it('workerul așteaptă acordul UI și păstrează cache-urile modelelor', () => {

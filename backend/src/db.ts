@@ -55,6 +55,11 @@ import {
 export type { GeneratedMediaKind } from './services/mediaPolicy.js'
 import { redactDiagnostic, sanitizeDiagnosticUrl } from './shared/diagnosticRedaction.js'
 import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from './shared/agentCustomPolicy.js'
+import type { ConstructorAutomationAuthority } from './shared/doctor.js'
+import { constructorAutomationAuthority, doctorExecutionScope, doctorCode } from './services/doctorPolicy.js'
+import { readAdminStatsBaseline,resetAdminStatsBaseline } from './services/adminStats.js'
+import { ADMIN_HISTORY_MAX } from './services/adminHistory.js'
+import type { AdminHistoryPage,AdminHistoryQuery } from './shared/adminHistory.js'
 
 export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
@@ -675,6 +680,9 @@ export async function recordSimptomLive(
     message: detaliu,
     url: extra?.url,
   })
+  // Bounded code only. Doctor never receives the private detail/URL above.
+  const { relayKelionSymptom } = await import('./services/doctor.js')
+  await relayKelionSymptom(fel)
 }
 
 export interface SimptomLive {
@@ -1606,6 +1614,8 @@ export async function eraseUserAccount(
   try {
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`constructor-account:${key}`])
+    await client.query('DELETE FROM doctor_incidents WHERE grant_id IN (SELECT id FROM doctor_grants WHERE admin_email=$1)', [key])
+    await client.query('DELETE FROM doctor_grants WHERE admin_email=$1', [key])
     await client.query(
       `INSERT INTO erasure_requests
          (id, erasure_id, status, backup_purge_after, retention_until, deleted_categories, retained_records, provider_revocation)
@@ -3650,27 +3660,29 @@ export async function curataJurnaleVechi(): Promise<{ tabela: string; sterse: nu
 // răspunde 500, panoul spune „nu pot citi", nu „nu există activitate".
 export async function getUserActivity(): Promise<{
   users: UserActivityRow[]
+  statsSince:string | null
 } | null> {
   if (!dbEnabled()) return null
   try {
     const pool = getPool()
+    const baseline = await readAdminStatsBaseline()
     const users = (
       await pool.query<UserActivityRow>(
         `SELECT lower(v.user_email) AS email,
-                COUNT(*)::int AS sessions,
-                COALESCE(SUM(EXTRACT(EPOCH FROM (v.last_seen_at - v.first_seen_at))), 0)::float AS seconds,
+                COALESCE(SUM(v.sessions),0)::int AS sessions,
+                COALESCE(SUM(v.seconds), 0)::float AS seconds,
                 COALESCE(SUM(v.actions), 0)::int AS actions,
                 COALESCE(MAX(m.n), 0)::int AS messages,
                 MAX(v.last_seen_at)::text AS last_seen,
                 EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = MIN(lower(v.user_email))) AS blocked,
                 COALESCE((SELECT w.balance_minor FROM wallets w WHERE lower(w.user_email) = MIN(lower(v.user_email)) LIMIT 1), 0)::float / $2::float AS balance,
-                COALESCE((SELECT SUM(c.cost_usd_micros) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email))), 0)::float / 1000000.0 AS "consumedUsd",
+                COALESCE((SELECT SUM(c.cost_usd_micros) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email)) AND ($4::timestamptz IS NULL OR c.created_at >= $4)), 0)::float / 1000000.0 AS "consumedUsd",
                 (MIN(lower(v.user_email)) = lower($1)) AS scutit,
                 EXISTS(SELECT 1 FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email))) AS voce,
                 COALESCE((SELECT vp.audio_clip <> '' FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email)) LIMIT 1), false) AS "mostraAudio"
-         FROM user_presence_daily v
+         FROM admin_presence_since($3::bigint) v
          LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
-                    FROM messages GROUP BY lower(user_email)) m
+                    FROM messages WHERE ($4::timestamptz IS NULL OR created_at >= $4) GROUP BY lower(user_email)) m
            ON m.email_jos = lower(v.user_email)
          GROUP BY lower(v.user_email)
          ORDER BY MAX(v.last_seen_at) DESC
@@ -3678,10 +3690,10 @@ export async function getUserActivity(): Promise<{
         // P10: ownerul e scutit de taxare peste tot („e casa lui", tarife.ts) —
         // soldul lui negativ e datorie ISTORICĂ dinaintea scutirilor, fără
         // efect; rândul lui se marchează ca panoul să spună asta, nu să sperie.
-        [config.adminEmail, 10 ** config.billing.minorUnit],
+        [config.adminEmail, 10 ** config.billing.minorUnit,baseline.id,baseline.statsSince],
       )
     ).rows
-    return { users }
+    return { users,statsSince:baseline.statsSince }
   } catch (e) {
     // P26 (bugul viu din captura ownerului): panoul spunea cinstit „citirea a
     // eșuat", dar catch-ul MUT înghițea CAUZA — nimeni nu putea diagnostica.
@@ -3702,32 +3714,34 @@ export async function getDemoStats(): Promise<DemoStats | null> {
   if (!dbEnabled()) return null
   try {
     const pool = getPool()
+    const baseline = await readAdminStatsBaseline()
     const vCounts = (
       await pool.query<{ total: string; today: string }>(
         `SELECT COALESCE(SUM(views), 0)::text AS total,
                 COALESCE(SUM(views) FILTER (WHERE day = current_date), 0)::text AS today
-         FROM visit_daily`,
+         FROM admin_visits_since($1::bigint)`,[baseline.id],
       )
     ).rows[0]
     const byCountry = (
       await pool.query<{ code: string; count: number }>(
         `SELECT country_code AS code, SUM(views)::int AS count
-           FROM visit_daily
-          WHERE country_code <> ''
+           FROM admin_visits_since($1::bigint)
+          WHERE country_code <> '' AND views>0
           GROUP BY country_code
-          ORDER BY SUM(views) DESC`,
+          ORDER BY SUM(views) DESC`,[baseline.id],
       )
     ).rows
     const recent = (
       await pool.query<DemoRecent>(
         `SELECT 'visit'::text AS kind, country_code, day::text AS started_at,
                 path, views::int
-           FROM visit_daily
+           FROM admin_visits_since($1::bigint) WHERE views>0
           ORDER BY day DESC, last_seen_at DESC
-          LIMIT 60`,
+          LIMIT 60`,[baseline.id],
       )
     ).rows
     return {
+      statsSince:baseline.statsSince,
       visitsTotal: Number(vCounts?.total ?? 0),
       visitsToday: Number(vCounts?.today ?? 0),
       byCountry,
@@ -3963,6 +3977,7 @@ export async function loadGeneratedMedia(
 }
 
 export interface CostSummary {
+  statsSince:string | null
   total: number
   today: number
   byKind: Record<string, number>
@@ -4059,14 +4074,11 @@ export async function cheltuialaDeLaPeKinduri(
  *  The AI money (the pocket) has nothing to reset: it's read LIVE from the
  *  bank account (through Enable Banking) and from the brain provider, so it
  *  always reflects what's there now. */
-export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number }> {
-  if (!dbEnabled()) return { ok: false, sterse: 0 }
+export async function resetCostCounters(): Promise<{ ok:boolean; sterse:0; statsSince:string | null }> {
   try {
-    const r = await getPool().query('DELETE FROM cost_events')
-    return { ok: true, sterse: r.rowCount ?? 0 }
-  } catch {
-    return { ok: false, sterse: 0 }
-  }
+    const baseline = await resetAdminStatsBaseline()
+    return { ok:true,sterse:0,statsSince:baseline.statsSince }
+  } catch { return { ok:false,sterse:0,statsSince:null } }
 }
 
 /** Rezumatul costurilor, ca CITIRE (M7b, 8 aug — ultima rămasă): `getCostSummary`
@@ -4076,14 +4088,15 @@ export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number
 export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
   return citireDb('citirea jurnalului de cost', async () => {
     const pool = getPool()
+    const baseline = await readAdminStatsBaseline()
     const totals = await pool.query<{ total: string | null; today: string | null }>(
       `SELECT
          COALESCE(SUM(cost_usd_micros), 0)::float / 1000000.0 AS total,
          COALESCE(SUM(cost_usd_micros) FILTER (WHERE created_at >= date_trunc('day', now())), 0)::float / 1000000.0 AS today
-       FROM cost_events`,
+       FROM cost_events WHERE ($1::timestamptz IS NULL OR created_at >= $1)`,[baseline.statsSince],
     )
     const kinds = await pool.query<{ kind: string; sum: string }>(
-      'SELECT kind, SUM(cost_usd_micros)::float / 1000000.0 AS sum FROM cost_events GROUP BY kind',
+      'SELECT kind, SUM(cost_usd_micros)::float / 1000000.0 AS sum FROM cost_events WHERE ($1::timestamptz IS NULL OR created_at >= $1) GROUP BY kind',[baseline.statsSince],
     )
     const byKind: Record<string, number> = {}
     const felul: Record<string, 'masurat' | 'estimat'> = {}
@@ -4098,6 +4111,7 @@ export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
       else estimat += v
     }
     return {
+      statsSince:baseline.statsSince,
       total: Number(totals.rows[0]?.total ?? 0),
       today: Number(totals.rows[0]?.today ?? 0),
       byKind,
@@ -4391,13 +4405,14 @@ export interface UserSummary {
   last: string
 }
 
-export async function citesteUtilizatori(): Promise<Citire<UserSummary[]>> {
+export async function citesteUtilizatori(): Promise<Citire<{ users:UserSummary[]; statsSince:string | null }>> {
   return citireDb('citirea utilizatorilor', async () => {
+    const baseline = await readAdminStatsBaseline()
     const r = await getPool().query<UserSummary>(
-      `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
-       FROM messages GROUP BY user_email ORDER BY last DESC`,
+      `SELECT user_email AS email, COUNT(*) FILTER (WHERE $1::timestamptz IS NULL OR created_at >= $1)::int AS count, MAX(created_at) AS last
+       FROM messages GROUP BY user_email ORDER BY last DESC`,[baseline.statsSince],
     )
-    return r.rows
+    return { users:r.rows,statsSince:baseline.statsSince }
   })
 }
 
@@ -4445,16 +4460,28 @@ export interface HistoryRow {
   created_at: string
 }
 
-export async function citesteIstoric(email: string, limit = 1000): Promise<Citire<HistoryRow[]>> {
+export async function citesteIstoric(email:string,limit?:number): Promise<Citire<HistoryRow[]>>
+export async function citesteIstoric(email:string,options:AdminHistoryQuery): Promise<Citire<AdminHistoryPage>>
+export async function citesteIstoric(email:string,options:number | AdminHistoryQuery = 1000): Promise<Citire<HistoryRow[] | AdminHistoryPage>> {
   return citireDb('citirea istoricului', async () => {
-    const r = await getPool().query<HistoryRow>(
-      `SELECT role, content, created_at FROM messages
-       WHERE user_email = $1
-       ORDER BY created_at ASC, id ASC
+    const limit = typeof options === 'number' ? options : options.limit
+    const before = typeof options === 'number' ? null : options.before
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('history_limit_invalid')
+    const r = await getPool().query<HistoryRow & { id:string; cursor_at:string }>(
+      `SELECT m.id::text,m.role,m.content,m.created_at,
+         to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at FROM messages m
+       WHERE m.user_email=$1 AND ($3::timestamptz IS NULL OR (m.created_at,m.id)<($3::timestamptz,$4::bigint))
+       ORDER BY m.created_at DESC,m.id DESC
        LIMIT $2`,
-      [email, limit],
+      [email,limit+1,before?.createdAt ?? null,before?.id ?? null],
     )
-    return r.rows
+    const rows = r.rows.slice(0,limit)
+    const last = rows.at(-1)
+    const nextCursor = r.rows.length > limit && last ? { createdAt:last.cursor_at,id:last.id } : null
+    rows.reverse()
+    return typeof options === 'number'
+      ? rows.map(({ role,content,created_at }) => ({ role,content,created_at }))
+      : { history:rows.map(({ id,role,content,cursor_at }) => ({ id,role,content,created_at:cursor_at })),nextCursor,limit,maxLimit:ADMIN_HISTORY_MAX }
   })
 }
 
@@ -5334,6 +5361,9 @@ interface BuildJobDbRow {
   order_text: string
   status: string
   attempts: number
+  automatic_retry_limit?: number
+  automation_origin?: 'admin' | 'doctor'
+  repair_scope?: unknown
   branch: string | null
   pr_url: string | null
   tokens: string | number
@@ -5479,6 +5509,25 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
       [accountKey],
     )
     if (identity.rows[0]?.active !== true) throw new Error('constructor_identity_erased_or_inactive')
+    const result = await insertAuthorizedBuildJob(client, accountKey, orderText)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+/** Internal intake primitive. Caller MUST hold the account + intake locks and
+ * validate either the active session or the durable Doctor grant in this SAME
+ * transaction. Not a route/authentication entry point. */
+export async function insertAuthorizedBuildJob(
+  client: Pick<pg.PoolClient, 'query'>,
+  accountKey: string,
+  orderText: string,
+): Promise<CreateBuildJobResult> {
     const vii = await client.query<{ id: string | number; order_text: string; status: BuildJob['status'] }>(
       `SELECT id, order_text, status FROM build_jobs
         WHERE status IN ('queued','running') ORDER BY id DESC`,
@@ -5486,31 +5535,21 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
     const amp = amprentaOrdin(orderText)
     const dublura = vii.rows.find((rand) => amprentaOrdin(rand.order_text) === amp)
     if (dublura) {
-      console.error(`[ORDINE] dublură refuzată: ordinul #${dublura.id} e VIU cu aceeași amprentă — nu se naște al doilea (depus de ${orderedBy})`)
-      await client.query('COMMIT')
       return { id: Number(dublura.id), created: false, status: dublura.status }
     }
     // Același SUBIECT în alte cuvinte (16 aug, tripleta #334/#335/#338):
     const geaman = vii.rows.find((rand) => seamanaOrdinele(rand.order_text, orderText))
     if (geaman) {
-      console.error(`[ORDINE] același subiect refuzat: ordinul #${geaman.id} e VIU pe aceeași temă (cuvinte comune peste prag) — nu se naște al doilea (depus de ${orderedBy})`)
-      await client.query('COMMIT')
+      // același subiect refuzat: se reutilizează ordinul, fără alt executor.
       return { id: Number(geaman.id), created: false, status: geaman.status }
     }
     const r = await client.query<{ id: string | number }>(
       'INSERT INTO build_jobs (ordered_by, order_text, brain) VALUES ($1, $2, $3) RETURNING id',
       [accountKey, orderText, CONSTRUCTOR_LOCAL_ACTOR],
     )
-    await client.query('COMMIT')
     const id = Number(r.rows[0]?.id ?? 0)
     if (!id) throw new Error('constructor_create_missing_id')
     return { id, created: true, status: 'queued' }
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined)
-    throw error
-  } finally {
-    client.release()
-  }
 }
 
 /** Câte ordine sunt ACTIVE (în coadă sau în lucru) de la un depunător anume.
@@ -5799,47 +5838,40 @@ export async function updateConstructorIncident(
   }
 }
 
-// Cât timp de TĂCERE (fără nicio raportare de progres) până când un ordin
-// „running" e considerat BLOCAT — worker-ul lui a murit (omorât de `timeout
-// 1800` din constructor-worker.sh) și nimeni nu-l mai duce. Era 40 de minute
-// (Adrian, 5 aug: „pleacă enorm de greu să rezolve orice cerere" — un job agățat
-// ținea coada blocată 40 de minute). E scăzut la 15: worker-ul viu trimite
-// progres la fiecare pas, iar pasul cel mai lung fără bătaie de inimă e un `npm`
-// cu timeout de 10 min — deci 15 min de tăcere = worker mort, sigur. Flock-ul de
-// pe VPS (un singur worker odată) apără oricum de dubla-execuție.
+// Lipsa unui heartbeat pentru acest interval terminalizează etapa worker;
+// nu dovedește cauza tăcerii și nu autorizează altă execuție a modelului.
+// Etapele publisher/release și orice handoff durabil sunt excluse.
 const MIN_JOB_BLOCAT = 15
 
-// Câte reluări automate primește un ordin înainte să fie declarat mort. Cauzele
-// tehnice ale workerului sunt trecătoare (modelul local se reîncarcă, un deploy
-// oprește unitatea, procesul e omorât la depășirea memoriei), iar până acum
-// fiecare dintre ele omora ordinul definitiv, cerând reluare manuală de la owner.
-// Trei încercări acoperă pana obișnuită fără să ascundă un defect real: dacă un
-// ordin pică de trei ori la rând, cauza nu mai este trecătoare.
-const CONSTRUCTOR_WORKER_MAX_ATTEMPTS = 3
-
 // Workerul ia un singur ordin, iar acel ordin rămâne unica execuție activă până
-// la dovada live sau un rezultat terminal. Claim-ul persistă profilul ales
-// manual înainte de execuție; watchdog-ul nu schimbă profilul, dar repune
-// ordinul în coadă dacă lucrătorul a murit, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS.
+// la dovada live sau un rezultat terminal. O încercare consumă ciclul curent:
+// numai Reia explicit resetează attempts și creează un execution_cycle nou.
 export type ClaimNextBuildJobResult =
-  | { state: 'claimed'; job: BuildJob }
+  | { state: 'claimed'; job: BuildJob; authority: ConstructorAutomationAuthority }
   | { state: 'pipeline_active' | 'no_claimable_job'; job: null }
 
 export async function claimNextBuildJob(
   constructorTaskId: string,
   executionProfile: ConstructorExecutionProfile,
+  doctorCapability?: unknown,
 ): Promise<ClaimNextBuildJobResult> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   if (!constructorTaskId || (executionProfile !== 'fast' && executionProfile !== 'powerful')) {
     throw new Error('constructor_claim_profile_invalid')
   }
   await deblocheazaJoburileClaimate()
+  const { doctorRuntimeScopeVerified } = await import('./services/doctorRuntimeCapability.js')
+  const doctorAllowed = await doctorRuntimeScopeVerified({ service:'worker',capability:doctorCapability })
   const client = await conexiuneDb()
   try {
     await client.query('BEGIN')
     // Serializarea este globală fiindcă ordinea următoare trebuie bazată pe
     // masterul produs de cea anterioară, nu pe un vârf devenit stale în paralel.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('constructor:claim-build-job'))")
+    // Match Doctor revoke/GDPR ordering before locking the queued job. The
+    // consent check and transition across the worker boundary are atomic with
+    // account erasure, without inventing a session for autonomous intake.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`constructor-account:${config.adminEmail.trim().toLowerCase()}`])
     const r = await client.query<BuildJobDbRow>(
        `UPDATE build_jobs SET status='running', attempts = attempts + 1,
           codex_task_id=$1, constructor_stage='claimed', retry_not_before=NULL,
@@ -5850,13 +5882,17 @@ export async function claimNextBuildJob(
        WHERE id = (
          SELECT candidate.id FROM build_jobs candidate
          WHERE candidate.status='queued'
+           AND candidate.constructor_stage='queued'
+           AND candidate.attempts=0
+           AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=candidate.id)
+           AND (candidate.automation_origin='admin' OR $4::boolean)
            AND candidate.arhivat=false
            AND (candidate.retry_not_before IS NULL OR candidate.retry_not_before <= now())
            AND NOT EXISTS (SELECT 1 FROM build_jobs active WHERE active.status='running')
          ORDER BY candidate.created_at LIMIT 1 FOR UPDATE OF candidate SKIP LOCKED
        )
        RETURNING *`,
-      [constructorTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile],
+      [constructorTaskId.slice(0, 200), CONSTRUCTOR_LOCAL_ACTOR, executionProfile, doctorAllowed],
     )
     if (r.rows[0]) {
       // Un probe programat după backoff nu mai este descris ca „așteaptă
@@ -5873,7 +5909,28 @@ export async function claimNextBuildJob(
     }
     let result: ClaimNextBuildJobResult
     if (r.rows[0]) {
-      result = { state: 'claimed', job: rowToBuildJob(r.rows[0]) }
+      const row = r.rows[0]
+      let authority: ConstructorAutomationAuthority | null = null
+      try {
+        authority = constructorAutomationAuthority(row.automation_origin,row.repair_scope)
+      } catch { authority = null }
+      if (authority?.automationOrigin === 'doctor') {
+          const consent = await client.query<{ code: string }>(`SELECT d.code FROM doctor_incidents d
+            JOIN doctor_grants g ON g.id=d.grant_id WHERE d.job_id=$1 AND d.repair_attempted=true
+              AND g.admin_email=$2 AND g.admin_email=lower($3) AND g.scope='measured-code-repair'
+              AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > now())
+              AND NOT EXISTS (SELECT 1 FROM blocked_users u WHERE lower(u.email)=$2)`,
+          [row.id,config.adminEmail.trim().toLowerCase(),row.ordered_by])
+          const code = doctorCode(consent.rows[0]?.code)
+          const expectedScope = code ? doctorExecutionScope(code) : null
+          if (!expectedScope || row.automatic_retry_limit !== 1
+            || JSON.stringify(expectedScope) !== JSON.stringify(authority.repairScope)) authority = null
+      }
+      if (!authority) {
+        await client.query(`UPDATE build_jobs SET status='failed',constructor_stage='failed',
+          progress='constructor_automation_authority_invalid',retry_not_before=NULL,updated_at=now() WHERE id=$1`, [row.id])
+        result = { state:'no_claimable_job',job:null }
+      } else result = { state: 'claimed', job: rowToBuildJob(row), authority }
     } else {
       // Un UPDATE fără rând poate însemna fie coadă goală/backoff, fie
       // faptul că un job este deja running. Contractul workerului nu le poate
@@ -5899,14 +5956,8 @@ export async function claimNextBuildJob(
 }
 
 // ── WATCHDOG SERVER-SIDE, INDEPENDENT DE LUCRĂTOR ───────────────────────────
-// Un worker tăcut nu este o invitație la o a doua execuție SIMULTANĂ: revendicarea
-// este serializată de advisory lock și de flock-ul de pe mașină. Dar un lucrător
-// mort nu este vina ordinului — se întâmplă la fiecare deploy, care oprește
-// unitatea. După pragul măsurat ordinul se repune în coadă pe ACELAȘI profil
-// persistat la claim, până la CONSTRUCTOR_WORKER_MAX_ATTEMPTS; codex_task_id se
-// eliberează, ca revendicarea următoare să fie curată, iar execution_cycle și
-// attempts rămân dovezi. Abia la epuizarea plafonului ordinul devine terminal și
-// se deschide incidentul pentru owner.
+// Tăcerea închide etapa worker fără requeue, fără ștergerea taskId/attempts și
+// fără schimbarea ciclului. Incidentul păstrează profilul și cauza tehnică.
 export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: number }> {
   if (!dbEnabled()) throw new Error('constructor_db_unavailable')
   const client = await conexiuneDb()
@@ -5918,6 +5969,7 @@ export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: nu
         WHERE status='running'
           AND constructor_stage IN ('claimed','accepted','working')
           AND updated_at < now() - interval '${MIN_JOB_BLOCAT} minutes'
+          AND NOT EXISTS (SELECT 1 FROM constructor_pipeline p WHERE p.job_id=build_jobs.id)
         ORDER BY id
         FOR UPDATE`,
     )
@@ -5932,21 +5984,16 @@ export async function deblocheazaJoburileClaimate(): Promise<{ terminalizate: nu
             evidence: 'worker_failure:worker_internal_failure;profile=unrecorded',
             progress: 'technical_failure',
           }
-      // Un worker mort nu este vina ordinului: se întâmplă la fiecare deploy,
-      // care oprește unitatea, și la fiecare depășire de memorie. Îl repunem în
-      // coadă cu backoff, până la plafon. Handoff-ul este idempotent, deci
-      // re-revendicarea este sigură.
       const updated = await client.query<BuildJobDbRow>(
         `UPDATE build_jobs SET
-           status=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
-           constructor_stage=CASE WHEN attempts < $4 THEN 'queued' ELSE 'failed' END,
-           codex_task_id=CASE WHEN attempts < $4 THEN NULL ELSE codex_task_id END,
+           status='failed',
+           constructor_stage='failed',
            progress=$2,
-           retry_not_before=CASE WHEN attempts < $4 THEN now() + interval '2 minutes' ELSE NULL END,
+           retry_not_before=NULL,
            log=$3, progress_at=now(), updated_at=now()
          WHERE id=$1 AND status='running'
          RETURNING *`,
-        [row.id, failure.progress, failure.evidence, CONSTRUCTOR_WORKER_MAX_ATTEMPTS],
+        [row.id, failure.progress, failure.evidence],
       )
       const failedRow = updated.rows[0]
       if (!failedRow) continue
@@ -6231,26 +6278,14 @@ export async function advanceConstructorBuildJob(id: number, taskId: string, inp
       : input.event === 'unresolved'
         ? constructorWorkerUnresolvedRecord(input.reason, input.profile)
         : null
-    // Cele trei coduri tehnice ale workerului sunt tranzitorii prin natura lor:
-    // modelul local se reîncarcă, execuția depășește fereastra, procesul moare.
-    // Până acum fiecare dintre ele omora ordinul definitiv. Îl repunem în coadă
-    // cu backoff, până la plafon; codul rămâne prima linie din log și ajunge la
-    // worker ca recoveryCode. `unresolved` NU se reia: acela este un verdict
-    // despre conținutul ordinului, nu o pană.
-    const reluabil = input.event === 'failed'
+    // Orice verdict worker terminal păstrează identitatea execuției. Un eșec
+    // tehnic nu este permisiunea de a reinvoca AI, nici măcar pe același model.
     const updated = await client.query<BuildJobDbRow>(
       `UPDATE build_jobs SET
-         status=CASE
-           WHEN $8 AND attempts < $9 THEN 'queued'
-           WHEN $3 THEN 'failed'
-           ELSE status END,
-         constructor_stage=CASE WHEN $8 AND attempts < $9 THEN 'queued' ELSE $2 END,
-         codex_task_id=CASE WHEN $8 AND attempts < $9 THEN NULL ELSE codex_task_id END,
+         status=CASE WHEN $3 THEN 'failed' ELSE status END,
+         constructor_stage=$2,
          progress=$4,
-         retry_not_before=CASE
-           WHEN $8 AND attempts < $9 THEN now() + (interval '1 minute' * power(2, least(attempts, 4)))
-           WHEN $3 THEN NULL
-           ELSE retry_not_before END,
+         retry_not_before=CASE WHEN $3 THEN NULL ELSE retry_not_before END,
          progress_at=now(),
          log=CASE WHEN $3 THEN $5 ELSE log END,
          brain=$6,
@@ -6265,13 +6300,10 @@ export async function advanceConstructorBuildJob(id: number, taskId: string, inp
         failure?.evidence ?? null,
         CONSTRUCTOR_LOCAL_ACTOR,
         input.event === 'failed' || input.event === 'unresolved' ? input.profile : null,
-        reluabil,
-        CONSTRUCTOR_WORKER_MAX_ATTEMPTS,
       ],
     )
     const failedRow = updated.rows[0]
-    // Incidentul se deschide numai când ordinul chiar a murit. Dacă a fost repus
-    // în coadă, nu există încă nimic de raportat ownerului.
+    // Raportăm imediat verdictul terminal; nu îl ascundem în spatele backoffului.
     if (terminal && failedRow && failedRow.status === 'failed') {
       await upsertConstructorIncident(client, {
         id: Number(failedRow.id),
@@ -6505,10 +6537,9 @@ export async function archiveBuildJobsByScope(
  *  jobul actualizat sau null.
  *
  *  Numai un rezultat terminal poate fi reluat explicit. Un job viu nu poate fi
- *  resetat concurent din Admin: dacă workerul tace, watchdogul îl repune întâi
- *  în coadă, iar la epuizarea plafonului îl închide terminal; abia atunci
- *  ownerul poate folosi Reia. Cât ordinul este `queued` nu are nevoie de Reia,
- *  fiindcă va fi revendicat automat. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
+ *  resetat concurent din Admin: dacă workerul tace, watchdogul îl închide
+ *  terminal; abia atunci ownerul poate folosi Reia. O coadă deja încercată nu
+ *  este revendicabilă. Astfel nu apar doi executori pe aceeași cerere și nu este mutat înapoi
  *  un job deja publicat. */
 export type RetryBuildJobResult =
   | { ok: true; job: BuildJob }
@@ -6661,18 +6692,22 @@ export async function cancelBuildJob(
 // ── AGENȚII CUSTOM AI OWNERULUI (4 aug: „să pot pune și să fie creat automat") ─
 
 /** Lista agenților adăugați din admin — formă identică cu rosterul din cod. */
-export async function listaAgentiCustom(): Promise<
+export async function listaAgentiCustom(strict = false): Promise<
   { id: string; nume: string; rol: string; efort?: 'low' | 'high'; doarAdmin?: boolean }[]
 > {
-  if (!dbEnabled()) return []
+  if (!dbEnabled()) {
+    if (strict) throw new Error('agent_registry_unavailable')
+    return []
+  }
   const r = await getPool()
     .query(`SELECT id, nume, rol, efort, doar_admin FROM agenti_custom ORDER BY creat`)
     .catch(() => null)
+  if (!r && strict) throw new Error('agent_registry_unavailable')
   return ((r?.rows ?? []) as { id: string; nume: string; rol: string; efort?: string; doar_admin?: boolean }[]).map((x) => ({
     id: x.id,
     nume: x.nume,
     rol: x.rol,
-    efort: x.efort === 'high' ? 'high' : undefined,
+    efort: x.efort === 'high' || x.efort === 'low' ? x.efort : undefined,
     doarAdmin: x.doar_admin === true ? true : undefined,
   }))
 }
@@ -6691,7 +6726,7 @@ export async function adaugaAgentCustom(a: {
     .query(
       `INSERT INTO agenti_custom (id, nume, rol, efort, doar_admin) VALUES ($1,$2,$3,$4,$5)
         ON CONFLICT (id) DO NOTHING`,
-      [a.id, a.nume.slice(0, 80), a.rol, a.efort === 'high' ? 'high' : null, a.doarAdmin === true],
+      [a.id, a.nume.slice(0, 80), a.rol, a.efort ?? null, a.doarAdmin === true],
     )
     .catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
   if (typeof r === 'string') return `scrierea a picat: ${r.slice(0, 150)}`

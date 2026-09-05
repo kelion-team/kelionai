@@ -15,12 +15,18 @@ RUN cd frontend && npm ci --no-audit --no-fund
 
 FROM dependinte AS constructie
 WORKDIR /build
+ARG GIT_COMMIT_SHA
 COPY frontend ./frontend
 COPY config ./config
 COPY scripts/genereaza-config-platforme.mjs ./scripts/genereaza-config-platforme.mjs
 COPY backend/src/shared ./backend/src/shared
-RUN cd frontend && npm run build
+RUN cd frontend && GIT_COMMIT_SHA="$GIT_COMMIT_SHA" npm run build
 COPY backend ./backend
+# The expected Doctor capability is bound to the reviewed runtime source bytes
+# in this image build, not to a worker heartbeat or a configurable expected hash.
+COPY scripts/generate-constructor-doctor-capability.mjs ./scripts/generate-constructor-doctor-capability.mjs
+COPY deploy/lib/doctor-repair-scope.mjs ./deploy/lib/doctor-repair-scope.mjs
+COPY deploy/codex-worker.mjs deploy/constructor-publisher.mjs ./deploy/
 RUN cd backend && npm run build
 
 FROM dependinte AS module-runtime
@@ -41,6 +47,7 @@ RUN apt-get update \
 COPY --chown=node:node --from=module-runtime /build/backend/node_modules ./backend/node_modules
 COPY --chown=node:node --from=constructie /build/backend/vendor ./backend/vendor
 COPY --chown=node:node --from=constructie /build/backend/dist ./backend/dist
+COPY --chown=root:root --chmod=0444 --from=constructie /build/backend/dist/constructor-doctor-capability.json ./backend/dist/constructor-doctor-capability.json
 COPY --chown=node:node --from=constructie /build/backend/migrations ./backend/migrations
 COPY --chown=node:node --from=constructie /build/config ./config
 COPY --chown=node:node backend/package.json ./backend/package.json
