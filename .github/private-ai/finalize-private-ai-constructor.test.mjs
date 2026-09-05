@@ -558,6 +558,11 @@ test('finalizerul păstrează modul executabil canonic pentru helperul de schimb
     /install -o root -g root -m 0755 "\$MODEL_SWITCH_SOURCE" "\$model_switch_candidate"/)
 })
 
+test('workflow-ul acceptă succesul finalizerului numai după o invocare nouă observată', () => {
+  assert.match(workflow,
+    /if \[ "\$active" = inactive \] && \[ "\$result" = success \] \\\n+              && \[\[ "\$last_invocation" =~ \^\[0-9a-f\]\{32\}\$ \]\]/)
+})
+
 test('finalizerul armează intentul înainte de snapshot și publică workerul numai după control-plane', () => {
   const lock = finalizer.indexOf('flock -n 9')
   const marker = finalizer.indexOf('\npublish_finalizer_reactivation_intent \\', lock)

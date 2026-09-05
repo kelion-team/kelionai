@@ -611,7 +611,8 @@ jobs:
             fi
             active=$(systemctl show private-ai-constructor-finalize.service -p ActiveState --value)
             result=$(systemctl show private-ai-constructor-finalize.service -p Result --value)
-            if [ "$active" = inactive ] && [ "$result" = success ]; then
+            if [ "$active" = inactive ] && [ "$result" = success ] \
+              && [[ "$last_invocation" =~ ^[0-9a-f]{32}$ ]]; then
               success_invocation=$last_invocation
               break
             fi
