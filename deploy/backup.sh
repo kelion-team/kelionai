@@ -32,6 +32,14 @@ finally:
 PY
 }
 
+validate_backup_runtime_directory() {
+  # Shared with the application and Constructor. Backup files stay root-only,
+  # but backup must never normalize this shared directory to root:root 0700.
+  [ -d "$RUNTIME_DIR" ] && [ ! -L "$RUNTIME_DIR" ] \
+    && [ "$(realpath -e -- "$RUNTIME_DIR")" = "$RUNTIME_DIR" ] \
+    && [ "$(stat -Lc '%u:%g:%a' "$RUNTIME_DIR")" = '0:10050:750' ]
+}
+
 [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ] \
   || { printf '%s\n' 'backup: configul runtime lipsește sau este link'; exit 1; }
 mapfile -t retention_values < <(sed -n 's/^PRIVACY_BACKUP_RETENTION_DAYS=//p' "$CONFIG_FILE")
@@ -57,8 +65,9 @@ fi
 POSTGRES_SOCKET_GID=$(stat -c '%g' /var/run/postgresql/.s.PGSQL.5432)
 case "$POSTGRES_SOCKET_GID" in ''|*[!0-9]*) printf '%s\n' 'backup: grup socket invalid'; exit 1 ;; esac
 
+validate_backup_runtime_directory \
+  || { printf '%s\n' 'backup: directorul runtime comun nu are layoutul canonic'; exit 1; }
 install -d -o root -g root -m 0700 "$OUT_DIR"
-install -d -o root -g root -m 0700 "$RUNTIME_DIR"
 # Backupurile create de implementări anterioare pot avea permisiuni mai largi.
 # Orice fișier din directorul dedicat este material de recovery și devine
 # root-only înainte de a crea sau roti un backup nou.

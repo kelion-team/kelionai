@@ -147,6 +147,40 @@ jobs:
             --entrypoint node kelion-ci-app:${GITHUB_SHA} \
             --test /probe/deploy/lib/constructor-handoff-permissions.test.mjs
 
+      - name: OpenCode version probe cu HOME privat în rootfs read-only
+        run: |
+          set -euo pipefail
+          umask 077
+          probe_dir=$(mktemp -d "${RUNNER_TEMP}/kelion-opencode-version.XXXXXXXX")
+          cleanup() {
+            local rc=$?
+            case "$probe_dir" in "${RUNNER_TEMP}"/kelion-opencode-version.*) ;; *) exit 1 ;; esac
+            test -d "$probe_dir" && test ! -L "$probe_dir" || exit 1
+            rm -rf -- "$probe_dir"
+            exit "$rc"
+          }
+          trap cleanup EXIT
+          # Baseline asset pins retained from the reviewed private-ai installer;
+          # the controller independently pins the extracted executable too.
+          curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 180 \
+            https://github.com/anomalyco/opencode/releases/download/v1.18.25/opencode-linux-x64-baseline.tar.gz \
+            --output "$probe_dir/opencode.tar.gz"
+          printf '%s  %s\n' ccd10586611b598b1eaed7c05cfbcbc68e3ec09e736b360da09b1d615d922968 "$probe_dir/opencode.tar.gz" | sha256sum --check --strict -
+          tar -xzOf "$probe_dir/opencode.tar.gz" opencode > "$probe_dir/opencode"
+          test -f "$probe_dir/opencode" && test ! -L "$probe_dir/opencode"
+          printf '%s  %s\n' d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb "$probe_dir/opencode" | sha256sum --check --strict -
+          chmod 0555 "$probe_dir/opencode"
+          docker run --rm --pull=never --read-only --network none \
+            --cap-drop ALL --security-opt no-new-privileges --pids-limit 96 --memory 256m --cpus 2 \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=32m --user 0:0 \
+            --mount type=bind,src="$probe_dir/opencode",dst=/opt/private-ai/bin/opencode,readonly \
+            --mount type=bind,src="$PWD/deploy/constructor-model-control.mjs",dst=/probe/deploy/constructor-model-control.mjs,readonly \
+            --mount type=bind,src="$PWD/deploy/constructor-model-control-home.test.mjs",dst=/probe/deploy/constructor-model-control-home.test.mjs,readonly \
+            --mount type=bind,src="$PWD/deploy/lib/service-auth.mjs",dst=/probe/deploy/lib/service-auth.mjs,readonly \
+            --entrypoint node kelion-ci-app:${GITHUB_SHA} \
+            --test /probe/deploy/constructor-model-control-home.test.mjs
+
       - name: Trust boundary web și self-testuri
         run: |
           set -euo pipefail

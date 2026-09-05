@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -7,6 +10,63 @@ const deploy = read('deploy.sh')
 const backup = read('backup.sh')
 const service = read('systemd/kelion-backup.service')
 const timer = read('systemd/kelion-backup.timer')
+
+test('backupul verifică read-only directorul runtime comun și păstrează dovada root-only', () => {
+  const start = backup.indexOf('validate_backup_runtime_directory() {')
+  const end = backup.indexOf('\n}\n', start)
+  assert.ok(start >= 0 && end > start)
+  const validator = backup.slice(start, end + 2)
+  assert.match(validator, /\[ -d "\$RUNTIME_DIR" \] && \[ ! -L "\$RUNTIME_DIR" \]/)
+  assert.match(validator, /realpath -e -- "\$RUNTIME_DIR"/)
+  assert.match(validator, /stat -Lc '%u:%g:%a' "\$RUNTIME_DIR".*'0:10050:750'/)
+  assert.doesNotMatch(validator, /(?:^|\n)\s*(?:install|chmod|chown|mkdir|rm)\s/)
+  assert.doesNotMatch(backup, /install -d[^\n]*"\$RUNTIME_DIR"/)
+  assert.match(backup, /validate_backup_runtime_directory \\\n\s+\|\| .*exit 1; \}/)
+  assert.match(backup, /chown root:root "\$temporary_proof"\nchmod 0600 "\$temporary_proof"\nmv "\$temporary_proof" "\$PROOF_FILE"/)
+  const preparation = deploy.indexOf('install -d -o root -g 10050 -m 0750 "$RUNTIME_ROOT" "$RELEASE_STATE_ROOT"')
+  assert.ok(preparation >= 0 && preparation < deploy.indexOf('\n"$PERSISTENT_BACKUP_SCRIPT"\n'))
+})
+
+test('validatorul backup păstrează inode/ACL/conținut și refuză layoutul700, lipsa, fișierul și symlinkul', {
+  skip: process.platform !== 'linux',
+}, () => {
+  const start = backup.indexOf('validate_backup_runtime_directory() {')
+  const end = backup.indexOf('\n}\n', start)
+  assert.ok(start >= 0 && end > start)
+  const original = backup.slice(start, end + 2)
+  // The fixture uses the test process's UID/GID; no chown or production path is
+  // needed. The test above seals the real root:10050 policy. Every filesystem
+  // predicate here is the actual shell predicate against a private directory.
+  assert.equal(original.split("'0:10050:750'").length, 2)
+  const validator = original.replace("'0:10050:750'", `'${process.getuid()}:${process.getgid()}:750'`)
+  const root = mkdtempSync(join(tmpdir(), 'kelion-backup-runtime-layout-'))
+  try {
+    const runtime = join(root, 'runtime')
+    mkdirSync(runtime, { mode: 0o750 })
+    chmodSync(runtime, 0o750)
+    const proof = join(runtime, 'last-verified-backup.json')
+    writeFileSync(proof, '{"synthetic":true}\n', { mode: 0o600 })
+    const before = lstatSync(runtime)
+    const run = (path = runtime) => spawnSync('bash', ['--noprofile', '--norc', '-c', `${validator}\nvalidate_backup_runtime_directory`], {
+      encoding: 'utf8', timeout: 5_000, env: { PATH: '/usr/bin:/bin', RUNTIME_DIR: path },
+    })
+    assert.equal(run().status, 0)
+    const after = lstatSync(runtime)
+    for (const field of ['dev', 'ino', 'uid', 'gid', 'mode', 'ctimeMs']) assert.equal(after[field], before[field], field)
+    assert.equal(lstatSync(proof).mode & 0o777, 0o600)
+    assert.equal(readFileSync(proof, 'utf8'), '{"synthetic":true}\n')
+    chmodSync(runtime, 0o700)
+    assert.notEqual(run().status, 0)
+    assert.equal(lstatSync(runtime).mode & 0o777, 0o700, 'invalid ACL must not be silently rewritten')
+    assert.notEqual(run(join(root, 'missing')).status, 0)
+    assert.notEqual(run(proof).status, 0)
+    chmodSync(runtime, 0o750)
+    const link = join(root, 'linked-runtime')
+    symlinkSync(runtime, link, 'dir')
+    assert.notEqual(run(link).status, 0)
+    assert.equal(lstatSync(runtime).mode & 0o777, 0o750)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
 
 test('retenția backupului vine exclusiv din contractul runtime', () => {
   assert.match(backup, /PRIVACY_BACKUP_RETENTION_DAYS=/)
