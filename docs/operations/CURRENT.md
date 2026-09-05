@@ -207,3 +207,22 @@ Actualizat: 2026-09-05T13:17:51.116Z (Europe/London: UTC+1 la această dată)
   integrare/CI/deploy:root. Detalii:docs/operations/incidents/2026-09-05-ci-fixture-owner.md.
 - Închiderea CI cere noul GitHub HEAD cu toate porțile trecute. Deploy și ordin666
   au acceptări separate; nu sunt declarate finalizate din probele fixture.
+
+## CI32a1 și al doilea incident, 5 septembrie2026
+
+- Run33968908143: verifyPASS3m4s; backend1743/1743, frontend467/467,
+  static453tests/452PASS/0FAIL/1SKIP. OwnerregressionPASS.
+- Container-isolation101314219700: imaginile construite; Doctor scope12PASS/1FAIL
+  din regex stale pentru heartbeat (detail întrestate și doctorCapability).
+  Producția arecapabilitymăsurată, backendacceptădetailbounded240.
+- Fixnumaitestdoctor-repair-scope: ASTapeleazăexpresiilePOSTreale și verifică
+  capabilitatemăsuratăindependent, refuzămutanțiomiși/fabricați.15/15PASS0skip,
+  peerreviewDaltonaprobat; SHA9baa07297ecfa87b6fe1dcdb77de98c3d6abb3c167cb56428248088d89e694df.
+  Fișă:docs/operations/incidents/2026-09-05-ci-doctor-heartbeat-contract.md.
+- Clarificărileaprobateraportare/context/metoderezolvare și4zonetehnice suntîn
+  docs/requirements/approved/2026-09-05/Completare-aprobata-raportare-si-zone-tehnice.md.
+  Nu suntimplementateprinfișă.648DB+DOM+capturănuînseamnăconsumorchestrator;
+  Darwinconfirmăcănotificărilenusuntîncontext/unelteKelionautomat.
+- PreflightVPS13:29–13:30UTC: markerpausedABSENT; timerenabled/inactive,PID0.
+  Helperlegacy833b28...=a32acceptatdebootstrap,jurnaleabsente; nublocajnou.
+  Pauzaîncănudurabilă; deploytrebuiesăcaptezemarkerînainteupgrade/reluare.

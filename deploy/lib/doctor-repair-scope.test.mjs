@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { canonicalRepairAuthorization, assertDoctorPatchScope, DoctorScopeError, measureDoctorCapability, persistDoctorScopeRejection, doctorSemanticSources, assertDoctorSemanticSources } from './doctor-repair-scope.mjs'
 import { strictWorkerClaimResponse } from '../codex-worker.mjs'
+import { runInNewContext } from 'node:vm'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const runtimePath = 'backend/src/services/publicRuntimeContract.ts'
@@ -243,6 +244,62 @@ test('both supervisors enforce the same scope before handoff, gates, push and me
   assert.match(worker, /\.scope-rejections[\s\S]*patchSha256: error\.patchSha256/)
   assert.match(worker, /codex\/status', \{ status,[^\n]+doctorCapability: measureDoctorCapability\(\)/)
   assert.match(worker, /codex\/jobs\/claim', \{ profile, doctorCapability: measureDoctorCapability\(\)/)
-  assert.match(publisher, /publisher\/heartbeat', body: \{ state: 'ready', doctorCapability: measureDoctorCapability\(\)/)
-  assert.match(publisher, /publisher\/jobs\/claim', body: \{ doctorCapability: measureDoctorCapability\(\)/)
+})
+
+async function verifyPublisherCapabilityRequests(source, capabilityAvailable = true) {
+  const ast = ts.createSourceFile('constructor-publisher.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const run = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'runOnce')
+  assert.ok(run?.body, 'The production publisher runOnce body is required')
+  const paths = ['/api/internal/constructor-publisher/heartbeat', '/api/internal/constructor-publisher/jobs/claim']
+  const calls = []
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'postInternal') {
+      const argument = node.arguments[0]
+      if (argument && ts.isObjectLiteralExpression(argument)) {
+        const path = argument.properties.find((property) => ts.isPropertyAssignment(property)
+          && property.name.getText(ast) === 'path')
+        if (path && ts.isStringLiteral(path.initializer) && paths.includes(path.initializer.text)) calls.push(node)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(run.body)
+  assert.equal(calls.length, 2, 'Both canonical production requests must exist exactly once')
+  const measured = [], sent = []
+  // Execute the actual request expressions, not a reconstructed payload or a
+  // whitespace-sensitive regex. Only measurement and network I/O are doubled.
+  await runInNewContext('(async () => { ' + calls.map((call) => 'await ' + call.getText(ast) + ';').join('\n') + ' })()', {
+    API: 'http://127.0.0.1:8080', PREFIX: 'synthetic-publisher', hmac: { value: 'synthetic-hmac' },
+    measureDoctorCapability: () => {
+      const capability = capabilityAvailable ? Object.freeze({ measurement: measured.length + 1 }) : null
+      measured.push(capability)
+      return capability
+    },
+    postInternal: async (request) => { sent.push(request) },
+  })
+  assert.equal(measured.length, 2, 'Each request must measure capability independently')
+  assert.deepEqual(sent.map((request) => request.path), paths)
+  assert.equal(sent[0].body.state, 'ready')
+  for (const [index, request] of sent.entries()) {
+    assert.equal(request.api, 'http://127.0.0.1:8080')
+    assert.equal(request.secret, 'synthetic-hmac')
+    assert.equal(request.prefix, 'synthetic-publisher')
+    assert.ok(Object.hasOwn(request.body, 'doctorCapability'))
+    assert.equal(request.body.doctorCapability, measured[index], 'Only the measured capability may cross the wire')
+  }
+}
+
+test('production publisher heartbeat and claim forward measured capability regardless of diagnostic detail', async () => {
+  const publisher = readFileSync(join(root, 'deploy/constructor-publisher.mjs'), 'utf8')
+  await verifyPublisherCapabilityRequests(publisher)
+  await verifyPublisherCapabilityRequests(publisher, false)
+})
+
+test('publisher capability regression rejects removed or fabricated capability in actual request bodies', async () => {
+  const publisher = readFileSync(join(root, 'deploy/constructor-publisher.mjs'), 'utf8')
+  for (const replacement of ['unrelated: measureDoctorCapability()', 'doctorCapability: null', 'doctorCapability: { protocolVersion: 2 }']) {
+    const mutated = publisher.replaceAll('doctorCapability: measureDoctorCapability()', replacement)
+    assert.notEqual(mutated, publisher)
+    await assert.rejects(verifyPublisherCapabilityRequests(mutated), assert.AssertionError)
+  }
 })
