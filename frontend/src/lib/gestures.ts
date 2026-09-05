@@ -99,6 +99,35 @@ export async function fetchDisabledGestures(): Promise<string[] | null> {
   }
 }
 
+const GESTURE_POLICY_SAVED_EVENT = 'kelion-gesture-policy-saved'
+
+/** A confirmed Admin write wins immediately over any older polling response. */
+export function watchDisabledGestures(onChange: (disabled: string[] | null) => void, target: EventTarget = window): () => void {
+  let generation = 0
+  let disposed = false
+  const load = (): void => {
+    const requestGeneration = ++generation
+    void fetchDisabledGestures().then((disabled) => {
+      if (!disposed && requestGeneration === generation) onChange(disabled)
+    })
+  }
+  const saved = (event: Event): void => {
+    const disabled = parseDisabledGesturesResponse((event as CustomEvent<unknown>).detail)
+    if (disposed || disabled === null) return
+    ++generation
+    onChange(disabled)
+  }
+  target.addEventListener(GESTURE_POLICY_SAVED_EVENT, saved)
+  load()
+  const timer = setInterval(load, 30_000) // hardcod-permis: polling inter-client păstrat; salvarea locală se propagă imediat.
+  return () => {
+    disposed = true
+    ++generation
+    clearInterval(timer)
+    target.removeEventListener(GESTURE_POLICY_SAVED_EVENT, saved)
+  }
+}
+
 export async function saveDisabledGesturesCanonical(disabled: string[]): Promise<string[] | null> {
   try {
     const canonical = canonicalDisabledGestures(disabled)
@@ -114,9 +143,11 @@ export async function saveDisabledGesturesCanonical(disabled: string[]): Promise
       return null
     }
     const echoed = parseDisabledGesturesResponse(response)
-    return echoed !== null && echoed.length === canonical.length && echoed.every((clip, index) => clip === canonical[index])
-      ? echoed
-      : null
+    if (echoed === null || echoed.length !== canonical.length || !echoed.every((clip, index) => clip === canonical[index])) return null
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(GESTURE_POLICY_SAVED_EVENT, { detail: { disabled: echoed } }))
+    }
+    return echoed
   } catch {
     return null
   }

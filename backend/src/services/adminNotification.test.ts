@@ -75,10 +75,36 @@ describe('adminNotification service', () => {
     expect(list).toHaveLength(2)
 
     const marked = await markAdminNotificationRead(1)
-    expect(marked).toBe(true)
+    expect(marked).toBe('read')
 
     const unread = await getAdminNotifications(50, true)
     expect(unread).toHaveLength(1)
     expect(unread?.[0]?.title).toBe('Test 2')
+  })
+
+  it('distinguishes a missing notification from successful idempotent marking', async () => {
+    await expect(markAdminNotificationRead(9)).resolves.toBe('not_found')
+    await notifyAdmin('scris', 'Read receipt', 'Measured notification')
+    await expect(markAdminNotificationRead(1)).resolves.toBe('read')
+    await expect(markAdminNotificationRead(1)).resolves.toBe('read')
+    expect(mockQuery).toHaveBeenLastCalledWith('UPDATE admin_notifications SET read = TRUE WHERE id = $1', [1])
+  })
+
+  it('does not fabricate success or not-found when storage is disabled or fails', async () => {
+    vi.spyOn(dbModule, 'dbEnabled').mockReturnValue(false)
+    await expect(markAdminNotificationRead(1)).resolves.toBe('unavailable')
+    expect(mockQuery).not.toHaveBeenCalled()
+    vi.spyOn(dbModule, 'dbEnabled').mockReturnValue(true)
+    mockQuery.mockRejectedValueOnce(new Error('private-database-detail'))
+    await expect(markAdminNotificationRead(1)).resolves.toBe('unavailable')
+    vi.spyOn(dbModule, 'getPool').mockImplementationOnce(() => { throw new Error('private-pool-detail') })
+    await expect(markAdminNotificationRead(1)).resolves.toBe('unavailable')
+  })
+
+  it('rejects unmeasured or unexpected affected-row counts', async () => {
+    for (const rowCount of [null, undefined, 2]) {
+      mockQuery.mockResolvedValueOnce({ rowCount })
+      await expect(markAdminNotificationRead(1)).resolves.toBe('unavailable')
+    }
   })
 })

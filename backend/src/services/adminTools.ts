@@ -17,6 +17,7 @@ import { systemHealth } from './health.js'
 import { resurseGazda } from './resurse.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { notifyAdmin } from './adminNotification.js'
+import { readConstructorMonitor } from './constructorMonitor.js'
 import { esteAdminKelion } from './adminIdentity.js'
 
 // The names of the shared admin tools (chat ∩ voice). The caller checks
@@ -53,14 +54,16 @@ export async function execSharedAdminTool(
     // FULL OBSERVABILITY in one call (his request #3): every figure below is a
     // MEASUREMENT — a failed read arrives as null and is said, never a zero.
     case 'stare_masurata': {
-      const [sanatate, resurse, cost] = await Promise.all([
+      const [sanatate, resurse, cost, constructorMonitor] = await Promise.all([
         systemHealth().catch(() => 'nu pot citi sănătatea'),
         resurseGazda().catch(() => null),
         citesteRezumatCost().catch(() => null),
+        readConstructorMonitor().catch(() => ({ state:'unknown',error:'constructor_monitor_unavailable',activeExecution:false })),
       ])
       return JSON.stringify(
         {
           sanatate,
+          constructorMonitor,
           resurse: resurse ?? 'nu pot citi /proc (memorie/încărcare)',
           costAzi: cost?.citit ? cost.valoare : `nu pot citi jurnalul de cost${cost && !cost.citit ? `: ${cost.motiv}` : ''}`,
           paymentCollection: {

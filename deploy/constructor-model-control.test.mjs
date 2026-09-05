@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  createModelControl, createPublicationBarrier, probeModelState,
+  createModelControl, createPublicationBarrier, probeModelState, probeWorkerState, readWorkerPause,
   validateProviderConfig, requestProviderCatalog,
 } from './constructor-model-control.mjs'
 import { signServiceRequest } from './lib/service-auth.mjs'
@@ -68,10 +68,25 @@ async function assertRealPublicationBarrier(path) {
   const first = await barrier.acquire()
   assert.ok(first)
   assert.equal(await barrier.acquire(), null)
+  assert.deepEqual(await barrier.acquire({ observeContention: true }), { contended: true })
+  const observed = await listenControl(readyDependencies({
+    publicationBarrier: barrier, deploymentPending: () => true,
+    probeWorkerState: async () => { throw new Error('must not probe across held publication lock') },
+  }))
+  try {
+    const response = await signedRequest(observed.endpoint, '/v1/worker/state', {})
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.body, { schema: 1, measuredAt: response.body.measuredAt,
+      worker: null, intentionalPause: null, deployGate: true })
+    assert.ok(Date.now() - Date.parse(response.body.measuredAt) < 1000)
+  } finally { await observed.close() }
   await first.release()
   const second = await barrier.acquire()
   assert.ok(second)
   await second.release()
+  chmodSync(path, 0o644)
+  assert.equal(await barrier.acquire({ observeContention: true }), null)
+  chmodSync(path, 0o600)
 }
 
 
@@ -347,5 +362,112 @@ test('controllerul read-only păstrează socketul, credentiala și barierele fă
   assert.doesNotMatch(unit, /IPAddressDeny=any|AF_INET6|private-ai-llm|ReadWritePaths=.*\/etc/)
   assert.match(source, /startupDeploymentEntryExists\(\)/)
   assert.match(source, /chmodSync\(CONTROL_SOCKET, 0o660\)/)
-  assert.doesNotMatch(source, /llama|qwen|spawnModelSwitch|recoverInterruptedSwitch|createTransactionStore|systemctl/i)
+  assert.equal(source.split("execute('/usr/bin/systemctl', ['show'").length - 1, 1)
+  assert.doesNotMatch(source, /llama|qwen|spawnModelSwitch|recoverInterruptedSwitch|createTransactionStore/i)
+})
+
+
+test('host observation uses only fixed read-only systemd units and preserves pause', async () => {
+  const calls = []
+  const state = await probeWorkerState({ readWorkerPause: () => true,
+    runCommand: async (command, args, timeout) => {
+      calls.push({ command, args, timeout })
+      return { code: 0, signal: null, failed: false,
+        stdout: args.at(-1).endsWith('.timer') ? 'LoadState=loaded\nActiveState=inactive' : 'MainPID=0\nLoadState=loaded\nActiveState=inactive' }
+    } })
+  assert.equal(state.intentionalPause, true)
+  assert.deepEqual(state.worker, { timer:'inactive', service:'inactive', mainPid:0 })
+  assert.equal(state.deployGate, false)
+  assert.equal(calls.length,2)
+  assert.ok(calls.every(c => c.command === '/usr/bin/systemctl' && c.args[0] === 'show' && c.timeout === 3000))
+})
+
+test('host observation refuses malformed, failed and contradictory process states', async () => {
+  for (const stdout of ['LoadState=not-found\nActiveState=inactive', 'LoadState=loaded\nActiveState=active\nMainPID=4',
+    'LoadState=loaded\nActiveState=inactive\nActiveState=active', 'garbage']) {
+    await assert.rejects(probeWorkerState({ readWorkerPause:()=>false,
+      runCommand:async()=>({ code:0,signal:null,failed:false,stdout }) }))
+  }
+  await assert.rejects(probeWorkerState({readWorkerPause:()=>{throw Error('invalid') }}))
+  await assert.rejects(probeWorkerState({readWorkerPause:()=>false,
+    runCommand:async()=>({ code:0,signal:null,failed:true,stdout:'' }) }))
+})
+
+test('worker host wire requires HMAC and exact empty body and cannot mutate model', async () => {
+  const host = {schema:1,measuredAt:new Date().toISOString(),worker:{timer:'inactive',service:'inactive',mainPid:0},intentionalPause:true,deployGate:false}
+  let probes=0
+  const control = await listenControl(readyDependencies({probeWorkerState:async()=>{probes++;return host}}))
+  try {
+    const valid = await signedRequest(control.endpoint,'/v1/worker/state',{})
+    assert.equal(valid.status,200)
+    assert.deepEqual(valid.body,host)
+    assert.equal(probes,1)
+    assert.equal((await signedRequest(control.endpoint,'/v1/worker/state',{unit:'other'})).status,422)
+    assert.equal((await signedRequest(control.endpoint,'/v1/worker/state',{}, {signature:'x'})).status,401)
+    assert.equal(probes,1)
+  } finally {await control.close()}
+})
+
+
+test('worker pause validates parent ownership before absence and refuses disappearance races', () => {
+  const directory='/etc/kelion', marker=directory+'/codex-worker.paused'
+  const parent={isDirectory:()=>true,isSymbolicLink:()=>false,uid:0,gid:0,mode:0o755,dev:1,ino:2}
+  const file={isFile:()=>true,isSymbolicLink:()=>false,nlink:1,uid:0,gid:0,mode:0o444,size:9,dev:1,ino:3}
+  const missing=()=>{throw Object.assign(Error('absent'),{code:'ENOENT'})}
+  const base={lstatSync:p=>p===directory?parent:file,realpathSync:p=>p,openSync:()=>4,
+    fstatSync:()=>file,readFileSync:()=> 'schema=1\n',closeSync:()=>{}}
+  assert.equal(readWorkerPause(base),true)
+  assert.equal(readWorkerPause({...base,lstatSync:p=>p===directory?parent:missing()}),false)
+  for(const unsafe of [{uid:1},{gid:1},{mode:0o775},{isSymbolicLink:()=>true},{isDirectory:()=>false}]) {
+    assert.throws(()=>readWorkerPause({...base,lstatSync:p=>p===directory?{...parent,...unsafe}:missing()}))
+  }
+  assert.throws(()=>readWorkerPause({...base,realpathSync:p=>p===directory?'/tmp/else':p}))
+  assert.throws(()=>readWorkerPause({...base,openSync:missing}),/absent/)
+  let leafReads=0
+  assert.throws(()=>readWorkerPause({...base,lstatSync:p=>p===directory?parent:++leafReads===1?file:missing()}),/absent/)
+  assert.throws(()=>readWorkerPause({...base,lstatSync:p=>p===directory?parent:{...file,isSymbolicLink:()=>true}}))
+  let parentReads=0
+  assert.throws(()=>readWorkerPause({...base,lstatSync:p=>p===directory?{...parent,ino:++parentReads===1?2:9}:file}))
+  let closed=false
+  assert.throws(()=>readWorkerPause({...base,readFileSync:()=> 'schema=2\n',closeSync:()=>{closed=true}}))
+  assert.equal(closed,true)
+  assert.equal(marker,'/etc/kelion/codex-worker.paused')
+})
+
+test('worker observation reports an authenticated held publication barrier without fabricated process state', async (context) => {
+  let probes = 0, acquisitions = 0
+  const control = await listenControl(readyDependencies({
+    deploymentPending: () => true,
+    publicationBarrier: { acquire: async (options) => {
+      acquisitions += 1
+      assert.deepEqual(options, { observeContention: true })
+      return { contended: true }
+    } },
+    probeWorkerState: async () => { probes += 1; throw new Error('must_not_probe_during_gate') },
+  }))
+  context.after(() => control.close())
+  const response = await signedRequest(control.endpoint, '/v1/worker/state', {})
+  assert.equal(response.status, 200)
+  assert.deepEqual(response.body, { schema: 1, measuredAt: response.body.measuredAt,
+    worker: null, intentionalPause: null, deployGate: true })
+  assert.ok(Number.isFinite(Date.parse(response.body.measuredAt)))
+  assert.equal(probes, 0)
+  assert.equal(acquisitions, 1)
+  assert.equal((await signedRequest(control.endpoint, '/v1/worker/state', { unit: 'foreign' })).status, 422)
+  assert.equal((await signedRequest(control.endpoint, '/v1/worker/state', {}, { signature: 'x' })).status, 401)
+  assert.equal(acquisitions, 1)
+})
+
+test('worker gate observation never promotes invalid locks or unknown pending state into a measured gate', async (context) => {
+  for (const lock of [null, { release: async () => {} }]) {
+    const control = await listenControl(readyDependencies({
+      deploymentPending: () => true,
+      publicationBarrier: { acquire: async () => lock },
+      probeWorkerState: async () => { throw new Error('must_not_probe') },
+    }))
+    context.after(() => control.close())
+    const response = await signedRequest(control.endpoint, '/v1/worker/state', {})
+    assert.equal(response.status, 503)
+    assert.deepEqual(response.body, { error: 'deployment_in_progress' })
+  }
 })

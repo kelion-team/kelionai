@@ -2773,6 +2773,8 @@ a.card-item:hover {
 .ws-zoom-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .doc-text { transition: font-size 0.12s ease; }
 
+.admin-agent-registry-list { max-height: 24rem; overflow-y: auto; padding-left: 1.5rem; }
+.admin-agent-registry-list > li { margin-bottom: 1rem; overflow-wrap: anywhere; }
 /* Installed UI build and measured server version are distinct. Neither timestamp proves deployment. */
 .app-watermark {
   position: fixed;
@@ -2800,6 +2802,9 @@ a.card-item:hover {
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
+.app-watermark[data-version-state='unverified'] { color: #e3e6eb; text-shadow: none; }
+.app-watermark[data-version-state='ui_different'] { color: #ffe29a; text-shadow: none; }
+.app-watermark[data-version-state='runtime_mismatch'] { color: #ffb4b4; text-shadow: none; }
 
 /* AI pool — add/remove money controls in the „Bani” tab. */
 /* KELION'S ADMIN WALLET. */

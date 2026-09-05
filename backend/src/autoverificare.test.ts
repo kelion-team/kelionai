@@ -49,6 +49,16 @@ describe('interpreteazaProba — funcții cu EFECT (dry-run, fără cost)', () =
 })
 
 describe('interpreteazaProba — funcții de CITIRE: verdict + DE CE, pe fiecare cauză', () => {
+  it('o probă read-only absentă rămâne neverificată, nu defect sau succes', () => {
+    const mesaj = 'capabilitatea nu are o probă read-only sigură în procesul web'
+    for (const proba of [{ ok: false, eroare: mesaj }, { ok: false, cod: 'proba_read_only_absenta' as const }]) {
+      const d = interpreteazaProba('get_monitor', 'citire', proba)
+      expect(d.verdict).toBe('nu_pot_verifica')
+      expect(d.deCe).toContain('nu a fost executată')
+      expect(d.recomandare).not.toMatch(/^REPARĂ|^FERM/)
+    }
+    expect(interpreteazaProba('get_monitor', 'citire', { ok: false, eroare: `${mesaj}: ECONNREFUSED` }).verdict).toBe('stricat')
+  })
   it('401/403/sesiune → NU POT VERIFICA (nu e stricăciune, e auth)', () => {
     for (const er of ['HTTP 401 unauthorized', 'forbidden 403', 'nu ești admin']) {
       const d = interpreteazaProba('get_calendar_events', 'citire', { ok: false, eroare: er })
@@ -111,6 +121,34 @@ describe('interpreteazaProba — funcții de CITIRE: verdict + DE CE, pe fiecare
 })
 
 describe('ruleazaAutoverificare — probează TOATE capabilitățile + îmbogățește AI pe picate', () => {
+  it('lipsa probelor nu produce defecte și nu autorizează reparații sau efecte', async () => {
+    const creierDiag = vi.fn(async () => ({ get_monitor: { deCe: 'defect inventat', recomandare: 'REPARĂ' } }))
+    const raport = await ruleazaAutoverificare({
+      probaCitire: async () => ({ ok: false, cod: 'proba_read_only_absenta' }),
+      esteCablat: () => true,
+      creierDiag,
+    })
+    expect(raport.merg).toBe(0)
+    expect(raport.stricate).toBe(0)
+    expect(raport.nepotverifica).toBe(raport.total)
+    expect(creierDiag).not.toHaveBeenCalled()
+    expect(raport.functii.every((functie) => !functie.deCe.includes('defect inventat'))).toBe(true)
+    const plan = decideDinMasuratori(raport.functii)
+    expect(plan.every((pas) => pas.actiune === 'masoara_intai')).toBe(true)
+    expect(plan.find((pas) => pas.functie === 'get_monitor')?.urmatoareaMasuratoare).toContain('nu executa efecte')
+  })
+
+  it('AI primește numai defectul măsurat, nu citirile fără autorizare ori efectele nerulate', async () => {
+    const creierDiag = vi.fn(async () => ({}))
+    await ruleazaAutoverificare({
+      probaCitire: async (c) => c.name === 'system_health'
+        ? { ok: false, eroare: 'ECONNREFUSED' }
+        : { ok: false, eroare: 'HTTP 401 unauthorized' },
+      esteCablat: () => true,
+      creierDiag,
+    })
+    expect(creierDiag).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ functie: 'system_health' })])
+  })
   it('enumeră toate funcțiile din registru și dă un verdict fiecăreia', async () => {
     const raport = await ruleazaAutoverificare({
       // citirile „merg" (rezultat valid); efectele „cablate" (ok)

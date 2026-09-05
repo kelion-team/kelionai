@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { conexiuneDb, getPool } from '../dbPool.js'
 import { CONSTRUCTOR_LOCAL_ACTOR } from './constructorIdentity.js'
+import type { ConstructorAutomationAuthority } from '../shared/doctor.js'
+import { constructorAutomationAuthority } from './doctorPolicy.js'
 
 // Domeniile HMAC sunt valori de protocol, nu nume de executor: 'codex-worker'
 // rămâne compatibil cu workerul OpenCode instalat, indiferent de model.
@@ -43,9 +45,9 @@ interface PipelineRow {
   patch_sha256: string
   gate_receipt_sha256: string
   publisher_attempts: number
+  publisher_last_error: string | null
   publisher_lease_id: string | null
   publisher_retry_not_before: Date | string | null
-  publisher_last_error: string | null
   publisher_branch: string | null
   publisher_head_sha: string | null
   publisher_pr_number: string | number | null
@@ -74,6 +76,8 @@ interface PipelineRow {
   commit_sha: string | null
   live_version: string | null
   ci?: string | null
+  automation_origin?: string
+  repair_scope?: unknown
 }
 
 export interface WorkerHandoff {
@@ -84,7 +88,7 @@ export interface WorkerHandoff {
   progress?: string
 }
 
-export interface PublisherClaim {
+export type PublisherClaim = ConstructorAutomationAuthority & {
   jobId: string
   taskId: string
   leaseId: string
@@ -144,6 +148,7 @@ function eventResult(row: PipelineRow): PipelineEventResult {
 
 function publisherClaim(row: PipelineRow, leaseId: string): PublisherClaim {
   return {
+    ...constructorAutomationAuthority(row.automation_origin,row.repair_scope),
     jobId: String(row.job_id),
     taskId: row.task_id,
     leaseId,
@@ -246,7 +251,7 @@ export async function recordWorkerHandoff(
 > {
   return withTransaction(async (sql) => {
       const locked = await sql.query<PipelineRow>(
-        `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version,
+        `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version,b.automation_origin,
                 p.*
            FROM build_jobs b
            LEFT JOIN constructor_pipeline p ON p.job_id=b.id
@@ -263,6 +268,8 @@ export async function recordWorkerHandoff(
       if (task.rows[0]?.codex_task_id !== taskId) return { ok: false, reason: 'task_mismatch' as const }
 
       if (current.handoff_id) {
+        const terminalDoctorScope = current.automation_origin === 'doctor' && current.status === 'failed'
+          && current.constructor_stage === 'failed' && current.publisher_last_error === 'doctor_scope_rejected'
         const same = current.task_id === taskId
           && current.handoff_id === handoff.handoffId
           && current.base_commit_sha === handoff.baseCommit
@@ -270,6 +277,7 @@ export async function recordWorkerHandoff(
           && current.gate_receipt_sha256 === handoff.gateReceiptSha256
           && (
             ['gates_passed', 'pr_opened', 'merged', 'release_dispatched', 'deployed'].includes(current.constructor_stage)
+            || terminalDoctorScope
             // A terminal stale-base handoff remains immutable evidence. ACK
             // reconciliation must not retire it or restart the execution.
             || (current.status === 'failed' && current.constructor_stage === 'failed'
@@ -302,10 +310,10 @@ export async function recordWorkerHandoff(
     })
 }
 
-export async function claimPublisherJob(leaseId = randomUUID()): Promise<PublisherClaim | null> {
+export async function claimPublisherJob(leaseId = randomUUID(), doctorCapability?: unknown): Promise<PublisherClaim | null> {
   return withTransaction(async (sql) => {
       const selected = await sql.query<PipelineRow>(
-        `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, p.*
+        `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version,b.automation_origin,b.repair_scope,p.*
            FROM build_jobs b
            JOIN constructor_pipeline p ON p.job_id=b.id
           WHERE b.status='running'
@@ -318,6 +326,10 @@ export async function claimPublisherJob(leaseId = randomUUID()): Promise<Publish
       )
       const row = selected.rows[0]
       if (!row) return null
+      if (row.automation_origin === 'doctor') {
+        const { doctorRuntimeScopeVerified } = await import('./doctorRuntimeCapability.js')
+        if (!await doctorRuntimeScopeVerified({ service:'publisher',capability:doctorCapability },sql)) return null
+      }
       await sql.query(
         `UPDATE constructor_pipeline
             SET publisher_lease_id=$2::uuid,
@@ -363,7 +375,7 @@ export async function renewPublisherLease(jobId: number, taskId: string, leaseId
 
 async function lockPublisherLease(sql: ConstructorSql, jobId: number, taskId: string, leaseId: string): Promise<PipelineRow | null> {
   const locked = await sql.query<PipelineRow>(
-    `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, p.*
+    `SELECT b.id AS job_id, b.status, b.constructor_stage, b.commit_sha, b.live_version, b.automation_origin, p.*
        FROM build_jobs b JOIN constructor_pipeline p ON p.job_id=b.id
       WHERE b.id=$1 AND p.task_id=$2 AND p.publisher_lease_id=$3::uuid
         AND p.publisher_lease_until > now()
@@ -531,6 +543,17 @@ export interface PublisherRetirementProof {
   cleanupReceiptSha256: string
 }
 
+async function stopDoctorPublication(sql: ConstructorSql, jobId: number, code: string): Promise<PipelineEventResult | null> {
+  await sql.query(`UPDATE constructor_pipeline SET publisher_lease_id=NULL,
+    publisher_lease_until=NULL,publisher_retry_not_before=NULL,publisher_last_error=$2,
+    updated_at=now() WHERE job_id=$1`, [jobId,code])
+  const stopped = await sql.query<PipelineRow>(`UPDATE build_jobs SET status='failed',
+    constructor_stage='failed',progress=$3,log=$2,retry_not_before=NULL,updated_at=now() WHERE id=$1
+    RETURNING id AS job_id,status,constructor_stage,commit_sha,live_version`,
+  [jobId,code,code === 'stale_base' ? 'doctor_stale_base_requires_admin' : 'doctor_scope_rejected'])
+  return stopped.rows[0] ? eventResult(stopped.rows[0]) : null
+}
+
 export async function failPublisherLease(
   jobId: number,
   taskId: string,
@@ -542,6 +565,11 @@ export async function failPublisherLease(
       const row = await lockPublisherLease(sql, jobId, taskId, leaseId)
       if (!row || row.status !== 'running' || !['gates_passed', 'pr_opened'].includes(row.constructor_stage)) return null
       const incident = publisherIncident(code)
+      if (code === 'doctor_scope_rejected' && row.automation_origin === 'doctor') {
+        incident.summary = 'Patchul Doctorului a depășit domeniul de cod autorizat; publicarea a fost oprită.'
+        incident.nextAction = 'Păstrează dovezile și cere examinare admin; Doctorul nu reinvocă modelul automat.'
+        incident.state = 'blocked'
+      }
       const rebuildCodes = new Set(['stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed'])
       const rebuild = rebuildCodes.has(code)
       const retirementProof = retirement ?? null
@@ -571,6 +599,7 @@ export async function failPublisherLease(
            updated_at=now()`,
         [jobId, incident.state, incident.causeCode, incident.summary, code, incident.nextAction],
       )
+      if (code === 'doctor_scope_rejected' && row.automation_origin === 'doctor') return stopDoctorPublication(sql,jobId,code)
       if (rebuild && retirementProof) {
         await sql.query(
           `INSERT INTO constructor_publication_retirements
@@ -589,6 +618,9 @@ export async function failPublisherLease(
           ],
         )
         if (code === 'stale_base') {
+          // A stale base is terminal for every origin. Doctor keeps its
+          // scoped incident outcome; neither path can enqueue AI again.
+          if (row.automation_origin === 'doctor') return stopDoctorPublication(sql,jobId,code)
           await sql.query(
             `UPDATE constructor_pipeline SET publisher_lease_id=NULL,
                 publisher_lease_until=NULL, publisher_last_error=$2,

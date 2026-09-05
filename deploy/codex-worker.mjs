@@ -18,10 +18,12 @@ import {
   readSync,
   renameSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -32,6 +34,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolve4 } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import { DoctorScopeError, canonicalRepairAuthorization, assertDoctorPatchScope, measureDoctorCapability, persistDoctorScopeRejection, doctorSemanticSources, doctorSemanticContainerArgs } from './lib/doctor-repair-scope.mjs'
 
 const API = new URL(process.env.KELION_CODEX_API ?? 'http://127.0.0.1:8080/')
 const OPENCODE_BIN = resolve(process.env.OPENCODE_BIN ?? '/opt/private-ai/bin/opencode')
@@ -51,6 +54,13 @@ class HandoffDurabilityUncertainError extends Error {
     super(`Durabilitatea handoff-ului materializat nu a putut fi confirmată: ${cause instanceof Error ? cause.message : String(cause)}`)
     this.name = 'HandoffDurabilityUncertainError'
     this.cause = cause
+  }
+}
+
+class ExecutorCleanupUnverifiedError extends Error {
+  constructor(cause) {
+    super('Executor stop or dependency cleanup could not be verified; preserve the worktree', { cause })
+    this.name = 'ExecutorCleanupUnverifiedError'
   }
 }
 
@@ -431,9 +441,72 @@ export function openCodeContainerArgs(jobDir, orderPath, addresses, image = GATE
     ...validateProviderAddresses(addresses).flatMap((address) => ['--add-host', `${providerHost}:${address}`]),
     '--workdir', '/work/repo', '--entrypoint', '/usr/bin/env',
     image, '-i', ...openCodeEnvironmentArgs(), '/usr/bin/bash', '-c',
-    'mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"; for section in backend frontend; do if [ -d "$section" ] && [ ! -e "$section/node_modules" ]; then ln -s "/opt/kelion/$section/node_modules" "$section/node_modules"; fi; done; exec /usr/local/bin/opencode "$@"',
+    'mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"; exec /usr/local/bin/opencode "$@"',
     'opencode', ...execArgs,
   ]
+}
+
+/** The supervisor owns temporary dependency links, including their identity.
+ * Cleanup runs only after the container has stopped, never follows a target,
+ * and refuses tracked paths or replacements instead of deleting model output. */
+export function prepareExecutorDependencyLinks(jobDir, runGit = gitResult) {
+  const root = resolve(jobDir)
+  const rootInfo = lstatSync(root)
+  const paths = ['backend/node_modules', 'frontend/node_modules']
+  const sameDirectory = (path, before) => {
+    const current = lstatSync(path)
+    return current.isDirectory() && !current.isSymbolicLink() && realpathSync(path) === path
+      && current.dev === before.dev && current.ino === before.ino
+  }
+  const optionalStat = (path) => {
+    try { return lstatSync(path) } catch (error) { if (error?.code === 'ENOENT') return null; throw error }
+  }
+  const assertUntracked = () => {
+    const result = runGit(['ls-files', '--stage', '-z', '--', ...paths], root)
+    if (result.status !== 0 || result.signal || result.error || String(result.stdout ?? '').length !== 0) {
+      fail('Dependency paths are tracked or the Git index cannot be verified')
+    }
+  }
+  if (!sameDirectory(root, rootInfo)) fail('Dependency worktree is not canonical')
+  assertUntracked()
+  const candidates = []
+  for (const relative of paths) {
+    const path = join(root, relative)
+    const parent = dirname(path)
+    const parentInfo = optionalStat(parent)
+    if (!parentInfo) continue
+    if (!sameDirectory(parent, parentInfo) || optionalStat(path)) fail('Dependency path already exists or its parent is unsafe')
+    candidates.push({ path, parent, parentInfo, target: resolve(`/opt/kelion/${relative}`) })
+  }
+  const created = []
+  const cleanup = () => {
+    if (!sameDirectory(root, rootInfo)) fail('Dependency worktree changed before cleanup')
+    assertUntracked()
+    const removable = []
+    for (const entry of created) {
+      if (!sameDirectory(entry.parent, entry.parentInfo)) fail('Dependency parent changed before cleanup')
+      const current = optionalStat(entry.path)
+      if (!current) continue
+      if (!current.isSymbolicLink() || readlinkSync(entry.path) !== entry.target
+        || ['dev', 'ino', 'ctimeMs', 'mtimeMs', 'size'].some((key) => current[key] !== entry.info[key])) {
+        fail('Dependency link changed before cleanup')
+      }
+      removable.push(entry.path)
+    }
+    // Validate every link before removing any; the stopped sandbox cannot race
+    // these checks. unlink removes the link itself, never its dependency target.
+    for (const path of removable) unlinkSync(path)
+  }
+  try {
+    for (const entry of candidates) {
+      symlinkSync(entry.target, entry.path, 'dir')
+      created.push({ ...entry, info: lstatSync(entry.path) })
+    }
+  } catch (error) {
+    cleanup()
+    throw error
+  }
+  return cleanup
 }
 
 function prepareExecutorInputs(orderPath) {
@@ -459,7 +532,14 @@ function stopExecutorContainer(jobDir) {
   // The runtime may exit before conmon on cancellation. Remove only this job's
   // deterministic container, including after a lost lease or output overflow.
   const result = commandResult(REQUIRED_LAYOUT.podman, ['--runtime', REQUIRED_LAYOUT.ociRuntime, 'rm', '--force', '--ignore', executorContainerName(jobDir)], undefined, podmanSupervisorEnv())
-  if (result.status !== 0) fail('Containerul executorului nu a putut fi oprit; nu continui către publicare')
+  if (result.status !== 0 || result.signal !== null || result.error) fail('Containerul executorului nu a putut fi oprit; nu continui către publicare')
+}
+
+function finishExecutor(jobDir, cleanupDependencies) {
+  try {
+    stopExecutorContainer(jobDir)
+    cleanupDependencies?.()
+  } catch (error) { throw new ExecutorCleanupUnverifiedError(error) }
 }
 
 export function createOpenCodeProgress(onProgress = () => {}) {
@@ -637,6 +717,23 @@ export function handoffReceipt(input) {
   return receipt
 }
 
+function assertIndexedDoctorScope(jobDir, baseCommit, authorization, patch) {
+  if (authorization.automationOrigin !== 'doctor') return
+  const raw = gitResult(['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-renames', baseCommit, '--'], jobDir)
+  const counts = gitResult(['diff', '--cached', '--numstat', '-z', '--no-renames', baseCommit, '--'], jobDir)
+  if (raw.status !== 0 || counts.status !== 0) throw new DoctorScopeError('manifest_unavailable', patch)
+  assertDoctorPatchScope(authorization, { rawDiff: raw.stdout, numStat: counts.stdout, patch })
+}
+
+function verifyDoctorWorktree(jobDir, baseCommit, authorization) {
+  if (authorization.automationOrigin !== 'doctor') return
+  if (gitResult(['add', '--all', '--', '.'], jobDir).status !== 0) throw new DoctorScopeError('manifest_unavailable')
+  const patch = gitResult(['diff', '--cached', '--binary', '--full-index', '--no-ext-diff', '--no-renames', baseCommit, '--'], jobDir, 16 * 1024 * 1024)
+  if (patch.status !== 0) throw new DoctorScopeError('manifest_unavailable')
+  assertIndexedDoctorScope(jobDir, baseCommit, authorization, String(patch.stdout ?? ''))
+  return String(patch.stdout ?? '')
+}
+
 function publishHandoff(jobDir, input) {
   const currentHead = exactOutput('/usr/bin/git', ['rev-parse', 'HEAD'], jobDir, gitSupervisorEnv())
   if (currentHead !== input.baseCommit) fail('Executorul OpenCode a mutat HEAD-ul; workerul acceptă numai patch peste baza revendicată')
@@ -652,6 +749,7 @@ function publishHandoff(jobDir, input) {
   if (patch.status !== 0) fail('Nu am putut materializa patch-ul imuabil')
   const patchBytes = Buffer.from(String(patch.stdout ?? ''), 'utf8')
   if (patchBytes.length === 0 || patchBytes.length > 16 * 1024 * 1024) fail('Patch-ul este gol sau depășește limita de 16 MiB')
+  assertIndexedDoctorScope(jobDir, input.baseCommit, input.authorization, patchBytes)
   const patchSha256 = createHash('sha256').update(patchBytes).digest('hex')
   const handoffId = randomUUID()
   const receipt = handoffReceipt({
@@ -1150,10 +1248,10 @@ async function reportEvent(secret, jobId, body) {
 }
 
 async function heartbeat(secret, status, detail) {
-  return post(secret, '/api/internal/codex/status', { status, ...(detail ? { detail } : {}) })
+  return post(secret, '/api/internal/codex/status', { status, ...(detail ? { detail } : {}), doctorCapability: measureDoctorCapability() })
 }
 
-function strictWorkerClaimResponse(claimed) {
+export function strictWorkerClaimResponse(claimed) {
   if (!claimed || typeof claimed !== 'object' || Array.isArray(claimed)) fail('Răspuns claim invalid')
   if (Object.keys(claimed).some((key) => !['state', 'job'].includes(key))) fail('Răspuns claim invalid')
   if (claimed.state === 'no_claimable_job' || claimed.state === 'pipeline_active') {
@@ -1177,7 +1275,8 @@ function strictWorkerClaimResponse(claimed) {
     || (recoveryCode !== null && !Object.hasOwn(RECOVERY_GUIDANCE, recoveryCode))
     || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(order)
   ) fail('Răspuns claim invalid')
-  return { state: 'claimed', job: { jobId, taskId, order, recoveryCode } }
+  const authorization = canonicalRepairAuthorization(job)
+  return { state: 'claimed', job: { jobId, taskId, order, recoveryCode, ...authorization } }
 }
 
 async function degradedWithoutMasking(secret, detail, reportHeartbeat = heartbeat) {
@@ -1203,7 +1302,7 @@ async function prepareWorkerClaim(secret, dependencies = {}) {
   const claim = dependencies.claim ?? ((value) => {
     const profile = dependencies.profile
     if (profile !== 'fast') fail('Profilul claimului Constructor nu este instalat')
-    return post(value, '/api/internal/codex/jobs/claim', { profile })
+    return post(value, '/api/internal/codex/jobs/claim', { profile, doctorCapability: measureDoctorCapability() })
   })
   const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
   try {
@@ -1297,7 +1396,13 @@ function worktreeHasChanges(jobDir) {
   return Buffer.byteLength(String(status.stdout ?? ''), 'utf8') > 0
 }
 
-async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, turn, order) {
+export function constructorOrderDocument(order, authorization) {
+  const semanticSources = doctorSemanticSources(authorization)
+  const semanticInstruction = semanticSources === null ? '' : `\nContract semantic Doctor v2: sunt autorizate numai aceste două module, cu AST echivalent exact surselor de mai jos. Creează regresia nominală. Nu adăuga importuri, efecte laterale sau alte instrucțiuni.\n${JSON.stringify(semanticSources, null, 2)}\n`
+  return `${order}\n${semanticInstruction}`
+}
+
+async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, turn, order, baseCommit, authorization) {
   const logPrefix = `model-${turn.tier}`
   const executorLogPath = join(jobStateDir, `${logPrefix}-opencode.log`)
   const gateLogPath = join(jobStateDir, `${logPrefix}-gates.log`)
@@ -1324,9 +1429,11 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
   const progress = createOpenCodeProgress(stopExecLease.update)
   let executorResult = null
   let executorError = null
+  let cleanupDependencies = null
   try {
     try {
       prepareExecutorInputs(orderPath)
+      cleanupDependencies = prepareExecutorDependencyLinks(jobDir)
       executorResult = await runLogged(
         REQUIRED_LAYOUT.podman,
         openCodeContainerArgs(jobDir, orderPath, await providerAddresses()),
@@ -1347,7 +1454,7 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
     try {
       await stopExecLease()
     } finally {
-      stopExecutorContainer(jobDir)
+      finishExecutor(jobDir, cleanupDependencies)
     }
   }
   if (executorError || !runSucceeded(executorResult)) {
@@ -1361,6 +1468,9 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
   if (!worktreeHasChanges(jobDir)) {
     return { ok: false, event: 'unresolved', phase: 'opencode', reason: 'no_changes', logPath: executorLogPath }
   }
+  // The sandbox has stopped. Enforce the persisted scope before running even
+  // isolated gates, then check again on the exact immutable handoff bytes.
+  const doctorPatch = verifyDoctorWorktree(jobDir, baseCommit, authorization)
 
   const stopGateLease = startJobLease(
     secret,
@@ -1371,6 +1481,12 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
   let gateResult = null
   let gateError = null
   try {
+    if (authorization.automationOrigin === 'doctor') {
+      const semantic = await runLogged(REQUIRED_LAYOUT.podman, doctorSemanticContainerArgs(jobDir, GATE_IMAGE, authorization), jobDir,
+        gateLogPath, podmanSupervisorEnv(), null, 30_000, stopGateLease.signal)
+      if (semantic.code === 2 && !semantic.timedOut && !semantic.aborted && !semantic.outputExceeded) throw new DoctorScopeError('semantic_contract_rejected', doctorPatch)
+      if (!runSucceeded(semantic)) fail('Verificarea semantică Doctor nu este disponibilă; porțile nu au fost executate')
+    }
     try {
       gateResult = await runLogged(
         REQUIRED_LAYOUT.podman,
@@ -1414,6 +1530,7 @@ async function runOnce() {
   const claimed = await prepareWorkerClaim(secret, { profile: profile.tier })
   if (!claimed) return
   const { jobId, taskId, order, recoveryCode } = claimed
+  const authorization = canonicalRepairAuthorization(claimed)
   const effectiveOrder = recoveryCode
     ? `${order}\n\nContext de recuperare canonic: ${RECOVERY_GUIDANCE[recoveryCode]}`
     : order
@@ -1429,6 +1546,7 @@ async function runOnce() {
   let logPath = null
   let failureReported = false
   let handoffMaterialized = false
+  let preserveWorktree = false
   try {
     mkdirSync(jobStateDir, { recursive: false, mode: 0o700 })
     const added = spawnSync(
@@ -1443,9 +1561,9 @@ async function runOnce() {
     // al lui origin/master. Nu folosim varful lui master: acesta se poate muta
     // in timpul executiei, iar ordinul ar muri fara vina lui.
     if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== gateCommit) fail('Worktree-ul nu corespunde commitului imaginii gate')
-    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-anonymous-isolated', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
+    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-anonymous-isolated', profile: profile.tier, ...authorization, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
     const orderPath = join(jobStateDir, 'order.md')
-    writeFileSync(orderPath, `${effectiveOrder}\n`, { flag: 'wx', mode: 0o600 })
+    writeFileSync(orderPath, constructorOrderDocument(effectiveOrder, authorization), { flag: 'wx', mode: 0o600 })
 
     const finalOutcome = await runConstructorTurn(
       secret,
@@ -1456,6 +1574,8 @@ async function runOnce() {
       orderPath,
       profile,
       effectiveOrder,
+      baseCommit,
+      authorization,
     )
     logPath = finalOutcome.logPath
     if (!finalOutcome.ok) {
@@ -1480,7 +1600,7 @@ async function runOnce() {
       )
       return
     }
-    const handoff = publishHandoff(jobDir, { jobId, taskId, baseCommit })
+    const handoff = publishHandoff(jobDir, { jobId, taskId, baseCommit, authorization })
     handoffMaterialized = true
     await reportEvent(secret, jobId, {
       taskId,
@@ -1494,20 +1614,32 @@ async function runOnce() {
     // tocmai confirmat este reconciliat și claim-ul dovedește că nu există
     // niciun ordin eligibil acum.
   } catch (error) {
+    preserveWorktree = error instanceof ExecutorCleanupUnverifiedError
     if (error instanceof HandoffDurabilityUncertainError) handoffMaterialized = true
     if (!failureReported && !handoffMaterialized) {
+      let progress
+      if (error instanceof DoctorScopeError) {
+        progress = `${error.message};patch_sha256=${error.patchSha256}`
+        const proofRoot = join(JOBS, '.scope-rejections')
+        mkdirSync(proofRoot, { mode: 0o700, recursive: true })
+        const proofPath = join(proofRoot, `${taskId}-${jobId}.json`)
+        persistDoctorScopeRejection(proofPath, { jobId, taskId, reason: error.reason, patchSha256: error.patchSha256 })
+        fsyncPath(JOBS)
+      }
       const code = assertWorkerFailureCode(classifyWorkerFailure(logPath, 'internal', {}, error))
-      await reportEvent(secret, jobId, { taskId, event: 'failed', code, profile: profile.tier }).catch(() => undefined)
+      await reportEvent(secret, jobId, { taskId, event: 'failed', code, profile: profile.tier, ...(progress ? { progress } : {}) }).catch(() => undefined)
     }
     throw error
   } finally {
-    const removed = worktreeAdded ? gitResult(['worktree', 'remove', '--force', '--', jobDir], REPO) : null
-    if (removed?.status !== 0 && existsSync(jobDir)) {
-      await heartbeat(secret, 'degraded', 'Worktree-ul jobului necesită curățare manuală').catch(() => undefined)
-    } else if (existsSync(jobStateDir)) {
-      rmSync(jobStateDir, { recursive: true, force: true })
+    if (!preserveWorktree) {
+      const removed = worktreeAdded ? gitResult(['worktree', 'remove', '--force', '--', jobDir], REPO) : null
+      if (removed?.status !== 0 && existsSync(jobDir)) {
+        await heartbeat(secret, 'degraded', 'Worktree-ul jobului necesită curățare manuală').catch(() => undefined)
+      } else if (existsSync(jobStateDir)) {
+        rmSync(jobStateDir, { recursive: true, force: true })
+      }
+      gitResult(['worktree', 'prune'], REPO)
     }
-    gitResult(['worktree', 'prune'], REPO)
   }
 }
 
@@ -1528,6 +1660,7 @@ async function executorSmoke() {
   const orderPath = join(smokeStateDir, 'order.md')
   const logPath = join(smokeStateDir, 'executor-smoke.log')
   const expectedGitStatus = ' M tracked.txt\n'
+  let preserveWorktree = false
   try {
     const initialized = commandResult('/usr/bin/git', ['init', '--quiet'], smokeDir, gitSupervisorEnv())
     if (initialized.status !== 0) fail('Repo-ul temporar pentru smoke OpenCode nu a putut fi inițializat')
@@ -1558,8 +1691,11 @@ async function executorSmoke() {
     writeFileSync(orderPath, `${order}\n`, { flag: 'wx', mode: 0o600 })
     const progress = createOpenCodeProgress()
     let result
+    let cleanupDependencies = null
     try {
       prepareExecutorInputs(orderPath)
+      for (const section of ['backend', 'frontend']) mkdirSync(join(smokeDir, section))
+      cleanupDependencies = prepareExecutorDependencyLinks(smokeDir)
       result = await runLogged(
         REQUIRED_LAYOUT.podman,
         openCodeContainerArgs(smokeDir, orderPath, await providerAddresses()),
@@ -1573,7 +1709,10 @@ async function executorSmoke() {
         progress.consume,
       )
     } finally {
-      stopExecutorContainer(smokeDir)
+      finishExecutor(smokeDir, cleanupDependencies)
+    }
+    for (const section of ['backend', 'frontend']) {
+      if (lstatSync(join(smokeDir, section, 'node_modules'), { throwIfNoEntry: false })) fail('Smoke dependency link remains after executor cleanup')
     }
     if (!runSucceeded(result) || progress.snapshot().failed || progress.snapshot().completedTools === 0) {
       const diagnostic = tailText(logPath, 8 * 1024)
@@ -1598,9 +1737,13 @@ async function executorSmoke() {
     }
     const proofSha256 = createHash('sha256').update(readFileSync(proofPath)).digest('hex')
     process.stdout.write('OPENCODE_EXECUTOR_GIT_VERIFIED status=porcelain-v1\n')
+    process.stdout.write('OPENCODE_EXECUTOR_DEPENDENCIES_VERIFIED cleanup=exact-owned-links\n')
     process.stdout.write(`OPENCODE_EXECUTOR_SMOKE_VERIFIED sha256=${proofSha256} tools=${progress.snapshot().completedTools}\n`)
+  } catch (error) {
+    preserveWorktree = error instanceof ExecutorCleanupUnverifiedError
+    throw error
   } finally {
-    rmSync(smokeStateDir, { recursive: true, force: true })
+    if (!preserveWorktree) rmSync(smokeStateDir, { recursive: true, force: true })
   }
 }
 
@@ -1856,6 +1999,8 @@ async function selfTest() {
   }
 
   const claimedJob = {
+    automationOrigin: 'admin',
+    repairScope: null,
     jobId: '42',
     taskId: 'codex-123e4567-e89b-42d3-a456-426614174000',
     order: 'Remediază fluxul Constructor complet',

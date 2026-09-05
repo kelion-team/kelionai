@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
+import { runInNewContext } from 'node:vm'
 import { readVerifiedFile, validateControllerState, validateCompletedJob } from './constructor-status-proof.mjs'
 
 const source = readFileSync(new URL('./constructor-status-proof.mjs', import.meta.url), 'utf8')
@@ -56,6 +57,196 @@ test('readiness is distinct from completed work and derives model from checked c
     { requestId: 'pending' }, { model: { ...model, id: 'historical/local' } },
   ]) assert.throws(() => validateControllerState({ ...state, ...change }, model), /constructor_not_ready/)
   assert.match(source, /kind: 'constructor-readiness-proof'[\s\S]*endToEnd: false/)
+})
+
+// Exercise the production entry point; only its I/O boundaries are substituted.
+// No installed files, credentials, sockets, processes or provider are accessed.
+async function installedStatus(scenario, jobId = 'status', observed = {}) {
+  const calls = observed.calls ?? []
+  const requests = observed.requests ?? []
+  const signatures = observed.signatures ?? []
+  const layout = runInNewContext(source.match(/const LAYOUT = Object.freeze\(([\s\S]*?)\n\]\)/)[0] + '; LAYOUT')
+  const start = source.indexOf('export async function installedProof(args) {')
+  const end = source.indexOf("\nif (process.argv[2] === '--installed')", start)
+  assert.ok(start >= 0 && end > start)
+  const body = source.slice(start, end).replace('export async function', 'async function').replaceAll('await import(', 'await load(')
+  const paused = !scenario.startsWith('unpaused')
+  const host = { schema: 1, measuredAt: new Date().toISOString(),
+    worker: { timer: paused ? 'inactive' : 'active', service: 'inactive', mainPid: 0 },
+    intentionalPause: paused, deployGate: false }
+  const command = (file, args) => {
+    calls.push([file, ...args])
+    if (file === '/usr/bin/node') return 'OPENCODE_BINARY_VERIFIED=yes'
+    assert.equal(file, '/usr/bin/systemctl', 'no unverified installed helper may execute')
+    assert.equal(args[0], 'show')
+    if (args.includes('--property=UnitFileState')) return scenario === 'worker-disabled' ? 'disabled' : 'enabled'
+    if (args.includes('--property=MainPID')) return scenario === 'worker-pid-changed' ? '7' : '0'
+    assert.ok(args.includes('--property=ActiveState'))
+    if (args[1] === 'kelion-codex-worker.service') return scenario === 'worker-service-changed' ? 'active' : 'inactive'
+    if (args[1] === 'kelion-codex-worker.timer') return scenario === 'paused-active' || scenario === 'unpaused-active' ? 'active' : 'inactive'
+    if (args[1] === 'kelion-constructor-publisher.timer' && scenario === 'publisher-stopped') return 'inactive'
+    if (args[1] === 'kelion-constructor-release.timer' && scenario === 'release-stopped') return 'inactive'
+    return 'active'
+  }
+  const controller = { validateProviderConfig: () => model, CONTROL_SOCKET: '/synthetic/socket', CONTROL_SECRET: '/synthetic/secret' }
+  const auth = { signServiceRequest: (...args) => {
+    signatures.push(args)
+    return 'signed:' + args[2] + ':' + args[4]
+  }, readServiceSecret: () => Buffer.from('synthetic') }
+  let nonce = 0
+  const entryPoint = runInNewContext('(' + body.trim() + ')', {
+    LAYOUT: layout, ID: /^[1-9][0-9]{0,18}$/, MAX_BYTES: 512 * 1024, Buffer, Date, process: { getuid: () => 0 },
+    readVerifiedFile: () => { if (scenario === 'unverified-controller') throw new Error('installed_source_mismatch') },
+    readFileSync: () => '{}',
+    lstatSync: () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }) },
+    pathToFileURL: (path) => ({ href: path }),
+    load: async (path) => path === layout[0][1] ? controller : auth,
+    randomUUID: () => 'synthetic-nonce-' + (++nonce), command,
+    boundedJSON: async (_request, options, body, limits) => {
+      requests.push({ options, body, limits })
+      if (options.path === '/v1/model/state') return state
+      assert.equal(options.path, '/v1/worker/state')
+      if (scenario === 'host-failed') throw new Error('proof_request_status')
+      return Object.hasOwn(observed, 'host') ? observed.host : host
+    }, httpRequest: {}, validateControllerState,
+    activeContainer: () => { throw new Error('paused_proof_must_not_enter_completion_path') },
+  })
+  const result = await entryPoint([...layout.map(() => 'a'.repeat(64)), jobId])
+  return { result, calls, requests, signatures }
+}
+
+for (const jobId of ['status', '17']) {
+  test('installed production proof reports paused without readiness or completion: ' + jobId, async () => {
+    const { result, calls } = await installedStatus('paused', jobId)
+    assert.equal(result.kind, 'constructor-paused-status')
+    assert.equal(result.readiness.status, 'paused')
+    assert.equal(result.workerPause, 'paused')
+    assert.equal(result.endToEnd, false)
+    assert.equal(result.job, undefined)
+    assert.equal(result.inferenceRequests, 0)
+    assert.ok(!calls.some(([file]) => file === '/root/kelion/bin/runtime-config-cutover.sh'))
+    assert.ok(!calls.some(([file]) => file === '/usr/bin/docker'))
+  })
+}
+
+test('installed production proof accepts unpaused active vector only as readiness, not E2E', async () => {
+  const { result } = await installedStatus('unpaused-active')
+  assert.equal(result.kind, 'constructor-readiness-proof')
+  assert.equal(result.readiness.status, 'ready')
+  assert.equal(result.workerPause, 'unpaused')
+  assert.equal(result.endToEnd, false)
+})
+
+for (const scenario of ['host-failed', 'worker-disabled', 'publisher-stopped', 'release-stopped', 'unpaused-stopped', 'paused-active', 'worker-service-changed', 'worker-pid-changed']) {
+  test('installed production proof rejects ' + scenario + ', never inventing a pause', async () => {
+    await assert.rejects(installedStatus(scenario))
+  })
+}
+
+test('installed proof independently signs bounded model and worker requests after source verification', async () => {
+  const { requests, signatures } = await installedStatus('paused')
+  assert.equal(requests.length, 2)
+  assert.equal(signatures.length, 2)
+  assert.deepEqual(requests.map(({ options }) => options.path), ['/v1/model/state', '/v1/worker/state'])
+  assert.notEqual(requests[0].options.headers['x-kelion-nonce'], requests[1].options.headers['x-kelion-nonce'])
+  requests.forEach(({ options, body }, index) => {
+    assert.equal(options.method, 'POST')
+    assert.equal(options.socketPath, '/synthetic/socket')
+    assert.equal(body.toString(), '{}')
+    const signed = signatures[index]
+    assert.equal(signed[1], options.headers['x-kelion-timestamp'])
+    assert.equal(signed[2], options.headers['x-kelion-nonce'])
+    assert.equal(signed[3], 'POST')
+    assert.equal(signed[4], options.path)
+    assert.equal(signed[5], body)
+    assert.equal(options.headers['x-kelion-signature'], 'signed:' + signed[2] + ':' + signed[4])
+    assert.ok(Math.abs(Date.now() / 1000 - Number(signed[1])) < 2)
+  })
+  assert.equal(requests[1].limits.maxBytes, 2048)
+  const observed = { calls: [], requests: [], signatures: [] }
+  await assert.rejects(installedStatus('unverified-controller', 'status', observed), /installed_source_mismatch/)
+  assert.equal(observed.calls.length + observed.requests.length + observed.signatures.length, 0)
+})
+
+test('real installed proof rejects invalid, stale, future or contradictory worker evidence', async () => {
+  const valid = { schema: 1, measuredAt: new Date().toISOString(),
+    worker: { timer: 'inactive', service: 'inactive', mainPid: 0 },
+    intentionalPause: true, deployGate: false }
+  const invalid = [
+    null, [], {}, { ...valid, schema: 2 }, { ...valid, extra: true },
+    { ...valid, measuredAt: null }, { ...valid, measuredAt: 'invalid' },
+    { ...valid, measuredAt: new Date(Date.now() - 15_001).toISOString() },
+    { ...valid, measuredAt: new Date(Date.now() + 60_000).toISOString() },
+    { ...valid, measuredAt: valid.measuredAt.replace('Z', '+00:00') },
+    { ...valid, intentionalPause: 'true' }, { ...valid, deployGate: true },
+    { ...valid, deployGate: null }, { ...valid, worker: null },
+    { ...valid, worker: { ...valid.worker, extra: true } },
+    { ...valid, worker: { ...valid.worker, timer: 'unknown' } },
+    { ...valid, worker: { ...valid.worker, service: 'unknown' } },
+    { ...valid, worker: { ...valid.worker, mainPid: -1 } },
+    { ...valid, worker: { ...valid.worker, mainPid: '0' } },
+    { ...valid, worker: { ...valid.worker, mainPid: 1 } },
+    { ...valid, worker: { ...valid.worker, timer: 'active' } },
+    { ...valid, worker: { ...valid.worker, service: 'active', mainPid: 1 } },
+  ]
+  for (const host of invalid) {
+    const observed = { host, calls: [] }
+    await assert.rejects(installedStatus('paused', '17', observed), /worker_state_unverified/)
+    assert.ok(!observed.calls.some(([file]) => file === '/usr/bin/systemctl' || file === '/usr/bin/docker'))
+  }
+})
+
+test('actual bounded JSON transport rejects timeout, HTTP failure, oversized and invalid worker responses', async () => {
+  const { EventEmitter } = await import('node:events')
+  const start = source.indexOf('function boundedJSON(')
+  const end = source.indexOf('\nconst QUEUE_READ_ONLY', start)
+  assert.ok(start >= 0 && end > start)
+  for (const scenario of ['valid', 'timeout', 'http', 'oversized', 'json', 'request-error', 'response-error']) {
+    let deadline, destroyed = false, resumed = false
+    const bounded = runInNewContext('(' + source.slice(start, end).trim() + ')', {
+      Buffer, MAX_BYTES: 512 * 1024,
+      setTimeout: (callback, milliseconds) => { assert.equal(milliseconds, 10_000); deadline = callback; return 1 },
+      clearTimeout: () => {},
+    })
+    const request = new EventEmitter()
+    request.destroy = () => { destroyed = true }
+    const response = new EventEmitter()
+    response.statusCode = scenario === 'http' ? 503 : 200
+    response.resume = () => { resumed = true }
+    const pending = bounded((_options, callback) => {
+      request.end = () => queueMicrotask(() => {
+        if (scenario === 'timeout') return deadline()
+        if (scenario === 'request-error') return request.emit('error', new Error('private error'))
+        callback(response)
+        if (scenario === 'http') return
+        if (scenario === 'response-error') return response.emit('error', new Error('private error'))
+        response.emit('data', Buffer.from(scenario === 'oversized' ? JSON.stringify({ padding: 'x'.repeat(2049) }) : scenario === 'json' ? '{' : '{"ok":true}'))
+        response.emit('end')
+      })
+      return request
+    }, {}, Buffer.from('{}'), { maxBytes: 2048 })
+    if (scenario === 'valid') assert.equal((await pending).ok, true)
+    else {
+      await assert.rejects(pending, /proof_(?:request_timeout|request_status|response_limit|response_invalid|request_failed|response_failed)/)
+      assert.equal(destroyed, true)
+      if (scenario === 'http') assert.equal(resumed, true)
+    }
+  }
+})
+
+test('actual installed CLI prints paused status but never exits successfully for readiness', async () => {
+  const cli = source.slice(source.indexOf("\nif (process.argv[2] === '--installed')"))
+  for (const status of ['paused', 'ready']) {
+    const output = []
+    const proof = { readiness: { status }, endToEnd: false }
+    const processDouble = {
+      argv: ['node', 'proof', '--installed', 'status'], exitCode: 0,
+      stdout: { write: (value) => output.push(value) },
+    }
+    await runInNewContext(cli, { process: processDouble, installedProof: async () => proof, Date })
+    assert.equal(processDouble.exitCode, status === 'paused' ? 1 : 0)
+    assert.deepEqual(output.map((line) => JSON.parse(line)), [proof])
+  }
 })
 
 test('completed proof requires real queue, gates, publisher, release and current live SHA', () => {

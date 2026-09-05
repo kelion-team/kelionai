@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   assertSecureFileStat,
@@ -20,6 +22,101 @@ const bashExecutable = process.platform === 'win32'
   ? `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Git\\bin\\bash.exe`
   : 'bash'
 const jqAvailable = spawnSync(bashExecutable, ['-lc', 'command -v jq'], { encoding: 'utf8' }).status === 0
+
+function runtimeDirectoryGuard() {
+  const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
+  const start = script.indexOf('[ -d "$RUNTIME_DIRECTORY" ]')
+  const end = script.indexOf('[ -f "$VALIDATOR" ]', start)
+  assert.ok(start >= 0 && end > start)
+  const guard = script.slice(start, end)
+  assert.doesNotMatch(guard, /\b(?:install|chmod|chown|mkdir|rm|psql|pg_restore)\b/)
+  return guard
+}
+
+test('restore acceptă read-only numai runtime canonic 0:10050:750, fără a relaxa materialul privat', () => {
+  const script = readFileSync(new URL('../restore-verified-backup.sh', import.meta.url), 'utf8')
+  const guard = runtimeDirectoryGuard()
+  assert.match(guard, /realpath -e -- "\$RUNTIME_DIRECTORY"/)
+  assert.match(guard, /'0:10050:750'/)
+  assert.match(script, /^need realpath$/m)
+  assert.match(script, /work=\$\(mktemp -d "\$RUNTIME_DIRECTORY\/verified-restore\.XXXXXX"\)\nchmod 0700 "\$work"/)
+  assert.match(script, /stat -Lc '%u:%g:%a' -- "\$work"\)" = '0:0:700'/)
+  assert.match(script, /chown 0:0 -- "\$journal_next"[\s\S]*chmod 0600 -- "\$journal_next"/)
+  assert.match(script, /chown 0:0 -- "\$record"[\s\S]*chmod 0600 -- "\$record"/)
+})
+
+test('guardul real refuză ACL greșit, symlink și cale necanonică fără operații pe filesystem', () => {
+  const guard = runtimeDirectoryGuard()
+  const shell = `set -euo pipefail
+RUNTIME_DIRECTORY=/root/kelion/runtime
+fail() { printf '%s\\n' "$1" >&2; exit 23; }
+stat() { [ "$STAT_OK" = 1 ] || return 1; printf '%s\\n' "$METADATA"; }
+realpath() { [ "$REALPATH_OK" = 1 ] || return 1; printf '%s\\n' "$CANONICAL"; }
+[() {
+  case "$*" in
+    '-d /root/kelion/runtime ]') builtin [ "$DIRECTORY" = 1 ] ;;
+    '! -L /root/kelion/runtime ]') builtin [ "$SYMLINK" = 0 ] ;;
+    *) builtin [ "$@" ;;
+  esac
+}
+${guard}`
+  const good = { DIRECTORY:'1', SYMLINK:'0', STAT_OK:'1', REALPATH_OK:'1', METADATA:'0:10050:750', CANONICAL:'/root/kelion/runtime' }
+  const run = (overrides = {}) => spawnSync(bashExecutable, ['--noprofile','--norc','-c',shell], {
+    encoding:'utf8', timeout:5_000, env:{ ...process.env,...good,...overrides },
+  })
+  const accepted = run()
+  assert.equal(accepted.status,0,accepted.stderr || accepted.stdout)
+  for (const overrides of [
+    { METADATA:'0:0:700' },{ METADATA:'0:0:750' },{ METADATA:'10050:10050:750' },
+    { METADATA:'0:10050:770' },{ METADATA:'0:10050:755' },{ METADATA:'0:10050:2750' },
+    { DIRECTORY:'0' },{ SYMLINK:'1' },{ STAT_OK:'0' },{ REALPATH_OK:'0' },
+    { CANONICAL:'/untrusted/runtime' },
+  ]) {
+    const rejected = run(overrides)
+    assert.equal(rejected.status,23,JSON.stringify(overrides))
+    assert.match(rejected.stderr,/restore_runtime_directory_invalid/)
+  }
+})
+
+test('Linux izolat: restore păstrează inode/ACL/dovada și refuză linkurile directe sau din părinți', {
+  skip: process.platform !== 'linux' || process.getuid?.() !== 0 || !existsSync('/.dockerenv')
+    ? 'fixture-ul cu UID/GID real este permis numai într-un container Linux root izolat' : false,
+}, () => {
+  const guard = runtimeDirectoryGuard()
+  const root = mkdtempSync(join(tmpdir(),'kelion-restore-runtime-layout-'))
+  try {
+    const runtime = join(root,'runtime')
+    mkdirSync(runtime,{ mode:0o750 })
+    chownSync(runtime,0,10050)
+    chmodSync(runtime,0o750)
+    const work = join(runtime,'verified-restore.synthetic')
+    mkdirSync(work,{ mode:0o700 })
+    const proof = join(runtime,'last-verified-backup.json')
+    writeFileSync(proof,'{"synthetic":true}\n',{ mode:0o600 })
+    const before = [runtime,work,proof].map((path) => lstatSync(path))
+    const run = (path = runtime) => spawnSync('bash',['--noprofile','--norc','-c',
+      `set -euo pipefail\nfail() { printf '%s\\n' "$1" >&2; exit 23; }\n${guard}`], {
+      encoding:'utf8', timeout:5_000, env:{ PATH:'/usr/bin:/bin',RUNTIME_DIRECTORY:path },
+    })
+    assert.equal(run().status,0)
+    for (const [index,path] of [runtime,work,proof].entries()) {
+      const after = lstatSync(path)
+      for (const field of ['dev','ino','uid','gid','mode','ctimeMs']) assert.equal(after[field],before[index][field],`${path}: ${field}`)
+    }
+    assert.equal(readFileSync(proof,'utf8'),'{"synthetic":true}\n')
+    chmodSync(runtime,0o700)
+    assert.equal(run().status,23)
+    assert.equal(lstatSync(runtime).mode & 0o777,0o700)
+    chmodSync(runtime,0o750)
+    for (const path of [join(root,'missing'),proof]) assert.equal(run(path).status,23)
+    const linked = join(root,'linked-runtime')
+    symlinkSync(runtime,linked,'dir')
+    assert.equal(run(linked).status,23)
+    const parentLink = join(root,'linked-parent')
+    symlinkSync(root,parentLink,'dir')
+    assert.equal(run(join(parentLink,'runtime')).status,23)
+  } finally { rmSync(root,{ recursive:true,force:true }) }
+})
 
 function secureStat(overrides = {}) {
   return {

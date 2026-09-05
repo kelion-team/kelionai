@@ -12,11 +12,13 @@ import {
   type AdminConstructorModelSnapshot,
 } from './adminConstructorContract'
 import { apiFetch } from './transport'
+import type { StorePresence } from '../../../backend/src/shared/storePresence'
 export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
 
 export const ADMIN_TABS = [
   'finance',
   'users',
+  'visitors',
   'share',
   'stores',
   'inbox',
@@ -46,6 +48,7 @@ export interface HistoryRow {
 // profit, and per-AI cost. No hand-typed figures.
   // Valorile sunt raportate de backend, fără solduri fabricate în client.
 export interface Finance {
+  statsSince: string | null
   // (`spent` și `profit` au fost SCOASE — auditul admin, 3 aug: tabul nu le
   // desena, iar sursa lor din backend inventa zerouri la eșec de DB.)
   /** The cost journal, unconverted (USD end to end) — the Money tab shows
@@ -184,13 +187,7 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
 
 // Market control (admin only): LIVE presence in the four install locations,
 // checked against the real store pages rather than dashboard promises.
-export interface StoreRow {
-  key: string
-  name: string
-  store: string
-  url: string
-  listed: boolean
-}
+export type StoreRow = StorePresence
 export interface StoresData {
   stores: StoreRow[]
 }
@@ -207,7 +204,10 @@ export function parseStoresData(value: unknown): StoresData | null {
       && typeof candidate.name === 'string'
       && typeof candidate.store === 'string'
       && typeof candidate.url === 'string'
-      && typeof candidate.listed === 'boolean'
+      && (candidate.listed === null || typeof candidate.listed === 'boolean')
+      && (candidate.reason === null || typeof candidate.reason === 'string')
+      && (candidate.listed !== null || (typeof candidate.reason === 'string' && candidate.reason.length > 0))
+      && typeof candidate.checkedAt === 'string' && Number.isFinite(Date.parse(candidate.checkedAt))
   })
   return valid ? { stores: stores as StoreRow[] } : null
 }
@@ -227,6 +227,7 @@ export async function fetchStores(): Promise<StoresData | null> {
 // (P6, 15 aug; lista plată de sesiuni care repeta același om a fost scoasă).
 
 export interface UserActivity {
+  statsSince: string | null
   users: UserActivityRow[]
 }
 
@@ -370,22 +371,6 @@ export async function fetchActivity(): Promise<UserActivity | null> {
 // fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
 // unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
 // „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
-export function parseHistoryAdmin(value: unknown): HistoryRow[] | null {
-  return parseAdminArray<HistoryRow>(value, 'history')
-}
-
-export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
-  try {
-    const r = await apiFetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
-      credentials: 'include',
-    })
-    if (!r.ok) return null
-    return parseHistoryAdmin(await r.json())
-  } catch {
-    return null
-  }
-}
-
 // Batch-translates a conversation's messages into Romanian (the "Translate to Romanian"
 // button in the chat viewer). Returns translations aligned 1:1 with the input, plus
 // `failed` — how many messages came back as the UNTRANSLATED ORIGINAL because the
@@ -512,7 +497,7 @@ export async function markNotificareCitit(id: number): Promise<boolean> {
     const r = await apiFetch(`/api/admin/notificari/${id}/citit`, { method: 'POST', credentials: 'include' })
     if (!r.ok) return false
     const j = (await r.json()) as { ok?: boolean }
-    return !!j.ok
+    return j?.ok === true
   } catch {
     return false
   }

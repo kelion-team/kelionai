@@ -8,6 +8,7 @@ import { CreditAICard } from './admin/shared'
 import { AdminFinance, AdminStores } from './admin/AdminBani'
 import { AdminInbox, AdminNotificari, AdminShare } from './admin/AdminComunicare'
 import { AdminUsers, AdminTokenuri, AdminGesturi } from './admin/AdminUtilizatori'
+import { AdminVizitatori } from './admin/AdminVizitatori'
 import { AdminConstructor, AdminCreier } from './admin/AdminProductie'
 import { AdminSistem, AdminErori, AdminRecuperare } from './admin/AdminOperatii'
 
@@ -34,14 +35,17 @@ export default function AdminPanel({
   const [tab, setTab] = useState<AdminTab>(initialTab ?? 'finance')
   const [push, setPush] = useState<StarePush>('inactiv')
   const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState('')
   const [peek, setPeek] = useState(false)
 
-  useEffect(() => { void starePush().then(setPush) }, [])
+  useEffect(() => { void starePush().then(setPush).catch(() => setPushError('Starea notificărilor nu poate fi citită.')) }, [])
   useEffect(() => { if (initialTab) setTab(initialTab) }, [initialTab])
 
   const comutaPush = async (): Promise<void> => {
     setPushBusy(true)
+    setPushError('')
     try { setPush(push === 'activ' ? await dezactiveazaPush() : await activeazaPush()) }
+    catch (error) { setPushError(error instanceof Error ? error.message : 'Starea notificărilor nu a fost confirmată.') }
     finally { setPushBusy(false) }
   }
 
@@ -53,6 +57,7 @@ export default function AdminPanel({
   const tabLabels: Record<AdminTab, string> = {
     finance: A.tabMoney,
     users: A.tabUsers,
+    visitors: A.tabVisitors,
     share: A.tabShare,
     stores: A.tabStores,
     inbox: A.tabInbox,
@@ -94,11 +99,13 @@ export default function AdminPanel({
             onClick={() => void comutaPush()}
           >
             {pushBusy ? '🔔 …'
+              : pushError ? '⚠ Notificări: stare neconfirmată'
               : push === 'activ' ? '🔔 Pe telefon: pornit'
               : push === 'refuzat' ? '🔕 blocat din browser'
               : push === 'nesuportat' ? '🔕 indisponibil aici'
               : '🔔 Pornește pe telefon'}
           </button>
+          {pushError && <span className="chat-hint" role="alert">{pushError}</span>}
           <BackLink onBack={onClose} />
         </header>
 
@@ -116,6 +123,7 @@ export default function AdminPanel({
           {tab === 'notificari' && <AdminNotificari />}
           {tab === 'share' && <AdminShare />}
           {tab === 'users' && <AdminUsers />}
+          {tab === 'visitors' && <AdminVizitatori />}
           {tab === 'tokenuri' && <AdminTokenuri />}
           {tab === 'gesturi' && <AdminGesturi onPeek={previewAndPeek} />}
         </section>

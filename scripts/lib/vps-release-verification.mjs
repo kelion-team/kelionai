@@ -87,6 +87,13 @@ function emptyNamedActorSet(value) {
 export function evaluateBranchProtection(protection, requiredSignatures, activeBranchRules = []) {
   const configuredContexts = protection?.required_status_checks?.contexts
   const configuredChecks = protection?.required_status_checks?.checks
+  if (
+    !Array.isArray(configuredContexts)
+    || !Array.isArray(configuredChecks)
+    || configuredContexts.some((value) => typeof value !== 'string' || value.length === 0)
+    || configuredChecks.some((check) => typeof check?.context !== 'string' || check.context.length === 0)
+  ) return { ok: false, missing: ['required-checks-schema'] }
+
   const checks = new Set([
     ...(Array.isArray(configuredContexts) ? configuredContexts : []),
     ...(Array.isArray(configuredChecks) ? configuredChecks.map((check) => check?.context) : []),
@@ -101,15 +108,21 @@ export function evaluateBranchProtection(protection, requiredSignatures, activeB
   if (protection?.required_conversation_resolution?.enabled !== true) missing.push('conversation-resolution')
   if (protection?.enforce_admins?.enabled !== true) missing.push('enforce-admins')
   const reviews = protection?.required_pull_request_reviews
-  if (!Number.isSafeInteger(reviews?.required_approving_review_count) || reviews.required_approving_review_count < 1) missing.push('human-review')
-  if (reviews?.dismiss_stale_reviews !== true) missing.push('dismiss-stale-reviews')
+  // Match the publisher's existing policy: the GitHub-configured threshold is
+  // a nonnegative integer; zero does not claim that human approval occurred.
+  if (!Number.isSafeInteger(reviews?.required_approving_review_count) || reviews.required_approving_review_count < 0) missing.push('human-review')
+  if (reviews?.required_approving_review_count >= 1 && reviews?.dismiss_stale_reviews !== true) missing.push('dismiss-stale-reviews')
   if (reviews?.require_code_owner_reviews !== false) missing.push('code-owner-policy')
   if (reviews?.require_last_push_approval !== false) missing.push('last-push-policy')
-  if (!emptyNamedActorSet(reviews?.dismissal_restrictions)) missing.push('review-dismissal-restrictions')
-  if (!emptyNamedActorSet(reviews?.bypass_pull_request_allowances)) missing.push('review-bypass')
+  // GitHub omits unsupported actor restrictions. Normalize only absent/null,
+  // as the publisher does; malformed or nonempty actor sets stay fail-closed.
+  if (!emptyNamedActorSet(reviews?.dismissal_restrictions ?? null)) missing.push('review-dismissal-restrictions')
+  if (!emptyNamedActorSet(reviews?.bypass_pull_request_allowances ?? null)) missing.push('review-bypass')
   if (protection?.required_linear_history?.enabled !== true) missing.push('linear-history')
-  if (requiredSignatures?.enabled !== true) missing.push('signed-commits')
-  if (!emptyNamedActorSet(protection?.restrictions)) missing.push('push-restrictions')
+  // A known disabled setting is valid under the publisher policy; an unknown
+  // or malformed response is not. Preserve its explicit null compatibility.
+  if (requiredSignatures !== null && typeof requiredSignatures?.enabled !== 'boolean') missing.push('signed-commits')
+  if (!emptyNamedActorSet(protection?.restrictions ?? null)) missing.push('push-restrictions')
   if (protection?.allow_force_pushes?.enabled !== false) missing.push('force-push-disabled')
   if (protection?.allow_deletions?.enabled !== false) missing.push('deletion-disabled')
   if (!Array.isArray(activeBranchRules) || activeBranchRules.length !== 0) missing.push('unsupported-ruleset')

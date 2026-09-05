@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { createHash, randomBytes } from 'node:crypto'
 import { config, roleFor } from './config.js'
+import { esteAdminKelion } from './services/adminIdentity.js'
 import {
   createAuthSession,
   consumeNativeChannelTicket,
@@ -65,8 +66,11 @@ export function sessionRoleFor(
   return provider === 'google' ? roleFor(email) : 'customer'
 }
 
-function fromRecord(record: AuthSessionRecord): SessionUser {
+function fromRecord(record: AuthSessionRecord): SessionUser | null {
   const authProvider = record.authProvider === 'google' ? 'google' : 'local'
+  // Historical/local records must never carry the owner's email to legacy
+  // email-keyed tools or billing. Apply once for HTTP and native channels.
+  if (authProvider !== 'google' && esteAdminKelion(record.email)) return null
   return {
     email: record.email.toLowerCase(),
     name: record.name,
@@ -82,6 +86,8 @@ function fromRecord(record: AuthSessionRecord): SessionUser {
 export async function hydrateSession(req: FastifyRequest): Promise<void> {
   const target = req as SessionRequest
   target[SESSION_ON_REQUEST] = null
+  delete target[SESSION_HASH_ON_REQUEST]
+  delete target[SESSION_TRANSPORT_ON_REQUEST]
   const authorizationPresent = typeof req.headers.authorization === 'string'
   const bearer = bearerToken(req)
   const nativeOrigin = typeof req.headers.origin === 'string'
@@ -102,9 +108,11 @@ export async function hydrateSession(req: FastifyRequest): Promise<void> {
     if (!record) return
     if (bearer && record.sessionKind !== 'native') return
     if (!bearer && record.sessionKind !== 'browser') return
+    const user = fromRecord(record)
+    if (!user) return
     target[SESSION_HASH_ON_REQUEST] = hash
     target[SESSION_TRANSPORT_ON_REQUEST] = bearer ? 'bearer' : 'cookie'
-    target[SESSION_ON_REQUEST] = fromRecord(record)
+    target[SESSION_ON_REQUEST] = user
   } catch {
     const unavailable = new Error('session_store_unavailable') as Error & { statusCode?: number }
     unavailable.statusCode = 503
@@ -140,6 +148,10 @@ export async function hydrateSessionFromChannelTicket(
   req: FastifyRequest,
   audience: 'vocal-live' | 'apel',
 ): Promise<boolean> {
+  const target = req as SessionRequest
+  target[SESSION_ON_REQUEST] = null
+  delete target[SESSION_HASH_ON_REQUEST]
+  delete target[SESSION_TRANSPORT_ON_REQUEST]
   const raw = req.headers['sec-websocket-protocol']
   if (typeof raw !== 'string') return false
   const protocols = raw.split(',').map((value) => value.trim()).filter(Boolean)
@@ -150,8 +162,9 @@ export async function hydrateSessionFromChannelTicket(
   if (!looksOpaque(ticket)) return false
   const record = await consumeNativeChannelTicket(sha256(ticket), audience)
   if (!record) return false
-  const target = req as SessionRequest
-  target[SESSION_ON_REQUEST] = fromRecord(record)
+  const user = fromRecord(record)
+  if (!user) return false
+  target[SESSION_ON_REQUEST] = user
   target[SESSION_TRANSPORT_ON_REQUEST] = 'bearer'
   return true
 }

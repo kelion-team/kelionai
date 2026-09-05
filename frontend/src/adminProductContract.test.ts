@@ -9,6 +9,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const source = (path: string): string => readFileSync(join(here, path), 'utf8')
 
 describe('admin product contract', () => {
+  it('does not advertise unmeasured permanent autonomy in Finance and keeps one Doctor in System', () => {
+    const finance = source('components/admin/AdminBani.tsx')
+    expect(finance).not.toMatch(/PORNITĂ PERMANENT|circuit\.autonomie\.ok/)
+    expect(finance).toContain('Acest panou de costuri nu confirmă activarea Doctorului')
+    expect(source('components/admin/AdminOperatii.tsx').match(/<AdminDoctor\s*\/>/g)).toHaveLength(1)
+  })
   it('uses the shared specialist role limit so the saved instructions cannot be silently shortened', () => {
     const admin = source('components/admin/AdminProductie.tsx')
     expect(AGENT_CUSTOM_ROLE_MAX_LENGTH).toBe(500)
@@ -20,6 +26,7 @@ describe('admin product contract', () => {
     expect(ADMIN_TABS).toEqual([
       'finance',
       'users',
+      'visitors',
       'share',
       'stores',
       'inbox',

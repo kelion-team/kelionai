@@ -340,7 +340,8 @@ fi
 }
 
 constructor_reactivation_postcondition() {
-  local index marker timer socket=/run/kelion-constructor-model-control/control.sock
+  local index marker timer pause socket=/run/kelion-constructor-model-control/control.sock
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 "$ROOT/bin/runtime-config-cutover.sh" --worker-pause-state) || return 1
   [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
     && [ -f "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
     && [ "$(stat -Lc '%u:%g:%a:%h' "$READY_STAMP")" = '0:0:444:1' ] \
@@ -362,8 +363,12 @@ constructor_reactivation_postcondition() {
     if [ -e "$marker" ] || [ -L "$marker" ]; then
       [ -f "$marker" ] && [ ! -L "$marker" ] \
         && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ] \
-        && systemctl is-enabled --quiet "$timer" \
-        && systemctl is-active --quiet "$timer" || return 1
+        && systemctl is-enabled --quiet "$timer" || return 1
+      if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+        [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ] || return 1
+      else
+        systemctl is-active --quiet "$timer" || return 1
+      fi
     elif systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then
       return 1
     fi
@@ -681,7 +686,7 @@ validate_root_owned_protected_directory() {
 ensure_root_owned_install_directory() {
   local path=$1 mode=$2 parent
   case "$path" in
-    /opt/kelion-codex|/opt/kelion-constructor|/opt/kelion-constructor/lib|/etc/systemd/system/private-ai-web.service.d) ;;
+    /opt/kelion-codex|/opt/kelion-codex/lib|/opt/kelion-constructor|/opt/kelion-constructor/lib|/etc/systemd/system/private-ai-web.service.d) ;;
     *) return 1 ;;
   esac
   parent=$(dirname -- "$path")
@@ -876,6 +881,7 @@ validate_root_owned_install_directory /etc
 validate_root_owned_install_directory /etc/sudoers.d
 validate_root_owned_install_directory /etc/systemd/system
 ensure_root_owned_install_directory /opt/kelion-codex 0755
+ensure_root_owned_install_directory /opt/kelion-codex/lib 0755
 ensure_root_owned_install_directory /opt/kelion-constructor 0755
 ensure_root_owned_install_directory /opt/kelion-constructor/lib 0755
 ensure_root_owned_install_directory /etc/systemd/system/private-ai-web.service.d 0755
@@ -916,6 +922,8 @@ install_logicals=(
   artifact.constructor-service-client
   artifact.service-auth
   artifact.github-fixed-client
+  artifact.worker-doctor-repair-scope
+  artifact.publisher-doctor-repair-scope
   runtime-helper
   compose-production
   systemd-recovery.kelion-runtime-config-recovery.service
@@ -941,6 +949,8 @@ install_sources=(
   "$repo_root/deploy/lib/constructor-service-client.mjs"
   "$repo_root/deploy/lib/service-auth.mjs"
   "$repo_root/deploy/lib/github-fixed-client.mjs"
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs"
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs"
   "$repo_root/deploy/lib/runtime-config-cutover.sh"
   "$repo_root/deploy/compose.production.yml"
   "$repo_root/deploy/systemd/kelion-runtime-config-recovery.service"
@@ -972,6 +982,8 @@ map_install_logical() {
     artifact.constructor-service-client) install_target=/opt/kelion-constructor/lib/constructor-service-client.mjs; install_mode=444 ;;
     artifact.service-auth) install_target=/opt/kelion-constructor/lib/service-auth.mjs; install_mode=444 ;;
     artifact.github-fixed-client) install_target=/opt/kelion-constructor/lib/github-fixed-client.mjs; install_mode=444 ;;
+    artifact.worker-doctor-repair-scope) install_target=/opt/kelion-codex/lib/doctor-repair-scope.mjs; install_mode=444 ;;
+    artifact.publisher-doctor-repair-scope) install_target=/opt/kelion-constructor/lib/doctor-repair-scope.mjs; install_mode=444 ;;
     runtime-helper) install_target=$ROOT/bin/runtime-config-cutover.sh; install_mode=500 ;;
     compose-production) install_target=$ROOT/config/compose.production.yml; install_mode=444 ;;
     systemd-recovery.kelion-runtime-config-recovery.service) install_target=/etc/systemd/system/kelion-runtime-config-recovery.service; install_mode=444 ;;
@@ -1552,7 +1564,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=833b28bd8a879c077440a2563eabd37da86dc8b19208c72f95823b2c12881cbc
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=ebc12ea5dc03064778a281f65e04e8cf5631841caaaf53bb4ab97af56a99c95e
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
@@ -1683,6 +1695,7 @@ if [ "$resume_different_source" = 1 ]; then
     configuration.opencode instructions.opencode \
     artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
     artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
+    artifact.worker-doctor-repair-scope artifact.publisher-doctor-repair-scope \
     runtime-helper compose-production; do
     validate_published_candidate "$logical"
   done
@@ -1706,6 +1719,7 @@ for logical in \
   configuration.opencode instructions.opencode \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
   artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
+  artifact.worker-doctor-repair-scope artifact.publisher-doctor-repair-scope \
   runtime-helper compose-production; do
   publish_install_candidate "$logical"
 done

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import {
   canonicalCiRunIdFromBuild,
@@ -47,6 +48,111 @@ test('protecția refuză fiecare lipsă critică, inclusiv merge-policy și admi
     assert.equal(evaluateBranchProtection(changed, { enabled: true }, []).ok, false)
   }
   assert.equal(evaluateBranchProtection({ ...protection, enforce_admins: { enabled: false } }, { enabled: true }, []).ok, false)
+})
+
+// Exercise the publisher's actual policy with read-only API doubles, not a
+// copied predicate or its production entrypoint. No network or credentials.
+async function publisherAcceptsProtection(candidate, signatures, rules = []) {
+  const source = readFileSync(new URL('../deploy/constructor-publisher.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf('function hasExactRequiredCheckNames(')
+  const end = source.indexOf('async function pushBranch(', start)
+  assert.ok(start >= 0 && end > start, 'canonical publisher policy boundary')
+  const repoPath = `/repos/${repository}`
+  const github = async (_token, path) => {
+    if (path === `${repoPath}/branches/master/protection`) return structuredClone(candidate)
+    if (path === `${repoPath}/branches/master/protection/required_signatures`) return structuredClone(signatures)
+    if (path === `${repoPath}/rules/branches/master?per_page=100&page=1`) return structuredClone(rules)
+    throw new Error('unexpected_policy_request')
+  }
+  return await runInNewContext(
+    `${source.slice(start, end)}\nvalidateProtection('test-only').then(() => true, () => false)`,
+    { REQUIRED_CHECKS: REQUIRED_MERGE_CHECKS, REPOSITORY: repository, github,
+      publisherError: (_code, message) => new Error(message) },
+    { timeout: 1000 },
+  )
+}
+
+test('protecția reproduce API GitHub măsurat: zero review-uri, semnături false și actori omiși', async () => {
+  const measured = structuredClone(protection)
+  measured.required_pull_request_reviews.required_approving_review_count = 0
+  delete measured.required_pull_request_reviews.dismissal_restrictions
+  delete measured.required_pull_request_reviews.bypass_pull_request_allowances
+  delete measured.restrictions
+  assert.equal(await publisherAcceptsProtection(measured, { enabled: false }), true)
+  assert.deepEqual(evaluateBranchProtection(measured, { enabled: false }, []), { ok: true, missing: [] })
+})
+
+test('protecția aplică review-uri tipizate și stale-review exact ca publisherul', async () => {
+  for (const [count, dismiss, expected] of [
+    [0, true, true], [0, false, true], [1, true, true], [2, true, true],
+    [1, false, false], [-1, true, false], [0.5, true, false],
+    ['0', true, false], [null, true, false], [undefined, true, false],
+    [Number.NaN, true, false], [Number.MAX_SAFE_INTEGER + 1, true, false],
+  ]) {
+    const candidate = structuredClone(protection)
+    candidate.required_pull_request_reviews.required_approving_review_count = count
+    candidate.required_pull_request_reviews.dismiss_stale_reviews = dismiss
+    assert.equal(await publisherAcceptsProtection(candidate, { enabled: true }), expected)
+    assert.equal(evaluateBranchProtection(candidate, { enabled: true }, []).ok, expected,
+      `count=${String(count)}, dismiss=${String(dismiss)}`)
+  }
+})
+
+test('protecția nu confundă semnături false cu răspuns necunoscut sau malformat', async () => {
+  for (const [signatures, expected] of [
+    [{ enabled: true }, true], [{ enabled: false }, true], [null, true],
+    [undefined, false], [{}, false], [{ enabled: 'false' }, false],
+    [{ enabled: 0 }, false], [[], false], [false, false],
+  ]) {
+    assert.equal(await publisherAcceptsProtection(protection, signatures), expected)
+    assert.equal(evaluateBranchProtection(protection, signatures, []).ok, expected)
+  }
+})
+
+test('protecția normalizează numai actori absenți și refuză liste nonempty sau malformate', async () => {
+  for (const location of ['dismissal_restrictions', 'bypass_pull_request_allowances', 'restrictions']) {
+    for (const [value, expected] of [
+      [undefined, true], [null, true], [{ users: [], teams: [], apps: [] }, true],
+      [{ users: [{}], teams: [], apps: [] }, false],
+      [{ users: [], teams: [{}], apps: [] }, false],
+      [{ users: [], teams: [], apps: [{}] }, false],
+      [{ users: [] }, false], [[], false], [false, false], ['none', false],
+    ]) {
+      const candidate = structuredClone(protection)
+      const target = location === 'restrictions' ? candidate : candidate.required_pull_request_reviews
+      if (value === undefined) delete target[location]
+      else target[location] = value
+      assert.equal(await publisherAcceptsProtection(candidate, { enabled: true }), expected)
+      assert.equal(evaluateBranchProtection(candidate, { enabled: true }, []).ok, expected, location)
+    }
+  }
+})
+
+test('protecția păstrează barierele și refuză forma necitibilă a controalelor', () => {
+  const mutations = [
+    (p) => { p.required_status_checks.strict = false },
+    (p) => { p.required_status_checks.contexts = null },
+    (p) => { p.required_status_checks.contexts = 'verify' },
+    (p) => { p.required_status_checks.checks = {} },
+    (p) => { p.required_status_checks.checks[0].app_id = 999 },
+    (p) => { p.required_status_checks.checks.push(p.required_status_checks.checks[0]) },
+    (p) => { p.required_status_checks.contexts.push('unapproved') },
+    (p) => { p.enforce_admins.enabled = false },
+    (p) => { p.required_linear_history.enabled = false },
+    (p) => { p.required_conversation_resolution.enabled = false },
+    (p) => { p.allow_force_pushes.enabled = true },
+    (p) => { p.allow_deletions.enabled = true },
+    (p) => { p.required_pull_request_reviews.require_code_owner_reviews = true },
+    (p) => { p.required_pull_request_reviews.require_last_push_approval = true },
+  ]
+  for (const mutate of mutations) {
+    const candidate = structuredClone(protection)
+    mutate(candidate)
+    assert.equal(evaluateBranchProtection(candidate, { enabled: true }, []).ok, false)
+  }
+  for (const rules of [null, {}, [{ type: 'required_signatures' }]]) {
+    assert.equal(evaluateBranchProtection(protection, { enabled: true }, rules).ok, false)
+  }
 })
 
 test('identitatea deployului este exactă și respinge SHA scurt sau receipt incomplet', () => {

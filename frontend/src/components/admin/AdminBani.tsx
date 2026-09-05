@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { adminStrings } from '../../lib/adminText'
 import {
   fetchFinance,
@@ -8,7 +8,8 @@ import {
   fetchStores,
   type StoresData,
 } from '../../lib/admin'
-import { apiFetch } from '../../lib/transport'
+import { startStatisticsPeriod, statisticsPeriodLabel } from '../../lib/adminStatistics'
+import { formatLondonTimestamp } from '../../lib/versionEvidence'
 import { BecuriCredit } from './shared'
 import { aiLabel } from './adminHelpers'
 
@@ -36,6 +37,7 @@ export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: impo
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
   const [circuitFailed, setCircuitFailed] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
+  const resetBusyRef = useRef(false)
   const [resetMsg, setResetMsg] = useState('')
 
   useEffect(() => {
@@ -91,13 +93,8 @@ export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: impo
                 <span className="or-wallet-sub">💷 nu pot citi jurnalul de cost{circuit.costRealMotiv ? `: ${circuit.costRealMotiv}` : ''}</span>
               )}
               <span className="or-wallet-sub">
-                ▶ Autonomia: PORNITĂ PERMANENT (LEGE, 16 aug) — fără buton de oprire. Frânele tale reale: plafonul zilnic de bani, oprirea pe erori permanente (P27), cheile timerului de promovare.
+                Starea reparațiilor automate și autorizarea lor se verifică în Sistem → Doctor. Acest panou de costuri nu confirmă activarea Doctorului.
               </span>
-              {circuit?.autonomie && (
-                <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
-                  {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}
-                </span>
-              )}
               {(circuit.expenses?.length ?? 0) > 0 && (
                 <span className="or-wallet-sub">
                   Unde se schimbă cardul, la fiecare:{' '}
@@ -139,33 +136,38 @@ export function AdminFinance({ brainCredit: _brainCredit }: { brainCredit?: impo
           </div>
           <div className="admin-card">
             <div className="admin-card-head">
-              Cost per AI — total ${finance.spentUsd.toFixed(2)}
+              Jurnal intern de cost — total ${finance.spentUsd.toFixed(2)}
               {` (măsurat $${finance.masurat.toFixed(2)} · estimare internă $${finance.estimat.toFixed(2)})`}, azi ${finance.today.toFixed(2)}
               <button
                 type="button"
                 className="pool-btn withdraw"
                 style={{ marginLeft: 10, fontSize: 12, padding: '3px 9px' }}
-                disabled={resetBusy}
+                disabled={resetBusy || !(finance.statsSince === null || formatLondonTimestamp(finance.statsSince))}
                 onClick={async () => {
-                  if (!window.confirm(A.confirmResetCounters)) return
+                  if (resetBusyRef.current || !window.confirm('Începi acum o perioadă nouă pentru statisticile interne? Conversațiile, erorile, auditul, plățile, soldurile și costurile istorice se păstrează. Costurile furnizorilor nu se resetează.')) return
+                  resetBusyRef.current = true
                   setResetBusy(true)
-                  const r = await apiFetch('/api/admin/reset-counters', { method: 'POST', credentials: 'include' }).catch(() => null)
-                  const j = (await r?.json().catch(() => null)) as { ok?: boolean; sterse?: number; error?: string } | null
+                  const since = await startStatisticsPeriod()
                   setResetMsg(
-                    r?.ok && j?.ok === true
-                      ? `Resetat ✓ (${j.sterse ?? 0} înregistrări șterse)`
-                      : `Nu s-a putut reseta${j?.error ? ` — ${j.error}` : ''} — reîncearcă.`,
+                    since
+                      ? `Perioadă nouă confirmată: ${formatLondonTimestamp(since)}. Nicio înregistrare ștearsă.`
+                      : 'Perioada nouă nu a fost confirmată. Verifică data recitită înainte de reîncercare.',
                   )
-                  await fetchFinance().then((f) => { if (f) setFinance(f) }).catch(() => {})
+                  await Promise.all([
+                    fetchFinance().then((f) => { if (f) setFinance(f); setFinanceFailed(!f) }),
+                    fetchMoneyCircuit().then((c) => { if (c) setCircuit(c); setCircuitFailed(!c) }),
+                  ])
+                  resetBusyRef.current = false
                   setResetBusy(false)
                 }}
               >
-                {resetBusy ? '…' : 'Pune pe 0'}
+                {resetBusy ? 'Se confirmă…' : 'Începe perioadă nouă'}
               </button>
               {resetMsg && (
-                <span className="fin-sub" style={{ marginLeft: 8, color: resetMsg.startsWith('Resetat') ? undefined : '#e6a23c' }}>{resetMsg}</span>
+                <span className="fin-sub" role="status" style={{ marginLeft: 8 }}>{resetMsg}</span>
               )}
             </div>
+            <p className="chat-hint">{statisticsPeriodLabel(finance.statsSince)}. Perioada afectează numai statisticile interne; Costs/Usage ale furnizorului păstrează intervalul afișat separat. Istoricul nu se șterge.</p>
             {aiParts.length === 0 && <div className="chat-hint">{A.noSpendYet}</div>}
             {aiParts.map(([k, v]) => (
               <div className="fin-row" key={k}>
@@ -212,11 +214,14 @@ export function AdminStores() {
             <div className="fin-row" key={s.key}>
               <span>{s.name} — {s.store}</span>
               <span>
-                {s.listed ? (
+                {s.listed === true ? (
                   <a href={s.url} target="_blank" rel="noreferrer" className="store-live">● LISTAT — deschide</a>
-                ) : (
+                ) : s.listed === false ? (
                   <span className="store-missing">{A.notListedYet}</span>
+                ) : (
+                  <span className="chat-hint">⚠ Stare necunoscută — verificarea paginii a eșuat ({s.reason}).</span>
                 )}
+                <span className="fin-sub"> · Măsurat: {formatLondonTimestamp(s.checkedAt) ?? 'dată necunoscută'}</span>
               </span>
             </div>
           ))}

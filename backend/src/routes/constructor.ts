@@ -33,6 +33,7 @@ import { readConstructorModelSnapshot } from '../services/constructorModelContro
 import { constructorObservabilityForJobs } from '../services/constructorObservability.js'
 import { constructorWorkCardsForJobs } from '../services/constructorWorkCard.js'
 import { readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
+import { isDoctorRuntimeCapability, recordDoctorRuntimeCapability } from '../services/doctorRuntimeCapability.js'
 import {
   constructorChainAcceptsWork,
   constructorWorkerCanStartNow,
@@ -438,13 +439,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Contract fix, semnat, pentru workerul separat. Nu există un endpoint generic
   // de unelte/shell: workerul poate doar revendica un ordin și raporta etape.
-  app.post<{ Body: { status?: string; detail?: string } }>('/api/internal/codex/status', async (req, reply) => {
+  app.post<{ Body: { status?: string; detail?: string; doctorCapability?: unknown } }>('/api/internal/codex/status', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyConstructorWorkerRequest(req), reply)) return
-    if (!exactKeys(req.body, ['status', 'detail'])) return reply.code(400).send({ error: 'invalid_status' })
+    if (!exactKeys(req.body, ['status', 'detail', 'doctorCapability'])
+      || (req.body.doctorCapability != null && !isDoctorRuntimeCapability(req.body.doctorCapability))) return reply.code(400).send({ error: 'invalid_status' })
     const allowed: ConstructorWorkerState[] = ['offline', 'setup_required', 'ready', 'busy', 'degraded']
     const status = String(req.body?.status ?? '') as ConstructorWorkerState
     if (!allowed.includes(status)) return reply.code(400).send({ error: 'invalid_status' })
     try {
+      await recordDoctorRuntimeCapability('worker',req.body.doctorCapability)
       await recordConstructorWorkerStatus({
         status,
         detail: req.body.detail,
@@ -457,7 +460,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: Record<string, unknown> }>('/api/internal/codex/jobs/claim', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyConstructorWorkerRequest(req), reply)) return
-    if (!exactKeys(req.body, ['profile'])) return reply.code(400).send({ error: 'invalid_body' })
+    if (!exactKeys(req.body, ['profile', 'doctorCapability'])
+      || (req.body.doctorCapability != null && !isDoctorRuntimeCapability(req.body.doctorCapability))) return reply.code(400).send({ error: 'invalid_body' })
     const profile = req.body?.profile
     if (profile !== 'fast' && profile !== 'powerful') {
       return reply.code(400).send({ error: 'invalid_constructor_model_profile' })
@@ -480,7 +484,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     try {
       // Persistăm exclusiv profilul activ măsurat de controller, niciodată
       // afirmația workerului luată ca autoritate.
-      claim = await claimNextBuildJob(taskId, measuredProfile)
+      claim = await claimNextBuildJob(taskId, measuredProfile, req.body.doctorCapability)
     } catch {
       return reply.code(503).send({ error: 'constructor_queue_unreadable' })
     }
@@ -512,6 +516,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         orderedBy: job.orderedBy,
         attempts: job.attempts,
         recoveryCode,
+        ...claim.authority,
       },
     })
   })
@@ -581,23 +586,27 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // Publisherul este singura identitate care poate transforma un handoff cu
   // porți verzi într-un branch/PR și apoi într-un merge. Nu primește credentiale
   // ale motorului OpenCode sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
-  app.post<{ Body: { state?: unknown; detail?: unknown } }>('/api/internal/constructor-publisher/heartbeat', async (req, reply) => {
+  app.post<{ Body: { state?: unknown; detail?: unknown; doctorCapability?: unknown } }>('/api/internal/constructor-publisher/heartbeat', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyPublisherRequest(req), reply)) return
-    if (!exactKeys(req.body, ['state', 'detail']) || req.body.state !== 'degraded'
+    if (!exactKeys(req.body, ['state', 'detail', 'doctorCapability']) || !['ready','busy','degraded'].includes(String(req.body.state))
+      || (req.body.doctorCapability != null && !isDoctorRuntimeCapability(req.body.doctorCapability))
       || typeof req.body.detail !== 'string' || req.body.detail.trim().length === 0 || req.body.detail.length > 240) {
       return reply.code(400).send({ error: 'invalid_body' })
     }
-    return await serviceHeartbeat('publisher', 'degraded', req.body.detail)
+    try { await recordDoctorRuntimeCapability('publisher',req.body.doctorCapability) }
+    catch { return reply.code(503).send({ error:'publisher_heartbeat_not_persisted' }) }
+    return await serviceHeartbeat('publisher', req.body.state as 'ready' | 'busy' | 'degraded', req.body.detail)
       ? reply.send({ ok: true })
       : reply.code(503).send({ error: 'publisher_heartbeat_not_persisted' })
   })
 
-  app.post<{ Body: Record<string, never> }>('/api/internal/constructor-publisher/jobs/claim', async (req, reply) => {
+  app.post<{ Body: Record<string, unknown> }>('/api/internal/constructor-publisher/jobs/claim', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyPublisherRequest(req), reply)) return
-    if (Object.keys(req.body ?? {}).length !== 0) return reply.code(400).send({ error: 'invalid_body' })
+    if (!exactKeys(req.body ?? {}, ['doctorCapability'])
+      || (req.body?.doctorCapability != null && !isDoctorRuntimeCapability(req.body.doctorCapability))) return reply.code(400).send({ error: 'invalid_body' })
     let job: Awaited<ReturnType<typeof claimPublisherJob>>
     try {
-      job = await claimPublisherJob()
+      job = await claimPublisherJob(undefined,req.body?.doctorCapability)
     } catch {
       return reply.code(503).send({ error: 'constructor_pipeline_unreadable' })
     }

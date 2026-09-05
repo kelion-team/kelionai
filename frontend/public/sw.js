@@ -34,7 +34,9 @@ const manifestaShellPastrate = async () => {
     if (b.key === SHELL) return 1
     return b.installedAt - a.installedAt
   })
-  return manifests.filter((manifest, index) => manifest.key === SHELL || index < 2).slice(0, 2)
+  // Un tab poate amâna mai multe actualizări. Lookup-ul trebuie să poată servi
+  // orice generație păstrată, inclusiv un chunk lazy încă necerut de acel tab.
+  return manifests
 }
 const caleRevizuitaPastrata = async (pathname) => {
   const current = caleRevizuita(pathname)
@@ -207,14 +209,22 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     (async () => {
-      // Păstrăm manifestul curent + cel precedent, pentru taburile deja deschise,
-      // și curățăm din pool numai reviziile care nu apar în niciunul dintre ele.
+      // Fără un registru per-tab nu putem dovedi ce generație folosește fiecare
+      // fereastră. Amânăm reclamarea cât există oricare, inclusiv necontrolată;
+      // eroarea de enumerare nu este dovadă că toate ferestrele s-au închis.
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true }).catch(() => null)
+      if (windows === null || windows.length > 0) {
+        await self.clients.claim()
+        return
+      }
+      // Retenția poate crește până la o activare ulterioară fără ferestre.
+      // Atunci păstrăm politica existentă: manifestul curent + cel precedent.
       const keys = await caches.keys()
       const runtimeMeta = await caches.open(OFFLINE_RUNTIME_META_CACHE)
       const runtimeMarker = await runtimeMeta.match(OFFLINE_RUNTIME_MANIFEST)
       // Activarea nu repară și nu descarcă runtime-uri. Readiness-ul local va
       // cere o reinstalare explicită dacă inventarul noii versiuni diferă.
-      const pastrate = await manifestaShellPastrate()
+      const pastrate = (await manifestaShellPastrate()).slice(0, 2)
       const cheiPastrate = new Set(pastrate.map((m) => m.key))
       const urluriPastrate = new Set(pastrate.flatMap((m) => m.urls))
       if (runtimeMarker) {

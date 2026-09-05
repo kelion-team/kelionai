@@ -31,6 +31,7 @@ export interface AdminStrings {
   becuriBaraTitlu: string
   becuriBaraFaraCredit: string
   tabUsers: string
+  tabVisitors: string
   tabShare: string
   tabStores: string
   tabInbox: string
@@ -160,6 +161,7 @@ const en: AdminStrings = {
   becuriBaraTitlu: 'AI credit — click for Money',
   becuriBaraFaraCredit: '{n} AI out of credit — click for Money',
   tabUsers: 'Users',
+  tabVisitors: 'Visitors',
   tabShare: 'Share',
   tabStores: 'Stores',
   tabInbox: 'Inbox',
@@ -278,6 +280,7 @@ const ro: AdminStrings = {
   becuriBaraTitlu: 'Credit AI — click pentru Bani',
   becuriBaraFaraCredit: '{n} AI fără credit — click pentru Bani',
   tabUsers: 'Utilizatori',
+  tabVisitors: 'Vizitatori',
   tabShare: 'Distribuie',
   tabStores: 'Magazine',
   tabInbox: 'Inbox',

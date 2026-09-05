@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { adminStrings } from '../../lib/adminText'
 import {
-  fetchHistory,
   translateToRo,
   fetchActivity,
   manageUser,
@@ -23,6 +22,8 @@ import {
 import { fetchBalance, majorToMinor } from '../../lib/billing'
 import { fmtDur, groupByDay } from './adminHelpers'
 import { RegistruAudit } from './shared'
+import { createAdminHistoryLoader, type AdminHistoryState } from '../../lib/adminHistory'
+import { statisticsPeriodLabel } from '../../lib/adminStatistics'
 
 // ── USERS tab ───────────────────────────────────────────────────────────────
 
@@ -30,8 +31,22 @@ export function AdminUsers() {
   const A = adminStrings()
   const [activity, setActivity] = useState<UserActivity | null | 'necitit'>('necitit')
   const [billingUnit, setBillingUnit] = useState<{ currency: string; minorUnit: number } | null>(null)
-  const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] | null } | null>(null)
-  const [userConvoLoading, setUserConvoLoading] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserActivityRow | null>(null)
+  const [historyState, setHistoryState] = useState<AdminHistoryState>({ email: null, rows: [], nextCursor: null, loading: false, error: false, mode: 'recent' })
+  const historyLoader = useRef<ReturnType<typeof createAdminHistoryLoader> | null>(null)
+  if (!historyLoader.current) historyLoader.current = createAdminHistoryLoader(setHistoryState)
+  const historyBody = useRef<HTMLDivElement | null>(null)
+  const scrollAnchor = useRef<{ height: number; top: number } | null>(null)
+  const userConvo = selectedUser && historyState.email === selectedUser.email ? { u: selectedUser, rows: historyState.rows } : null
+  useEffect(() => () => historyLoader.current?.close(), [])
+  useLayoutEffect(() => {
+    if (!historyBody.current || historyState.loading || historyState.error) return
+    const body = historyBody.current
+    body.scrollTop = historyState.mode === 'older' && scrollAnchor.current
+      ? scrollAnchor.current.top + body.scrollHeight - scrollAnchor.current.height
+      : body.scrollHeight
+    scrollAnchor.current = null
+  }, [historyState.rows, historyState.loading, historyState.error, historyState.mode])
   const [roOn, setRoOn] = useState(false)
   const [roMap, setRoMap] = useState<Record<string, string>>({})
   const [roBusy, setRoBusy] = useState(false)
@@ -64,15 +79,12 @@ export function AdminUsers() {
   const showMsg = (content: string): string => (roOn ? (roMap[content] ?? content) : content)
 
   async function openUserConvo(u: UserActivityRow): Promise<void> {
-    setUserConvoLoading(true)
     setRoOn(false)
     setRoFailed(0)
-    setUserConvo({ u, rows: [] })
-    const rows = await fetchHistory(u.email)
-    setUserConvo({ u, rows })
-    setUserConvoLoading(false)
+    setSelectedUser(u)
+    await historyLoader.current!.open(u.email)
   }
-  const closeUserConvo = (): void => { setUserConvo(null); setRoOn(false); setRoFailed(0) }
+  const closeUserConvo = (): void => { historyLoader.current!.close(); setSelectedUser(null); setRoOn(false); setRoFailed(0) }
 
   return (
     <div className="admin-tab-content">
@@ -84,6 +96,7 @@ export function AdminUsers() {
         </p>
       )}
       <RegistruAudit />
+      {activityData && <p className="chat-hint">{statisticsPeriodLabel(activityData.statsSince)}. Legea perioadei se aplică statisticilor, nu șterge conversațiile sau soldurile.</p>}
       {activityData && activityData.users.length === 0 && (
         <p className="chat-hint">Încă nu s-a strâns activitate pe conturi — se adună de la prima intrare a fiecărui utilizator după această actualizare.</p>
       )}
@@ -158,15 +171,21 @@ export function AdminUsers() {
                 <button type="button" className="ghost" onClick={closeUserConvo}>Închide</button>
               </div>
             </header>
-            <div className="admin-history convo-body">
-              {userConvoLoading && <p className="chat-hint">{A.loading}</p>}
-              {!userConvoLoading && userConvo.rows === null && <p className="chat-hint" style={{ color: '#e6a23c' }}>⚠ {A.historyReadFail}</p>}
-              {!userConvoLoading && userConvo.rows !== null && userConvo.rows.length === 0 && <p className="chat-hint">{A.noMessagesYet}</p>}
-              {!userConvoLoading && groupByDay(userConvo.rows ?? []).map((g) => (
+            <div className="admin-history convo-body" ref={historyBody}>
+              {(historyState.nextCursor || (historyState.error && historyState.rows.length === 0)) && <button type="button" className="ghost" disabled={historyState.loading} onClick={() => {
+                const body = historyBody.current
+                scrollAnchor.current = body ? { height: body.scrollHeight, top: body.scrollTop } : null
+                void (historyState.rows.length ? historyLoader.current!.older() : historyLoader.current!.open(userConvo.u.email))
+              }}>{historyState.rows.length ? 'Încarcă mesaje mai vechi' : 'Reîncearcă istoricul'}</button>}
+              <p className="chat-hint">Cele mai recente mesaje sunt încărcate inițial. {historyState.rows.length} mesaje încărcate; istoricul se păstrează integral pe server.</p>
+              {historyState.loading && <p className="chat-hint">{A.loading}</p>}
+              {historyState.error && <p className="chat-hint" role="alert">⚠ {A.historyReadFail} Mesajele deja citite au fost păstrate.</p>}
+              {!historyState.loading && !historyState.error && userConvo.rows.length === 0 && <p className="chat-hint">{A.noMessagesYet}</p>}
+              {groupByDay(userConvo.rows).map((g) => (
                 <div key={g.header} className="admin-day">
                   <div className="admin-day-header">{g.header}</div>
-                  {g.rows.map((h, i) => (
-                    <div key={i} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
+                    {g.rows.map((h) => (
+                      <div key={h.id} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
                       <span className="admin-msg-time">{new Date(h.created_at).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' })}</span>
                       {showMsg(h.content)}
                     </div>

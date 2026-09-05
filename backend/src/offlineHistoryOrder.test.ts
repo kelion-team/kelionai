@@ -64,6 +64,26 @@ afterEach(async () => {
 }, 30_000)
 
 describe('offline history deterministic ordering', () => {
+  it('paginates every older message beyond 1000 using numeric IDs for equal timestamps', { timeout:30_000 }, async () => {
+    await database.query(`INSERT INTO messages(user_email,role,content,created_at)
+      SELECT $1,'user','record-'||n::text,'2026-09-05T00:00:00Z'::timestamptz FROM generate_series(1,1005) AS n`,[email])
+    let before: { createdAt:string;id:string } | null = null
+    const ids: string[] = []
+    let pages = 0
+    do {
+      const result = await citesteIstoric(email,{ email,limit:200,before })
+      expect(result.citit).toBe(true)
+      if (!result.citit) throw new Error('history unreadable')
+      const page = result.valoare
+      if (pages === 0) expect(page.history.map((row) => row.id)).toEqual(Array.from({ length:200 },(_,index) => String(806+index)))
+      ids.unshift(...page.history.map((row) => row.id))
+      before = page.nextCursor
+      pages++
+    } while (before && pages < 10)
+    expect(before).toBeNull()
+    expect(pages).toBe(6)
+    expect(ids).toEqual(Array.from({ length:1005 },(_,index) => String(index+1)))
+  })
   it('preserves insertion order across the 100/101 batch boundary and a lost-response retry', { timeout: 30_000 }, async () => {
     const firstBatch = Array.from({ length: 100 }, (_, index) => turn(index))
     const lastTurn = turn(100)

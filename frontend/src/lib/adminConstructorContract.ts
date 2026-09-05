@@ -67,6 +67,7 @@ export interface BuildJobRow {
   id: number
   status: ConstructorJobStatus
   constructorStage: string
+  executionCycle?: number
   deletable: boolean
   retryable: boolean
   orderText: string
@@ -87,6 +88,7 @@ function isBuildJobRow(value: unknown, projected: boolean): value is BuildJobRow
   const base = isPositiveInteger(value.id)
     && JOB_STATUSES.includes(value.status as ConstructorJobStatus)
     && typeof value.constructorStage === 'string'
+    && (value.executionCycle === undefined || (Number.isSafeInteger(value.executionCycle) && Number(value.executionCycle) >= 0))
     && typeof value.deletable === 'boolean'
     && typeof value.retryable === 'boolean'
     && typeof value.orderText === 'string'

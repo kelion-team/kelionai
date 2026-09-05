@@ -15,6 +15,7 @@ import {
 } from './poartaFaptelor.js'
 import type { OrMessage, BrainTool } from './brainContract.js'
 import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from '../shared/agentCustomPolicy.js'
+import type { AdminAgentRegistrySnapshot } from '../shared/agentRegistry.js'
 
 // ── ARSENALUL COMPLET (5 aug, ownerul: „nu are uneltele pentru tot ce are
 // nevoie... instalează-i tot") ───────────────────────────────────────────────
@@ -71,7 +72,7 @@ export interface AgentKelion {
   rol: string
   /** Bugetul de gândire al specialistului: 'high' = superputerea de raționament
    *  (Adrian, 4 aug: „super putere pentru gindire rationament... wow").
-   *  Nespecificat = 'low' (rapid și ieftin, destul pentru meserii). */
+   *  Nespecificat = efort efectiv 'high'; selecția modelului rămâne separată. */
   efort?: 'low' | 'high'
   /** Doar ownerul îl poate chema (Adrian, 4 aug: „roboti de tranzactionare
    *  DOAR admin") — routes/a2a.ts refuză POST-ul fără sesiune de admin. */
@@ -190,10 +191,25 @@ export function gasesteAgent(id: string): AgentKelion | undefined {
 // stau în DB (agenti_custom); aici se lipesc la listă, cu codul câștigător la
 // id egal (rosterul din cod e sursa de adevăr pentru meseriile casei).
 
-export async function rosterViu(): Promise<AgentKelion[]> {
-  const custom = await listaAgentiCustom()
-  const idsCod = new Set(ROSTER.map((a) => a.id))
-  return [...ROSTER, ...custom.filter((c) => !idsCod.has(c.id))]
+export async function rosterViu(strict = false): Promise<AgentKelion[]> {
+  const custom = await listaAgentiCustom(strict)
+  const agents = new Map(ROSTER.map((a) => [a.id,a]))
+  for (const agent of custom) if (!agents.has(agent.id)) agents.set(agent.id,agent)
+  return [...agents.values()]
+}
+
+function effectiveAgentEffort(agent: AgentKelion): 'low' | 'high' {
+  return agent.efort ?? 'high'
+}
+
+/** The caller must supply the same complete, strictly-read roster as its public DTO. */
+export function adminAgentRegistry(roster: AgentKelion[]): AdminAgentRegistrySnapshot {
+  const integrated = new Set(ROSTER.map((agent) => agent.id))
+  return { checkedAt:new Date().toISOString(),agents:roster.map((agent) => ({
+    id:agent.id,nume:agent.nume,rol:agent.rol,
+    source:integrated.has(agent.id) ? 'integrated' : 'custom',
+    efort:effectiveAgentEffort(agent),doarAdmin:agent.doarAdmin === true,status:null,
+  })) }
 }
 
 export async function gasesteAgentViu(id: string): Promise<AgentKelion | undefined> {
@@ -255,7 +271,7 @@ export async function creeazaAgentCustom(input: {
     .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
   if (!id) return { ok: false, error: 'din nume nu iese un id valid', status: 400 }
   if (gasesteAgent(id)) return { ok: false, error: `id-ul „${id}” este rezervat unui agent existent; alege alt nume`, status: 409 }
-  const err = await adaugaAgentCustom({ id, nume: n, rol: r, efort: input.efort === 'high' ? 'high' : undefined, doarAdmin: input.doarAdmin === true })
+  const err = await adaugaAgentCustom({ id, nume: n, rol: r, efort: input.efort === 'high' || input.efort === 'low' ? input.efort : undefined, doarAdmin: input.doarAdmin === true })
   if (err) return { ok: false, error: err, status: 409 }
   return { ok: true, id, nume: n }
 }
@@ -398,7 +414,7 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
   // celor 92 gândeau superficial. Acum default e 'high': fiecare agent primește
   // buget de gândire mare + plafon dublu. Un agent poate cere explicit efort:'low' dacă e o simplă
   // căutare, dar implicitul e gândirea profundă.
-  const efort = a.efort ?? 'high'
+  const efort = effectiveAgentEffort(a)
   const plafon = efort === 'high' ? 8192 : 2048
   let cost: number | undefined
   for (let runda = 0; ; runda++) {

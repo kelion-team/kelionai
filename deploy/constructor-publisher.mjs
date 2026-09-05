@@ -33,6 +33,7 @@ import {
   systemdCredentialPath,
 } from './lib/constructor-service-client.mjs'
 import { githubRequest, validateRepository } from './lib/github-fixed-client.mjs'
+import { DoctorScopeError, canonicalRepairAuthorization, assertDoctorPatchScope, measureDoctorCapability, persistDoctorScopeRejection, doctorSemanticContainerArgs } from './lib/doctor-repair-scope.mjs'
 
 const API = assertLoopbackApi(process.env.KELION_CONSTRUCTOR_API ?? 'http://127.0.0.1:8080/')
 const ENABLED = process.env.CONSTRUCTOR_PUBLISHER_EXEC_ENABLED === '1'
@@ -62,6 +63,7 @@ const PUBLISHER_FAILURE_CODES = new Set([
   'merged_unverifiable',
   'master_diverged',
   'publisher_failed',
+  'doctor_scope_rejected',
 ])
 
 function canonicalWorkflowRunPath(value) {
@@ -79,6 +81,7 @@ function publisherError(code, message) {
 }
 
 function publisherFailureCode(error) {
+  if (error instanceof DoctorScopeError) return 'doctor_scope_rejected'
   if (error instanceof Error && PUBLISHER_FAILURE_CODES.has(error.publisherCode)) return error.publisherCode
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (/Commitul recuperat nu este în master/i.test(message)) return 'master_diverged'
@@ -338,7 +341,47 @@ function prepareCommitSigning() {
   return { keyPath, allowedSigners }
 }
 
-async function recreateCommit(handoff, identity, signing) {
+function assertPublisherDoctorScope(worktree, handoff, authorization) {
+  if (authorization.automationOrigin !== 'doctor') return
+  const raw = git(['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-renames', handoff.baseCommit, '--'], worktree)
+  const counts = git(['diff', '--cached', '--numstat', '-z', '--no-renames', handoff.baseCommit, '--'], worktree)
+  if (raw.status !== 0 || counts.status !== 0) throw new DoctorScopeError('manifest_unavailable', handoff.patch)
+  assertDoctorPatchScope(authorization, { rawDiff: raw.stdout, numStat: counts.stdout, patch: handoff.patch })
+}
+
+async function verifyDoctorSemantics(worktree, handoff, authorization) {
+  if (authorization.automationOrigin !== 'doctor') return
+  const code = await runIgnoringOutput('/usr/bin/podman', doctorSemanticContainerArgs(worktree, GATE_IMAGE, authorization),
+    { PATH: '/usr/bin:/bin', HOME: '/var/lib/kelion-publisher', XDG_RUNTIME_DIR: '/run/kelion-publisher', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, 30_000)
+  if (code === 2) throw new DoctorScopeError('semantic_contract_rejected', handoff.patch)
+  if (code !== 0) throw publisherError('publisher_failed', 'Verificarea semantică Doctor nu este disponibilă; porțile nu au fost executate')
+}
+
+async function verifyDoctorHandoffBeforeRecovery(handoff, authorization) {
+  if (authorization.automationOrigin !== 'doctor') return
+  const workRoot = mkdtempSync(join(STATE, '.scope-'))
+  const worktree = join(workRoot, 'worktree')
+  try {
+    if (git(['worktree', 'add', '--detach', worktree, handoff.baseCommit], REPO).status !== 0) throw new DoctorScopeError('manifest_unavailable', handoff.patch)
+    const applied = git(['apply', '--index', '--binary', '--whitespace=error-all', '--'], worktree, { input: handoff.patch, encoding: 'buffer', maxBuffer: MAX_PATCH })
+    if (applied.status !== 0) throw new DoctorScopeError('patch_not_applicable', handoff.patch)
+    assertPublisherDoctorScope(worktree, handoff, authorization)
+    await verifyDoctorSemantics(worktree, handoff, authorization)
+  } finally {
+    git(['worktree', 'remove', '--force', '--', worktree], REPO)
+    rmSync(workRoot, { recursive: true, force: true })
+  }
+}
+
+function fetchCanonicalMaster(authenticatedGitEnv) {
+  const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { env: authenticatedGitEnv, timeout: 180_000 })
+  if (fetched.status !== 0) {
+    if (gitAuthFailed(fetched)) throw publisherError('github_auth_required', 'GitHub a refuzat autentificarea la fetch')
+    fail('Fetch public origin/master a eșuat')
+  }
+}
+
+async function recreateCommit(handoff, identity, signing, authorization) {
   const workRoot = mkdtempSync(join(STATE, '.publish-'))
   const worktree = join(workRoot, 'worktree')
   const branch = `codex/${identity.taskId.slice('codex-'.length)}`
@@ -348,6 +391,8 @@ async function recreateCommit(handoff, identity, signing) {
     if (applied.status !== 0) fail('Patch-ul nu se aplică exact peste baza declarată')
     const canonicalPatch = git(['diff', '--cached', '--binary', '--full-index', '--no-ext-diff', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/', handoff.baseCommit, '--'], worktree, { maxBuffer: MAX_PATCH })
     if (canonicalPatch.status !== 0 || sha256(Buffer.from(String(canonicalPatch.stdout ?? ''), 'utf8')) !== handoff.patchSha256) fail('Patch-ul recreat nu are hash-ul declarat')
+    assertPublisherDoctorScope(worktree, handoff, authorization)
+    await verifyDoctorSemantics(worktree, handoff, authorization)
     let gateCode
     try {
       gateCode = await runIgnoringOutput('/usr/bin/podman', gateArgs(worktree), { PATH: '/usr/bin:/bin', HOME: '/var/lib/kelion-publisher', XDG_RUNTIME_DIR: '/run/kelion-publisher', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, 45 * 60_000)
@@ -423,7 +468,7 @@ async function reportPublisherPreflightFailure(hmac, error) {
     secret: hmac,
     prefix: PREFIX,
     path: '/api/internal/constructor-publisher/heartbeat',
-    body: { state: 'degraded', detail: `publisher upstream preflight: ${code}` },
+    body: { state: 'degraded', detail: `publisher upstream preflight: ${code}`, doctorCapability: measureDoctorCapability() },
   }).catch(() => undefined)
 }
 
@@ -1059,7 +1104,8 @@ async function runOnce() {
     GIT_ASKPASS: ASKPASS,
     KELION_GITHUB_TOKEN_FILE: githubCredential.path,
   })
-  const claim = await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: '/api/internal/constructor-publisher/jobs/claim', body: {} })
+  await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: '/api/internal/constructor-publisher/heartbeat', body: { state: 'ready', detail: 'Preflightul publisherului este verificat; urmează citirea cozii', doctorCapability: measureDoctorCapability() } })
+  const claim = await postInternal({ api: API, secret: hmac.value, prefix: PREFIX, path: '/api/internal/constructor-publisher/jobs/claim', body: { doctorCapability: measureDoctorCapability() } })
   if (!claim?.job) return
   const identity = strictJobIdentity(claim.job)
   const leasePath = `/api/internal/constructor-publisher/jobs/${identity.jobId}/lease`
@@ -1072,7 +1118,15 @@ async function runOnce() {
   // stale/closed/CI failure ar încerca să le retragă cu o dovadă goală.
   let publication = publicationFromClaim(claim.job, identity)
   try {
+    const authorization = canonicalRepairAuthorization(claim.job)
     await stopLease.assert()
+    // Even recovery of an already-open/merged PR must not silently skip the
+    // Doctor boundary. A missing immutable proof fails closed for Doctor.
+    if (authorization.automationOrigin === 'doctor') {
+      fetchCanonicalMaster(authenticatedGitEnv)
+      await stopLease.assert()
+      await verifyDoctorHandoffBeforeRecovery(readHandoff({ ...claim.job, ...identity }), authorization)
+    }
     protectionPolicy = await validateProtection(githubCredential.value)
     const recovered = await recoverMergedPr(githubCredential.value, claim.job, identity, protectionPolicy)
     if (recovered) {
@@ -1083,17 +1137,13 @@ async function runOnce() {
       cleanupAcknowledgedHandoff(claim.job.handoffId)
       return
     }
-    const fetched = git(['fetch', '--prune', '--no-tags', 'origin', '+refs/heads/master:refs/remotes/origin/master'], REPO, { env: authenticatedGitEnv, timeout: 180_000 })
-    if (fetched.status !== 0) {
-      if (gitAuthFailed(fetched)) throw publisherError('github_auth_required', 'GitHub a refuzat autentificarea la fetch')
-      fail('Fetch public origin/master a eșuat')
-    }
+    if (authorization.automationOrigin !== 'doctor') fetchCanonicalMaster(authenticatedGitEnv)
     await stopLease.assert()
     const handoff = readHandoff({ ...claim.job, ...identity })
     if (gitOutput(['rev-parse', 'origin/master^{commit}'], REPO) !== handoff.baseCommit) {
       throw publisherError('stale_base', 'Baza handoff-ului nu mai este vârful master; rebase automat interzis')
     }
-    built = await recreateCommit(handoff, identity, signing)
+    built = await recreateCommit(handoff, identity, signing, authorization)
     await stopLease.assert()
     await pushBranch(githubCredential.path, built)
     publication = { branch: built.branch, headCommit: built.headCommit, prNumber: null }
@@ -1125,6 +1175,11 @@ async function runOnce() {
     cleanupAcknowledgedHandoff(claim.job.handoffId)
   } catch (error) {
     let code = publisherFailureCode(error)
+    if (error instanceof DoctorScopeError) {
+      // No raw code/log leaves the private spool. Retain a bounded rejection
+      // receipt and the original immutable handoff for diagnosis, never retry.
+      persistDoctorScopeRejection(join(STATE, `${identity.taskId}.scope-rejected.json`), { jobId: identity.jobId, taskId: identity.taskId, reason: error.reason, patchSha256: error.patchSha256 })
+    }
     const rebuild = new Set(['stale_base', 'ci_failed', 'local_gate_failed', 'pr_closed'])
     let retirement = null
     if (rebuild.has(code)) {

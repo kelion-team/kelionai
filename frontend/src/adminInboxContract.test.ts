@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseContactMessagesAdmin,
-  parseHistoryAdmin,
   parseInboundAdmin,
   parseMailboxLiveAdmin,
   parseNotificariAdmin,
@@ -12,7 +11,6 @@ describe('Admin inbox payload contracts', () => {
     { parse: parseInboundAdmin, key: 'emails' },
     { parse: parseContactMessagesAdmin, key: 'messages' },
     { parse: parseNotificariAdmin, key: 'notificari' },
-    { parse: parseHistoryAdmin, key: 'history' },
   ] as const
 
   it('accepts an explicitly measured empty list', () => {

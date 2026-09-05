@@ -1,4 +1,7 @@
 import { ConstructorJobProgress } from './ConstructorJobProgress'
+import { ConstructorJobActivity } from './ConstructorJobActivity'
+import { useConstructorMonitor } from '../../lib/useConstructorMonitor'
+import { AdminAgentRegistry } from './AdminAgentRegistry'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { adminStrings } from '../../lib/adminText'
 import {
@@ -12,6 +15,7 @@ import {
 } from '../../lib/admin'
 import { fetchBalance, formatMinorMoney, type WalletStatus } from '../../lib/billing'
 import { apiFetch } from '../../lib/transport'
+import { formatLondonTimestamp } from '../../lib/versionEvidence'
 import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from '../../../../backend/src/shared/agentCustomPolicy'
 import {
   constructorAvailabilityFromSnapshot,
@@ -43,6 +47,7 @@ import {
 
 export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?: boolean } = {}) {
   const A = adminStrings()
+  const constructorMonitor = useConstructorMonitor()
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[] | null | 'necitit'>('necitit')
   const [buildArchive, setBuildArchive] = useState<{
     status: 'idle' | 'loading' | 'ready' | 'error'
@@ -70,6 +75,8 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   const [agentDeep, setAgentDeep] = useState(false)
   const [agentAdminOnly, setAgentAdminOnly] = useState(false)
   const [agentBusy, setAgentBusy] = useState(false)
+  const agentBusyRef = useRef(false)
+  const [agentsRefreshRevision, setAgentsRefreshRevision] = useState(0)
   const [agentMsg, setAgentMsg] = useState('')
   const [evalOrdin, setEvalOrdin] = useState<EvalConstructor | null>(null)
 
@@ -91,24 +98,27 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
 
   async function addCustomAgent(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
-    if (agentBusy || agentName.trim().length < 3 || agentRole.trim().length < 10) return
+    if (agentBusyRef.current || agentName.trim().length < 3 || agentRole.trim().length < 10) return
+    agentBusyRef.current = true
     setAgentBusy(true)
     setAgentMsg('')
     try {
       const response = await apiFetch('/api/enterprise/agent-nou', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ nume: agentName.trim(), rol: agentRole.trim(), efort: agentDeep ? 'high' : undefined, doarAdmin: agentAdminOnly || undefined }),
+        body: JSON.stringify({ nume: agentName.trim(), rol: agentRole.trim(), efort: agentDeep ? 'high' : 'low', doarAdmin: agentAdminOnly || undefined }),
       })
-      const body = (await response.json().catch(() => null)) as { id?: string; error?: string } | null
-      if (!response.ok || !body?.id) {
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; id?: string; error?: string } | null
+      if (!response.ok || body?.ok !== true || typeof body.id !== 'string' || !body.id) {
         setAgentMsg(body?.error ?? `Agentul nu a fost creat (HTTP ${response.status}).`)
       } else {
-        setAgentMsg(`Agentul ${body.id} este disponibil în aplicație.`)
+        setAgentMsg(`Crearea agentului ${body.id} a fost confirmată; recitesc registrul persistent.`)
+        setAgentsRefreshRevision((revision) => revision + 1)
         setAgentName(''); setAgentRole(''); setAgentDeep(false); setAgentAdminOnly(false)
       }
     } catch {
       setAgentMsg('Agentul nu a fost creat: conexiunea cu serverul a eșuat.')
     } finally {
+      agentBusyRef.current = false
       setAgentBusy(false)
     }
   }
@@ -436,7 +446,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                   : 'Motor indisponibil: nu există o verificare curentă reușită.'}
               </p>
               {constructorModelSnapshot.verifiedAt && <p className="chat-hint">
-                {A.constructorModelVerifiedAt(new Date(constructorModelSnapshot.verifiedAt).toLocaleString())}
+                <time dateTime={constructorModelSnapshot.verifiedAt}>{A.constructorModelVerifiedAt(formatLondonTimestamp(constructorModelSnapshot.verifiedAt) ?? 'moment neconfirmat')}</time>
               </p>}
             </>
           )}
@@ -480,15 +490,15 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
         <p className="chat-hint">Creează un agent prin același sistem A2A și aceeași sesiune admin, fără o consolă paralelă.</p>
         <form onSubmit={(event) => void addCustomAgent(event)}>
           <div className="admin-form-row" style={{ flexWrap: 'wrap' }}>
-            <input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Numele agentului" minLength={3} maxLength={80} required />
-            <textarea value={agentRole} onChange={(event) => setAgentRole(event.target.value)} placeholder="Rolul și limitele agentului" minLength={10} maxLength={AGENT_CUSTOM_ROLE_MAX_LENGTH} required rows={3} style={{ flex: 1, minWidth: 240 }} />
+            <input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Numele agentului" minLength={3} maxLength={80} disabled={agentBusy} required />
+            <textarea value={agentRole} onChange={(event) => setAgentRole(event.target.value)} placeholder="Rolul și limitele agentului" minLength={10} maxLength={AGENT_CUSTOM_ROLE_MAX_LENGTH} disabled={agentBusy} required rows={3} style={{ flex: 1, minWidth: 240 }} />
           </div>
           <label className="chat-hint" style={{ display: 'block', marginTop: 8 }}>
-            <input type="checkbox" checked={agentDeep} onChange={(event) => setAgentDeep(event.target.checked)} />{' '}
+            <input type="checkbox" checked={agentDeep} disabled={agentBusy} onChange={(event) => setAgentDeep(event.target.checked)} />{' '}
             Raționament aprofundat pentru sarcini complexe
           </label>
           <label className="chat-hint" style={{ display: 'block', marginTop: 6 }}>
-            <input type="checkbox" checked={agentAdminOnly} onChange={(event) => setAgentAdminOnly(event.target.checked)} />{' '}
+            <input type="checkbox" checked={agentAdminOnly} disabled={agentBusy} onChange={(event) => setAgentAdminOnly(event.target.checked)} />{' '}
             Disponibil numai adminului
           </label>
           <button type="submit" className="ghost" disabled={agentBusy} style={{ marginTop: 10 }}>
@@ -496,6 +506,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
           </button>
         </form>
         {agentMsg && <div className="chat-hint" role="status">{agentMsg}</div>}
+        <AdminAgentRegistry refreshRevision={agentsRefreshRevision} />
       </div>}
 
       <div className="admin-card" style={{ marginTop: 12 }}>
@@ -557,11 +568,12 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               {j.prUrl && <a href={j.prUrl} target="_blank" rel="noreferrer">PR ↗</a>}
               {j.tokens > 0 && <span>{`· ${Math.round(j.tokens / 1000)}k tok`}</span>}
-              <span style={{ opacity: 0.7 }}>· {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+              <span style={{ opacity: 0.7 }}>· actualizat <time dateTime={j.updatedAt}>{formatLondonTimestamp(j.updatedAt) ?? 'moment neconfirmat'}</time></span>
               {j.retryable && <button type="button" className="ghost" style={{ fontSize: 12 }} onClick={() => retryBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title="Repune ordinul în coadă (îl reia de la zero)">↻ reia</button>}
               {j.deletable && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => deleteBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title="Șterge definitiv ordinul">✕</button>}
               {constructorJobCanBeCancelled(j.status, j.constructorStage) && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => cancelBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title={j.status === 'queued' ? 'Anulează ordinul aflat în coadă' : 'Oprește ordinul aflat în lucru (devine „anulat")'}>⏹ oprește</button>}
             </span>
+            <ConstructorJobActivity jobId={j.id} cycle={j.executionCycle} status={j.status} connection={constructorMonitor} />
             <ConstructorJobProgress job={j} />
             {j.continuity && (
               <div className="chat-hint" style={{ flexBasis: '100%', fontSize: 11, marginTop: 2 }}>
@@ -600,7 +612,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                 <div className="chat-hint" style={{ marginTop: 6 }}>
                   <b>Obiectiv:</b> {j.workCard.objective}<br />
                   <b>Owner / actor:</b> {j.workCard.owner ?? 'neatribuit'} / {constructorActorLabel(j.workCard.actor) ?? 'în așteptare'}<br />
-                  <b>Heartbeat:</b> {j.workCard.heartbeatAt ? new Date(j.workCard.heartbeatAt).toLocaleString('ro-RO') : 'nepublicat'}{' · '}
+                  <b>Heartbeat:</b> {j.workCard.heartbeatAt ? <time dateTime={j.workCard.heartbeatAt}>{formatLondonTimestamp(j.workCard.heartbeatAt) ?? 'moment neconfirmat'}</time> : 'nepublicat'}{' · '}
                   <b>Evenimente persistente:</b> {constructorPersistentEventsText(j.workCard.progress, j.workCard.evidence.eventCount)}
                   {j.workCard.escalationCondition && <><br /><b>Escaladare:</b> {j.workCard.escalationCondition}</>}
                   {constructorFinalResultText(j.workCard.finalResult) && <><br /><b>Rezultat:</b> {constructorFinalResultText(j.workCard.finalResult)}</>}
@@ -610,7 +622,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                 {(j.continuity?.activity ?? []).length > 0 && (
                   <ol className="chat-hint" aria-label={`Cronologia ${j.workCard.id}`}>
                     {(j.continuity?.activity ?? []).map((event) => (
-                      <li key={event.id}><b>{event.label}</b> · {event.percent === null ? 'progres nemăsurat' : `${event.percent}% din etape`} · {event.state}{event.at ? ` · ${new Date(event.at).toLocaleString('ro-RO')}` : ''}</li>
+                      <li key={event.id}><b>{event.label}</b> · {event.percent === null ? 'progres nemăsurat' : `${event.percent}% din etape`} · {event.state}{event.at ? <> · <time dateTime={event.at}>{formatLondonTimestamp(event.at) ?? 'moment neconfirmat'}</time></> : ''}</li>
                     ))}
                   </ol>
                 )}
@@ -686,7 +698,7 @@ export function AdminCreier() {
               </p>
               <p className="chat-hint">
                 Executor: <b>{constructorWorker.executor ?? 'executor neverificat'}</b> · coadă: <b>{constructorWorker.queue ?? 'build_jobs'}</b>.<br />
-                Ultimul heartbeat: {constructorWorker.worker.lastHeartbeat ? new Date(constructorWorker.worker.lastHeartbeat).toLocaleString('ro-RO') : 'neînregistrat'}
+                Ultimul heartbeat: {constructorWorker.worker.lastHeartbeat ? <time dateTime={constructorWorker.worker.lastHeartbeat}>{formatLondonTimestamp(constructorWorker.worker.lastHeartbeat) ?? 'moment neconfirmat'}</time> : 'neînregistrat'}
               </p>
               {(constructorWorker.worker.state === 'setup_required' || constructorWorker.worker.state === 'unknown') && (
                 <p className="chat-hint">

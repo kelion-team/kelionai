@@ -99,6 +99,7 @@ for source in \
   "$repo_root/deploy/constructor-model-control.mjs" \
   "$repo_root/deploy/constructor-model-switch.sh" \
   "$repo_root/deploy/lib/service-auth.mjs" \
+  "$repo_root/deploy/lib/doctor-repair-scope.mjs" \
   "$repo_root/deploy/opencode-constructor.json" \
   "$repo_root/deploy/opencode-constructor-instructions.md" \
   "$repo_root/deploy/systemd/kelion-codex-worker.service" \
@@ -277,7 +278,10 @@ validate_ready_stamp() {
 }
 
 validate_reactivation_postcondition() {
-  local index marker timer socket=/run/kelion-constructor-model-control/control.sock
+  local index marker timer pause socket=/run/kelion-constructor-model-control/control.sock
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --worker-pause-state) || return 1
   [ ! -e "$REACTIVATION_JOURNAL" ] && [ ! -L "$REACTIVATION_JOURNAL" ] \
     && validate_ready_stamp \
     && systemctl is-active --quiet kelion-constructor-model-control.service \
@@ -288,8 +292,10 @@ validate_reactivation_postcondition() {
     if [ -e "$marker" ] || [ -L "$marker" ]; then
       [ -f "$marker" ] && [ ! -L "$marker" ] \
         && [ "$(stat -Lc '%u:%g:%a:%h' "$marker")" = '0:0:444:1' ] \
-        && systemctl is-enabled --quiet "$timer" \
-        && systemctl is-active --quiet "$timer" || return 1
+        && systemctl is-enabled --quiet "$timer" || return 1
+      if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then
+        [ "$(systemctl show "$timer" --property=ActiveState --value)" = inactive ] || return 1
+      else systemctl is-active --quiet "$timer" || return 1; fi
     elif systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then
       return 1
     fi
@@ -374,7 +380,10 @@ validate_service_quiescence() {
 }
 
 validate_live_activation_vector() {
-  local index marker timer config present unit_file_state active_state
+  local index marker timer config present unit_file_state active_state pause
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --worker-pause-state) || return 1
   validate_marker_root || return 1
   validate_ready_stamp || return 1
   for config in \
@@ -397,8 +406,14 @@ validate_live_activation_vector() {
     unit_file_state=$(systemctl show "$timer" --property=UnitFileState --value) || return 1
     active_state=$(systemctl show "$timer" --property=ActiveState --value) || return 1
     if [ "$present" = 1 ]; then
-      [ "$unit_file_state" = enabled ] && [ "$active_state" = active ] \
-        && systemctl is-enabled --quiet "$timer" && systemctl is-active --quiet "$timer" || return 1
+      [ "$unit_file_state" = enabled ] && systemctl is-enabled --quiet "$timer" || return 1
+      if [ "$timer" = kelion-codex-worker.timer ] && [ "$active_state" = inactive ]; then
+        [ "$pause" = paused ] || return 1
+        if systemctl is-active --quiet "$timer"; then return 1; fi
+      else
+        if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then return 1; fi
+        [ "$active_state" = active ] && systemctl is-active --quiet "$timer" || return 1
+      fi
     else
       [ "$unit_file_state" = disabled ] && [ "$active_state" = inactive ] || return 1
       if systemctl is-enabled --quiet "$timer" || systemctl is-active --quiet "$timer"; then return 1; fi
@@ -484,15 +499,33 @@ load_upgrade_journal() {
     [ "$type" = timer ] && [ "$name" = "${constructor_timers[$index]}" ] \
       && [[ "$first" =~ ^[01]$ ]] && [[ "$second" =~ ^[01]$ ]] \
       && [ "$digest" = - ] && [ -z "$extra" ] || return 1
-    [ "$first" = "${snapshot_marker_present[$index]}" ] \
-      && [ "$second" = "${snapshot_marker_present[$index]}" ] || return 1
+    [ "$first" = "${snapshot_marker_present[$index]}" ] || return 1
+    if [ "$index:$first:$second" = 0:1:0 ]; then
+      [ "$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+        KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+        bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --worker-pause-state)" = paused ] || return 1
+    else [ "$second" = "${snapshot_marker_present[$index]}" ] || return 1; fi
     snapshot_timer_enabled+=("$first")
     snapshot_timer_active+=("$second")
   done
 }
 
 create_upgrade_snapshot() {
-  local index marker timer present enabled active digest state_file
+  local index marker timer present enabled active digest state_file pause
+  validate_live_activation_vector || return 1
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --worker-pause-state) || return 1
+  # Only an explicit canonical pause may be preserved or bootstrapped. Never
+  # infer operator intent if an active timer stops between these observations.
+  case "$pause" in
+    paused)
+      KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+        KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+        bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --capture-worker-pause || return 1 ;;
+    unpaused) ;;
+    *) return 1 ;;
+  esac
   validate_live_activation_vector || return 1
   snapshot_root=$(mktemp -d "$RUNTIME_ROOT/constructor-upgrade.XXXXXX") || return 1
   chown root:root "$snapshot_root"
@@ -557,7 +590,7 @@ validate_private_ai_executor() {
   local expected_controller_state=${1:-active}
   local config=/srv/private-ai/home/.config/opencode/opencode.json
   local instructions=/srv/private-ai/home/.config/opencode/instructions.md
-  local unit_text self_test_output retired unit state
+  local unit_text self_test_output retired unit state scope_target
   env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
     /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
     --verify-runtime-binary >/dev/null || return 1
@@ -572,6 +605,12 @@ validate_private_ai_executor() {
   cmp -s -- "$repo_root/deploy/constructor-model-control.mjs" /opt/kelion-constructor/constructor-model-control.mjs || return 1
   cmp -s -- "$repo_root/deploy/constructor-model-switch.sh" /opt/private-ai/bin/constructor-model-switch || return 1
   cmp -s -- "$repo_root/deploy/lib/service-auth.mjs" /opt/kelion-constructor/lib/service-auth.mjs || return 1
+  for scope_target in /opt/kelion-codex/lib/doctor-repair-scope.mjs /opt/kelion-constructor/lib/doctor-repair-scope.mjs; do
+    [ -f "$scope_target" ] && [ ! -L "$scope_target" ] \
+      && [ "$(realpath -e -- "$scope_target")" = "$scope_target" ] \
+      && [ "$(stat -Lc '%u:%g:%a:%h' "$scope_target")" = '0:0:444:1' ] \
+      && cmp -s -- "$repo_root/deploy/lib/doctor-repair-scope.mjs" "$scope_target" || return 1
+  done
   cmp -s -- "$repo_root/deploy/systemd/kelion-codex-worker.service" /etc/systemd/system/kelion-codex-worker.service || return 1
   cmp -s -- "$repo_root/deploy/systemd/kelion-constructor-model-control.service" /etc/systemd/system/kelion-constructor-model-control.service || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-codex/codex-worker.mjs)" = '0:0:555:1' ] || return 1
@@ -825,6 +864,41 @@ flock -n 9 || { echo 'altă operație de publicare este activă' >&2; exit 1; }
   && [ ! -L "$PUBLICATION_LOCK" ] \
   && [ "$(stat -Lc '%d:%i' /proc/$$/fd/9)" = "$(stat -Lc '%d:%i' "$PUBLICATION_LOCK")" ] \
   || { echo 'lock-ul de publicare s-a schimbat după flock' >&2; exit 1; }
+# Resume only our authenticated pause bootstrap, before any generic pending
+# validator or fresh snapshot. Boot never owns this schema-2 transaction.
+pause_bootstrap_needed=0
+if [ "$constructor_upgrade_recovery" = 0 ]; then
+  if [ -f /etc/kelion/codex-worker.paused ] && [ ! -e "$READY_STAMP" ]; then
+    pause_bootstrap_needed=1
+    for conflict in "$INSTALL_JOURNAL" "$RUNTIME_JOURNAL" "$ACTIVATION_JOURNAL" "$GATE_JOURNAL" \
+      "$UPGRADE_JOURNAL" "$REACTIVATION_JOURNAL" "$MAX_MODEL_JOURNAL" "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
+      if [ -e "$conflict" ] || [ -L "$conflict" ]; then pause_bootstrap_needed=0; fi
+    done
+  fi
+  if [ -f "$UNIT_MIGRATION_PENDING" ] && jq -e '.kind == "worker-pause-bootstrap"' "$UNIT_MIGRATION_PENDING" >/dev/null 2>&1; then
+    pause_bootstrap_needed=1
+  fi
+fi
+if [ "$pause_bootstrap_needed" = 1 ]; then
+  for conflict in "$INSTALL_JOURNAL" "$RUNTIME_JOURNAL" "$ACTIVATION_JOURNAL" "$GATE_JOURNAL" \
+    "$UPGRADE_JOURNAL" "$REACTIVATION_JOURNAL" "$MAX_MODEL_JOURNAL" "$DESTRUCTIVE_RECOVERY_JOURNAL"; do
+    [ ! -e "$conflict" ] && [ ! -L "$conflict" ] \
+      || { echo 'bootstrapul pauzei nu poate adopta un recovery străin' >&2; exit 1; }
+  done
+  pause_bootstrap_result=$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+    KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --capture-worker-pause) \
+    || { echo 'bootstrapul pauzei nu poate fi reluat de acest owner' >&2; exit 1; }
+  if [ "$pause_bootstrap_result" = resumed ] || [ ! -e "$READY_STAMP" ]; then
+    cmp -s -- "$repo_root/deploy/lib/runtime-config-cutover.sh" "$ROOT/bin/runtime-config-cutover.sh" \
+      || { echo 'helperul bootstrap nu este candidatul exact' >&2; exit 1; }
+    KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+      KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+      "$ROOT/bin/runtime-config-cutover.sh" --recover-only "$CONFIG_ROOT/compose.production.yml" \
+      || { echo 'control-plane-ul bootstrap nu poate fi restaurat sigur' >&2; exit 1; }
+  fi
+fi
+
 
 if { [ -e "$REACTIVATION_JOURNAL" ] || [ -L "$REACTIVATION_JOURNAL" ]; } \
   && { [ ! -e "$UPGRADE_JOURNAL" ] && [ ! -L "$UPGRADE_JOURNAL" ]; }; then

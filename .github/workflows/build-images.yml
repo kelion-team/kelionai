@@ -40,7 +40,7 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]
           git merge-base --is-ancestor "$RELEASE_SHA" origin/master
-          docker build --pull --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-app .
+          docker build --pull --build-arg "GIT_COMMIT_SHA=$RELEASE_SHA" --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-app .
           docker build --pull --file Dockerfile.browser --target worker --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-browser .
           docker build --pull --file Dockerfile.browser --target egress --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-browser-egress .
           docker build --pull --file Dockerfile.converter --target gateway --label "org.opencontainers.image.revision=$RELEASE_SHA" --tag kelion-release-converter-gateway .
@@ -50,6 +50,21 @@ jobs:
       - name: Probe fără rețea și trust boundary
         run: |
           set -euo pipefail
+          # Prove the UI bytes carry the verified release SHA before publishing
+          # or signing the image; an OCI label alone is not a frontend version.
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 32 --memory 128m \
+            --entrypoint node kelion-release-app -e '
+            const fs = require("node:fs");
+            const file = "/app/frontend/dist/ui-build.json";
+            const expected = process.argv[1];
+            const stat = fs.lstatSync(file);
+            if (!/^[0-9a-f]{40}$/.test(expected) || !stat.isFile() || stat.isSymbolicLink() || stat.size > 1024) process.exit(1);
+            const value = JSON.parse(fs.readFileSync(file, "utf8"));
+            if (!value || Array.isArray(value) || Object.keys(value).sort().join(",") !== "commit,schema"
+              || value.schema !== 1 || value.commit !== expected) process.exit(1);
+            console.log(JSON.stringify({ok:true,event:"release_ui_build_verified",commit:expected}));
+          ' "$RELEASE_SHA"
           docker run --rm --network none --entrypoint sh kelion-release-app -eu -c '
             test ! -e /app/.github
             test ! -e /app/deploy

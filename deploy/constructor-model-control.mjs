@@ -230,7 +230,7 @@ function assertPublicationLock(path) {
 
 export function createPublicationBarrier(path = PUBLICATION_LOCK) {
   return {
-    async acquire() {
+    async acquire({ observeContention = false } = {}) {
       let fd
       try {
         assertPublicationLock(path)
@@ -269,11 +269,12 @@ export function createPublicationBarrier(path = PUBLICATION_LOCK) {
         closeSync(fd)
         return null
       }
-      const acquired = await new Promise((resolvePromise) => {
-        child.once('error', () => resolvePromise(false))
-        child.once('close', (code, signal) => resolvePromise(code === 0 && signal === null))
+      const outcome = await new Promise((resolvePromise) => {
+        child.once('error', () => resolvePromise('invalid'))
+        child.once('close', (code, signal) => resolvePromise(signal !== null ? 'invalid'
+          : code === 0 ? 'acquired' : code === 75 ? 'contended' : 'invalid'))
       })
-      if (!acquired) {
+      if (outcome === 'invalid' || (outcome === 'contended' && !observeContention)) {
         closeSync(fd)
         return null
       }
@@ -285,6 +286,11 @@ export function createPublicationBarrier(path = PUBLICATION_LOCK) {
       } catch {
         closeSync(fd)
         return null
+      }
+      if (outcome === 'contended') {
+        closeSync(fd)
+        // Observation only: no lease, no worker state and no authority to run.
+        return { contended: true }
       }
       let released = false
       return {
@@ -499,6 +505,78 @@ export async function probeModelState(dependencies = {}) {
   }
 }
 
+
+// Read-only host observation for the independent server monitor. No caller
+// supplies a unit name, filesystem path or command. Process presence is not
+// itself evidence of useful activity; the backend correlates durable events.
+export function readWorkerPause(io = { lstatSync, realpathSync, openSync, fstatSync, readFileSync, closeSync }) {
+  const directory = '/etc/kelion', path = directory + '/codex-worker.paused'
+  const parent = io.lstatSync(directory)
+  const validParent = (p) => p.isDirectory() && !p.isSymbolicLink()
+    && p.uid === 0 && p.gid === 0 && (p.mode & 0o777) === 0o755
+    && io.realpathSync(directory) === directory
+  if (!validParent(parent)) throw new Error('worker_pause_invalid')
+  const assertParentUnchanged = () => {
+    const current = io.lstatSync(directory)
+    if (!validParent(current) || current.dev !== parent.dev || current.ino !== parent.ino) throw new Error('worker_pause_invalid')
+  }
+  let info
+  try { info = io.lstatSync(path) }
+  catch (error) {
+    // Only initial absence is unpaused. A disappearance during open/read is not.
+    if (error?.code !== 'ENOENT') throw error
+    assertParentUnchanged()
+    return false
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1
+    || info.uid !== 0 || info.gid !== 0 || (info.mode & 0o777) !== 0o444
+    || info.size !== 9 || io.realpathSync(path) !== path) throw new Error('worker_pause_invalid')
+  let fd
+  try {
+    fd = io.openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    const opened = io.fstatSync(fd), current = io.lstatSync(path)
+    if (opened.dev !== info.dev || opened.ino !== info.ino || current.dev !== info.dev || current.ino !== info.ino
+      || opened.uid !== 0 || opened.gid !== 0 || (opened.mode & 0o777) !== 0o444
+      || io.readFileSync(fd, 'utf8') !== 'schema=1\n') throw new Error('worker_pause_invalid')
+    assertParentUnchanged()
+    return true
+  } finally { if (fd !== undefined) io.closeSync(fd) }
+}
+
+export async function probeWorkerState(dependencies = {}) {
+  const execute = dependencies.runCommand ?? runCommand
+  const parse = async (unit, pid) => {
+    const result = await execute('/usr/bin/systemctl', ['show', '--no-pager',
+      '--property=' + (pid ? 'LoadState,ActiveState,MainPID' : 'LoadState,ActiveState'), unit], 3_000)
+    if (result.failed || result.code !== 0 || result.signal) throw new Error('worker_host_unavailable')
+    const entries = result.stdout.split('\n').filter(Boolean).map((line) => line.split('='))
+    const fields = Object.fromEntries(entries)
+    const expected = pid ? ['LoadState','ActiveState','MainPID'] : ['LoadState','ActiveState']
+    if (entries.length !== expected.length || entries.some(([key, value, extra]) =>
+      !expected.includes(key) || value === undefined || extra !== undefined)
+      || Object.keys(fields).length !== expected.length || fields.LoadState !== 'loaded'
+      || !(pid ? ['active','activating','inactive','failed'] : ['active','inactive','failed']).includes(fields.ActiveState)) {
+      throw new Error('worker_host_unavailable')
+    }
+    if (pid && (!/^(0|[1-9][0-9]*)$/.test(fields.MainPID)
+      || !Number.isSafeInteger(Number(fields.MainPID))
+      || (['inactive','failed'].includes(fields.ActiveState) && fields.MainPID !== '0'))) {
+      throw new Error('worker_host_unavailable')
+    }
+    return fields
+  }
+  const paused = (dependencies.readWorkerPause ?? readWorkerPause)()
+  const [timer, service] = await Promise.all([
+    parse('kelion-codex-worker.timer', false), parse('kelion-codex-worker.service', true),
+  ])
+  if (paused && (timer.ActiveState !== 'inactive' || !['inactive','failed'].includes(service.ActiveState))) {
+    throw new Error('worker_pause_vector_invalid')
+  }
+  return { schema: 1, measuredAt: new Date().toISOString(),
+    worker: { timer: timer.ActiveState, service: service.ActiveState, mainPid: Number(service.MainPID) },
+    intentionalPause: paused, deployGate: false }
+}
+
 function statePayload(observed) {
   const ready = observed?.ok === true && observed.installed === true && record(observed.model)
   return {
@@ -523,7 +601,7 @@ export function createModelControl(secret, dependencies = {}) {
   const publicationBarrier = dependencies.publicationBarrier ?? createPublicationBarrier()
   const snapshot = async () => statePayload(await probe().catch(() => ({ ok: false })))
   const server = http.createServer(async (req, res) => {
-    if (req.method !== 'POST' || !['/v1/model/state', '/v1/model/switch'].includes(req.url)) {
+    if (req.method !== 'POST' || !['/v1/model/state', '/v1/model/switch', '/v1/worker/state'].includes(req.url)) {
       return json(res, 404, { error: 'not_found' })
     }
     let lease
@@ -540,7 +618,8 @@ export function createModelControl(secret, dependencies = {}) {
         signature: req.headers['x-kelion-signature'],
         method: req.method, path: req.url, body: raw,
       })
-      if (deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
+      const workerObservation = req.url === '/v1/worker/state'
+      if (!workerObservation && deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
       if (req.url === '/v1/model/switch') {
         const input = exactObject(raw, ['requestId', 'profile'])
         exactRawJson(raw, { requestId: input.requestId, profile: input.profile })
@@ -548,9 +627,19 @@ export function createModelControl(secret, dependencies = {}) {
         return json(res, 410, { error: 'constructor_model_switch_retired' })
       }
       exactRawJson(raw, exactObject(raw, []))
-      lease = await publicationBarrier.acquire()
+      lease = await publicationBarrier.acquire(workerObservation ? { observeContention: true } : {})
+      if (workerObservation && lease?.contended === true) {
+        lease = null
+        // Only the validated lock's actual EWOULDBLOCK proves a held barrier.
+        // Pending/invalid journals alone remain unverified; never probe across
+        // another transaction or invent a PID, timer or intentional pause.
+        return json(res, 200, { schema: 1, measuredAt: new Date().toISOString(),
+          worker: null, intentionalPause: null, deployGate: true })
+      }
       if (!lease || deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
-      const state = await snapshot()
+      const state = workerObservation
+        ? await (dependencies.probeWorkerState ?? (() => probeWorkerState(dependencies)))()
+        : await snapshot()
       if (deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
       let released = false
       const releaseOnce = () => {

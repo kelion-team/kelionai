@@ -115,49 +115,50 @@ payload personal brut.
 Fișierul `openai-project-key` conține unica cheie project-scoped de inferență.
 Backendul o montează read-only numai pentru funcțiile OpenAI ale clienților.
 `OPENAI_ADMIN_KEY` este distinctă și poate fi montată numai în backendul
-Admin. Niciuna nu ajunge în Constructor. Workerul execută OpenCode 1.18.25
-numai prin endpointul loopback llama.cpp, cu profilul FAST implicit
-(Qwen3.6-35B-A3B) sau profilul POWERFUL (Qwen3.5-122B-A10B), selectat exclusiv
-manual de owner din Admin.
+Admin. Niciuna nu ajunge în Constructor. Configurația canonică
+`deploy/opencode-constructor.json` selectează exclusiv OpenCode 1.18.25 și
+`opencode-free/big-pickle`, prin endpointul anonim aprobat de owner
+`https://opencode.ai/inference/openai/v1`. Nu folosește autentificare OpenAI,
+chei API sau fallback plătit. Gratuitatea și disponibilitatea furnizorului nu
+sunt garanții permanente.
 
-### Profilurile locale Constructor
+### Executorul izolat și verificarea disponibilității
 
-FAST este profilul implicit și starea obligatorie după instalare și după boot
-sau reboot. În exploatarea normală, POWERFUL poate fi activat exclusiv printr-o
-cerere manuală din Admin. Workerul, backendul și interfața nu schimbă profilul
-și nu reexecută automat un ordin.
+Workerul, publisherul și release-ul sunt identități host-only separate, cu
+autentificare HMAC per domeniu. Aplicația web deține coada, dar nu primește
+credențialele Git/VPS sau acces shell. Workerul revendică un ordin într-un
+worktree dedicat și păstrează controlul lease-ului, jurnalului, porților și
+handoffului `gates_passed`.
 
-O recomandare de comutare manuală la POWERFUL este emisă numai pentru un
-rezultat FAST `unresolved` real, validat de worker. O eroare
-`technical_failure` nu recomandă alt model. Un rezultat POWERFUL `unresolved`
-este terminal pentru ordin și nu produce recomandare, comutare sau reluare.
+OpenCode execută numai în container rootless, prin Podman și `crun`, cu o
+copie de lucru a codului și tmpfs privat deținut de utilizatorul workerului.
+Executorul nu primește sudo pe host, baza de date, secrete, socketuri sau
+credențiale Git/VPS. Accesul furnizorului folosește IPv4 în sandbox; gate-ul
+separat rulează fără rețea. Unitățile systemd limitează workerul și publisherul
+la 6 GiB, CPU 200% și 512 procese, inclusiv containerele lor. Aceste limite nu
+reprezintă o promisiune de durată sau de finalizare a unei reparații.
 
-Comutarea este serializată și păstrează exact un singur model servit și mapat
-de procesul `llama-server`; ambele GGUF-uri rămân instalate pe disc, dar nu sunt
-încărcate simultan ca două modele active în RAM. Profilul POWERFUL este numai un
-override de runtime; configurația persistentă rămâne FAST, astfel încât orice
-boot sau reboot normalizează runtime-ul la FAST.
+Upgrade-ul canonic este operația `upgrade-constructor` din `vps-run.yml`, care
+apelează `deploy/upgrade-constructor.sh` și `deploy/instaleaza-constructor.sh`.
+Installerul verifică binarul OpenCode fixat prin versiune și SHA-256, apoi
+publică și compară byte-identic configurația, instrucțiunile, controllerul și
+unitățile versionate. Retrage regulile sudo de acces complet și oprește/dezactivează
+runtime-ul local și interfața web veche. Reactivarea trece prin jurnalele,
+lockurile, markerii și barierele de recovery existente; nu se fabrică un marker
+ready și nu se pornesc manual timerele pentru a ocoli o etapă eșuată.
 
-Constructorul are trei servicii host-only separate. Web-ul deține coada și câte
-un verificator HMAC per domeniu; nu primește cheie AI, token Git sau shell.
-Supervisorul neprivilegiat revendică ordinul HMAC și îl scrie într-un worktree
-dedicat. Numai executorul OpenCode local este pornit explicit prin `sudo` root,
-cu config fixat la unicul provider `llama.cpp`; accesul complet la host este
-intenționat și verificat prin regula sudoers versionată. Lease-ul, timeoutul,
-porțile și handofful `gates_passed` rămân controlate de worker.
-Installerul permanent publică atomic configul, comutatorul de model și
-instrucțiunile din
-`deploy/opencode-constructor.json` și
-`deploy/opencode-constructor-instructions.md`; configure și upgrade le compară
-byte-identic și refuză orice provider extern, `apiKey` sau permisiune restrânsă.
-Pentru instalarea dual-model, validarea controlată pornește și probează
-model-list plus inferența pe POWERFUL, revine la FAST, probează model-list plus
-inferența pe FAST și finalizează numai cu FAST activ și verificat. Validarea nu
-declară instalarea reușită dacă revenirea la FAST sau invariantul unui singur
-model activ nu pot fi dovedite.
-Publisherul are credentiala GitHub minimă, dar nu are OpenCode/root/VPS; dispatcherul
-are numai permisiune Actions pentru commituri deja merged, fără Git/VPS.
-Flagurile, markerii și timerele celor trei identități rămân implicit oprite.
+Controllerul validează configurația anonimă și binarul instalat, apoi citește
+catalogul furnizorului printr-o cerere limitată, fără inferență. Un catalog valid
+dovedește numai disponibilitatea măsurată pentru preflight, nu executarea unui
+ordin. Selectorul de modele locale este retras; `fast` rămâne numai ID intern
+de compatibilitate și nu identifică modelul unei rulări istorice. Nu există
+comutare automată sau manuală la un al doilea model.
+
+Publisherul separat are credențiala GitHub minimă, dar nu rulează OpenCode și
+nu primește root/VPS. Release-ul urmărește numai commituri deja merged și
+publică prin aceeași conductă protejată descrisă mai sus. Testele, PR-ul sau
+starea ready nu înlocuiesc dovada finală: jobul, receipturile, commitul aprobat
+și versiunea live trebuie să corespundă aceluiași ordin.
 
 Interfața OpenCode nu este intake-ul cozii. Chatul Kelion și clientul desktop
 Constructor creează aceleași joburi validate prin backend, iar workerul unic le

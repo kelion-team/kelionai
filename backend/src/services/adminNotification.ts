@@ -71,13 +71,17 @@ export async function getAdminNotifications(
   }
 }
 
-export async function markAdminNotificationRead(id: number): Promise<boolean> {
-  if (!dbEnabled()) return false
-  const pool = getPool()
+export type MarkAdminNotificationReadResult = 'read' | 'not_found' | 'unavailable'
+
+export async function markAdminNotificationRead(id: number): Promise<MarkAdminNotificationReadResult> {
+  if (!dbEnabled()) return 'unavailable'
   try {
+    const pool = getPool()
     const res = await pool.query(`UPDATE admin_notifications SET read = TRUE WHERE id = $1`, [id])
-    return (res.rowCount ?? 0) > 0
+    if (res.rowCount === 1) return 'read'
+    if (res.rowCount === 0) return 'not_found'
+    return 'unavailable'
   } catch {
-    return false
+    return 'unavailable'
   }
 }

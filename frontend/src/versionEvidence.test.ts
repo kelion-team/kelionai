@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 const { request } = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('./lib/transport', () => ({ apiFetch: request }))
-import { fetchRuntimeVersion, formatLondonTimestamp, installedBuildLabel, parseRuntimeVersion, runtimeVersionLabel } from './lib/versionEvidence'
+import { compareReleaseVersions, fetchReleaseVersions, fetchRuntimeVersion, formatLondonTimestamp, installedBuildLabel, parseReleaseCommit, parseRuntimeVersion, releaseComparisonLabel, runtimeVersionLabel } from './lib/versionEvidence'
 
 afterEach(() => { request.mockReset(); vi.useRealTimers() })
 
@@ -24,8 +24,8 @@ describe('London timestamps identify the actual event without local-zone or now 
   it('keeps installed product version/build distinct from server process boot', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2099-01-01T00:00:00Z'))
-    expect(installedBuildLabel('1.0.0', '2026-09-05T05:54:00Z')).toBe('UI V1.0.0 · build 2026-09-05 06:54 BST (London)')
-    expect(installedBuildLabel(null, null)).toBe('UI versiune necunoscută · build necunoscut')
+    expect(installedBuildLabel('1.0.0', '2026-09-05T05:54:00Z','a'.repeat(40))).toBe('UI V1.0.0 · commit aaaaaaa · build 2026-09-05 06:54 BST (London)')
+    expect(installedBuildLabel(null, null)).toBe('UI versiune necunoscută · commit necunoscut · build necunoscut')
     expect(runtimeVersionLabel(null)).toBe('Server commit necunoscut · pornire necunoscută')
     expect(runtimeVersionLabel({ commit: 'e65f011', startedAt: '2026-09-05T06:05:00Z' })).toBe('Server e65f011 · pornire 2026-09-05 07:05 BST (London)')
   })
@@ -54,5 +54,54 @@ describe('runtime version uses only the canonical read-only API evidence', () =>
     }
     request.mockRejectedValueOnce(new Error('offline'))
     await expect(fetchRuntimeVersion(signal)).resolves.toBeNull()
+  })
+})
+
+describe('loaded UI, runtime and active release compare exact full commits', () => {
+  const sha = 'abcdef0'+'1'.repeat(33)
+  const collision = 'abcdef0'+'2'.repeat(33)
+  const runtime = { commit:sha,startedAt:'2026-09-05T06:05:00Z' }
+  const proof = { ready:true,candidate:false,sideEffectsActive:true,activeCommit:sha }
+  it('accepts only active, ready full-SHA proof and rejects contradictory nested state', () => {
+    expect(parseReleaseCommit(proof)).toBe(sha)
+    for (const invalid of [null,{}, { ...proof,activeCommit:sha.slice(0,7) },{ ...proof,ready:false },
+      { ...proof,candidate:true },{ ...proof,sideEffectsActive:false },{ ...proof,release:{ candidate:true,sideEffectsActive:true } }]) {
+      expect(parseReleaseCommit(invalid)).toBeNull()
+    }
+  })
+  it('distinguishes exact agreement, changed UI and runtime mismatch without prefix equivalence', () => {
+    expect(compareReleaseVersions(sha,runtime,sha,sha).state).toBe('synced')
+    expect(compareReleaseVersions(collision,runtime,sha,sha).state).toBe('ui_different')
+    expect(compareReleaseVersions(sha,{ ...runtime,commit:collision },sha,sha).state).toBe('runtime_mismatch')
+    expect(releaseComparisonLabel(compareReleaseVersions(sha,runtime,sha,sha))).toContain('SHA complet verificat')
+    for (const ui of [null,'unknown',sha.slice(0,7)]) expect(compareReleaseVersions(ui,runtime,sha,sha).state).toBe('unverified')
+    expect(compareReleaseVersions(sha,{ ...runtime,commit:sha.slice(0,7) },sha,sha).state).toBe('unverified')
+  })
+  it('never combines reads from different deployments into a green verdict', () => {
+    for (const after of [null,collision]) {
+      expect(compareReleaseVersions(sha,runtime,sha,after)).toMatchObject({ state:'unverified',liveCommit:null })
+    }
+    expect(compareReleaseVersions(sha,null,sha,sha).state).toBe('unverified')
+  })
+  it('uses the new full commit only when it agrees with legacy version fields', () => {
+    expect(parseRuntimeVersion({ v:sha.slice(0,7),ver:sha.slice(0,7),commit:sha,at:runtime.startedAt })).toEqual(runtime)
+    expect(parseRuntimeVersion({ v:'9999999',commit:sha,at:runtime.startedAt })).toEqual({ commit:null,startedAt:runtime.startedAt })
+    expect(parseRuntimeVersion({ v:sha.slice(0,7),commit:'invalid' })).toBeNull()
+  })
+  it('brackets the runtime call with no-store public proofs and handles cutover/failure as unknown', async () => {
+    const signal = new AbortController().signal
+    const version = { v:sha.slice(0,7),ver:sha.slice(0,7),commit:sha,at:runtime.startedAt }
+    for (const finalProof of [proof,{ ...proof,activeCommit:collision },null]) {
+      request.mockResolvedValueOnce(new Response(JSON.stringify(proof)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(version)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(finalProof)))
+      const result = await fetchReleaseVersions(sha,signal)
+      expect(result.state).toBe(finalProof === proof ? 'synced' : 'unverified')
+    }
+    expect(request.mock.calls.slice(0,3)).toEqual([
+      ['/api/release-proof',{ signal,cache:'no-store' }],['/api/version',{ signal,cache:'no-store' }],['/api/release-proof',{ signal,cache:'no-store' }],
+    ])
+    request.mockRejectedValue(new Error('offline'))
+    expect(await fetchReleaseVersions(sha,signal)).toEqual({ runtime:null,liveCommit:null,state:'unverified' })
   })
 })

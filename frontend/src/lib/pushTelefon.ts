@@ -19,6 +19,12 @@ const b64laBiti = (b64: string): Uint8Array<ArrayBuffer> => {
 const suportat = (): boolean =>
   'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 
+async function confirmat(response: Response | null): Promise<boolean> {
+  if (!response?.ok) return false
+  const body: unknown = await response.json().catch(() => null)
+  return !!body && typeof body === 'object' && (body as { ok?: unknown }).ok === true
+}
+
 /** Starea REALĂ, măsurată din browser — nu una ținută minte. */
 export async function starePush(): Promise<StarePush> {
   if (!suportat()) return 'nesuportat'
@@ -49,26 +55,30 @@ export async function activeazaPush(): Promise<StarePush> {
     credentials: 'include',
     body: JSON.stringify({ abonare: sub.toJSON() }),
   }).catch(() => null)
-  if (!sus?.ok) {
+  if (!await confirmat(sus)) {
     await sub.unsubscribe().catch(() => false)
-    return 'inactiv'
+    throw new Error('Abonarea nu a fost confirmată de server. Starea notificărilor este neverificată.')
   }
   return 'activ'
 }
 
-/** Retrage abonarea din browser și de pe server. */
+/** Revocă mai întâi pe server: la eșec păstrăm endpointul local pentru retry.
+ *  Nicio permisiune nouă nu este cerută, iar ACK-ul nu înlocuiește recitirea browserului. */
 export async function dezactiveazaPush(): Promise<StarePush> {
   if (!suportat()) return 'nesuportat'
   const reg = await navigator.serviceWorker.getRegistration()
   const sub = await reg?.pushManager.getSubscription()
   if (!sub) return 'inactiv'
   const endpoint = sub.endpoint
-  await sub.unsubscribe().catch(() => false)
-  await apiFetch('/api/push/dezaboneaza', {
+  const response = await apiFetch('/api/push/dezaboneaza', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ endpoint }),
   }).catch(() => null)
+  if (!await confirmat(response)) throw new Error('Dezactivarea nu a fost confirmată de server. Abonarea locală a fost păstrată pentru reîncercare.')
+  await sub.unsubscribe().catch(() => false)
+  const remaining = await reg!.pushManager.getSubscription()
+  if (remaining) throw new Error('Abonarea a fost retrasă de pe server, dar browserul nu a confirmat dezactivarea. Reîncearcă.')
   return 'inactiv'
 }

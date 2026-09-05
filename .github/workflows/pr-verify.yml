@@ -35,6 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -134,6 +135,23 @@ jobs:
           docker build --file Dockerfile.browser --target egress --tag kelion-ci-browser-egress:${GITHUB_SHA} .
           docker build --file Dockerfile.converter --target gateway --tag kelion-ci-converter-gateway:${GITHUB_SHA} .
           docker build --file Dockerfile.converter --target parser --tag kelion-ci-converter-parser:${GITHUB_SHA} .
+          docker build --file Dockerfile.gates --tag kelion-ci-gates:${GITHUB_SHA} .
+
+      - name: Doctor scope, semantic AST și capabilitate instalată
+        run: |
+          set -euo pipefail
+          docker run --rm --pull=never --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 64 --memory 512m --cpus 1 \
+            --user 1000:1000 --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m \
+            --tmpfs /source:rw,nosuid,nodev,noexec,mode=0700,uid=1000,gid=1000,size=1m \
+            -v "$PWD/deploy:/proof/deploy:ro" --entrypoint node \
+            kelion-ci-gates:${GITHUB_SHA} --test /proof/deploy/lib/doctor-repair-scope.test.mjs
+          docker run --rm --pull=never --network none --read-only --cap-drop ALL --cap-add CHOWN \
+            --security-opt no-new-privileges --pids-limit 32 --memory 256m --cpus 1 \
+            --user 0:0 --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=8m \
+            --tmpfs /opt:rw,nosuid,nodev,noexec,mode=0755,size=8m \
+            -v "$PWD/deploy:/proof/deploy:ro" --entrypoint node \
+            kelion-ci-gates:${GITHUB_SHA} --test /proof/deploy/lib/doctor-runtime-capability.test.mjs
 
       - name: Predare worker către publisher cu identități separate
         run: |
@@ -482,6 +500,62 @@ jobs:
           ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-browser-worker-1 | grep -Eq 'OPENAI|ADMIN|DATABASE|SESSION|GOOGLE|GITHUB'
           ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-converter-parser-1 | grep -Eq '^(OPENAI|ADMIN_EMAIL|DATABASE_URL|SESSION_SECRET|GOOGLE_|GITHUB_|CODEX_|BROWSER_WORKER_SECRET|CONVERTER_WORKER_SECRET)'
           ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' kelion-ci-app-1 | grep -Eq '^OPENAI_(API|ADMIN)_KEY=|^SESSION_SECRET=|^DATABASE_URL=|^GOOGLE_CLIENT_SECRET='
+
+      - name: Reset statistici concurent în PostgreSQL real
+        run: |
+          set -euo pipefail
+          stats_probe="kelion-stats-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$(openssl rand -hex 8)"
+          for target in "$stats_probe" "$stats_probe-node"; do
+            if docker container inspect "$target" >/dev/null 2>&1; then
+              echo "isolated stats fixture name already exists"
+              exit 1
+            fi
+          done
+          cleanup() {
+            local rc=$?
+            for target in "$stats_probe-node" "$stats_probe"; do
+              if docker container inspect "$target" >/dev/null 2>&1; then
+                [ "$(docker inspect --format '{{index .Config.Labels "kelion.stats-audit"}}' "$target")" = "$GITHUB_SHA" ] || exit 91
+                docker rm --force "$target" >/dev/null || rc=1
+              fi
+            done
+            exit "$rc"
+          }
+          trap cleanup EXIT
+          docker run --detach --pull=never --name "$stats_probe" --label "kelion.stats-audit=$GITHUB_SHA" \
+            --network none --user 999:999 --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 96 --memory 512m --cpus 1 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,uid=999,gid=999 \
+            --tmpfs /var/lib/postgresql/data:rw,nosuid,nodev,noexec,size=192m,uid=999,gid=999,mode=0700 \
+            --tmpfs /var/run/postgresql:rw,nosuid,nodev,noexec,size=16m,uid=999,gid=999,mode=0775 \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=kelion_admin_stats_test \
+            postgres:16-bookworm@sha256:60f4761b9035e0b8d5218f701a8c3382f641bf12b1604822574cf5be3baeb537 >/dev/null
+          ready=0
+          for attempt in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Running}}' "$stats_probe")" = true ] || exit 1
+            if docker exec "$stats_probe" pg_isready -h /var/run/postgresql -U postgres -d kelion_admin_stats_test >/dev/null 2>&1; then
+              ready=$((ready + 1))
+              [ "$ready" -ge 3 ] && break
+            else
+              ready=0
+            fi
+            sleep 1
+          done
+          [ "$ready" -ge 3 ]
+          # Only this private network namespace is shared. There are no host
+          # ports, production mounts, provider keys or application processes.
+          git ls-files --cached --others --exclude-standard -z | tar --null -T - -cf - |
+          docker run -i --rm --pull=never --name "$stats_probe-node" --label "kelion.stats-audit=$GITHUB_SHA" \
+            --network "container:$stats_probe" --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 128 --memory 1g --cpus 1 --user 1000:1000 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700 \
+            -e KELION_ADMIN_STATS_POSTGRES=1 -e HOME=/tmp --workdir /tmp --entrypoint sh \
+            "kelion-ci-gates:$GITHUB_SHA" -eu -c '
+              mkdir source; tar -xf - -C source
+              ln -s /opt/kelion/backend/node_modules source/backend/node_modules
+              cd source/backend
+              node /opt/kelion/backend/node_modules/vitest/vitest.mjs run src/adminStats.test.ts --maxWorkers=1 --reporter=verbose
+            '
 
       - name: Validează Caddy cu upstream candidat
         run: |

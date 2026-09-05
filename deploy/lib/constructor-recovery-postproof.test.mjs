@@ -88,6 +88,7 @@ helper_calls=0
 constructor_deploy_quiesce_restore_proof() { return 0; }
 quiesce_constructor_after_failed_reactivation_proof() { return 0; }
 function /synthetic/bin/runtime-config-cutover.sh {
+  if [ "$1" = --worker-pause-state ]; then printf 'unpaused\\n'; return 0; fi
   helper_calls=$((helper_calls + 1))
   [ "$KELION_CUTOVER_LOCK_HELD" = 1 ] && [ "$KELION_DEPLOY_QUIESCE_PROOF" = 1 ] || return 99
   [ "$mode" != helper-failed ]
