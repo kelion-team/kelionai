@@ -43,7 +43,7 @@ Actualizat: `2026-09-04T21:13:36Z`
   sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
 - Finalizerul live `33915591080` a confirmat o limită tehnică ascunsă în
   executor: OpenCode primește SIGTERM la exact 15 minute în smoke și la exact
-  30 de minute în execuția reală, apoi SIGKILL după două secunde. Modelul local
+  patru ore în execuția reală, apoi SIGKILL după două secunde. Modelul local
   apucă să scrie o parte din dovadă, dar jobul este raportat eșuat înainte de
   finalizare; acesta este motivul măsurat pentru auditurile cerute pe durate mai
   lungi.

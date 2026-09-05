@@ -14,7 +14,7 @@ test('durata explicită de audit devine timeout efectiv cu marjă de handoff', (
   assert.equal(parseRequestedAuditMinutes('30 min audit Constructor'), 30)
   assert.equal(parseRequestedAuditMinutes('ordin generic fără durată'), null)
   assert.equal(executionTimeoutMsForOrder('audit pentru 90 de minute', {}), 95 * 60_000)
-  assert.equal(executionTimeoutMsForOrder('ordin generic', {}), 30 * 60_000)
+  assert.equal(executionTimeoutMsForOrder('ordin generic', {}), 4 * 60 * 60_000)
 })
 
 test('timeout-urile configurabile refuză valori nesigure și plafonează auditul', () => {
