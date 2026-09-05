@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   adminMutationAcknowledged,
-  adminReleaseActionAcknowledged,
   parseAdminArchiveAcknowledgement,
   parseAdminBuildArchive,
   parseAdminConstructorDiagnostic,
@@ -166,10 +165,8 @@ describe('contractele runtime ale Constructorului în AdminPanel', () => {
     expect(parseAdminReleaseSnapshot(release)?.pr?.headSha).toBe(sha)
     expect(parseAdminReleaseSnapshot({ ...release, pr: { ...release.pr, headSha: 'abc' } })).toBeNull()
     expect(parseAdminReleaseSnapshot({ ...release, nextAction: undefined })).toBeNull()
-    const releaseDetails: Record<string, unknown> = { ...release }
-    delete releaseDetails.jobId
-    expect(adminReleaseActionAcknowledged({ ok: true, release: releaseDetails })).toBe(true)
-    expect(adminReleaseActionAcknowledged({ ok: true })).toBe(false)
+    expect(parseAdminReleaseSnapshot({ ...release, approval: undefined })).toBeNull()
+    expect(parseAdminReleaseSnapshot({ ...release, approval: 'invented' })).toBeNull()
   })
 
   it('nu transformă un 2xx fără ACK strict în succes', () => {

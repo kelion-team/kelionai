@@ -385,7 +385,7 @@ jobs:
             install -d -m 0700 "$compatibility_root"
             tar -xzf "$RUNNER_TEMP/constructor-bundle.tar.gz" -C "$compatibility_root" --no-same-owner --no-same-permissions
             # This helper accepts only the exact original e65 installer digest
-            # and the exact one-byte correction digest. All 23 runtime artefacts,
+            # and the exact count+staging orchestration correction digest. All 23 runtime artefacts,
             # the journal owner and the original activation snapshot stay e65.
             node "$compatibility_helper" --apply "$commit" "$UPGRADE_MASTER_COMMIT" \
               "$compatibility_root/deploy/instaleaza-constructor.sh"
@@ -2137,7 +2137,7 @@ jobs:
           done
 
           current_check='spool-identity'
-          [ -d "$spool" ] && [ ! -L "$spool" ]
+          [ -d "$spool" ] && [ ! -L "$spool" ] || exit 1
           [ "$(realpath "$spool")" = "$spool" ]
           [ "$(stat -c '%U:%G' "$spool")" = 'root:kelion-handoff' ]
           # După ce identitatea părintelui este dovedită, retragem imediat
@@ -2147,25 +2147,30 @@ jobs:
 
           current_check='children-allowlist'
           while IFS= read -r child; do
-            case "$child" in ready|ack|retired) ;; *) echo "::error::Refuz normalizarea: spool-ul contine un element nepermis." >&2; exit 1 ;; esac
+            case "$child" in ready|ack|retired|staging) ;; *) echo "::error::Refuz normalizarea: spool-ul contine un element nepermis." >&2; exit 1 ;; esac
           done < <(find "$spool" -mindepth 1 -maxdepth 1 -printf '%f\n')
           for child in ready ack; do
             path="$spool/$child"
-            [ -d "$path" ] && [ ! -L "$path" ]
+            [ -d "$path" ] && [ ! -L "$path" ] || exit 1
             [ "$(realpath "$path")" = "$path" ]
             [ "$(stat -c '%U:%G' "$path")" = 'root:kelion-handoff' ]
           done
-          if [ -e "$spool/retired" ] || [ -L "$spool/retired" ]; then
-            [ -d "$spool/retired" ] && [ ! -L "$spool/retired" ]
-            [ "$(realpath "$spool/retired")" = "$spool/retired" ]
-            [ "$(stat -c '%U:%G' "$spool/retired")" = 'root:kelion-handoff' ]
-          fi
+          for child in retired staging; do
+            path="$spool/$child"
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              [ -d "$path" ] && [ ! -L "$path" ] || exit 1
+              [ "$(realpath "$path")" = "$path" ]
+              [ "$(stat -c '%U:%G' "$path")" = 'root:kelion-handoff' ]
+            fi
+          done
 
           current_check='apply-canonical-layout'
-          if [ ! -e "$spool/retired" ] && [ ! -L "$spool/retired" ]; then
-            install -d -o root -g kelion-handoff -m 2770 "$spool/retired"
-          fi
-          for child in ready ack retired; do
+          for child in retired staging; do
+            if [ ! -e "$spool/$child" ] && [ ! -L "$spool/$child" ]; then
+              install -d -o root -g kelion-handoff -m 2770 "$spool/$child"
+            fi
+          done
+          for child in ready ack retired staging; do
             chown root:kelion-handoff "$spool/$child"
             chmod 2770 "$spool/$child"
             sync -f "$spool/$child"
@@ -2179,7 +2184,7 @@ jobs:
 
           current_check='verify-canonical-layout'
           [ "$(stat -c '%U:%G:%a' "$spool")" = 'root:kelion-handoff:750' ]
-          for child in ready ack retired; do
+          for child in ready ack retired staging; do
             current_check="verify-canonical-layout-$child"
             [ "$(stat -c '%U:%G:%a' "$spool/$child")" = 'root:kelion-handoff:2770' ]
           done
@@ -2231,7 +2236,7 @@ jobs:
               printf 'probe_error=%s exit_code=%s\n' "$label" "$rc"
             fi
           }
-          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
+          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired /var/lib/kelion-constructor-handoff/staging; do
             echo "--- $p"
             if stat -c 'type=%F mode=%a owner=%U group=%G ctime=%z mtime=%y' "$p" 2>&1; then
               if command -v getfacl >/dev/null 2>&1; then
@@ -2252,12 +2257,12 @@ jobs:
             fi
           done
           probe identity id
-          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired; do
+          for p in /var/lib /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired /var/lib/kelion-constructor-handoff/staging; do
             probe "namei:$p" namei -l "$p"
           done
           probe findmnt-var-lib findmnt -T /var/lib -no TARGET,FSTYPE,OPTIONS
           probe findmnt-spool findmnt -T /var/lib/kelion-constructor-handoff -no TARGET,FSTYPE,OPTIONS
-          probe lsattr-spool lsattr -d /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired
+          probe lsattr-spool lsattr -d /var/lib/kelion-constructor-handoff /var/lib/kelion-constructor-handoff/ready /var/lib/kelion-constructor-handoff/ack /var/lib/kelion-constructor-handoff/retired /var/lib/kelion-constructor-handoff/staging
           probe command-chmod command -V chmod
           probe command-chown command -V chown
           probe command-install command -V install

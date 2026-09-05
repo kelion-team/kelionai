@@ -39,6 +39,9 @@ export function clasificaFisier(caleInitiala) {
   // fișiere fără extensie ar ascunde din nou conținut necunoscut din audit.
   if (cale === 'frontend/public/.well-known/apple-app-site-association') return 'configuratie'
   if (cale === 'ios/ios/App/App/App.entitlements') return 'configuratie'
+  // Fixture istoric exact, cu hash verificat de testul de compatibilitate.
+  // Nu clasificăm generic toate fișierele base64 drept teste.
+  if (cale === 'deploy/lib/fixtures/installer-e65.sh.gz.base64') return 'teste'
   if (
     cale === 'android/gradle/verification-keyring.gpg'
     || cale === 'android/gradle/verification-keyring.keys'

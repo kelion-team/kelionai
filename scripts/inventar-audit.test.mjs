@@ -8,6 +8,8 @@ import { amprentaInventar, citesteIntrareInventar, clasificaFisier, duplicariAct
 test('clasifică toate familiile relevante fără a ascunde fișiere necunoscute', () => {
   assert.equal(clasificaFisier('backend/src/index.ts'), 'cod')
   assert.equal(clasificaFisier('backend/src/index.test.ts'), 'teste')
+  assert.equal(clasificaFisier('deploy/lib/fixtures/installer-e65.sh.gz.base64'), 'teste')
+  assert.equal(clasificaFisier('deploy/lib/fixtures/unknown.sh.gz.base64'), 'necunoscut')
   assert.equal(clasificaFisier('.github/workflows/ci.yml'), 'configuratie')
   assert.equal(clasificaFisier('deploy/systemd/worker.timer'), 'configuratie')
   assert.equal(clasificaFisier('frontend/.gitignore'), 'configuratie')

@@ -91,6 +91,13 @@ Fluxul unic este:
 8. deploy-ul este separat, cu backup, health și dovada că versiunea live este
    exact commitul din `master`.
 
+Ownerul a cerut explicit pe 5 septembrie 2026 publicare complet automată:
+Constructorul și Doctorul nu cer aprobarea manuală a fiecărui PR și nu introduc
+un acord intern paralel. Publisherul face rebase merge numai după verificările
+obligatorii verzi pe head-ul exact și respectând protecția GitHub existentă.
+Un prag GitHub de zero review-uri nu înseamnă că s-a efectuat un review uman.
+Nu se dezactivează protecții, autentificarea sau izolarea pentru automatizare.
+
 Nu se face push direct în `master`, force-push, deploy din browser sau publicare
 dintr-un job care nu a trecut porțile. Credențialele Git/host sunt separate de
 aplicația publică și au permisiuni minime.

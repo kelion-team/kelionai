@@ -135,6 +135,18 @@ jobs:
           docker build --file Dockerfile.converter --target gateway --tag kelion-ci-converter-gateway:${GITHUB_SHA} .
           docker build --file Dockerfile.converter --target parser --tag kelion-ci-converter-parser:${GITHUB_SHA} .
 
+      - name: Predare worker către publisher cu identități separate
+        run: |
+          set -euo pipefail
+          docker run --rm --pull=never --read-only --network none \
+            --cap-drop ALL --cap-add CHOWN --cap-add FSETID --cap-add SETUID --cap-add SETGID \
+            --security-opt no-new-privileges --pids-limit 64 --memory 256m --cpus 1 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m --user 0:0 \
+            --mount type=bind,src="$PWD/deploy/codex-worker.mjs",dst=/probe/deploy/codex-worker.mjs,readonly \
+            --mount type=bind,src="$PWD/deploy/lib/constructor-handoff-permissions.test.mjs",dst=/probe/deploy/lib/constructor-handoff-permissions.test.mjs,readonly \
+            --entrypoint node kelion-ci-app:${GITHUB_SHA} \
+            --test /probe/deploy/lib/constructor-handoff-permissions.test.mjs
+
       - name: Trust boundary web și self-testuri
         run: |
           set -euo pipefail

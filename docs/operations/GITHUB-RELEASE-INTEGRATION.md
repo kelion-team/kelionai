@@ -1,15 +1,15 @@
 # Integrarea GitHub pentru Admin → Constructor
 
-Panoul Constructor nu trimite administratorul la un link GitHub care poate fi
-neautentificat. El citește și cere acțiuni GitHub printr-o integrare OAuth
-dedicată, exclusiv server-side.
+Panoul Constructor citește dovezile GitHub prin integrarea dedicată,
+exclusiv server-side. Publisherul separat efectuează automat merge-ul după
+verificări; panoul nu cere aprobări manuale și nu execută merge/deploy.
 
 ## Configurare
 
-1. Autorizează o identitate GitHub user-bound dedicată review-ului, diferită de
-   autorul PR-urilor Constructor și cu rol `write` numai în repository-ul
-   configurat.
-2. Acordă strict `Pull requests: write`, `Checks: read`, `Actions: read`,
+1. Folosește identitatea GitHub dedicată citirii dovezilor numai în
+   repository-ul configurat. Nu este necesar un al doilea cont pentru
+   aprobarea manuală a PR-urilor.
+2. Integrarea de citire necesită `Pull requests: read`, `Checks: read`, `Actions: read`,
    `Contents: read` și `Administration: read`; `Metadata: read` rămâne implicit.
    Validează tokenul pe toate endpointurile citite de integrare înainte de
    provisionare.
@@ -17,13 +17,14 @@ dedicată, exclusiv server-side.
    `RELEASE_GITHUB_TOKEN`. Workflow-ul îl montează în container ca
    `GITHUB_RELEASE_OAUTH_TOKEN_FILE`. Nu folosi `GITHUB_TOKEN` al publisherului
    și nu expune tokenul în browser, worker, loguri sau chat.
-4. Deschide Admin → Constructor. Panoul arată PR-ul, verificările, review-ul,
-   disponibilitatea de merge și următoarea acțiune. Dacă integrarea lipsește
+4. Deschide Admin → Constructor. Panoul arată PR-ul, verificările, politica
+   de review GitHub, starea merge-ului automat și următoarea etapă. Dacă integrarea lipsește
    sau GitHub nu răspunde, starea apare explicit; niciun buton nu pretinde
    succes.
 
-Butonul **Aprobă în Keleon** solicită un review GitHub în numele identității
-configurate. Butonul **Integrează în master** devine disponibil numai
-după ce verificările și review-ul sunt raportate verzi de GitHub. GitHub poate
-refuza în continuare acțiunea prin politici de protecție; Kelion afișează acel
-refuz, nu îl ocolește. Deploy-ul rămâne flux separat, cu dovadă live.
+Nu există buton sau endpoint pentru aprobarea manuală a publicării în Kelion.
+Publisherul reverifică imediat înainte de merge identitatea PR-ului, head-ul,
+controalele verzi și protecția ramurii. Pragul de review real din GitHub poate
+fi zero; dacă este mai strict, rămâne obligatoriu și nu este ocolit. Erorile
+de citire rămân stări necunoscute, nu permisiune de merge. Release-ul separat
+continuă automat și declară finalizarea numai după dovada versiunii live.

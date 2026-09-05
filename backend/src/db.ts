@@ -1818,8 +1818,6 @@ export async function saveWorkOrder(id: string, text: string): Promise<void> {
   await getPool().query('INSERT INTO work_orders (id, text) VALUES ($1,$2)', [id, text])
 }
 
-// ── Staged releases (persistent approval gate) ──────────────────────────────
-
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
 // (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
 

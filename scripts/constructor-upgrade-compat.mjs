@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url'
 
 // A real armed upgrade journal pins this exact release. Its immutable runtime
 // tuple has nine systemd units after the legacy drop-in was retired, while the
-// installer mistakenly counted ten. This is a single-release orchestration
+// installer mistakenly counted ten and omitted the root-provisioned handoff
+// staging directory. This is a single-release orchestration
 // correction, not permission to replace a journal owner or runtime artefact.
 const SOURCE_COMMIT = 'e65f0112aa2265fea12bfd248b8da645b428017a'
 const ORIGINAL_SHA256 = 'f1a1d60e83bfcd247f8af137f18aa181b30dd5578c6250f68f373c9a9949561e'
-const FIXED_SHA256 = '801e14436d8ac8341614f04fb7b9d327172db7523535c31868832ef597be7ab5'
+const FIXED_SHA256 = 'b3b4a2a6b3189eb0f352c56feed3f5164e0c07fbeaa631bff5901b3a5815d0cd'
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 export function correctPinnedInstaller(sourceCommit, executorCommit, original) {
@@ -22,12 +23,21 @@ export function correctPinnedInstaller(sourceCommit, executorCommit, original) {
   const before = text.slice(start, end)
   const oldPredicate = '[ "$count" -eq 10 ]'
   if (before.split(oldPredicate).length !== 2) throw new Error('constructor_upgrade_compatibility_predicate_invalid')
-  const fixed = Buffer.from(text.slice(0, start) + before.replace(oldPredicate, '[ "$count" -eq 9 ]') + text.slice(end), 'utf8')
+  const correctedCount = text.slice(0, start) + before.replace(oldPredicate, '[ "$count" -eq 9 ]') + text.slice(end)
+  const spoolStart = correctedCount.indexOf('secure_handoff_spool() {')
+  const spoolEnd = correctedCount.indexOf('\n}\n', spoolStart) + 2
+  if (spoolStart < 0 || spoolEnd <= spoolStart) throw new Error('constructor_upgrade_compatibility_function_invalid')
+  const spool = correctedCount.slice(spoolStart, spoolEnd)
+  const oldChildren = 'for child in ready ack retired; do'
+  if (spool.split(oldChildren).length !== 2) throw new Error('constructor_upgrade_compatibility_spool_invalid')
+  const fixed = Buffer.from(correctedCount.slice(0, spoolStart)
+    + spool.replace(oldChildren, 'for child in ready ack retired staging; do') + correctedCount.slice(spoolEnd), 'utf8')
   if (sha256(fixed) !== FIXED_SHA256) throw new Error('constructor_upgrade_compatibility_result_invalid')
   return {
     fixed,
     provenance: {
-      schema: 1, event: 'constructor_upgrade_compatibility', correction: 'e65-systemd-unit-count',
+      schema: 1, event: 'constructor_upgrade_compatibility',
+      corrections: ['e65-systemd-unit-count', 'e65-handoff-staging-provisioning'],
       sourceCommit, executorCommit, originalInstallerSha256: ORIGINAL_SHA256, fixedInstallerSha256: FIXED_SHA256,
       installedArtifactsChanged: false, journalChanged: false,
     },

@@ -1,8 +1,14 @@
 # Contract de livrare si roadmap operational
 
-Versiune contract: `1.0`
+Versiune contract: `1.1`
 
 Agreat de owner: `2026-08-25`
+
+Actualizare explicită owner `2026-09-05`: Constructorul și Doctorul publică
+automat prin porțile existente, fără aprobarea manuală a fiecărui PR. Nu se
+introduce un gate intern paralel de acord. Cerințele de autentificare, scop,
+izolare, teste, protecție GitHub și dovadă live rămân obligatorii. Automatizarea
+nu autorizează schimbarea modelului, plăți sau ștergerea datelor.
 
 Acest document este inregistrarea versionata a regulilor de livrare si a
 ordinii de produs agreate de owner. Orice schimbare a contractului trece prin
@@ -63,7 +69,8 @@ chatul trebuie sa proiecteze aceleasi checkpointuri ordonate:
 3. schimbarea este produsa intr-un worktree izolat;
 4. portile locale/offline produc receiptul pentru commitul candidat;
 5. publisherul deschide PR-ul si ataseaza legaturile canonice;
-6. review-ul si toate checkurile obligatorii trec pe head-ul exact;
+6. toate checkurile obligatorii și cerințele efective GitHub trec pe head-ul
+   exact; un prag de zero review-uri nu este prezentat drept review uman;
 7. PR-ul intra in `master` protejat, fara push direct sau ocolirea politicii;
 8. artefactul semnat este construit din SHA-ul exact din `master`;
 9. release-ul publica acel SHA si inregistreaza probele publice;
@@ -283,7 +290,8 @@ Aceasta regula este criteriu de acceptare obligatoriu, nu recomandare.
 ### Traseu protejat complet
 
 - [ ] O cerere pilot reala parcurge Admin -> Constructor -> PR.
-- [ ] PR-ul intra in `master` numai dupa review si checkurile obligatorii.
+- [ ] PR-ul intră automat în `master` numai după checkurile obligatorii și
+  satisfacerea politicii GitHub reale, fără un click de aprobare în Kelion.
 - [ ] Artefactul si deploy-ul sunt legate de acelasi SHA din `master`.
 - [ ] `/api/version`, readiness si proba publica confirma SHA-ul live.
 - [ ] Exista o tinta de rollback eligibila si procedura/proba ei este legata de

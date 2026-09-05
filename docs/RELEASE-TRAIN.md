@@ -10,8 +10,10 @@ porțile de siguranță.
    `AGENTS.md`.
 4. Deschide un singur PR. `pr-verify` blochează CI-ul complet dacă ramura nu
    conține masterul curent sau worktree-ul nu este curat.
-5. După verde, se face rebase merge; deploy-ul acceptă numai commitul din
-   `master` cu dovada CI și imaginile semnate.
+5. După verde, publisherul face automat rebase merge; deploy-ul acceptă numai
+   commitul din `master` cu dovada CI și imaginile semnate. Nu există un pas de
+   aprobare manuală în Kelion pentru fiecare PR, conform cerinței ownerului
+   din 5 septembrie 2026.
 
 O schimbare independentă poate avea propriul train. O schimbare care depinde de
 un PR deschis nu pornește încă un PR: se adaugă aceluiași train înainte de
@@ -24,7 +26,9 @@ Repository settings → Branches → `master` trebuie să impună:
 
 - branch up to date înainte de merge;
 - check obligatoriu `pr-verify / container-isolation`;
-- cel puțin un review uman eligibil;
+- pragul de review configurat efectiv în GitHub (zero este permis pentru
+  publicarea automată autorizată; nu inventăm un review și nu reducem un prag
+  mai strict configurat ulterior);
 - doar **Rebase and merge** pentru release train;
 - merge queue pentru trenuri concurente, cu `pr-verify` rulat pe merge group.
 

@@ -54,6 +54,36 @@ those objects next to `continuity`, but they are not fields of `continuity`.
 
 ## Operational response
 
+### Pinned e65 upgrade recovery
+
+The current armed journal owns release
+`e65f0112aa2265fea12bfd248b8da645b428017a`. Do not delete the journal or
+rewrite its activation snapshot. The reviewed master workflow applies only
+two digest-pinned installer corrections: the systemd count is nine, and
+`staging` is provisioned as `root:kelion-handoff 2770` under a parent kept at
+`0750`. It does not replace any of the 23 e65 runtime artefacts. The temporary
+installer must match the original and corrected hashes recorded in
+`CURRENT.md`; executor provenance names both corrections separately.
+
+Use a new `upgrade-constructor` dispatch after the hotfix is merged, not a
+rerun of the old workflow. Before recovery, verify the queue read-only:
+queued/running must be absent, including archived and backoff candidates.
+The saved activation vector restores all three services' markers and timers.
+After e65 recovery completes, deploy the hotfix application and perform the
+canonical upgrade again for its full worker/publisher tuple. Do not create
+or resume a pilot between these two upgrades: the original e65 worker does
+not preserve the handoff child setgid. Publication is fully automatic under
+the owner's explicit instruction: there is no internal administrator approval
+route or pilot approval click. The publisher must still verify green checks
+for the exact head and the actual GitHub protection; the current zero-review
+policy is not permission to bypass failing checks or modify branch protection.
+
+For a standalone spool repair, `repair-spool-layout` requires inactive
+Constructor services and no pending upgrade. It validates the parent and
+children, provisions missing `retired`/`staging` directories, rejects links
+and non-directories, keeps the parent non-group-writable, and preserves all
+existing handoff contents. Do not repair this by making the parent writable.
+
 Read `continuity.state`, `message` and the persisted activity first. For
 `recovering`, preserve evidence and let the scheduled retry advance the same
 order; a routine manual retry is a contract violation. For `waiting_external`,

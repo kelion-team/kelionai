@@ -32,7 +32,7 @@ import { constructorContinuity } from '../services/constructorContinuity.js'
 import { readConstructorModelSnapshot } from '../services/constructorModelControl.js'
 import { constructorObservabilityForJobs } from '../services/constructorObservability.js'
 import { constructorWorkCardsForJobs } from '../services/constructorWorkCard.js'
-import { approveRelease, readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
+import { readReleaseSnapshot } from '../services/githubReleaseIntegration.js'
 import {
   constructorChainAcceptsWork,
   constructorWorkerCanStartNow,
@@ -256,10 +256,9 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(diagnostic)
   })
 
-  // Admin release console: GitHub is contacted only by a dedicated server-side
-  // OAuth integration. The browser receives status and can request a bounded
-  // review action; publisherul separat rămâne singura identitate care face merge
-  // și persistă receiptul, iar browserul nu vede niciodată credentiala.
+  // Read-only release console. The dedicated publisher integrates automatically
+  // after the protected GitHub checks; the browser has no manual PR-approval
+  // action and never receives the server-side read credential.
   app.get<{ Querystring: { jobId?: string } }>('/api/admin/constructor/release', async (req, reply) => {
     const user = cerAdmin(req, reply)
     if (!user) return
@@ -280,27 +279,6 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(503).send({ error: 'db_unreadable' })
     }
     return reply.send({ jobId: job?.id ?? null, ...(await readReleaseSnapshot(job?.prUrl ?? null)) })
-  })
-
-  app.post<{ Body: { jobId?: number; action?: 'approve'; prNumber?: number; headSha?: string } }>('/api/admin/constructor/release/action', async (req, reply) => {
-    const user = cerAdmin(req, reply)
-    if (!user) return
-    const jobId = Number(req.body?.jobId)
-    const action = req.body?.action
-    const prNumber = Number(req.body?.prNumber)
-    const headSha = String(req.body?.headSha ?? '').toLowerCase()
-    if (!Number.isSafeInteger(jobId) || jobId <= 0 || action !== 'approve' || !Number.isSafeInteger(prNumber) || prNumber <= 0 || !SHA40.test(headSha)) return reply.code(400).send({ error: 'invalid_release_action' })
-    let job
-    try {
-      job = await getBuildJobById(jobId)
-    } catch {
-      return reply.code(503).send({ error: 'db_unreadable' })
-    }
-    if (!job) return reply.code(404).send({ error: 'job_not_found' })
-    const result = await approveRelease(job.prUrl, prNumber, headSha)
-    if (!result.ok) return reply.code(409).send(result)
-    noteazaAudit(user.email, 'constructor-approve', 'build_jobs', String(jobId), job.constructorStage, 'approved')
-    return reply.send({ ok: true, release: await readReleaseSnapshot(job.prUrl) })
   })
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de

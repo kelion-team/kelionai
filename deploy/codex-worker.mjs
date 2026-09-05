@@ -673,7 +673,9 @@ function publishHandoff(jobDir, input) {
   assertDescendant(HANDOFF_READY, target, 'Handoff final')
   if (existsSync(staging) || existsSync(target)) fail('Coliziune de identificator handoff')
   mkdirSync(staging, { mode: 0o750 })
-  chmodSync(staging, 0o750)
+  // Preserve the inherited handoff group on new files. Without setgid,
+  // 0440 files use the worker's primary group and the publisher cannot read.
+  chmodSync(staging, 0o2750)
   try {
     writeFileSync(join(staging, 'patch.diff'), patchBytes, { flag: 'wx', mode: 0o440 })
     writeFileSync(join(staging, 'receipt.json'), receiptBytes, { flag: 'wx', mode: 0o440 })
