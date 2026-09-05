@@ -13,7 +13,7 @@ export type ConstructorWorkerState =
   | 'degraded'
   | 'unknown'
 
-export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode + Qwen local (llama.cpp)'
+export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode — profilul rularii'
 
 /** UI compatibility for work cards persisted before the local executor. */
 export function constructorActorLabel(actor: string | null | undefined): string | null {
@@ -217,7 +217,7 @@ export function isConstructorModelOutcome(value: unknown): value is ConstructorM
   if (!reasonMatchesResult) return false
 
   const recommendation = value.manualRecommendation
-  if (value.result === 'technical_failure' || value.profile === 'powerful') {
+  if (recommendation === null || value.result === 'technical_failure' || value.profile === 'powerful') {
     return recommendation === null
   }
   if (value.profile !== 'fast' || value.result !== 'unresolved' || !constructorRecord(recommendation)) {

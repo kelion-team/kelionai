@@ -3,7 +3,7 @@ import { conexiuneDb, getPool } from '../dbPool.js'
 import { CONSTRUCTOR_LOCAL_ACTOR } from './constructorIdentity.js'
 
 // Domeniile HMAC sunt valori de protocol, nu nume de executor: 'codex-worker'
-// ramane inghetat pentru workerul deja instalat (OpenCode + Qwen local).
+// rămâne compatibil cu workerul OpenCode instalat, indiferent de model.
 export type ConstructorServiceDomain = 'codex-worker' | 'constructor-publisher' | 'constructor-release'
 
 export interface SqlResult<Row> {

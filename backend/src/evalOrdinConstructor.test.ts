@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AI_CONSTRUCTORI, evalueazaOrdin } from './services/evalOrdinConstructor.js'
 
-describe('Constructor OpenCode + Qwen local preflight', () => {
+describe('Constructor configured OpenCode preflight', () => {
   it('rejects short, vague and direct-interface orders', () => {
     expect(evalueazaOrdin('fă').trece).toBe(false)
     expect(evalueazaOrdin('ceva frumos acolo').trece).toBe(false)
@@ -11,12 +11,12 @@ describe('Constructor OpenCode + Qwen local preflight', () => {
   it('accepts concrete repository work and selects only the separate worker', () => {
     const result = evalueazaOrdin('repară endpointul de login din backend și adaugă teste')
     expect(result.trece).toBe(true)
-    expect(result.aiRecomandat).toBe('opencode_qwen_local')
+    expect(result.aiRecomandat).toBe('opencode_constructor')
     expect(result.capacitatiNecesare).toEqual(expect.arrayContaining(['cod', 'repo', 'backend', 'teste']))
-    expect(result.clasament.map((entry) => entry.cheie)).toEqual(['opencode_qwen_local'])
-    expect(AI_CONSTRUCTORI.map((entry) => entry.cheie)).toEqual(['opencode_qwen_local'])
-    expect(result.clasament[0]).toMatchObject({ nume: 'OpenCode + Qwen local (llama.cpp)' })
-    expect(result.clasament[0]?.descriere).toMatch(/OpenCode 1\.18\.25.*Qwen.*llama\.cpp.*build_jobs/i)
+    expect(result.clasament.map((entry) => entry.cheie)).toEqual(['opencode_constructor'])
+    expect(AI_CONSTRUCTORI.map((entry) => entry.cheie)).toEqual(['opencode_constructor'])
+    expect(result.clasament[0]).toMatchObject({ nume: 'OpenCode (motor configurat separat)' })
+    expect(result.clasament[0]?.descriere).toMatch(/OpenCode.*validat în configurația de deploy.*build_jobs/i)
   })
 
   it('classifies the explicit user request, not technical boilerplate around it', () => {

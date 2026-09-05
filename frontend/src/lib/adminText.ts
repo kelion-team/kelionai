@@ -72,33 +72,14 @@ export interface AdminStrings {
   versionNotePlaceholder: string
   // Constructor
   buildOrderPlaceholder: string
-  constructorModelTitle: string
-  constructorModelManualHint: string
   constructorModelLoading: string
   constructorModelUnreadable: string
-  constructorModelUnknown: string
-  constructorModelCurrent: (profile: string) => string
-  constructorModelLastVerified: (profile: string) => string
-  constructorModelDefault: string
-  constructorModelFastFallback: string
-  constructorModelPowerfulFallback: string
-  constructorModelActivate: (profile: string) => string
-  constructorModelActive: (profile: string) => string
-  constructorModelSwitching: (profile: string) => string
-  constructorModelSwitchAccepted: (profile: string) => string
-  constructorModelConflict: string
-  constructorModelUnavailable: string
-  constructorModelSwitchFailed: string
-  constructorModelNotInstalled: string
   constructorModelVerifiedAt: (date: string) => string
   constructorOutcomeUnresolved: (profile: string) => string
   constructorOutcomeTechnicalFailure: (profile: string) => string
   constructorOutcomeReason: (reason: string) => string
-  constructorOutcomeManualRecommendation: (profile: string) => string
-  constructorOutcomeRecommendationReason: (reason: string) => string
   constructorOutcomeNoOtherModel: string
   constructorOutcomeTechnicalNoModelAdvice: string
-  constructorOutcomeGoToManualControl: string
   // Tokenuri
   checkingTokens: string
   tokensFailed: string
@@ -214,33 +195,14 @@ const en: AdminStrings = {
   reply: 'Reply:',
   versionNotePlaceholder: 'Note (optional): what this version is',
   buildOrderPlaceholder: 'The build order: what, where, how it is verified',
-  constructorModelTitle: 'Constructor model — manual control',
-  constructorModelManualHint: 'Kelion never changes this model automatically. You decide which installed profile serves the next order.',
   constructorModelLoading: 'Reading the active model…',
   constructorModelUnreadable: 'The active model could not be verified. No profile is assumed to be active.',
-  constructorModelUnknown: 'no currently verified model',
-  constructorModelCurrent: (profile: string) => `Active and verified: ${profile}.`,
-  constructorModelLastVerified: (profile: string) => `Last verified model: ${profile}. It is not being presented as current.`,
-  constructorModelDefault: 'default after startup',
-  constructorModelFastFallback: 'fast profile',
-  constructorModelPowerfulFallback: 'powerful profile',
-  constructorModelActivate: (profile: string) => `Activate ${profile}`,
-  constructorModelActive: (profile: string) => `${profile} — active`,
-  constructorModelSwitching: (profile: string) => `Manual switch in progress to ${profile}.`,
-  constructorModelSwitchAccepted: (profile: string) => `The manual request for ${profile} was accepted. Waiting for verified activation.`,
-  constructorModelConflict: 'Another model operation is already in progress. The state is being refreshed.',
-  constructorModelUnavailable: 'The local model controller is unavailable. The request was not confirmed.',
-  constructorModelSwitchFailed: 'The manual model switch failed or returned an invalid acknowledgement. The requested profile is not marked active.',
-  constructorModelNotInstalled: 'not installed or not verified',
   constructorModelVerifiedAt: (date: string) => `Verified at ${date}`,
   constructorOutcomeUnresolved: (profile: string) => `The requirement ended with a valid unresolved result on ${profile}.`,
   constructorOutcomeTechnicalFailure: (profile: string) => `Technical failure on ${profile} — this is not evidence that the model is too weak.`,
   constructorOutcomeReason: (reason: string) => `Reason: ${reason}`,
-  constructorOutcomeManualRecommendation: (profile: string) => `Recommendation: switch manually to ${profile}, then explicitly use Retry. No switch or retry starts automatically.`,
-  constructorOutcomeRecommendationReason: (reason: string) => `Why this manual option is offered: ${reason}`,
-  constructorOutcomeNoOtherModel: 'This POWERFUL cycle is terminal and recommends neither Retry nor a higher model.',
+  constructorOutcomeNoOtherModel: 'This run is terminal. A new attempt requires an explicit Retry; no model switch is proposed.',
   constructorOutcomeTechnicalNoModelAdvice: 'This technical verdict recommends neither a different model nor Retry.',
-  constructorOutcomeGoToManualControl: 'Go to manual model control',
   checkingTokens: 'Checking the tokens…',
   tokensFailed: 'Could not load the checks.',
   seeWhatTheyWrote: 'See what it wrote and how it tested',
@@ -349,33 +311,14 @@ const ro: AdminStrings = {
   reply: 'Răspuns:',
   versionNotePlaceholder: 'Notă (opțional): ce e această versiune',
   buildOrderPlaceholder: 'Ordinul de construcție: ce, unde, cum se verifică',
-  constructorModelTitle: 'Model Constructor — control manual',
-  constructorModelManualHint: 'Kelion nu schimbă niciodată automat acest model. Tu alegi ce profil instalat deservește următorul ordin.',
   constructorModelLoading: 'Se citește modelul activ…',
   constructorModelUnreadable: 'Modelul activ nu a putut fi verificat. Niciun profil nu este presupus activ.',
-  constructorModelUnknown: 'niciun model verificat acum',
-  constructorModelCurrent: (profile: string) => `Activ și verificat: ${profile}.`,
-  constructorModelLastVerified: (profile: string) => `Ultimul model verificat: ${profile}. Nu este prezentat drept stare curentă.`,
-  constructorModelDefault: 'implicit după pornire',
-  constructorModelFastFallback: 'profil rapid',
-  constructorModelPowerfulFallback: 'profil puternic',
-  constructorModelActivate: (profile: string) => `Activează ${profile}`,
-  constructorModelActive: (profile: string) => `${profile} — activ`,
-  constructorModelSwitching: (profile: string) => `Comutare manuală în curs spre ${profile}.`,
-  constructorModelSwitchAccepted: (profile: string) => `Cererea manuală pentru ${profile} a fost acceptată. Aștept activarea verificată.`,
-  constructorModelConflict: 'Altă operație de model este deja în curs. Starea se recitește.',
-  constructorModelUnavailable: 'Controlerul local al modelelor este indisponibil. Cererea nu a fost confirmată.',
-  constructorModelSwitchFailed: 'Comutarea manuală a eșuat sau confirmarea este invalidă. Profilul cerut nu este marcat activ.',
-  constructorModelNotInstalled: 'neinstalat sau neverificat',
   constructorModelVerifiedAt: (date: string) => `Verificat la ${date}`,
   constructorOutcomeUnresolved: (profile: string) => `Cerința s-a încheiat valid, dar nerezolvat, pe ${profile}.`,
   constructorOutcomeTechnicalFailure: (profile: string) => `Eroare tehnică pe ${profile} — nu este dovadă că modelul este prea slab.`,
   constructorOutcomeReason: (reason: string) => `Motiv: ${reason}`,
-  constructorOutcomeManualRecommendation: (profile: string) => `Recomandare: comută manual la ${profile}, apoi folosește explicit Reia. Nicio comutare și nicio reluare nu pornesc automat.`,
-  constructorOutcomeRecommendationReason: (reason: string) => `De ce este oferită această opțiune manuală: ${reason}`,
-  constructorOutcomeNoOtherModel: 'Acest ciclu POWERFUL este terminal și nu recomandă Reia sau un model superior.',
+  constructorOutcomeNoOtherModel: 'Rularea este oprită. O nouă încercare cere explicit Reia; nu se propune schimbarea modelului.',
   constructorOutcomeTechnicalNoModelAdvice: 'Acest verdict tehnic nu recomandă alt model sau Reia.',
-  constructorOutcomeGoToManualControl: 'Mergi la controlul manual al modelului',
   checkingTokens: 'Se verifică tokenurile…',
   tokensFailed: 'Nu s-au putut încărca verificările.',
   seeWhatTheyWrote: 'Vezi ce a scris și cum a testat',

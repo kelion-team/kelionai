@@ -1,18 +1,18 @@
-/** Deterministic preflight for OpenCode + Qwen local (llama.cpp). The web process only
+/** Deterministic preflight for OpenCode (motor configurat separat). The web process only
  * validates and queues repository work; it never selects an alternate worker
  * or executes repository tools itself. */
 
 export interface AiConstructor {
-  cheie: 'opencode_qwen_local'
+  cheie: 'opencode_constructor'
   nume: string
   descriere: string
   capacitati: string[]
 }
 
 export const AI_CONSTRUCTORI: readonly AiConstructor[] = [{
-  cheie: 'opencode_qwen_local',
-  nume: 'OpenCode + Qwen local (llama.cpp)',
-  descriere: 'Executor separat OpenCode 1.18.25 + Qwen local (llama.cpp); revendică build_jobs, lucrează într-un worktree izolat și raportează porțile, PR-ul și versiunea live.',
+  cheie: 'opencode_constructor',
+  nume: 'OpenCode (motor configurat separat)',
+  descriere: 'Executor separat OpenCode, cu motorul validat în configurația de deploy; revendică build_jobs, lucrează într-un worktree izolat și raportează porțile, PR-ul și versiunea live.',
   capacitati: ['cod', 'repo', 'teste', 'pr', 'reparatie', 'frontend', 'backend', 'migrare', 'asincron'],
 }]
 
@@ -60,10 +60,10 @@ export function evalueazaOrdin(order: string): EvaluareOrdin {
   const potriviri = worker.capacitati.filter((capability) => capacitatiNecesare.includes(capability))
   return {
     trece: true,
-    motiv: 'Cerință de repository clară — poate fi pusă direct în coada build_jobs pentru OpenCode + Qwen local (llama.cpp).',
+    motiv: 'Cerință de repository clară — poate fi pusă direct în coada build_jobs pentru OpenCode (motor configurat separat).',
     capacitatiNecesare,
     clasament: [{ ...worker, scor: potriviri.length, potrivire: `acoperă: ${potriviri.join(', ')}` }],
-    aiRecomandat: 'opencode_qwen_local',
+    aiRecomandat: 'opencode_constructor',
   }
 }
 

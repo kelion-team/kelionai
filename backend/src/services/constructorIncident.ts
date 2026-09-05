@@ -129,14 +129,14 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
     }
   }
   // Aceste două coduri pot exista în incidente persistate de workerul vechi.
-  // Constructorul OpenCode/Qwen local nu le mai emite și nu transformă texte
-  // cloud arbitrare în incidente curente de autentificare sau credit.
+  // Constructorul curent nu le mai emite și nu transformă texte arbitrare
+  // în incidente curente de autentificare sau credit.
   if (/worker_failure:provider_auth/i.test(log)) {
     return {
       ...base,
       causeCode: 'provider_auth',
-      causeSummary: 'Un worker retras a persistat un incident legacy de autentificare; acesta nu descrie executorul local curent.',
-      nextAction: 'Nu relua vechea cale. Confirmă data incidentului și reexecută ordinul numai prin OpenCode cu Qwen local.',
+      causeSummary: 'Un worker retras a persistat un incident legacy de autentificare; acesta nu descrie executorul curent.',
+      nextAction: 'Nu relua vechea cale. Confirmă data incidentului și configurația actuală OpenCode; orice reluare cere o comandă explicită.',
       state: 'blocked',
     }
   }
@@ -144,8 +144,8 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
     return {
       ...base,
       causeCode: 'provider_credit',
-      causeSummary: 'Un worker retras a persistat un incident legacy de credit; acesta nu descrie executorul local curent.',
-      nextAction: 'Nu alimenta și nu relua vechea cale. Reexecută ordinul numai prin OpenCode cu Qwen local.',
+      causeSummary: 'Un worker retras a persistat un incident legacy de credit; acesta nu descrie executorul curent.',
+      nextAction: 'Nu alimenta și nu relua vechea cale. Verifică configurația actuală OpenCode, fără fallback plătit; orice reluare cere o comandă explicită.',
       state: 'blocked',
     }
   }
@@ -198,8 +198,8 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
     return {
       ...base,
       causeCode: 'brain_unavailable',
-      causeSummary: 'Serverul local llama.cpp sau modelul Qwen nu a produs un rezultat executabil.',
-      nextAction: 'Verifică private-ai-llm.service, endpointurile loopback /health și /v1/models, apoi jurnalul privat OpenCode; remediază local, fără fallback cloud.',
+      causeSummary: 'Motorul Constructorului nu a produs un rezultat executabil; modelul și cauza exactă trebuie verificate pentru rularea raportată.',
+      nextAction: 'Verifică configurația validată a motorului, disponibilitatea furnizorului și jurnalul privat OpenCode; păstrează dovezile istorice, fără fallback plătit.',
       state: 'diagnosing',
     }
   }
@@ -208,7 +208,7 @@ export function classifyConstructorFailure(logRaw: string, progressRaw = ''): Co
       ...base,
       causeCode: 'unknown',
       causeSummary: 'Executorul a raportat un eșec intern generic, iar cauza exactă nu este demonstrată de codul public.',
-      nextAction: 'Citește jurnalul privat al jobului, verifică OpenCode și serviciul local llama.cpp, apoi clasifică numai cauza susținută de dovadă.',
+      nextAction: 'Citește jurnalul privat al jobului, verifică OpenCode și configurația motorului folosit de acea rulare, apoi clasifică numai cauza susținută de dovadă.',
       state: 'diagnosing',
     }
   }

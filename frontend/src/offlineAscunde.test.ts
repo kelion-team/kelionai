@@ -67,8 +67,8 @@ describe('offline: funcțiile de internet nu se afișează (Stage)', () => {
     expect(chat).toMatch(/const online = useConectat\(\)/)
   })
 
-  it('meniul „Aplicații" (toate = comenzi către server) dispare offline', () => {
-    expect(stage).toMatch(/\{online && \(\s*<div className="apps-wrap">/)
+  it('meniul de aplicații retras nu se afișează online sau offline', () => {
+    expect(stage).not.toMatch(/apps-wrap|appsOpen|setAppsOpen/)
   })
 
   it('portofelul dispare offline, iar cumpărarea depinde numai de scutirea serverului', () => {

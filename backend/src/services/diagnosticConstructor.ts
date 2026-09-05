@@ -155,8 +155,8 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
     probleme.push({
       cod: 'constructor_worker_offline',
       severitate: 'critic',
-      ce: 'Workerul Constructor OpenCode + Qwen local (llama.cpp) nu are un heartbeat recent de stare ready; ordinele rămân în build_jobs.',
-      recomandare: 'Verifică preflightul OpenCode 1.18.25, modelul Qwen local din endpointul loopback llama.cpp și autentificarea HMAC a cozii build_jobs.',
+      ce: 'Workerul Constructor OpenCode (motor configurat separat) nu are un heartbeat recent de stare ready; ordinele rămân în build_jobs.',
+      recomandare: 'Verifică preflightul OpenCode 1.18.25, disponibilitatea motorului configurat și autentificarea HMAC a cozii build_jobs.',
     })
   }
   if (!publisherReady) {
@@ -178,27 +178,14 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
   const failedOutcomes = failed
     .map((job) => ({ job, outcome: constructorModelOutcome(job.log) }))
     .filter((entry): entry is { job: typeof failed[number]; outcome: ConstructorModelOutcome } => Boolean(entry.outcome))
-  const fastUnresolved = failedOutcomes.filter(({ outcome }) =>
-    outcome.result === 'unresolved' && outcome.profile === 'fast',
-  )
-  const powerfulUnresolved = failedOutcomes.filter(({ outcome }) =>
-    outcome.result === 'unresolved' && outcome.profile === 'powerful',
-  )
+  const unresolved = failedOutcomes.filter(({ outcome }) => outcome.result === 'unresolved')
   const technicalFailures = failedOutcomes.filter(({ outcome }) => outcome.result === 'technical_failure')
-  if (fastUnresolved.length) {
+  if (unresolved.length) {
     probleme.push({
-      cod: 'constructor_fast_unresolved',
+      cod: 'constructor_unresolved',
       severitate: 'critic',
-      ce: `${fastUnresolved.length} ordin(e) FAST nearhivate au un rezultat canonic nerezolvat.`,
-      recomandare: constructorModelOutcomeNextAction(fastUnresolved[0].outcome),
-    })
-  }
-  if (powerfulUnresolved.length) {
-    probleme.push({
-      cod: 'constructor_powerful_unresolved',
-      severitate: 'critic',
-      ce: `${powerfulUnresolved.length} ordin(e) POWERFUL nearhivate au încheiat terminal ciclul curent fără rezultat publicabil.`,
-      recomandare: constructorModelOutcomeNextAction(powerfulUnresolved[0].outcome),
+      ce: `${unresolved.length} ordin(e) nearhivate au un rezultat canonic nerezolvat.`,
+      recomandare: constructorModelOutcomeNextAction(unresolved[0].outcome),
     })
   }
   if (technicalFailures.length) {
@@ -255,7 +242,7 @@ export async function diagnosticConstructorViu(now: number): Promise<DiagnosticC
       cod: 'constructor_job_long_running',
       severitate: 'atentie',
       ce: `Cel mai vechi ordin rulează de peste ${Math.round((runningSec ?? 0) / 3600)} ore.`,
-      recomandare: 'Verifică worktree-ul executorului OpenCode + Qwen local (llama.cpp) și etapa persistată; anulează numai dacă workerul confirmă oprirea.',
+      recomandare: 'Verifică worktree-ul executorului OpenCode (motor configurat separat) și etapa persistată; anulează numai dacă workerul confirmă oprirea.',
     })
   }
   const stalledPublisher = running.find((job) =>

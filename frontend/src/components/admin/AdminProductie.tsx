@@ -1,3 +1,4 @@
+import { ConstructorJobProgress } from './ConstructorJobProgress'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { adminStrings } from '../../lib/adminText'
 import {
@@ -6,12 +7,12 @@ import {
   fetchConstructorWorkerAdmin,
   type ConstructorWorkerAdmin,
   fetchConstructorModelAdmin,
-  switchConstructorModelAdmin,
   evalueazaOrdinConstructor,
   type EvalConstructor,
 } from '../../lib/admin'
 import { fetchBalance, formatMinorMoney, type WalletStatus } from '../../lib/billing'
 import { apiFetch } from '../../lib/transport'
+import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from '../../../../backend/src/shared/agentCustomPolicy'
 import {
   constructorAvailabilityFromSnapshot,
   constructorActorLabel,
@@ -37,7 +38,6 @@ import {
   type AdminReleaseSnapshot,
   type BuildArchiveCursor,
   type BuildJobRow,
-  type ConstructorModelProfile,
 } from '../../lib/adminConstructorContract'
 
 // ── CONSTRUCTOR tab ─────────────────────────────────────────────────────────
@@ -56,8 +56,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   const [constructorWorkerCanStartNow, setConstructorWorkerCanStartNow] = useState<boolean | null>(null)
   const [constructorId, setConstructorId] = useState<ConstructorWorkerSummary | null>(null)
   const [constructorModel, setConstructorModel] = useState<AdminConstructorModelSnapshot | null | 'necitit'>('necitit')
-  const [constructorModelBusy, setConstructorModelBusy] = useState(false)
-  const [constructorModelMessage, setConstructorModelMessage] = useState<{ kind: 'status' | 'error'; text: string } | null>(null)
   const [diagnostic, setDiagnostic] = useState<AdminConstructorDiagnostic | null>(null)
   const [release, setRelease] = useState<AdminReleaseSnapshot | null>(null)
   const [releaseBusy, setReleaseBusy] = useState(false)
@@ -186,9 +184,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
     void fetchConstructorModelAdmin(controller.signal).then((snapshot) => {
       if (!isCurrent()) return
       setConstructorModel(snapshot)
-      if (snapshot?.state === 'ready') {
-        setConstructorModelMessage((previous) => previous?.kind === 'status' ? null : previous)
-      }
     })
   }
 
@@ -211,51 +206,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
       })
       .catch(() => setBuildMsg('Acțiunea de publicare a eșuat: conexiunea cu serverul a căzut.'))
       .finally(() => { setReleaseBusy(false); refreshBuildJobs() })
-  }
-
-  const constructorModelProfileText = (profile: ConstructorModelProfile): string => {
-    if (typeof constructorModel === 'object' && constructorModel !== null) {
-      const descriptor = constructorModel.profiles.find((candidate) => candidate.id === profile)
-      if (descriptor) return `${descriptor.label} — ${descriptor.model}`
-    }
-    return profile === 'fast' ? A.constructorModelFastFallback : A.constructorModelPowerfulFallback
-  }
-
-  const selectConstructorModel = (profile: ConstructorModelProfile): void => {
-    if (
-      constructorModelBusy
-      || typeof constructorModel !== 'object'
-      || constructorModel === null
-      || constructorModel.state !== 'ready'
-      || constructorModel.activeProfile === profile
-      || !constructorModel.profiles.find((candidate) => candidate.id === profile)?.installed
-    ) return
-
-    setConstructorModelBusy(true)
-    setConstructorModelMessage(null)
-    void switchConstructorModelAdmin(profile)
-      .then((result) => {
-        if (result.kind === 'confirmed' || result.kind === 'accepted') {
-          setConstructorModel(result.snapshot)
-          const descriptor = result.snapshot.profiles.find((candidate) => candidate.id === profile)
-          const profileText = descriptor ? `${descriptor.label} — ${descriptor.model}` : constructorModelProfileText(profile)
-          setConstructorModelMessage(result.kind === 'accepted'
-            ? { kind: 'status', text: A.constructorModelSwitchAccepted(profileText) }
-            : null)
-          return
-        }
-        if (result.kind === 'conflict') {
-          setConstructorModelMessage({ kind: 'error', text: A.constructorModelConflict })
-        } else if (result.kind === 'unavailable') {
-          setConstructorModelMessage({ kind: 'error', text: A.constructorModelUnavailable })
-        } else {
-          setConstructorModelMessage({ kind: 'error', text: A.constructorModelSwitchFailed })
-        }
-      })
-      .finally(() => {
-        setConstructorModelBusy(false)
-        refreshBuildJobs()
-      })
   }
 
   useEffect(() => {
@@ -432,22 +382,12 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
   const constructorModelSnapshot = typeof constructorModel === 'object' && constructorModel !== null
     ? constructorModel
     : null
-  const displayedModelProfiles = (['fast', 'powerful'] as const).map((profile) => {
-    const descriptor = constructorModelSnapshot?.profiles.find((candidate) => candidate.id === profile)
-    return {
-      id: profile,
-      installed: descriptor?.installed === true,
-      text: descriptor
-        ? `${descriptor.label} — ${descriptor.model}`
-        : profile === 'fast' ? A.constructorModelFastFallback : A.constructorModelPowerfulFallback,
-    }
-  })
 
   return (
     <div className="admin-tab-content">
       <div className="admin-card">
         <div className="admin-card-head">
-          Constructor — OpenCode + Qwen local (llama.cpp). Ordinul intră în build_jobs; workerul rulează buildul și testele, apoi deschide PR-ul. După verificări și aprobarea ta, publisherul separat îl îmbină. Poți ordona și prin voce/chat: „Kelion, construiește…".
+          Constructor admin — ordin → modificări și teste → PR → aprobare → deploy verificat. Acest executor poate modifica Kelion numai pentru administrator; nu deservește spații de utilizator.
         </div>
         <div className="admin-constructor-status">
           <span
@@ -508,93 +448,25 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
               )}
             </div>
           )}
-          <div className="admin-constructor-meta">
-            <><b>Worker privat: OpenCode + Qwen local (llama.cpp)</b> · coada canonică <b>build_jobs</b>. Stare:{' '}</>
-            {constructorId == null ? 'se citește de pe server…'
-              : constructorAcceptingWork === true ? <><b>OpenCode worker</b> — {constructorId.motiv}</>
-              : <>{constructorId.motiv}</>}
-          </div>
         </div>
-        <section
-          className="admin-constructor-model-control"
-          aria-labelledby="constructor-model-control-title"
-          aria-busy={constructorModelBusy || constructorModelSnapshot?.state === 'switching'}
-        >
-          <div className="admin-subcard-title" id="constructor-model-control-title">{A.constructorModelTitle}</div>
-          <p className="chat-hint">{A.constructorModelManualHint}</p>
+        <section className="admin-constructor-engine" aria-labelledby="constructor-engine-title">
+          <h3 id="constructor-engine-title">Motorul Constructorului</h3>
           {constructorModel === 'necitit' && <p className="chat-hint" role="status">{A.constructorModelLoading}</p>}
           {constructorModel === null && <p className="chat-hint constructor-model-error" role="alert">{A.constructorModelUnreadable}</p>}
           {constructorModelSnapshot && (
             <>
-              {constructorModelSnapshot.state === 'ready' && constructorModelSnapshot.activeProfile && (
-                <p className="chat-hint constructor-model-ready" role="status">
-                  {A.constructorModelCurrent(constructorModelProfileText(constructorModelSnapshot.activeProfile))}
-                </p>
-              )}
-              {constructorModelSnapshot.state === 'switching' && constructorModelSnapshot.requestedProfile && (
-                <div className="chat-hint" role="status" aria-live="polite">
-                  <div>{constructorModelSnapshot.activeProfile
-                    ? A.constructorModelCurrent(constructorModelProfileText(constructorModelSnapshot.activeProfile))
-                    : A.constructorModelUnknown}</div>
-                  <div>{A.constructorModelSwitching(constructorModelProfileText(constructorModelSnapshot.requestedProfile))}</div>
-                </div>
-              )}
-              {constructorModelSnapshot.state === 'failed' && (
-                <div className="chat-hint constructor-model-error" role="alert">
-                  <div>{A.constructorModelSwitchFailed}</div>
-                  {constructorModelSnapshot.activeProfile && (
-                    <div>{A.constructorModelLastVerified(constructorModelProfileText(constructorModelSnapshot.activeProfile))}</div>
-                  )}
-                </div>
-              )}
-              {constructorModelSnapshot.state === 'unavailable' && (
-                <div className="chat-hint constructor-model-error" role="alert">
-                  <div>{A.constructorModelUnavailable}</div>
-                  {constructorModelSnapshot.activeProfile && (
-                    <div>{A.constructorModelLastVerified(constructorModelProfileText(constructorModelSnapshot.activeProfile))}</div>
-                  )}
-                </div>
-              )}
-              {constructorModelSnapshot.verifiedAt && (
-                <div className="chat-hint constructor-model-verified">
-                  {A.constructorModelVerifiedAt(new Date(constructorModelSnapshot.verifiedAt).toLocaleString())}
-                </div>
-              )}
+              <p><b>{constructorModelSnapshot.model?.label ?? 'Configurație neverificată'}</b>
+                {constructorModelSnapshot.model && <> · {constructorModelSnapshot.model.id}</>}
+              </p>
+              <p className="chat-hint" role={constructorModelSnapshot.state === 'ready' ? 'status' : 'alert'}>
+                {constructorModelSnapshot.state === 'ready'
+                  ? 'Configurația și disponibilitatea motorului sunt verificate. Finalizarea unui ordin se dovedește separat, mai jos.'
+                  : 'Motor indisponibil: nu există o verificare curentă reușită.'}
+              </p>
+              {constructorModelSnapshot.verifiedAt && <p className="chat-hint">
+                {A.constructorModelVerifiedAt(new Date(constructorModelSnapshot.verifiedAt).toLocaleString())}
+              </p>}
             </>
-          )}
-          <div className="admin-constructor-model-actions">
-            {displayedModelProfiles.map((profile) => {
-              const active = constructorModelSnapshot?.activeProfile === profile.id
-                && (constructorModelSnapshot.state === 'ready' || constructorModelSnapshot.state === 'switching')
-              const disabled = constructorModelBusy
-                || constructorModelSnapshot === null
-                || constructorModelSnapshot.state !== 'ready'
-                || active
-                || !profile.installed
-              return (
-                <button
-                  key={profile.id}
-                  type="button"
-                  className={`ghost constructor-model-button${active ? ' active' : ''}`}
-                  aria-pressed={active}
-                  disabled={disabled}
-                  title={!profile.installed ? A.constructorModelNotInstalled : undefined}
-                  onClick={() => selectConstructorModel(profile.id)}
-                >
-                  {active ? A.constructorModelActive(profile.text) : A.constructorModelActivate(profile.text)}
-                  {profile.id === 'fast' && <span className="constructor-model-default"> · {A.constructorModelDefault}</span>}
-                </button>
-              )
-            })}
-          </div>
-          {constructorModelMessage && (
-            <p
-              className={`chat-hint${constructorModelMessage.kind === 'error' ? ' constructor-model-error' : ''}`}
-              role={constructorModelMessage.kind === 'error' ? 'alert' : 'status'}
-              aria-live={constructorModelMessage.kind === 'status' ? 'polite' : undefined}
-            >
-              {constructorModelMessage.text}
-            </p>
           )}
         </section>
         <form className="admin-form-row" onSubmit={(e) => { e.preventDefault(); sendBuildOrder() }}>
@@ -637,7 +509,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
         <form onSubmit={(event) => void addCustomAgent(event)}>
           <div className="admin-form-row" style={{ flexWrap: 'wrap' }}>
             <input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Numele agentului" minLength={3} maxLength={80} required />
-            <textarea value={agentRole} onChange={(event) => setAgentRole(event.target.value)} placeholder="Rolul și limitele agentului" minLength={10} required rows={3} style={{ flex: 1, minWidth: 240 }} />
+            <textarea value={agentRole} onChange={(event) => setAgentRole(event.target.value)} placeholder="Rolul și limitele agentului" minLength={10} maxLength={AGENT_CUSTOM_ROLE_MAX_LENGTH} required rows={3} style={{ flex: 1, minWidth: 240 }} />
           </div>
           <label className="chat-hint" style={{ display: 'block', marginTop: 8 }}>
             <input type="checkbox" checked={agentDeep} onChange={(event) => setAgentDeep(event.target.checked)} />{' '}
@@ -694,15 +566,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
           </div>
         )}
 
-        {constructorWorkerCanStartNow === false && (
-          <div className="chat-hint" style={{ color: '#e6a23c' }}>
-            {constructorAcceptingWork
-              ? '⏳ Lanțul Constructor execută deja altă etapă — ordinele noi așteaptă în coadă, fără termen garantat.'
-              : '⏸ Lanțul Constructor nu acceptă lucru acum — ordinele rămân în coadă până când workerul, publisherul și releaserul redevin disponibile.'}{' '}
-            Stare: {constructorId?.state ?? 'unknown'} · {constructorId?.motiv ?? 'stare necitibilă'}
-          </div>
-        )}
-
         {buildJobs === 'necitit' && <div className="chat-hint">{A.loading}</div>}
         {buildJobs === null && <div className="chat-hint" style={{ color: '#e6a23c' }}>⚠ Nu am putut citi coada — citire eșuată, nu coadă goală (reîncerc la 10s).</div>}
         {buildJobsData && buildJobsData.length === 0 && <div className="chat-hint">{A.noOrdersYet}</div>}
@@ -727,19 +590,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
               {j.deletable && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => deleteBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title="Șterge definitiv ordinul">✕</button>}
               {constructorJobCanBeCancelled(j.status, j.constructorStage) && <button type="button" className="ghost" style={{ fontSize: 12, color: '#ff7a7a' }} onClick={() => cancelBuildOrder(j)} disabled={pendingBuildMutations.has(j.id)} title={j.status === 'queued' ? 'Anulează ordinul aflat în coadă' : 'Oprește ordinul aflat în lucru (devine „anulat")'}>⏹ oprește</button>}
             </span>
-            {j.pct != null && (
-              <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <div style={{ flex: 1, height: 6, borderRadius: 999, background: 'color-mix(in srgb, currentColor 12%, transparent)', overflow: 'hidden' }} title={j.progress || (j.status === 'queued' ? 'în coadă' : '')}>
-                  <div style={{
-                    width: `${j.pct}%`, height: '100%', borderRadius: 999,
-                    background: constructorHasVerifiedLiveResult(j.status, j.continuity) ? '#38b26e' : j.status === 'cancelled' ? '#7a7a7a' : '#4a8df0',
-                    transition: 'width 0.6s ease',
-                  }} />
-                </div>
-                <span style={{ fontSize: 11, opacity: 0.8, minWidth: 34, textAlign: 'right' }}>{j.pct}%</span>
-                {j.status === 'running' && j.progress && <span className="chat-hint" style={{ fontSize: 11, maxWidth: '46%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.progress}</span>}
-              </div>
-            )}
+            <ConstructorJobProgress job={j} />
             {j.continuity && (
               <div className="chat-hint" style={{ flexBasis: '100%', fontSize: 11, marginTop: 2 }}>
                 <b>{j.continuity.state === 'completed' ? '✓ Dovadă live' : j.continuity.state === 'cancelled' ? 'Cerere anulată' : `Checkpoint: ${j.continuity.checkpoint}`}</b>
@@ -750,7 +601,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
             )}
             {j.continuity?.modelOutcome && (() => {
               const outcome = j.continuity.modelOutcome
-              const profileText = constructorModelProfileText(outcome.profile)
+              const profileText = 'profilul rularii'
               if (outcome.result === 'technical_failure') {
                 return (
                   <div className="constructor-outcome technical" role="alert">
@@ -758,18 +609,6 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                     <div>{A.constructorOutcomeReason(outcome.reason)}</div>
                     <div>{A.constructorOutcomeTechnicalNoModelAdvice}</div>
                   </div>
-                )
-              }
-              if (outcome.manualRecommendation) {
-                const recommendedProfile = constructorModelProfileText(outcome.manualRecommendation.profile)
-                return (
-                  <aside className="constructor-outcome recommendation" aria-label={A.constructorOutcomeManualRecommendation(recommendedProfile)}>
-                    <b>{A.constructorOutcomeUnresolved(profileText)}</b>
-                    <div>{A.constructorOutcomeReason(outcome.reason)}</div>
-                    <div>{A.constructorOutcomeManualRecommendation(recommendedProfile)}</div>
-                    <div>{A.constructorOutcomeRecommendationReason(outcome.manualRecommendation.reason)}</div>
-                    <a href="#constructor-model-control-title">{A.constructorOutcomeGoToManualControl}</a>
-                  </aside>
                 )
               }
               return (
@@ -799,7 +638,7 @@ export function AdminConstructor({ dedicatedClient = false }: { dedicatedClient?
                 {(j.continuity?.activity ?? []).length > 0 && (
                   <ol className="chat-hint" aria-label={`Cronologia ${j.workCard.id}`}>
                     {(j.continuity?.activity ?? []).map((event) => (
-                      <li key={event.id}><b>{event.label}</b> · {event.percent}% · {event.state}{event.at ? ` · ${new Date(event.at).toLocaleString('ro-RO')}` : ''}</li>
+                      <li key={event.id}><b>{event.label}</b> · {event.percent === null ? 'progres nemăsurat' : `${event.percent}% din etape`} · {event.state}{event.at ? ` · ${new Date(event.at).toLocaleString('ro-RO')}` : ''}</li>
                     ))}
                   </ol>
                 )}
@@ -854,7 +693,7 @@ export function AdminCreier() {
       <div className="admin-card">
         <div className="admin-card-head">Creier conversațional și Constructor</div>
         <div className="admin-subcard">
-          <div className="admin-subcard-title">Constructor — OpenCode + Qwen local (llama.cpp)</div>
+          <div className="admin-subcard-title">Constructor — executor separat</div>
           {constructorWorker === 'necitit' && <p className="chat-hint">Se citește configurația…</p>}
           {constructorWorker === null && (
             <p className="chat-hint" style={{ color: '#e6a23c' }}>
@@ -874,15 +713,15 @@ export function AdminCreier() {
                 </b>.{constructorWorker.status ? ` ${constructorWorker.status}` : ''}
               </p>
               <p className="chat-hint">
-                Executor: <b>{constructorWorker.executor ?? 'OpenCode + Qwen local (llama.cpp)'}</b> · coadă: <b>{constructorWorker.queue ?? 'build_jobs'}</b>.<br />
+                Executor: <b>{constructorWorker.executor ?? 'executor neverificat'}</b> · coadă: <b>{constructorWorker.queue ?? 'build_jobs'}</b>.<br />
                 Ultimul heartbeat: {constructorWorker.worker.lastHeartbeat ? new Date(constructorWorker.worker.lastHeartbeat).toLocaleString('ro-RO') : 'neînregistrat'}
               </p>
               {(constructorWorker.worker.state === 'setup_required' || constructorWorker.worker.state === 'unknown') && (
                 <p className="chat-hint">
-                  {constructorWorker.setupInstructions ?? 'Verifică preflightul OpenCode 1.18.25 + Qwen local (llama.cpp) și autentificarea HMAC a cozii build_jobs.'}
+                  {constructorWorker.setupInstructions ?? 'Verifică preflightul motorului configurat și autentificarea HMAC a cozii build_jobs.'}
                 </p>
               )}
-              {constructorWorker.worker.state === 'offline' && <p className="chat-hint">Workerul local nu răspunde. Verifică OpenCode + Qwen local (llama.cpp) și endpointul loopback al modelului.</p>}
+              {constructorWorker.worker.state === 'offline' && <p className="chat-hint">Workerul nu răspunde. Verifică diagnosticul executorului și disponibilitatea motorului configurat.</p>}
               {constructorWorker.worker.state === 'degraded' && (
                 <p className="chat-hint" style={{ color: '#8a6d1a' }}>Workerul răspunde, dar a raportat o stare degradată. Cauza afișată mai sus trebuie rezolvată înainte ca panoul să-l considere pregătit.</p>
               )}
@@ -892,7 +731,7 @@ export function AdminCreier() {
                   : <><b>Starea debitului Kelion pentru admin nu poate fi verificată.</b></>}
               </p>
               <p className="chat-hint" style={{ marginTop: 8 }}>
-                OpenCode + Qwen local (llama.cpp) execută exclusiv ordinele validate din build_jobs; browserul doar scrie în coadă și citește starea autorizată.
+                Executorul separat OpenCode execută exclusiv ordinele validate din build_jobs; browserul doar scrie în coadă și citește starea autorizată.
               </p>
             </>
           )}

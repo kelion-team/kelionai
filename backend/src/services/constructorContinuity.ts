@@ -32,7 +32,7 @@ const FAILURE_REASONS: Readonly<Record<ConstructorExecutionReasonCode, string>> 
   test_failure: 'Porțile locale au măsurat cel puțin un test eșuat; rezultatul nu este publicabil.',
   quality_gate_failure: 'O poartă locală de build, tipuri sau lint a respins rezultatul.',
   no_changes: 'Rularea s-a încheiat fără nicio modificare verificabilă în worktree.',
-  brain_unavailable: 'Serviciul local de inferență sau modelul selectat nu a fost disponibil tehnic.',
+  brain_unavailable: 'Motorul configurat nu a fost disponibil tehnic în timpul rulării.',
   worker_internal_failure: 'Workerul a raportat o eroare internă fără dovadă de insuficiență a modelului.',
 }
 
@@ -60,7 +60,7 @@ export function constructorWorkerUnresolvedRecord(
 ): { evidence: string; progress: string } {
   return {
     evidence: `worker_unresolved:${reason};profile=${profile}`,
-    progress: profile === 'fast' ? 'fast_insufficient' : 'powerful_final_failure',
+    progress: 'unresolved',
   }
 }
 
@@ -78,25 +78,18 @@ export function constructorModelOutcome(log: string | null | undefined): Constru
     result,
     reasonCode,
     reason: FAILURE_REASONS[reasonCode],
-    manualRecommendation: profile === 'fast' && result === 'unresolved'
-      ? {
-          profile: 'powerful',
-          reasonCode: 'fast_result_not_publishable',
-          reason: 'FAST 35B nu a produs un rezultat publicabil; poți alege manual POWERFUL 122B înainte de comanda Reia.',
-        }
-      : null,
+    // A historic profile identifier cannot identify the current engine.
+    // The retired local-model switch must not be recommended for old jobs.
+    manualRecommendation: null,
   }
 }
 
 /** Acțiunea textuală derivă exclusiv din outcome-ul bounded. Disponibilitatea
  * butonului Admin `Reia` este o capabilitate separată; aici nu inventăm o
- * recomandare pentru POWERFUL terminal ori pentru o eroare tehnică. */
+ * schimbare a motorului ori o reluare după o eroare tehnică. */
 export function constructorModelOutcomeNextAction(outcome: ConstructorModelOutcome): string {
-  if (outcome.manualRecommendation) {
-    return 'Comută manual la POWERFUL 122B dacă decizi asta, apoi folosește explicit Reia.'
-  }
-  if (outcome.result === 'unresolved' && outcome.profile === 'powerful') {
-    return 'Diagnostichează cauza măsurată; ciclul POWERFUL este terminal și nu recomandă Reia sau un model superior.'
+  if (outcome.result === 'unresolved') {
+    return 'Verifică rezultatul și cauza măsurată; un ciclu nou pornește numai prin comanda explicită Reia.'
   }
   return 'Diagnostichează și remediază cauza tehnică măsurată; acest verdict nu recomandă schimbarea modelului sau Reia.'
 }
@@ -176,11 +169,8 @@ export function constructorContinuity(
       ?? 'Finalizează autorizarea externă indicată în starea workerului.'
   } else if (waitingManual) {
     state = 'waiting_manual'
-    if (modelOutcome?.manualRecommendation) {
-      message = 'Rularea FAST 35B nu a produs un rezultat publicabil; ordinul rămâne nerezolvat și nu se reia automat.'
-      nextAction = constructorModelOutcomeNextAction(modelOutcome)
-    } else if (modelOutcome?.profile === 'powerful' && modelOutcome.result === 'unresolved') {
-      message = 'Rularea POWERFUL 122B nu a produs un rezultat publicabil; acesta este un eșec final care necesită diagnostic.'
+    if (modelOutcome?.result === 'unresolved') {
+      message = 'Rularea nu a produs un rezultat publicabil; ordinul rămâne nerezolvat și nu se reia automat.'
       nextAction = constructorModelOutcomeNextAction(modelOutcome)
     } else if (modelOutcome?.result === 'technical_failure' || progress === 'technical_failure') {
       message = 'Rularea s-a oprit dintr-o cauză tehnică; aceasta nu dovedește insuficiența modelului și nu declanșează comutare sau retry.'

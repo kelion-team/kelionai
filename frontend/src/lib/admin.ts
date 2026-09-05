@@ -10,7 +10,6 @@ import type {
 import {
   parseAdminConstructorModelSnapshot,
   type AdminConstructorModelSnapshot,
-  type ConstructorModelProfile,
 } from './adminConstructorContract'
 import { apiFetch } from './transport'
 export type { MoneyCircuit, OpenAIAdminSnapshot, UserActivityRow }
@@ -131,7 +130,7 @@ export function clasaBec(bec: string): string {
 
 // ── Evaluarea unui ordin de constructor (owner, 13 aug) ─────────────────────
 export interface EvalRandAI {
-  cheie: 'opencode_qwen_local'
+  cheie: 'opencode_constructor'
   nume: string
   descriere: string
   scor: number
@@ -142,7 +141,7 @@ export interface EvalConstructor {
   motiv: string
   capacitatiNecesare: string[]
   clasament: EvalRandAI[]
-  aiRecomandat: 'opencode_qwen_local' | null
+  aiRecomandat: 'opencode_constructor' | null
 }
 
 /** Evaluează cerința ÎNAINTE de trimitere pentru executorul local canonic.
@@ -549,7 +548,7 @@ export interface ConstructorWorkerAdmin {
   }
   setupInstructions: string | null
   status: string | null
-  executor: 'OpenCode + Qwen local (llama.cpp)' | null
+  executor: string | null
   queue: 'build_jobs' | null
 }
 
@@ -562,7 +561,7 @@ const CONSTRUCTOR_WORKER_STATES = new Set([
   'unknown',
 ])
 
-/** Starea workerului local al Constructorului (OpenCode + Qwen local). */
+/** Starea workerului separat al Constructorului. */
 export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAdmin | null> {
   try {
     const r = await apiFetch('/api/admin/constructor/worker', { cache: 'no-store' })
@@ -587,7 +586,7 @@ export async function fetchConstructorWorkerAdmin(): Promise<ConstructorWorkerAd
         ? raw.setupInstructions.slice(0, 1_000)
         : null,
       status: typeof raw.status === 'string' ? raw.status.slice(0, 240) : null,
-      executor: raw.executor === 'OpenCode + Qwen local (llama.cpp)' ? raw.executor : null,
+      executor: typeof raw.executor === 'string' && raw.executor.length <= 160 && !/[\p{Cc}\p{Cs}]/u.test(raw.executor) ? raw.executor : null,
       queue: raw.queue === 'build_jobs' ? raw.queue : null,
     }
   } catch {
@@ -608,36 +607,6 @@ export async function fetchConstructorModelAdmin(
     return parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
   } catch {
     return null
-  }
-}
-
-export type ConstructorModelSwitchResult =
-  | { kind: 'confirmed' | 'accepted'; snapshot: AdminConstructorModelSnapshot }
-  | { kind: 'conflict' | 'unavailable' | 'failed' }
-
-/** Trimite numai alegerea explicită a adminului; nu selectează și nu repetă automat. */
-export async function switchConstructorModelAdmin(
-  profile: ConstructorModelProfile,
-): Promise<ConstructorModelSwitchResult> {
-  try {
-    const response = await apiFetch('/api/admin/constructor/model', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ profile }),
-    })
-    if (response.status === 200 || response.status === 202) {
-      const snapshot = parseAdminConstructorModelSnapshot(await response.json().catch(() => null))
-      if (!snapshot) return { kind: 'failed' }
-      if (response.status === 200 && snapshot.state !== 'ready') return { kind: 'failed' }
-      if (response.status === 202 && snapshot.state !== 'switching') return { kind: 'failed' }
-      return { kind: response.status === 202 ? 'accepted' : 'confirmed', snapshot }
-    }
-    if (response.status === 409) return { kind: 'conflict' }
-    if (response.status === 503) return { kind: 'unavailable' }
-    return { kind: 'failed' }
-  } catch {
-    return { kind: 'failed' }
   }
 }
 

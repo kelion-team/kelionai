@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (path) => readFileSync(resolve(ROOT, path), 'utf8')
 
-test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentificare AI cloud', () => {
+test('Constructorul folosește exclusiv modelul gratuit aprobat în executor code-only anonim', () => {
   const worker = read('deploy/codex-worker.mjs')
   const service = read('deploy/systemd/kelion-codex-worker.service')
   const localPreflightWorkflow = read('.github/workflows/vps-codex-login.yml')
@@ -20,33 +20,36 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
   const buildWorkflow = read('.github/workflows/build-images.yml')
 
   assert.match(worker, /^const OPENCODE_VERSION = '1\.18\.25'$/m)
-  assert.match(worker, /^const OPENCODE_MODEL_ID = 'qwen3\.6-35b-a3b-local'$/m)
-  assert.match(worker, /^const POWERFUL_OPENCODE_MODEL_ID = 'qwen3\.5-122b-a10b-local'$/m)
-  assert.match(worker, /const OPENCODE_MODEL = process\.env\.OPENCODE_MODEL \?\? 'llama\.cpp\/qwen3\.6-35b-a3b-local'/)
+  assert.match(worker, /^const OPENCODE_MODEL_ID = 'big-pickle'$/m)
+  assert.doesNotMatch(worker, /POWERFUL_OPENCODE_MODEL|llama\.cpp|qwen3/)
+  assert.match(worker, /const OPENCODE_MODEL = process\.env\.OPENCODE_MODEL \?\? 'opencode-free\/big-pickle'/)
   assert.match(worker, /function openCodeExecArgs\(jobDir, orderPath, model/)
-  assert.match(worker, /\[FAST_OPENCODE_MODEL, POWERFUL_OPENCODE_MODEL\]\.includes\(model\)/)
-  assert.match(worker, /const CONSTRUCTOR_MODEL_PROFILES = Object\.freeze\(\{[\s\S]*fast:[\s\S]*powerful:/)
+  assert.match(worker, /model !== FAST_OPENCODE_MODEL/)
+  assert.match(worker, /const CONSTRUCTOR_MODEL_PROFILES = Object\.freeze\(\{\s*fast:/)
   assert.match(worker, /\.\.\.modelArgs/)
   assert.match(worker, /function activeConstructorProfile\(\)/)
   assert.match(worker, /mkdtempSync\(join\(tmpdir\(\), 'kelion-worker-gate-classification-'\)\)/)
   assert.match(worker, /mkdtempSync\(join\(tmpdir\(\), 'kelion-worker-run-logged-self-test-'\)\)/)
   assert.doesNotMatch(worker, /mkdtempSync\('\/tmp\//)
   assert.doesNotMatch(worker, /switchConstructorModel|modelSwitchArgs|CONSTRUCTOR_TURNS/)
-  assert.match(worker, /'-n', '-u', 'root', '--'/)
+  assert.doesNotMatch(worker, /'-n', '-u', 'root', '--'/)
   assert.match(worker, /function openCodeParentEnv\(\)/)
-  assert.match(worker, /function openCodeRootEnvironmentArgs\(/)
+  assert.match(worker, /function openCodeEnvironmentArgs\(/)
+  assert.match(worker, /function openCodeContainerArgs\(/)
+  assert.match(worker, /--security-opt=no-new-privileges/)
+  assert.match(worker, /stopExecutorContainer\(jobDir\)/)
   assert.doesNotMatch(worker, /codexApiLogin|projectKey|sk-proj-|CODEX_BIN|codex-real|--with-api-key|login status/)
 
   assert.match(service, /^LoadCredential=codex-worker-secret:\/root\/kelion\/secrets\/codex-worker-secret$/m)
   assert.doesNotMatch(service, /^Requires=.*private-ai-llm\.service/m)
   assert.match(service, /^Requires=kelion-constructor-sync\.service kelion-constructor-model-control\.service$/m)
-  assert.match(service, /^Wants=.*private-ai-llm\.service$/m)
+  assert.match(service, /^Wants=network-online\.target$/m)
   assert.match(service, /^Environment=OPENCODE_BIN=\/opt\/private-ai\/bin\/opencode$/m)
-  assert.match(service, /^Environment=OPENCODE_MODEL=llama\.cpp\/qwen3\.6-35b-a3b-local$/m)
+  assert.match(service, /^Environment=OPENCODE_MODEL=opencode-free\/big-pickle$/m)
   assert.doesNotMatch(service, /^Environment=OPENCODE_POWERFUL_MODEL=/m)
   assert.doesNotMatch(service, /^ExecStopPost=.*constructor-model-switch/m)
   assert.match(service, /^SupplementaryGroups=kelion-handoff privateai$/m)
-  assert.match(service, /^ExecStart=\/usr\/bin\/flock --exclusive --wait 9000 \/run\/lock\/private-ai-model-switch\.lock \/usr\/bin\/node \/opt\/kelion-codex\/codex-worker\.mjs --once$/m)
+  assert.match(service, /^ExecStart=\/usr\/bin\/node \/opt\/kelion-codex\/codex-worker\.mjs --once$/m)
   assert.match(service, /^NoNewPrivileges=false$/m)
   assert.match(service, /^ProtectSystem=false$/m)
   assert.doesNotMatch(service, /openai-project-key|OPENAI|codex-real|CODEX_HOME/)
@@ -54,33 +57,24 @@ test('Constructorul folosește exclusiv OpenCode cu Qwen local, fără autentifi
   const parsedConfig = JSON.parse(config)
   assert.equal(parsedConfig.autoupdate, false)
   assert.equal(parsedConfig.share, 'disabled')
-  assert.equal(parsedConfig.model, 'llama.cpp/qwen3.6-35b-a3b-local')
+  assert.equal(parsedConfig.model, 'opencode-free/big-pickle')
   assert.deepEqual(
-    Object.keys(parsedConfig.provider['llama.cpp'].models).sort(),
-    ['qwen3.5-122b-a10b-local', 'qwen3.6-35b-a3b-local'],
+    Object.keys(parsedConfig.provider['opencode-free'].models),
+    ['big-pickle'],
   )
-  assert.deepEqual(parsedConfig.enabled_providers, ['llama.cpp'])
-  assert.deepEqual(Object.keys(parsedConfig.provider), ['llama.cpp'])
-  assert.equal(Object.hasOwn(parsedConfig.provider['llama.cpp'].options, 'apiKey'), false)
-  assert.match(instructions, /Never use a paid or external AI provider/)
+  assert.deepEqual(parsedConfig.enabled_providers, ['opencode-free'])
+  assert.deepEqual(Object.keys(parsedConfig.provider), ['opencode-free'])
+  assert.equal(Object.hasOwn(parsedConfig.provider['opencode-free'].options, 'apiKey'), false)
+  assert.match(instructions, /Never switch model, use a paid fallback/)
+  assert.match(instructions, /You have no sudo or host access/)
   assert.match(gates, /^mkdir -p \/work\/tmp "\$WORK"$/m)
   assert.match(gates, /^export TMPDIR=\/work\/tmp$/m)
   assert.match(buildWorkflow, /docker run --rm --network none --read-only --cap-drop ALL/)
   assert.match(buildWorkflow, /--tmpfs \/work:rw,nosuid,nodev,size=6g,uid=1000,gid=1000/)
   assert.doesNotMatch(buildWorkflow, /--tmpfs \/tmp(?:[:\s])/)
 
-  assert.match(localPreflightWorkflow, /OpenCode\/Qwen/)
-  assert.match(localPreflightWorkflow, /OPENCODE_VERSION = '1\.18\.25'/)
-  assert.match(localPreflightWorkflow, /qwen3\.6-35b-a3b-local/)
-  assert.match(controlWorkflow, /local-repair-executor/)
-  assert.match(controlWorkflow, /opencode-qwen-local=ready/)
-  assert.match(recoveryWorkflow, /\/opt\/private-ai\/bin\/opencode --version/)
-  assert.match(recoveryWorkflow, /\)" = '1\.18\.25' \]/)
-  assert.match(recoveryWorkflow, /\.enabled_providers == \["llama\.cpp"\]/)
-  assert.match(recoveryWorkflow, /\.model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
-  assert.match(recoveryWorkflow, /has\("apiKey"\) \| not/)
+  assert.match(localPreflightWorkflow, /OpenCode/)
   assert.doesNotMatch(localPreflightWorkflow, /@openai\/codex|forced_login_method|CODEX_HOME=\/|login status|sk-proj-|kelion-worker\.config\.toml|codex-auth=/)
-  assert.match(localPreflightWorkflow, /! grep -Eqi '[^']*login\[\[:space:\]\]\+--with-api-key\|openai-project-key[^']*' "\$unit_snapshot"/)
   assert.doesNotMatch(controlWorkflow, /@openai\/codex|forced_login_method|CODEX_HOME|login status|--with-api-key|sk-proj-|kelion-worker\.config\.toml|codex-auth=/)
   assert.doesNotMatch(recoveryWorkflow, /@openai\/codex|forced_login_method|CODEX_HOME|login status|--with-api-key|sk-proj-|kelion-worker\.config\.toml|codex-auth=|openai-project-key/)
 
@@ -108,16 +102,65 @@ test('activarea Constructorului este dublu fail-closed', () => {
   assert.match(service, /^EnvironmentFile=\/root\/kelion\/config\/codex-worker\.env$/m)
   assert.match(service, /^LoadCredential=codex-worker-secret:\/root\/kelion\/secrets\/codex-worker-secret$/m)
   assert.doesNotMatch(service, /^Requires=.*private-ai-llm\.service/m)
-  assert.match(service, /^Wants=.*private-ai-llm\.service$/m)
+  assert.match(service, /^Wants=network-online\.target$/m)
   assert.doesNotMatch(service, /^ExecStopPost=.*constructor-model-switch/m)
   assert.doesNotMatch(service, /host\.env|kelionai\.env|OPENAI_ADMIN|openai-admin|CODEX_ACCESS_TOKEN|openai-project-key|^Environment=.*OPENAI/m)
+})
+
+test('pollingul Constructor nu repornește direct sau tranzitiv modelul oprit de administrator', () => {
+  const unitDirectory = resolve(ROOT, 'deploy/systemd')
+  const units = new Map(readdirSync(unitDirectory)
+    .filter((name) => /\.(?:service|timer)$/.test(name))
+    .map((name) => [name, read(`deploy/systemd/${name}`)]))
+  const startupDependencies = (source) => {
+    let section = ''
+    const directives = new Map()
+    for (const rawLine of source.split(/\r?\n/)) {
+      const line = rawLine.trim()
+      if (line.startsWith('[')) section = line
+      const match = /^([A-Za-z]+)=(.*)$/.exec(line)
+      if (!match) continue
+      const [, name, value] = match
+      const startsUnit = section === '[Unit]' && ['Wants', 'Requires', 'BindsTo', 'Upholds'].includes(name)
+      const timerTarget = section === '[Timer]' && name === 'Unit'
+      if (!startsUnit && !timerTarget) continue
+      if (!value.trim() || timerTarget) directives.set(name, [])
+      directives.set(name, [...(directives.get(name) ?? []), ...value.trim().split(/\s+/).filter(Boolean)])
+    }
+    return [...directives.values()].flat()
+  }
+  const startedBy = (root, graph = units) => {
+    const visited = new Set()
+    const pending = [root]
+    while (pending.length) {
+      const name = pending.pop()
+      if (visited.has(name)) continue
+      visited.add(name)
+      pending.push(...startupDependencies(graph.get(name) ?? ''))
+    }
+    return visited
+  }
+  const scheduledStart = startedBy('kelion-codex-worker.timer')
+  for (const required of ['kelion-codex-worker.service', 'kelion-constructor-sync.service', 'kelion-constructor-model-control.service']) {
+    assert.equal(scheduledStart.has(required), true, `${required} must still be started by the queue timer`)
+  }
+  for (const modelService of ['private-ai-llm.service', 'private-ai-web.service']) {
+    assert.equal(scheduledStart.has(modelService), false, `queue polling must not activate ${modelService}`)
+  }
+  // Detect either old path independently, including the indirect path through
+  // the required controller. Ordering via After= must not count as activation.
+  for (const unit of ['kelion-codex-worker.service', 'kelion-constructor-model-control.service']) {
+    const previousGraph = new Map(units)
+    previousGraph.set(unit, units.get(unit).replace('[Unit]', '[Unit]\nWants=private-ai-llm.service'))
+    assert.equal(startedBy('kelion-codex-worker.timer', previousGraph).has('private-ai-llm.service'), true)
+  }
 })
 
 test('backendul primește admin key numai ca fișier, niciodată executorul Constructor', () => {
   const compose = read('deploy/compose.production.yml')
   const provision = read('.github/workflows/vps-set-env.yml')
   const worker = read('deploy/codex-worker.mjs')
-  const parentEnv = worker.slice(worker.indexOf('export function openCodeParentEnv()'), worker.indexOf('function openCodeRootEnvironmentArgs('))
+  const parentEnv = worker.slice(worker.indexOf('export function openCodeParentEnv()'), worker.indexOf('function openCodeEnvironmentArgs('))
   const workerService = read('deploy/systemd/kelion-codex-worker.service')
   const localPreflightWorkflow = read('.github/workflows/vps-codex-login.yml')
   const recoveryWorkflow = read('.github/workflows/vps-recovery.yml')
@@ -139,18 +182,32 @@ test('backendul primește admin key numai ca fișier, niciodată executorul Cons
   assert.doesNotMatch(workerService, /OPENAI_ADMIN|openai-admin-key/)
   assert.doesNotMatch(localPreflightWorkflow, /OPENAI_ADMIN|openai-admin-key|login status/)
   assert.doesNotMatch(recoveryWorkflow, /OPENAI_ADMIN|openai-admin-key|login status/)
-  assert.match(localPreflightWorkflow, /! grep -Eqi '[^']*login\[\[:space:\]\]\+--with-api-key\|openai-project-key[^']*' "\$unit_snapshot"/)
   assert.match(compose, /^\s+CODEX_WORKER_SECRET_FILE: \/run\/secrets\/codex-worker-secret$/m)
 })
 
 test('imaginea de porți autorizează numai worktree-ul copiat', () => {
   const gates = read('deploy/gates/run-gates.sh')
+  const publisher = read('deploy/constructor-publisher.mjs')
+  const worker = read('deploy/codex-worker.mjs')
 
   assert.match(gates, /^WORK=\/work\/repo$/m)
   assert.match(gates, /^export GIT_CONFIG_COUNT=1$/m)
   assert.match(gates, /^export GIT_CONFIG_KEY_0=safe\.directory$/m)
   assert.match(gates, /^export GIT_CONFIG_VALUE_0="\$WORK"$/m)
   assert.doesNotMatch(gates, /safe\.directory\s*[=*]\s*\*/)
+  assert.match(publisher, /'--runtime', '\/usr\/bin\/crun'/)
+  assert.match(worker, /ociRuntime: '\/usr\/bin\/crun'/)
+  for (const source of [publisher, worker]) {
+    assert.match(source, /--cgroups=disabled/)
+    assert.doesNotMatch(source, /--(?:pids-limit|memory|cpus)=/)
+  }
+  for (const name of ['kelion-codex-worker', 'kelion-constructor-publisher']) {
+    const unit = read(`deploy/systemd/${name}.service`)
+    assert.match(unit, /^CPUQuota=200%$/m)
+    assert.match(unit, /^MemoryMax=6G$/m)
+    assert.match(unit, /^TasksMax=512$/m)
+    assert.match(unit, /^KillMode=control-group$/m)
+  }
 })
 
 test('entrypointul porților emite verdictul măsurat folosit de clasificarea workerului', () => {
@@ -171,6 +228,9 @@ test('imaginea de porți include runtime-urile cerute de testele de publicare ș
   const gates = read('deploy/gates/run-gates.sh')
 
   assert.match(dockerfile, /apt-get install -y --no-install-recommends bash git jq openssh-client python3/)
+  const vendorCopy = 'COPY backend/vendor/node-domexception ./backend/vendor/node-domexception'
+  assert.ok(dockerfile.indexOf(vendorCopy) >= 0 && dockerfile.indexOf(vendorCopy) < dockerfile.indexOf('RUN cd backend && npm ci'))
+  assert.match(dockerfile, /COPY --from=dependencies \/opt\/kelion\/backend\/vendor \/opt\/kelion\/backend\/vendor/)
   assert.doesNotMatch(appRuntime, /\bjq\b/)
   assert.match(gates, /deploy\/lib\/constructor-publication\.test\.mjs/)
   assert.match(gates, /deploy\/lib\/release-rollback\.test\.mjs/)

@@ -18,8 +18,6 @@ test('clasifică toate familiile relevante fără a ascunde fișiere necunoscute
   assert.equal(clasificaFisier('android/gradle/wrapper/gradle-wrapper.jar'), 'dependente-blocate')
   assert.equal(clasificaFisier('android/gradle/verification-keyring.gpg'), 'dependente-blocate')
   assert.equal(clasificaFisier('android/gradle/verification-keyring.keys'), 'dependente-blocate')
-  assert.equal(clasificaFisier('deploy/sudoers/kelion-codex-full-access'), 'configuratie')
-  assert.equal(clasificaFisier('deploy/systemd/private-ai-web-full-access.conf'), 'configuratie')
   assert.equal(clasificaFisier('deploy/sudoers/necunoscut'), 'necunoscut')
   assert.equal(clasificaFisier('deploy/systemd/necunoscut.conf'), 'necunoscut')
   assert.equal(clasificaFisier('secrets/verification-keyring.gpg'), 'necunoscut')

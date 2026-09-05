@@ -70,7 +70,6 @@ import {
 } from '../lib/companionCreativ'
 import { apiFetch } from '../lib/transport'
 import { productConfig } from '../lib/productConfig'
-import { scopedClientKey } from '../lib/clientState'
 import { trustedTradingMessage } from '../lib/tradingBridge'
 import {
   constructorActorLabel,
@@ -1104,9 +1103,6 @@ export default function Stage({
   const isAdmin = !offline && user.role === 'admin'
   const [adminOpen, setAdminOpen] = useState(false)
 
-  useEffect(() => {
-    if (!online) setAppsOpen(false)
-  }, [online])
   const [adminTab, setAdminTab] = useState<AdminTab>('finance')
 
   const [docSaved, setDocSaved] = useState(false)
@@ -1172,59 +1168,6 @@ export default function Stage({
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cvAdaptationOpen, setCvAdaptationOpen] = useState(false)
-
-  const [appsOpen, setAppsOpen] = useState(false)
-
-  const [scenariuGata, setScenariuGata] = useState<{
-    videoPrompt: string
-    nume: string
-    cale: 'openai'
-    la: number
-  } | null>(() => {
-    try {
-      const key = scopedClientKey('kelion_scenariu')
-      const brut = key ? localStorage.getItem(key) : null
-      if (!brut) return null
-      const j = JSON.parse(brut) as {
-        videoPrompt?: string
-        nume?: string
-        cale?: string
-        la?: number
-      }
-      return j.cale === 'openai' && j.videoPrompt
-        ? {
-            videoPrompt: j.videoPrompt,
-            nume: j.nume ?? 'Clip',
-            cale: 'openai',
-            la: j.la ?? 0,
-          }
-        : null
-    } catch {
-      return null
-    }
-  })
-  useEffect(() => {
-    const onScenariu = (e: Event): void => {
-      const d = (e as CustomEvent).detail as {
-        videoPrompt?: string
-        nume?: string
-        cale?: string
-      }
-      if (d?.cale === 'openai' && d.videoPrompt)
-        setScenariuGata({
-          videoPrompt: d.videoPrompt,
-          nume: d.nume ?? 'Clip',
-          cale: 'openai',
-          la: Date.now(),
-        })
-    }
-    window.addEventListener('kelion:scenariu', onScenariu)
-    return () => window.removeEventListener('kelion:scenariu', onScenariu)
-  }, [])
-  const scenariuProaspat =
-    scenariuGata && Date.now() - scenariuGata.la < 30 * 60 * 1000
-      ? scenariuGata
-      : null
 
   const [langOpen, setLangOpen] = useState(false)
 
@@ -1988,142 +1931,6 @@ export default function Stage({
           Kelionai
         </span>
 
-        {online && (
-          <div className="apps-wrap">
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => setAppsOpen((v) => !v)}
-              aria-expanded={appsOpen}
-              title="Aplicații"
-            >
-              ▦ Aplicații ▾
-            </button>
-            {appsOpen && (
-              <>
-                <div
-                  className="apps-backdrop"
-                  onClick={() => setAppsOpen(false)}
-                />
-                <div className="apps-menu">
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      className="apps-item"
-                      onClick={() => {
-                        setAppsOpen(false)
-                        if (!closeTasksByKind('tranzactii'))
-                          window.dispatchEvent(
-                            new CustomEvent('kelion:comanda', {
-                              detail:
-                                'Deschide-mi Centrul de Tranzacționare și spune-mi pe scurt starea lui.',
-                            }),
-                          )
-                      }}
-                    >
-                      📈 Tranzacții
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="apps-item"
-                    onClick={() => {
-                      setAppsOpen(false)
-                      window.dispatchEvent(
-                        new CustomEvent('kelion:comanda', {
-                          detail:
-                            'Deschide-mi panoul de adaptare CV și spune-mi pe scurt cum funcționează.',
-                        }),
-                      )
-                    }}
-                  >
-                    📄 {t.cvTitle}
-                  </button>
-
-                  {[
-                    ['✉️ Gmail', 'Arată-mi ultimele emailuri primite.'],
-
-                    [
-                      '📅 Calendar',
-                      'Arată-mi ce am în calendar săptămâna asta.',
-                    ],
-                    ['📁 Drive', 'Arată-mi ultimele fișiere din Drive.'],
-                    ['📝 Docs', 'Fă-mi un document Google nou.'],
-                    ['📊 Sheets', 'Fă-mi un tabel Google nou.'],
-                    ['✅ Tasks', 'Arată-mi lista mea de sarcini.'],
-                    ['🗺 Hărți', 'Arată-mi pe hartă unde sunt.'],
-                    ['🔎 Căutare', 'Caută pe web ultimele știri.'],
-                    [
-                      '▶️ YouTube',
-                      'Caută pe YouTube un clip și pune-l pe monitor.',
-                    ],
-                    [
-                      '🎨 Imagini',
-                      'Generează o imagine cu un răsărit peste mare.',
-                    ],
-
-                    [
-                      '📽 Prezentări',
-                      'Fă-mi o prezentare Google Slides despre un subiect — întreabă-mă întâi subiectul.',
-                    ],
-                    [
-                      '📹 Meet',
-                      'Fă-mi o întâlnire în calendar cu link Google Meet — întreabă-mă întâi când și cu cine.',
-                    ],
-                    [
-                      '📋 Formulare',
-                      'Fă-mi un formular Google — întreabă-mă întâi ce întrebări să conțină.',
-                    ],
-                    [
-                      '📷 Photos',
-                      'Vreau să aleg niște poze din Google Photos — pornește alegerea și pune-mi linkul pe monitor.',
-                    ],
-                    [
-                      '▶️ YouTube upload',
-                      'Urcă un clip de-al meu pe YouTube — întreabă-mă întâi care clip și ce titlu.',
-                    ],
-                    [
-                      '🏪 Profilul firmei',
-                      'Arată-mi profilul firmei mele din Google (Business Profile) — contul și locațiile.',
-                    ],
-                  ].map(([eticheta, comanda]) => (
-                    <button
-                      key={eticheta}
-                      type="button"
-                      className="apps-item"
-                      onClick={() => {
-                        setAppsOpen(false)
-                        window.dispatchEvent(
-                          new CustomEvent('kelion:comanda', {
-                            detail: comanda,
-                          }),
-                        )
-                      }}
-                    >
-                      {eticheta}
-                    </button>
-                  ))}
-                  {/* Un scenariu pregătit poate fi copiat local; nu pornește un furnizor video. */}
-                  {scenariuProaspat && (
-                    <button
-                      type="button"
-                      className="apps-item"
-                      onClick={() => {
-                        setAppsOpen(false)
-                        void navigator.clipboard
-                          ?.writeText(scenariuProaspat.videoPrompt)
-                          .catch(() => {})
-                      }}
-                    >
-                      📋 Copiază scenariul pregătit
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
         {isAdmin && (
           <>
             {brainStale && (
@@ -2186,10 +1993,10 @@ export default function Stage({
             {langOpen && (
               <>
                 <div
-                  className="apps-backdrop"
+                  className="lang-backdrop"
                   onClick={() => setLangOpen(false)}
                 />
-                <div className="apps-menu lang-menu">
+                <div className="lang-menu">
                   {(
                     [
                       { code: 'ro', label: 'Română', flag: '🇷🇴' },
@@ -2207,7 +2014,7 @@ export default function Stage({
                     <button
                       key={l.code}
                       type="button"
-                      className={`apps-item${lang === l.code ? ' lang-activ' : ''}`}
+                      className={`lang-item${lang === l.code ? ' lang-activ' : ''}`}
                       onClick={() => {
                         setLangOpen(false)
                         handleAdminLangChange(l.code as Lang)

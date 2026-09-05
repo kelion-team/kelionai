@@ -54,6 +54,7 @@ import {
 } from './services/mediaPolicy.js'
 export type { GeneratedMediaKind } from './services/mediaPolicy.js'
 import { redactDiagnostic, sanitizeDiagnosticUrl } from './shared/diagnosticRedaction.js'
+import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from './shared/agentCustomPolicy.js'
 
 export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
@@ -6686,12 +6687,13 @@ export async function adaugaAgentCustom(a: {
   efort?: 'low' | 'high'
   doarAdmin?: boolean
 }): Promise<string | null> {
+  if (a.rol.length > AGENT_CUSTOM_ROLE_MAX_LENGTH) return `rolul poate avea cel mult ${AGENT_CUSTOM_ROLE_MAX_LENGTH} de caractere`
   if (!dbEnabled()) return 'baza de date nu e configurată'
   const r = await getPool()
     .query(
       `INSERT INTO agenti_custom (id, nume, rol, efort, doar_admin) VALUES ($1,$2,$3,$4,$5)
         ON CONFLICT (id) DO NOTHING`,
-      [a.id, a.nume.slice(0, 80), a.rol.slice(0, 500), a.efort === 'high' ? 'high' : null, a.doarAdmin === true],
+      [a.id, a.nume.slice(0, 80), a.rol, a.efort === 'high' ? 'high' : null, a.doarAdmin === true],
     )
     .catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
   if (typeof r === 'string') return `scrierea a picat: ${r.slice(0, 150)}`

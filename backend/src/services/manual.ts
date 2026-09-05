@@ -392,9 +392,9 @@ export function buildAdminChapters(): ManualSection[] {
       title: '🔒 Doar admin — Constructor și publicare',
       audience: 'admin',
       paragraphs: [
-        'Web-ul validează și pune ordine direct în coada canonică build_jobs; nu deține worktree, shell, credentiale Git sau chei AI. Workerul separat execută OpenCode 1.18.25 + Qwen local (llama.cpp).',
+        'Web-ul validează și pune ordine direct în coada canonică build_jobs; nu deține worktree, shell, credențiale Git sau chei AI. Workerul separat execută OpenCode cu motorul validat în configurația de deploy.',
         'Un job are lease, heartbeat, progres și rezultate durabile. Executorul nu poate declara singur publicarea sau deploy-ul, iar un browser admin citește numai starea autorizată.',
-        'Fluxul verificabil este build_jobs, worktree dedicat, OpenCode + Qwen local (llama.cpp), porți, PR, îmbinare și deploy separat cu backup și readiness.',
+        'Fluxul verificabil este build_jobs, worktree dedicat, OpenCode (motor configurat separat), porți, PR, îmbinare și deploy separat cu backup și readiness.',
       ],
     },
     {
@@ -403,7 +403,7 @@ export function buildAdminChapters(): ManualSection[] {
       paragraphs: [
         'Kitul offline este local, explicit și opțional. Instalarea pornește numai din Settings după preflight; modelele locale nu primesc chei și nu sunt folosite drept alternativă cloud a serverului.',
         'Fără rețea nu există acces la Google, memoria serverului, browser sau date live. Coada locală se sincronizează numai după autentificare și confirmă identificatorii acceptați, fără coordonate persistate implicit.',
-        'Constructorul folosește exclusiv OpenCode + Qwen local (llama.cpp). Browserul și clientul dedicat pot doar valida, pune ordine în build_jobs și citi starea autorizată.',
+        'Constructorul folosește exclusiv OpenCode (motor configurat separat). Browserul și clientul dedicat pot doar valida, pune ordine în build_jobs și citi starea autorizată.',
       ],
     },
   ]

@@ -235,10 +235,11 @@ function gateArgs(worktree) {
   const uid = process.getuid?.()
   const gid = process.getgid?.()
   return [
+    '--runtime', '/usr/bin/crun',
     'run', '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=all',
-    '--security-opt=no-new-privileges', '--pids-limit=512', '--memory=4g', '--cpus=2',
+    '--security-opt=no-new-privileges', '--cgroups=disabled',
     '--userns=keep-id', '--user', `${uid}:${gid}`,
-    '--tmpfs', `/work:rw,nosuid,nodev,size=6g,uid=${uid},gid=${gid}`,
+    '--mount', 'type=tmpfs,dst=/work,tmpfs-size=6g,tmpfs-mode=0700,U=true',
     '--mount', `type=bind,src=${worktree},dst=/source,ro=true`,
     '--env', 'HOME=/nonexistent', '--env', 'CI=1', GATE_IMAGE,
   ]

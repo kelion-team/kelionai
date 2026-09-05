@@ -76,7 +76,7 @@ export function projectConstructorObservability(
   if (sequenced.length < 2) return unavailable()
 
   const byKey = new Map(catalog.map((entry) => [entry.activityKey, entry]))
-  const total = sequenced[sequenced.length - 1].sequenceNo - sequenced[0].sequenceNo
+  const total = sequenced.length - 1
   const finalResolved = job.status === 'done'
     && job.constructorStage === 'deployed'
     && /^[0-9a-f]{40}$/.test(job.commit ?? '')
@@ -94,11 +94,15 @@ export function projectConstructorObservability(
     if (event.sequenceNo !== null) highestSequence = Math.max(highestSequence, event.sequenceNo)
   }
   const currentCatalog = byKey.get(job.constructorStage ?? job.status)
-  if (currentCatalog?.sequenceNo !== null && currentCatalog?.sequenceNo !== undefined) {
-    highestSequence = Math.max(highestSequence, currentCatalog.sequenceNo)
-  }
-  const completed = Math.max(0, highestSequence - sequenced[0].sequenceNo)
-  const percent = procentDinEtapePersistate(completed, total, finalResolved)
+  // A stage string alone is not proof that its milestones were reached.
+  // Catalog sequence numbers order milestones; gaps are not completed steps.
+  const milestoneCount = (sequence: number): number => Math.max(0,
+    sequenced.filter((entry) => entry.sequenceNo <= sequence).length - 1)
+  const completed = milestoneCount(highestSequence)
+  const hasEvents = (summary?.eventCount ?? events.length) > 0
+  const percent = hasEvents || finalResolved
+    ? procentDinEtapePersistate(completed, total, finalResolved)
+    : null
 
   let runningSequence = sequenced[0].sequenceNo
   const activity = orderedEvents.map((event, index): ConstructorActivityView => {
@@ -116,7 +120,7 @@ export function projectConstructorObservability(
       state: isResolved ? 'resolved' : isRecovery ? 'recovery' : isLast ? 'current' : 'completed',
       at: event.createdAt,
       percent: procentDinEtapePersistate(
-        Math.max(0, runningSequence - sequenced[0].sequenceNo),
+        milestoneCount(runningSequence),
         total,
         finalResolved && event.activityKey === 'deployed',
       ),

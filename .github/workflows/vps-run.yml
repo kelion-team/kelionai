@@ -710,10 +710,8 @@ jobs:
             artifact.codex-worker
             artifact.constructor-model-control
             artifact.constructor-model-switch
-            authorization.kelion-codex-full-access
             configuration.opencode
             instructions.opencode
-            systemd-dropin.private-ai-web-full-access
             artifact.constructor-publisher
             artifact.constructor-release
             artifact.github-askpass
@@ -737,10 +735,8 @@ jobs:
             "$work/deploy/codex-worker.mjs"
             "$work/deploy/constructor-model-control.mjs"
             "$work/deploy/constructor-model-switch.sh"
-            "$work/deploy/sudoers/kelion-codex-full-access"
             "$work/deploy/opencode-constructor.json"
             "$work/deploy/opencode-constructor-instructions.md"
-            "$work/deploy/systemd/private-ai-web-full-access.conf"
             "$work/deploy/constructor-publisher.mjs"
             "$work/deploy/constructor-release.mjs"
             "$work/deploy/github-askpass.sh"
@@ -762,7 +758,7 @@ jobs:
           )
           current_configure_install_source_sha256() {
             local index
-            [ "${#configure_install_logicals[@]}" -eq 25 ] \
+            [ "${#configure_install_logicals[@]}" -eq 23 ] \
               && [ "${#configure_install_logicals[@]}" -eq "${#configure_install_sources[@]}" ]
             {
               for index in "${!configure_install_logicals[@]}"; do
@@ -796,8 +792,8 @@ jobs:
                 && [ "$(stat -Lc '%u:%g:%a:%h' "$file")" = '0:0:600:1' ] \
                 && [ "$(sha256sum "$file" | awk '{print $1}')" = "$digest" ]
             done < "$root/manifest"
-            [ "$count" -eq 25 ] \
-              && [ "$(find "$root/files" -mindepth 1 -maxdepth 1 -type f -links 1 | wc -l)" -eq 25 ]
+            [ "$count" -eq "${#configure_install_logicals[@]}" ] \
+              && [ "$(find "$root/files" -mindepth 1 -maxdepth 1 -type f -links 1 | wc -l)" -eq "${#configure_install_logicals[@]}" ]
           }
           load_configure_install_journal() {
             [ -f "$deploy_quiesce_journal" ] && [ ! -L "$deploy_quiesce_journal" ] \
@@ -835,7 +831,7 @@ jobs:
             configure_install_journal_source_sha256=$(jq -er '.sourceSha256' "$deploy_quiesce_journal")
             if [ "$configure_install_journal_source_sha256" != "$configure_install_current_source_sha256" ] \
               || [ "${configure_install_journal_source_sha256:0:40}" != "$configure_install_commit" ]; then
-              echo 'Jurnalul installerului aparține altei generații de 25 artefacte; configure-constructor este refuzat' >&2
+              echo 'Jurnalul installerului aparține altei generații de artefacte canonice; configure-constructor este refuzat' >&2
               exit 1
             fi
             configure_install_superseded_root=$(jq -er '.supersededTransactionRoot // ""' "$deploy_quiesce_journal")
@@ -1020,35 +1016,22 @@ jobs:
             case "$state" in inactive|failed) ;; *) echo "Unitatea $unit a devenit activă în timpul instalării" >&2; exit 1 ;; esac
           done
 
-          constructor_config_check='local-repair-executor'
+          constructor_config_check='isolated-repair-executor'
           opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
           opencode_instructions=/srv/private-ai/home/.config/opencode/instructions.md
-          [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ]
-          [ "$(env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin /opt/private-ai/bin/opencode --version)" = '1.18.25' ]
-          [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
-          [ -f "$opencode_instructions" ] && [ ! -L "$opencode_instructions" ]
-          jq -e '
-            .autoupdate == false and .share == "disabled" and
-            .enabled_providers == ["llama.cpp"] and
-            (.provider | keys) == ["llama.cpp"] and
-            .model == "llama.cpp/qwen3.6-35b-a3b-local" and
-            (.provider["llama.cpp"].options | has("apiKey") | not) and
-            .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-            .instructions == ["instructions.md"] and
-            .server == {hostname:"127.0.0.1",port:24096,mdns:false}
-          ' "$opencode_config" >/dev/null
-          systemctl is-active --quiet private-ai-llm.service
-          curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null
-          active_model=$(curl --fail --silent --show-error --max-time 30 \
-            http://127.0.0.1:24080/v1/models \
-            | jq -er '.data | select(type == "array" and length == 1) | .[0].id')
-          case "$active_model" in
-            qwen3.6-35b-a3b-local) systemctl is-active --quiet private-ai-web.service ;;
-            qwen3.5-122b-a10b-local) ! systemctl is-active --quiet private-ai-web.service ;;
-            *) exit 1 ;;
-          esac
-          [ ! -e /var/lib/kelion-codex-auth ] && [ ! -L /var/lib/kelion-codex-auth ]
-          [ ! -e /opt/kelion-codex/profile-home ] && [ ! -L /opt/kelion-codex/profile-home ]
+          node "$work/deploy/constructor-model-control.mjs" --verify-runtime-binary >/dev/null
+          node "$work/deploy/constructor-model-control.mjs" --validate-runtime-config "$opencode_config" >/dev/null
+          cmp -s -- "$work/deploy/opencode-constructor.json" "$opencode_config"
+          cmp -s -- "$work/deploy/opencode-constructor-instructions.md" "$opencode_instructions"
+          for unit in private-ai-llm.service private-ai-web.service; do
+            ! systemctl is-active --quiet "$unit"
+            ! systemctl is-enabled --quiet "$unit"
+          done
+          for retired in /var/lib/kelion-codex-auth /opt/kelion-codex/profile-home \
+            /etc/sudoers.d/kelion-constructor-full-access \
+            /etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf; do
+            [ ! -e "$retired" ] && [ ! -L "$retired" ]
+          done
 
           constructor_config_check='cutover-stage'
           install -d -o root -g root -m 0750 /root/kelion/publisher-secrets
@@ -1907,190 +1890,28 @@ jobs:
             process.stdout.write(payload)
           NODE
           }
-          validate_fast_model_install() {
-            local receipt=/etc/private-ai/.install-complete ready=/var/lib/private-ai/model.ready
-            local model_cache=/srv/private-ai/models model_path
-            local -a lines=() candidates=()
-            [ -f "$receipt" ] && [ ! -L "$receipt" ] \
-              && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
-            mapfile -t lines < "$receipt"
-            [ "${#lines[@]}" -eq 6 ] \
-              && [ "${lines[0]}" = 'installer_id=private-ai-contabo-v1' ] \
-              && [[ "${lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
-              && [ "${lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ] \
-              && [ "${lines[3]}" = 'opencode_version=1.18.25' ] \
-              && [ "${lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ] \
-              && [ "${lines[5]}" = 'model_quant=Q4_K_M' ] || return 1
-            [ -f "$ready" ] && [ ! -L "$ready" ] \
-              && [ "$(stat -Lc '%U:%G:%a:%h' "$ready")" = 'privateai:privateai:600:1' ] || return 1
-            mapfile -d '' -t candidates < <(find "$model_cache" -xdev -type f -size 20419565568c -print0)
-            [ "${#candidates[@]}" -eq 1 ] || return 1
-            model_path=${candidates[0]}
-            [[ "$model_path" == /srv/private-ai/models/* ]] \
-              && [[ "$model_path" != *$'\n'* ]] \
-              && [[ "$model_path" != *$'\r'* ]] \
-              && [ "$(realpath -e -- "$model_path")" = "$model_path" ] \
-              && [ "$(stat -Lc '%U:%G:%s:%h' "$model_path")" = \
-                'privateai:privateai:20419565568:1' ] || return 1
-            printf '%s\n' "$model_path"
-          }
-          validate_powerful_model_install() {
-            local fast_model_path=$1
-            local sealed=/etc/private-ai/.max-model-sealed complete=/etc/private-ai/.max-model-complete
-            local powerful_root=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m
-            local -a sealed_lines=() complete_lines=()
-            [ -f "$complete" ] && [ ! -L "$complete" ] \
-              && [ "$(stat -Lc '%u:%g:%a:%h' "$complete")" = '0:0:600:1' ] || return 1
-            mapfile -t complete_lines < "$complete"
-            [ "${#complete_lines[@]}" -eq 20 ] \
-              && [ "${complete_lines[0]}" = 'schema=2' ] \
-              && [ "${complete_lines[1]}" = 'default_model=llama.cpp/qwen3.6-35b-a3b-local' ] \
-              && [ "${complete_lines[2]}" = 'powerful_model=llama.cpp/qwen3.5-122b-a10b-local' ] \
-              && [ "${complete_lines[3]}" = 'active_profile=fast' ] \
-              && [ "${complete_lines[4]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] \
-              && [ "${complete_lines[5]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] \
-              && [ "${complete_lines[6]}" = 'model_quant=Q4_K_M' ] \
-              && [ "${complete_lines[7]}" = 'model_total_bytes=76536964608' ] \
-              && [ "${complete_lines[8]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] \
-              && [ "${complete_lines[9]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] \
-              && [ "${complete_lines[10]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] \
-              && [ "${complete_lines[11]}" = 'fast_model_bytes=20419565568' ] \
-              && [ "${complete_lines[12]}" = 'fast_model_sha256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7' ] \
-              && [ "${complete_lines[13]}" = "fast_model_path=$fast_model_path" ] \
-              && [[ "${complete_lines[14]}" =~ ^installer_sha256=[0-9a-f]{64}$ ]] \
-              && [[ "${complete_lines[15]}" =~ ^worker_source_sha256=[0-9a-f]{64}$ ]] \
-              && [[ "${complete_lines[16]}" =~ ^config_source_sha256=[0-9a-f]{64}$ ]] \
-              && [[ "${complete_lines[17]}" =~ ^worker_unit_source_sha256=[0-9a-f]{64}$ ]] \
-              && [[ "${complete_lines[18]}" =~ ^switch_source_sha256=[0-9a-f]{64}$ ]] \
-              && [[ "${complete_lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
-              || return 1
-            [ -f "$sealed" ] && [ ! -L "$sealed" ] \
-              && [ "$(stat -Lc '%u:%g:%a:%h' "$sealed")" = '0:0:600:1' ] || return 1
-            mapfile -t sealed_lines < "$sealed"
-            [ "${#sealed_lines[@]}" -eq 9 ] \
-              && [ "${sealed_lines[0]}" = 'schema=1' ] \
-              && [ "${sealed_lines[1]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] \
-              && [ "${sealed_lines[2]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] \
-              && [ "${sealed_lines[3]}" = 'model_quant=Q4_K_M' ] \
-              && [ "${sealed_lines[4]}" = 'model_total_bytes=76536964608' ] \
-              && [ "${sealed_lines[5]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] \
-              && [ "${sealed_lines[6]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] \
-              && [ "${sealed_lines[7]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] \
-              && [[ "${sealed_lines[8]}" =~ ^sealed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
-              || return 1
-            [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf")" = \
-              'root:privateai:440:10943552:1' ] \
-              && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf")" = \
-                'root:privateai:440:49968146912:1' ] \
-              && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf")" = \
-                'root:privateai:440:26557874144:1' ]
-          }
-          expected_powerful_status_dropin() {
-            cat <<'EOF'
-          [Service]
-          ExecStart=
-          ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
-          Restart=no
-          TimeoutStartSec=3600
-          CPUQuota=1600%
-          MemoryHigh=84G
-          MemoryMax=88G
-          EOF
-          }
           validate_constructor_model_status() {
+            local controller=/opt/kelion-constructor/constructor-model-control.mjs
             local opencode_config=/srv/private-ai/home/.config/opencode/opencode.json
-            local model_lock=/run/lock/private-ai-model-switch.lock lock_identity
-            local legacy_dropin=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
-            local runtime_dropin=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf
-            local snapshot active_profile model_payload active_alias fast_model_path mapped_model
-            local dropins web_state llm_pid
-            [ -f "$model_lock" ] && [ ! -L "$model_lock" ] \
-              && [ "$(stat -Lc '%U:%G:%a:%h' "$model_lock")" = 'root:privateai:660:1' ] || return 1
-            lock_identity=$(stat -Lc '%d:%i' "$model_lock") || return 1
-            exec 8<>"$model_lock" || return 1
-            [ "$(readlink /proc/$$/fd/8)" = "$model_lock" ] \
-              && [ "$(stat -Lc '%d:%i' /proc/$$/fd/8)" = "$lock_identity" ] || return 1
-            flock --shared --wait 30 8 || return 1
-            [ ! -L "$model_lock" ] \
-              && [ "$(stat -Lc '%d:%i' "$model_lock")" = "$lock_identity" ] \
-              && [ "$(stat -Lc '%d:%i' /proc/$$/fd/8)" = "$lock_identity" ] || return 1
-            [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ] || return 1
+            local expected_model snapshot unit
+            [ -f "$controller" ] && [ ! -L "$controller" ] \
+              && [ "$(stat -Lc '%u:%g:%a:%h' "$controller")" = '0:0:555:1' ] || return 1
             [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ] \
               && [ "$(stat -Lc '%U:%G:%a:%h' "$opencode_config")" = 'root:privateai:640:1' ] || return 1
-            [ "$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
-              HOME=/var/lib/kelion-codex \
-              XDG_CONFIG_HOME=/srv/private-ai/home/.config \
-              PATH=/opt/private-ai/bin:/usr/bin:/bin \
-              /opt/private-ai/bin/opencode --version 2>/dev/null)" = '1.18.25' ] || return 1
-            jq -e '
-              .autoupdate == false and .share == "disabled" and
-              .enabled_providers == ["llama.cpp"] and
-              (.provider | keys) == ["llama.cpp"] and
-              .model == "llama.cpp/qwen3.6-35b-a3b-local" and
-              .small_model == "llama.cpp/qwen3.6-35b-a3b-local" and
-              .provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
-              (.provider["llama.cpp"].options | has("apiKey") | not) and
-              .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-              (.provider["llama.cpp"].models | keys) ==
-                ["qwen3.5-122b-a10b-local", "qwen3.6-35b-a3b-local"]
-            ' "$opencode_config" >/dev/null || return 1
-            fast_model_path=$(validate_fast_model_install) || return 1
-            validate_powerful_model_install "$fast_model_path" || return 1
+            node "$controller" --verify-runtime-binary >/dev/null || return 1
+            expected_model=$(node "$controller" --validate-runtime-config "$opencode_config") || return 1
+            for unit in private-ai-llm.service private-ai-web.service; do
+              ! systemctl is-active --quiet "$unit" || return 1
+              ! systemctl is-enabled --quiet "$unit" || return 1
+            done
+            [ ! -e /etc/sudoers.d/kelion-constructor-full-access ] \
+              && [ ! -L /etc/sudoers.d/kelion-constructor-full-access ] || return 1
             snapshot=$(constructor_model_snapshot) || return 1
-            active_profile=$(jq -er '
-              if type == "object" and
-                (keys == ["activeProfile","defaultProfile","installedProfiles","mode","requestId","requestedProfile","status"]) and
-                .mode == "manual" and .defaultProfile == "fast" and .status == "ready" and
-                .requestedProfile == null and .requestId == null and
-                .installedProfiles == ["fast", "powerful"] and
-                (.activeProfile == "fast" or .activeProfile == "powerful")
-              then .activeProfile else error("model snapshot invalid") end
-            ' <<<"$snapshot") || return 1
-            systemctl is-active --quiet private-ai-llm.service || return 1
-            [ "$(systemctl show private-ai-llm.service --property=NeedDaemonReload --value)" = no ] || return 1
-            curl --fail --silent --show-error --max-time 10 \
-              http://127.0.0.1:24080/health >/dev/null || return 1
-            model_payload=$(curl --fail --silent --show-error --max-time 30 \
-              http://127.0.0.1:24080/v1/models) || return 1
-            active_alias=$(jq -er '
-              .data as $models |
-              if ($models | type) == "array" and ($models | length) == 1 and
-                ($models[0] | type) == "object" and
-                ($models[0].id | type) == "string"
-              then $models[0].id else error("model list invalid") end
-            ' <<<"$model_payload") || return 1
-            [ ! -e "$legacy_dropin" ] && [ ! -L "$legacy_dropin" ] || return 1
-            dropins=$(systemctl show private-ai-llm.service --property=DropInPaths --value) || return 1
-            web_state=$(systemctl show private-ai-web.service --property=ActiveState --value) || return 1
-            case "$active_profile:$active_alias" in
-              fast:qwen3.6-35b-a3b-local)
-                [ "$web_state" = active ] \
-                  && [ ! -e "$runtime_dropin" ] && [ ! -L "$runtime_dropin" ] \
-                  && [ -z "$dropins" ] || return 1
-                mapped_model=$fast_model_path
-                ;;
-              powerful:qwen3.5-122b-a10b-local)
-                [ "$web_state" = inactive ] \
-                  && [ -f "$runtime_dropin" ] && [ ! -L "$runtime_dropin" ] \
-                  && [ "$(stat -Lc '%u:%g:%a:%h' "$runtime_dropin")" = '0:0:644:1' ] \
-                  && [ "$(<"$runtime_dropin")" = "$(expected_powerful_status_dropin)" ] \
-                  && [ "$dropins" = "$runtime_dropin" ] || return 1
-                mapped_model=/srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
-                ;;
-              *) return 1 ;;
-            esac
-            llm_pid=$(systemctl show private-ai-llm.service --property=MainPID --value) || return 1
-            [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] \
-              && [ "$(readlink -f -- "/proc/$llm_pid/exe")" = /opt/private-ai/bin/llama-server ] \
-              && awk -v target="$mapped_model" '$NF == target { found=1 } END { exit !found }' \
-                "/proc/$llm_pid/maps" || return 1
-            [ "$active_alias" = "$(curl --fail --silent --show-error --max-time 30 \
-              http://127.0.0.1:24080/v1/models \
-              | jq -er '.data | select(type == "array" and length == 1) | .[0].id')" ] || return 1
-            systemctl is-active --quiet kelion-constructor-model-control.service \
-              && [ -S /run/kelion-constructor-model-control/control.sock ] \
-              && [ ! -L /run/kelion-constructor-model-control/control.sock ] \
-              && [ "$(stat -Lc '%u:%g:%a' /run/kelion-constructor-model-control/control.sock)" = '0:10050:660' ]
+            jq -e --argjson expected "$expected_model" '
+              .mode == "manual" and .defaultProfile == "fast" and
+              .status == "ready" and .activeProfile == "fast" and
+              .installedProfiles == ["fast"] and .model == $expected
+            ' <<<"$snapshot" >/dev/null
           }
           status() {
             local unit marker state
@@ -2107,9 +1928,9 @@ jobs:
               fi
             done
             if validate_constructor_model_status; then
-              echo 'opencode-qwen-local=ready'
+              echo 'opencode-isolated=ready'
             else
-              echo 'opencode-qwen-local=required'
+              echo 'opencode-isolated=required'
             fi
             assert_backend_side_effects_active
           }
@@ -2132,7 +1953,7 @@ jobs:
               [ ! -e /etc/kelion/constructor-release.enabled ] && [ ! -L /etc/kelion/constructor-release.enabled ]
               require_enabled_flag CODEX_WORKER_ENABLED
               require_enabled_flag CONSTRUCTOR_PUBLISHER_ENABLED
-              # Primul start validează self-testul OpenCode/Qwen local și
+              # Primul start validează self-testul OpenCode izolat și
               # transportul HMAC înainte de orice claim.
               assert_backend_side_effects_active >/dev/null
               if [ "$activation_resume_pending" = 0 ]; then

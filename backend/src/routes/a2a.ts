@@ -52,8 +52,11 @@ export function extrageText(body: Record<string, unknown>): string {
 export async function a2aRoutes(app: FastifyInstance): Promise<void> {
   // Registrul: dovada că agenții există și sunt accesibili (verificare live).
   // Rosterul VIU = codul + agenții puși de owner din admin (4 aug).
-  app.get('/api/a2a', async () => {
-    const roster = await rosterViu()
+  app.get('/api/a2a', async (req, reply) => {
+    reply.header('Cache-Control', 'private, no-store')
+    const user = getSessionUser(req)
+    const owner = user !== null && esteAdminKelion(user.email)
+    const roster = (await rosterViu()).filter((a) => !a.doarAdmin || owner)
     return {
       count: roster.length,
       agents: roster.map((a) => ({ id: a.id, nume: a.nume, rol: a.rol, url: `/api/a2a/${a.id}` })),
@@ -62,8 +65,10 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
 
   // Cartea de descoperire A2A — și pe calea simplă, și pe calea .well-known.
   const cartea = async (req: FastifyRequest, reply: FastifyReply) => {
+    reply.header('Cache-Control', 'private, no-store')
     const a = await gasesteAgentViu((req.params as { id: string }).id)
-    if (!a) {
+    const user = getSessionUser(req)
+    if (!a || (a.doarAdmin && (!user || !esteAdminKelion(user.email)))) {
       reply.code(404)
       return { error: 'agent necunoscut' }
     }
@@ -93,7 +98,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
 
     // Agenții „doar admin" (Adrian, 4 aug: „roboti de tranzactionare DOAR
     // admin"): endpointul e public pentru restul rosterului, dar aceștia refuză
-    // orice apel fără sesiunea ownerului — cartea se vede, munca nu.
+    // orice apel fără sesiunea ownerului; descoperirea păstrează aceeași limită.
     if (a.doarAdmin) {
       if (!esteAdminKelion(user.email)) {
         // 401 pe sesiune moartă, 403 DOAR pe rol (regula din 9 aug) — și

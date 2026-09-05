@@ -22,10 +22,10 @@ describe('Kelion Constructor desktop contract', () => {
     expect(constructorDb).toContain('INSERT INTO build_jobs (ordered_by, order_text, brain)')
     expect(constructorDb).toContain('[accountKey, orderText, CONSTRUCTOR_LOCAL_ACTOR]')
     expect(constructorDb).toContain("UPDATE build_jobs SET status='running'")
-    expect(constructorPanel).toContain('Worker privat: OpenCode + Qwen local (llama.cpp)')
-    expect(constructorPanel).toContain('coada canonică <b>build_jobs</b>')
-    expect(constructorPanel).toContain('A.constructorModelManualHint')
-    expect(constructorPanel).toContain('selectConstructorModel(profile.id)')
+    expect(constructorPanel).toContain('Motorul Constructorului')
+    expect(constructorPanel).toContain('constructorModelSnapshot.model?.label')
+    expect(constructorPanel).toContain('<ConstructorJobProgress job={j} />')
+    expect(constructorPanel).not.toContain('selectConstructorModel')
   })
 
   it('does not create an SSH, VPS or separate OpenCode-web path', () => {

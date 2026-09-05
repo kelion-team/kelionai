@@ -1,7 +1,7 @@
 [Unit]
-Description=Kelion Constructor queue with local OpenCode/Qwen full-host executor
-After=network-online.target private-ai-llm.service kelion-constructor-sync.service kelion-constructor-model-control.service kelion-runtime-config-recovery.service
-Wants=network-online.target private-ai-llm.service
+Description=Kelion Constructor queue with isolated anonymous OpenCode executor
+After=network-online.target kelion-constructor-sync.service kelion-constructor-model-control.service kelion-runtime-config-recovery.service
+Wants=network-online.target
 Requires=kelion-constructor-sync.service kelion-constructor-model-control.service
 ConditionPathExists=/etc/kelion/codex-worker.enabled
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
@@ -19,15 +19,17 @@ Environment=PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/u
 Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode
 Environment=OPENCODE_CONFIG_HOME=/srv/private-ai/home/.config
 Environment=OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json
-Environment=OPENCODE_MODEL=llama.cpp/qwen3.6-35b-a3b-local
-Environment=OPENCODE_BASE_URL=http://127.0.0.1:24080/v1
+Environment=OPENCODE_MODEL=opencode-free/big-pickle
+Environment=OPENCODE_BASE_URL=https://opencode.ai/inference/openai/v1
 Environment=CODEX_WORKER_REPO=/var/lib/kelion-codex/repo
 Environment=CODEX_WORKER_JOBS=/var/lib/kelion-codex/jobs
 Environment=CODEX_HANDOFF_READY=/var/lib/kelion-constructor-handoff/ready
 EnvironmentFile=/root/kelion/config/codex-worker.env
 LoadCredential=codex-worker-secret:/root/kelion/secrets/codex-worker-secret
 ExecStartPre=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test
-ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once
+# Rootless podman requires newuidmap/newgidmap and mount namespaces. The AI
+# runs inside its no-new-privileges container, never with this supervisor env.
 NoNewPrivileges=false
 KeyringMode=shared
 PrivateIPC=false
@@ -39,14 +41,14 @@ ProtectProc=default
 ProcSubset=all
 ProtectClock=false
 ProtectControlGroups=false
-ProtectHome=false
+ProtectHome=true
 ProtectHostname=false
 ProtectKernelLogs=false
 ProtectKernelModules=false
 ProtectKernelTunables=false
 ProtectSystem=false
 ReadWritePaths=
-RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
 RestrictNamespaces=false
 RestrictRealtime=false
 RestrictSUIDSGID=false
@@ -54,6 +56,8 @@ LockPersonality=false
 CapabilityBoundingSet=~
 AmbientCapabilities=
 SystemCallArchitectures=
+# crun containers inherit these enforced limits; no rootless cgroup delegation.
+CPUQuota=200%
 MemoryMax=6G
 TasksMax=512
 TimeoutStartSec=240min

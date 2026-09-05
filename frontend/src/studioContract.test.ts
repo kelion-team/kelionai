@@ -10,11 +10,8 @@ describe('Studio video OpenAI-only', () => {
   it('acceptă numai frame-ul canonical OpenAI', () => {
     const contract = source('lib/chat.ts')
     const chat = source('components/ChatPanel.tsx')
-    const stage = source('pages/Stage.tsx')
     expect(contract).toContain("scenariu?: { videoPrompt: string; nume: string; cale: 'openai' }")
     expect(chat).toContain("c.scenariu?.cale === 'openai' && c.scenariu.videoPrompt")
-    expect(stage).toContain("j.cale === 'openai' && j.videoPrompt")
-    expect(stage).toContain('scenariuProaspat.videoPrompt')
   })
 
   it('nu păstrează câmpuri sau rețete video retrase', () => {

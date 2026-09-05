@@ -59,7 +59,7 @@ trap 'capture_constructor_install_failure "$LINENO"' ERR
 trap report_constructor_install_failure EXIT
 set_constructor_install_phase preflight
 
-# Instalează codul, configul OpenCode local, identitățile, regula sudoers și
+# Instalează codul, configurația OpenCode aprobată, identitățile izolate și
 # unitățile dezactivate. Retrage cache-ul/adaptoarele Codex vechi, dar nu
 # creează credentiale, nu clonează, nu activează timere și nu pornește servicii.
 [[ "$(id -u)" == "0" ]] || { echo 'rulează ca root' >&2; constructor_install_failure_line=$LINENO; exit 1; }
@@ -92,7 +92,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
   echo 'sursa instalării nu este repository-ul Kelion validat' >&2
   constructor_install_failure_line=$LINENO; exit 1
 }
-for tool in awk cmp curl find flock getent grep jq mktemp python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod visudo wc; do
+for tool in awk cmp crun curl find flock getent grep jq mktemp podman python3 readlink realpath sha256sum sleep stat sync systemctl systemd-analyze usermod node wc; do
   command -v "$tool" >/dev/null 2>&1 || { echo "lipsește utilitarul $tool" >&2; constructor_install_failure_line=$LINENO; exit 1; }
 done
 getent group privateai >/dev/null 2>&1 || {
@@ -102,175 +102,31 @@ getent group privateai >/dev/null 2>&1 || {
 
 validate_opencode_constructor_config() {
   local file=$1
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  jq -e '
-    . as $config |
-    $config.autoupdate == false and $config.share == "disabled" and
-    $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
-    ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
-    $config.enabled_providers == ["llama.cpp"] and
-    ($config.provider | keys) == ["llama.cpp"] and
-    $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
-    $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-    ($config.provider["llama.cpp"].options | has("apiKey") | not) and
-    ($config.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local")) and
-    ($config.provider["llama.cpp"].models | has("qwen3.5-122b-a10b-local")) and
-    (["*","read","glob","grep","edit","bash","task","skill","webfetch","websearch","external_directory"]
-      | all(.[]; $config.permission[.] == "allow")) and
-    $config.instructions == ["instructions.md"] and
-    $config.server == {hostname:"127.0.0.1",port:24096,mdns:false}
-  ' "$file" >/dev/null
-}
-
-constructor_expected_model_profile=''
-constructor_fast_model_path=''
-
-validate_max_model_complete_receipt() {
-  local receipt=/etc/private-ai/.max-model-complete
-  local expected_fast_path=$1
-  local -a lines=()
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
-  mapfile -t lines < "$receipt"
-  [ "${#lines[@]}" -eq 20 ] || return 1
-  [ "${lines[0]}" = 'schema=2' ] || return 1
-  [ "${lines[1]}" = 'default_model=llama.cpp/qwen3.6-35b-a3b-local' ] || return 1
-  [ "${lines[2]}" = 'powerful_model=llama.cpp/qwen3.5-122b-a10b-local' ] || return 1
-  [ "${lines[3]}" = 'active_profile=fast' ] || return 1
-  [ "${lines[4]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] || return 1
-  [ "${lines[5]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] || return 1
-  [ "${lines[6]}" = 'model_quant=Q4_K_M' ] || return 1
-  [ "${lines[7]}" = 'model_total_bytes=76536964608' ] || return 1
-  [ "${lines[8]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] || return 1
-  [ "${lines[9]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] || return 1
-  [ "${lines[10]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] || return 1
-  [ "${lines[11]}" = 'fast_model_bytes=20419565568' ] || return 1
-  [ "${lines[12]}" = 'fast_model_sha256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7' ] || return 1
-  [[ "$expected_fast_path" == /srv/private-ai/models/* ]] \
-    && [ "$(realpath -e -- "$expected_fast_path")" = "$expected_fast_path" ] \
-    && [ "${lines[13]}" = "fast_model_path=$expected_fast_path" ] || return 1
-  [[ "${lines[14]}" =~ ^installer_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[15]}" =~ ^worker_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[16]}" =~ ^config_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[17]}" =~ ^worker_unit_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[18]}" =~ ^switch_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+  env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+    /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
+    --validate-runtime-config "$file" >/dev/null
 }
 
 validate_private_ai_base() {
-  local receipt=/etc/private-ai/.install-complete config=/srv/private-ai/home/.config/opencode/opencode.json
-  local instructions=/srv/private-ai/home/.config/opencode/instructions.md
-  local llama_server=/opt/private-ai/bin/llama-server llama_source=/opt/private-ai/src/llama.cpp
-  local llama_state=/var/lib/private-ai/llama-cpp.commit model_cache=/srv/private-ai/models
-  local model_file_path fast_model_file_path llm_pid active_alias active_profile powerful_root
-  local -a receipt_lines=()
-  local -a model_candidates=()
-  for directory in /etc/private-ai /opt/private-ai /opt/private-ai/bin /srv/private-ai /srv/private-ai/home \
-    /srv/private-ai/home/.config /srv/private-ai/home/.config/opencode; do
+  local directory
+  # The approved hosted executor needs only the pinned OpenCode binary.
+  # No local model, obsolete model receipt or active llama daemon is required.
+  for directory in /opt/private-ai /opt/private-ai/bin /srv/private-ai \
+    /srv/private-ai/home /srv/private-ai/home/.config /srv/private-ai/home/.config/opencode; do
     [ -d "$directory" ] && [ ! -L "$directory" ] \
       && [ "$(realpath -e -- "$directory")" = "$directory" ] || return 1
   done
   [ "$(stat -Lc '%U:%G:%a' /srv/private-ai/home/.config)" = 'root:privateai:750' ] || return 1
   [ "$(stat -Lc '%U:%G:%a' /srv/private-ai/home/.config/opencode)" = 'root:privateai:750' ] || return 1
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
-  mapfile -t receipt_lines < "$receipt"
-  [ "${#receipt_lines[@]}" -eq 6 ] || return 1
-  [ "${receipt_lines[0]}" = 'installer_id=private-ai-contabo-v1' ] || return 1
-  [[ "${receipt_lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
-  [ "${receipt_lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ] || return 1
-  [ "${receipt_lines[3]}" = 'opencode_version=1.18.25' ] || return 1
-  [ "${receipt_lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ] || return 1
-  [ "${receipt_lines[5]}" = 'model_quant=Q4_K_M' ] || return 1
-  [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' /opt/private-ai/bin/opencode)" = '0:0:755:1' ] || return 1
-  [ "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')" = \
-    d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb ] || return 1
-  [ "$(env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin /opt/private-ai/bin/opencode --version)" = '1.18.25' ] || return 1
-  [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
-  [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
-    b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e ] || return 1
-  [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
-  [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
-  [ -d "$llama_source/.git" ] && [ ! -L "$llama_source" ] || return 1
-  [ "$(runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
-    git -C "$llama_source" rev-parse HEAD)" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
-  mapfile -d '' -t model_candidates < <(
-    find "$model_cache" -xdev -type f -size 20419565568c -print0
-  )
-  [ "${#model_candidates[@]}" -eq 1 ] || return 1
-  fast_model_file_path=${model_candidates[0]}
-  [ -f "$fast_model_file_path" ] && [ ! -L "$fast_model_file_path" ] \
-    && [ "$(stat -Lc '%U:%G:%s:%h' "$fast_model_file_path")" = \
-      'privateai:privateai:20419565568:1' ] || return 1
-  [ "$(sha256sum "$fast_model_file_path" | awk '{print $1}')" = \
-    671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7 ] || return 1
-  if [ -z "$constructor_fast_model_path" ]; then
-    constructor_fast_model_path=$fast_model_file_path
-  else
-    [ "$constructor_fast_model_path" = "$fast_model_file_path" ] || return 1
-  fi
-  [ -f "$config" ] && [ ! -L "$config" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "$config")" = 'root:privateai:640:1' ] || return 1
-  [ -f "$instructions" ] && [ ! -L "$instructions" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "$instructions")" = 'root:privateai:640:1' ] || return 1
-  jq -e '
-    .enabled_providers == ["llama.cpp"] and
-    (.provider | keys) == ["llama.cpp"] and
-    .provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
-    .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-    (.provider["llama.cpp"].options | has("apiKey") | not) and
-    (.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local")) and
-    (.provider["llama.cpp"].models | has("qwen3.5-122b-a10b-local"))
-  ' "$config" >/dev/null || return 1
-  systemctl is-active --quiet private-ai-llm.service || return 1
-  active_alias=$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id') || return 1
-  case "$active_alias" in
-    qwen3.6-35b-a3b-local)
-      active_profile=fast
-      model_file_path=$fast_model_file_path
-      systemctl is-active --quiet private-ai-web.service || return 1
-      ;;
-    qwen3.5-122b-a10b-local)
-      active_profile=powerful
-      powerful_root=$model_cache/qwen3.5-122b-a10b-q4_k_m
-      [ -f /etc/private-ai/.max-model-sealed ] && [ ! -L /etc/private-ai/.max-model-sealed ] || return 1
-      validate_max_model_complete_receipt "$fast_model_file_path" || return 1
-      [ -f "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf" ] \
-        && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf")" = 'root:privateai:440:10943552:1' ] || return 1
-      [ -f "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf" ] \
-        && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf")" = 'root:privateai:440:49968146912:1' ] || return 1
-      [ -f "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf" ] \
-        && [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf")" = 'root:privateai:440:26557874144:1' ] || return 1
-      model_file_path=$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
-      ! systemctl is-active --quiet private-ai-web.service || return 1
-      ;;
-    *) return 1 ;;
-  esac
-  if [ -z "$constructor_expected_model_profile" ]; then
-    constructor_expected_model_profile=$active_profile
-  else
-    [ "$active_profile" = "$constructor_expected_model_profile" ] || return 1
-  fi
-  llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
-  [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ] || return 1
-  awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
-    "/proc/$llm_pid/maps" || return 1
-  curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null || return 1
-  [ "$active_alias" = "$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id')" ]
+  env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+    /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
+    --verify-runtime-binary >/dev/null
 }
 
 validate_opencode_constructor_config "$repo_root/deploy/opencode-constructor.json" \
   || { echo 'configurația OpenCode Constructor din bundle este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 validate_private_ai_base \
-  || { echo 'runtime-ul OpenCode/Qwen local nu corespunde bazei fixate' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+  || { echo 'binarul OpenCode nu corespunde versiunii fixate' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 # Nu conecta `usermod --help` la `grep -q` sub pipefail: grep poate închide
 # conducta după primul match, iar SIGPIPE-ul producătorului transformă o
 # capabilitate prezentă într-un fals eșec. Capturăm o singură ieșire bounded și
@@ -882,50 +738,23 @@ secure_handoff_spool() {
   sync -f "$spool"
 }
 
-validate_constructor_sudoers() {
-  local file=$1
-  [ -f "$file" ] && [ ! -L "$file" ] \
-    && [ "$(stat -Lc '%h' "$file")" = 1 ] \
-    && [ "$(wc -l < "$file")" -eq 1 ] \
-    && grep -qxF 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' "$file" \
-    && visudo -cf "$file" >/dev/null
-}
-
-validate_private_ai_web_full_access() {
-  local source=$repo_root/deploy/systemd/private-ai-web-full-access.conf
-  local target=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
-  local pid dropins
-  [ -f "$source" ] && [ ! -L "$source" ] || return 1
-  [ -f "$target" ] && [ ! -L "$target" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$target")" = '0:0:444:1' ] \
-    && cmp -s -- "$source" "$target" || return 1
-  dropins=$(systemctl show private-ai-web.service --property=DropInPaths --value) || return 1
-  [ "$dropins" = "$target" ] || return 1
-  systemctl is-enabled --quiet private-ai-web.service || return 1
-  systemctl is-active --quiet private-ai-web.service || return 1
-  [ "$(systemctl show private-ai-web.service --property=User --value)" = root ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=Group --value)" = root ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=NoNewPrivileges --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateIPC --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateDevices --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateTmp --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectHome --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectControlGroups --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelLogs --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelModules --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelTunables --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectSystem --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=RestrictNamespaces --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=RestrictSUIDSGID --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=LockPersonality --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=CPUQuotaPerSecUSec --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=CPUWeight --value)" = 100 ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=MemoryHigh --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=MemoryMax --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=TasksMax --value)" = infinity ] || return 1
-  pid=$(systemctl show private-ai-web.service --property=MainPID --value) || return 1
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$pid/status" ] \
-    && [ "$(awk '/^Uid:/ { print $2 }' "/proc/$pid/status")" = 0 ]
+validate_retired_local_runtime() {
+  local unit state retired
+  for unit in private-ai-llm.service private-ai-web.service; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+      case "$state" in inactive|failed) ;; *) return 1 ;; esac
+      ! systemctl is-enabled --quiet "$unit" || return 1
+      [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    fi
+  done
+  for retired in /etc/sudoers.d/kelion-constructor-full-access \
+    /etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf; do
+    [ ! -e "$retired" ] && [ ! -L "$retired" ] || return 1
+  done
+  # The supervisor must not retain any other unrestricted sudo grant.
+  if runuser -u kelion-codex -- env -i PATH=/usr/bin:/bin \
+    /usr/bin/sudo -n -u root -- /usr/bin/id -u >/dev/null 2>&1; then return 1; fi
 }
 
 retire_legacy_codex_state() {
@@ -939,6 +768,8 @@ retire_legacy_codex_state() {
     /opt/private-ai/bin/opencode-constructor-root
     /etc/private-ai/local-codex-compat-key
     /etc/sudoers.d/kelion-local-qwen-constructor
+    /etc/sudoers.d/kelion-constructor-full-access
+    /etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
     /etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf
     /etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf
   )
@@ -946,6 +777,7 @@ retire_legacy_codex_state() {
   for parent in \
     /opt/kelion-codex /opt/kelion-codex/bin /opt/private-ai /opt/private-ai/bin \
     /etc/private-ai /etc/sudoers.d /etc/systemd/system \
+    /etc/systemd/system/private-ai-web.service.d \
     /etc/systemd/system/kelion-codex-worker.service.d /var/lib; do
     if [ -e "$parent" ] || [ -L "$parent" ]; then
       validate_root_owned_protected_directory "$parent" || return 1
@@ -1075,10 +907,8 @@ install_logicals=(
   artifact.codex-worker
   artifact.constructor-model-control
   artifact.constructor-model-switch
-  authorization.kelion-codex-full-access
   configuration.opencode
   instructions.opencode
-  systemd-dropin.private-ai-web-full-access
   artifact.constructor-publisher
   artifact.constructor-release
   artifact.github-askpass
@@ -1102,10 +932,8 @@ install_sources=(
   "$repo_root/deploy/codex-worker.mjs"
   "$repo_root/deploy/constructor-model-control.mjs"
   "$repo_root/deploy/constructor-model-switch.sh"
-  "$repo_root/deploy/sudoers/kelion-codex-full-access"
   "$repo_root/deploy/opencode-constructor.json"
   "$repo_root/deploy/opencode-constructor-instructions.md"
-  "$repo_root/deploy/systemd/private-ai-web-full-access.conf"
   "$repo_root/deploy/constructor-publisher.mjs"
   "$repo_root/deploy/constructor-release.mjs"
   "$repo_root/deploy/github-askpass.sh"
@@ -1135,10 +963,8 @@ map_install_logical() {
     artifact.codex-worker) install_target=/opt/kelion-codex/codex-worker.mjs; install_mode=555 ;;
     artifact.constructor-model-control) install_target=/opt/kelion-constructor/constructor-model-control.mjs; install_mode=555 ;;
     artifact.constructor-model-switch) install_target=/opt/private-ai/bin/constructor-model-switch; install_mode=755 ;;
-    authorization.kelion-codex-full-access) install_target=/etc/sudoers.d/kelion-constructor-full-access; install_mode=440 ;;
     configuration.opencode) install_target=/srv/private-ai/home/.config/opencode/opencode.json; install_group=privateai; install_mode=640 ;;
     instructions.opencode) install_target=/srv/private-ai/home/.config/opencode/instructions.md; install_group=privateai; install_mode=640 ;;
-    systemd-dropin.private-ai-web-full-access) install_target=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf; install_mode=444 ;;
     artifact.constructor-publisher) install_target=/opt/kelion-constructor/constructor-publisher.mjs; install_mode=555 ;;
     artifact.constructor-release) install_target=/opt/kelion-constructor/constructor-release.mjs; install_mode=555 ;;
     artifact.github-askpass) install_target=/opt/kelion-constructor/github-askpass.sh; install_mode=555 ;;
@@ -1677,113 +1503,20 @@ quiesce_before_install() {
   wait_for_install_quiesce_postconditions "$count"
 }
 
-expected_powerful_runtime_dropin() {
-  cat <<'EOF'
-[Service]
-ExecStart=
-ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
-Restart=no
-TimeoutStartSec=3600
-CPUQuota=1600%
-MemoryHigh=84G
-MemoryMax=88G
-EOF
-}
-
-validate_manual_model_dropin_state() {
-  local legacy=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
-  local runtime=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf
-  local dropins
-  [ ! -e "$legacy" ] && [ ! -L "$legacy" ] || return 1
-  dropins=$(systemctl show private-ai-llm.service --property=DropInPaths --value) || return 1
-  [[ " $dropins " != *" $legacy "* ]] || return 1
-  if [ "$constructor_expected_model_profile" = powerful ]; then
-    [ -f "$runtime" ] && [ ! -L "$runtime" ] \
-      && [ "$(stat -Lc '%u:%g:%a:%h' "$runtime")" = '0:0:644:1' ] \
-      && [ "$(<"$runtime")" = "$(expected_powerful_runtime_dropin)" ] \
-      && [[ " $dropins " == *" $runtime "* ]] || return 1
-  else
-    [ ! -e "$runtime" ] && [ ! -L "$runtime" ] || return 1
-    [[ " $dropins " != *" $runtime "* ]] || return 1
-  fi
-}
-
 retire_legacy_model_dropin() {
-  local legacy_dir=/etc/systemd/system/private-ai-llm.service.d
-  local legacy=$legacy_dir/90-qwen35-122b-max.conf
-  local runtime_dir=/run/systemd/system/private-ai-llm.service.d
-  local runtime=$runtime_dir/90-constructor-model.conf
-  local model_lock=/run/lock/private-ai-model-switch.lock model_lock_identity
-  local candidate='' expected alias_before alias_after
-  bash "$repo_root/deploy/constructor-model-switch.sh" --prepare-lock >/dev/null || return 1
-  [ -f "$model_lock" ] && [ ! -L "$model_lock" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "$model_lock")" = 'root:privateai:660:1' ] || return 1
-  model_lock_identity=$(stat -Lc '%d:%i' "$model_lock") || return 1
-  exec 8<>"$model_lock" || return 1
-  [ "$(readlink "/proc/$$/fd/8")" = "$model_lock" ] \
-    && [ "$(stat -Lc '%d:%i' "/proc/$$/fd/8")" = "$model_lock_identity" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "/proc/$$/fd/8")" = 'root:privateai:660:1' ] || return 1
-  flock -w 3600 8 || return 1
-  [ ! -L "$model_lock" ] \
-    && [ "$(stat -Lc '%d:%i' "$model_lock")" = "$model_lock_identity" ] \
-    && [ "$(stat -Lc '%d:%i' "/proc/$$/fd/8")" = "$model_lock_identity" ] || return 1
-  expected=$(expected_powerful_runtime_dropin) || return 1
-  alias_before=$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id') || return 1
-  case "$constructor_expected_model_profile:$alias_before" in
-    fast:qwen3.6-35b-a3b-local|powerful:qwen3.5-122b-a10b-local) ;;
-    *) return 1 ;;
-  esac
-
-  if [ -e "$legacy" ] || [ -L "$legacy" ]; then
-    [ -d "$legacy_dir" ] && [ ! -L "$legacy_dir" ] \
-      && [ "$(realpath -e -- "$legacy_dir")" = "$legacy_dir" ] \
-      && [ "$(stat -Lc '%u:%g:%a' "$legacy_dir")" = '0:0:755' ] || return 1
-    [ -f "$legacy" ] && [ ! -L "$legacy" ] \
-      && [ "$(stat -Lc '%u:%g:%a:%h' "$legacy")" = '0:0:644:1' ] \
-      && [ "$(<"$legacy")" = "$expected" ] || return 1
-  fi
-
-  if [ "$constructor_expected_model_profile" = powerful ]; then
-    validate_max_model_complete_receipt "$constructor_fast_model_path" || return 1
-    if [ -e "$runtime_dir" ] || [ -L "$runtime_dir" ]; then
-      [ -d "$runtime_dir" ] && [ ! -L "$runtime_dir" ] \
-        && [ "$(realpath -e -- "$runtime_dir")" = "$runtime_dir" ] \
-        && [ "$(stat -Lc '%u:%g:%a' "$runtime_dir")" = '0:0:755' ] || return 1
-    else
-      install -d -o root -g root -m 0755 "$runtime_dir" || return 1
-      sync -f /run/systemd/system || return 1
+  local unit state
+  # This runs only after the durable installation intent and full quiescence.
+  # The replaced model services are not restarted or used as readiness proof.
+  for unit in private-ai-web.service private-ai-llm.service; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      systemctl stop "$unit" >/dev/null 2>&1 || return 1
+      systemctl disable --no-reload "$unit" >/dev/null 2>&1 || return 1
+      state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+      case "$state" in inactive|failed) ;; *) return 1 ;; esac
+      [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
     fi
-    candidate=$(mktemp "$runtime_dir/.90-constructor-model.XXXXXX") || return 1
-    if ! expected_powerful_runtime_dropin > "$candidate" \
-      || ! chown root:root "$candidate" \
-      || ! chmod 0644 "$candidate" \
-      || ! sync -f "$candidate" \
-      || ! mv -f -- "$candidate" "$runtime" \
-      || ! sync -f "$runtime" \
-      || ! sync -f "$runtime_dir"; then
-      rm -f -- "$candidate"
-      return 1
-    fi
-  elif [ -e "$runtime" ] || [ -L "$runtime" ]; then
-    [ -d "$runtime_dir" ] && [ ! -L "$runtime_dir" ] \
-      && [ "$(realpath -e -- "$runtime_dir")" = "$runtime_dir" ] || return 1
-    [ ! -d "$runtime" ] || return 1
-    rm -f -- "$runtime" || return 1
-    sync -f "$runtime_dir" || return 1
-  fi
-
-  if [ -e "$legacy" ] || [ -L "$legacy" ]; then
-    rm -f -- "$legacy" || return 1
-    sync -f "$legacy_dir" || return 1
-  fi
-  systemctl daemon-reload || return 1
-  alias_after=$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id') || return 1
-  [ "$alias_after" = "$alias_before" ] || return 1
-  validate_manual_model_dropin_state
+  done
+  validate_retired_local_runtime
 }
 
 clear_install_transaction() {
@@ -1819,7 +1552,7 @@ resume_different_source=0
 # dublu pin-uită: helperul live trebuie să fie exact generația cunoscută, iar
 # copia de recovery trebuie să fie exact helperul auditat din acest bundle.
 readonly LEGACY_STATIC_RUNTIME_HELPER_SHA256=db72ef1d9c92660adfb656330efb4e651c16d0439643c7fd944c2dd56ee1c9de
-readonly COMPATIBLE_RUNTIME_HELPER_SHA256=829687d4571805244134feb721375cdc2f3f0b19d297daf11ad40c8c40b46057
+readonly COMPATIBLE_RUNTIME_HELPER_SHA256=833b28bd8a879c077440a2563eabd37da86dc8b19208c72f95823b2c12881cbc
 
 recover_existing_runtime_journal() {
   local runtime_journal=$RUNTIME_ROOT/runtime-config-cutover.journal
@@ -1899,8 +1632,6 @@ done
 
 validate_source_systemd_text_files \
   || { echo 'sursa unităților systemd încalcă contractul strict de bytes' >&2; constructor_install_failure_line=$LINENO; exit 1; }
-validate_constructor_sudoers "$repo_root/deploy/sudoers/kelion-codex-full-access" \
-  || { echo 'regula sudoers Constructor este invalidă' >&2; constructor_install_failure_line=$LINENO; exit 1; }
 
 set_constructor_install_phase transaction-prepare
 if [ -e "$INSTALL_JOURNAL" ] || [ -L "$INSTALL_JOURNAL" ]; then
@@ -1949,8 +1680,7 @@ if [ "$resume_different_source" = 1 ]; then
   && grep -qx 'schema=1' "$RUNTIME_ROOT/constructor-unit-migration.pending"
   for logical in \
     artifact.codex-worker artifact.constructor-model-control artifact.constructor-model-switch \
-    authorization.kelion-codex-full-access \
-    configuration.opencode instructions.opencode systemd-dropin.private-ai-web-full-access \
+    configuration.opencode instructions.opencode \
     artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
     artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
     runtime-helper compose-production; do
@@ -1973,33 +1703,15 @@ retire_legacy_model_dropin \
 set_constructor_install_phase artifact-publication
 for logical in \
   artifact.codex-worker artifact.constructor-model-control artifact.constructor-model-switch \
-  authorization.kelion-codex-full-access \
-  configuration.opencode instructions.opencode systemd-dropin.private-ai-web-full-access \
+  configuration.opencode instructions.opencode \
   artifact.constructor-publisher artifact.constructor-release artifact.github-askpass \
   artifact.constructor-sync-worker artifact.constructor-service-client artifact.service-auth artifact.github-fixed-client \
   runtime-helper compose-production; do
   publish_install_candidate "$logical"
 done
 
-# /run se goleste la fiecare boot, iar unitatea controllerului cere ca
-# /run/private-ai si dropin-ul runtime al llama-server sa existe INAINTE ca
-# systemd sa construiasca namespace-ul (ReadWritePaths). Fara o regula
-# tmpfiles persistenta, kelion-constructor-model-control.service esueaza dupa
-# fiecare repornire cu 226/NAMESPACE, iar Constructorul ramane oprit.
-publish_private_ai_runtime_tmpfiles() {
-  local candidate
-  candidate=$(mktemp "$RUNTIME_ROOT/tmpfiles-private-ai.XXXXXX") || return 1
-  printf '%s\n' \
-    'd /run/private-ai 0755 root root -' \
-    'd /run/systemd/system/private-ai-llm.service.d 0755 root root -' \
-    > "$candidate" || return 1
-  install -o root -g root -m 0644 -- "$candidate" /etc/tmpfiles.d/kelion-private-ai.conf || return 1
-  rm -f -- "$candidate"
-  systemd-tmpfiles --create /etc/tmpfiles.d/kelion-private-ai.conf || return 1
-  [ -d /run/private-ai ] && [ -d /run/systemd/system/private-ai-llm.service.d ]
-}
-publish_private_ai_runtime_tmpfiles \
-  || { echo 'regula tmpfiles pentru directoarele runtime private-ai nu a putut fi publicata' >&2; constructor_install_failure_line=$LINENO; exit 1; }
+# The hosted executor has no llama runtime directories or model-switch drop-ins.
+# The controller prepares only its compatibility lock and private runtime socket.
 
 set_constructor_install_phase unit-validation
 verify_candidate_units \
@@ -2036,14 +1748,6 @@ publish_install_candidate systemd-recovery.kelion-runtime-config-recovery.servic
 publish_install_candidate systemd-sync.kelion-constructor-sync.service
 publish_install_candidate systemd-controller.kelion-constructor-model-control.service
 systemctl daemon-reload
-if [ "$constructor_expected_model_profile" = fast ]; then
-  systemctl restart private-ai-web.service
-  validate_private_ai_web_full_access \
-    || { echo 'OpenCode web nu rulează cu acces complet la host' >&2; constructor_install_failure_line=$LINENO; exit 1; }
-else
-  systemctl stop private-ai-web.service >/dev/null 2>&1 || :
-  ! systemctl is-active --quiet private-ai-web.service
-fi
 for unit in "${constructor_timers[@]}"; do
   stop_and_disable_constructor_timer "$unit"
 done
@@ -2068,11 +1772,9 @@ sync -f /etc/systemd/system
 
 set_constructor_install_phase published-validation
 for logical in "${install_logicals[@]}"; do validate_published_candidate "$logical"; done
-validate_constructor_sudoers /etc/sudoers.d/kelion-constructor-full-access
 validate_opencode_constructor_config /srv/private-ai/home/.config/opencode/opencode.json
 validate_private_ai_base
-validate_manual_model_dropin_state
-if [ "$constructor_expected_model_profile" = fast ]; then validate_private_ai_web_full_access; fi
+validate_retired_local_runtime
 for marker in "${constructor_markers[@]}"; do [ ! -e "$marker" ] && [ ! -L "$marker" ]; done
 [ ! -e "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ]
 validate_constructor_activation_pending

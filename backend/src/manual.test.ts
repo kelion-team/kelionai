@@ -40,9 +40,8 @@ describe('manual — the public feature list cannot rot', () => {
     }
     const tot = cap.map((s) => `${s.title} ${s.paragraphs.join(' ')}`).join(' ')
     expect(tot).toMatch(/debit de produs exact zero/i)
-    expect(tot).toMatch(/OpenCode 1\.18\.25/i)
-    expect(tot).toMatch(/Qwen local/i)
-    expect(tot).toMatch(/llama\.cpp/i)
+    expect(tot).toMatch(/OpenCode.*motorul validat în configurația de deploy/i)
+    expect(tot).not.toMatch(/Qwen|llama\.cpp|35B|122B/i)
     expect(tot).toMatch(/build_jobs/i)
     expect(tot).not.toMatch(/codex login|openai-project-key|task URL/i)
     expect(tot).not.toMatch(/PROIECT-CHAT-VOCE|DRAFT-PROIECT|100% VORBIT/i)

@@ -42,7 +42,7 @@ describe('privacy frontend', () => {
     expect(chat).toMatch(/useState\(false\).*camera|const \[cameraOn, setCameraOn\] = useState\(false\)/s)
   })
 
-  it('starea Constructorului păstrează numai executorul local și nu propagă metadata cloud sau secrete', async () => {
+  it('starea Constructorului păstrează numai metadata executorului și nu propagă metadata cloud sau secrete', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       worker: { state: 'ready', lastHeartbeat: '2026-08-24T10:00:00.000Z' },
       setupInstructions: null,
@@ -64,12 +64,12 @@ describe('privacy frontend', () => {
     expect(JSON.stringify(constructor)).not.toMatch(/nu-trebuie-să-ajungă|chatgpt\.com|internalCostUsd|taskUrl/)
   })
 
-  it('nu inventează metadata executorului local când serverul nu o confirmă', async () => {
+  it('nu inventează metadata executorului când serverul nu o confirmă', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       worker: { state: 'unknown', lastHeartbeat: 'not-a-date' },
       setupInstructions: null,
       status: null,
-      executor: 'alt executor',
+      executor: 'invalid\nexecutor',
       queue: 'alt_queue',
     }), { status: 200, headers: { 'content-type': 'application/json' } })))
 

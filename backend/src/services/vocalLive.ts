@@ -256,7 +256,7 @@ function tokenUsageStrict(value: unknown, requireTokenType = false): TokenUsageS
   return { inputTokens, outputTokens, totalTokens, inputAudioTokens, outputAudioTokens }
 }
 
-export function interpreteazaCadru(m: Record<string, unknown>): VocalLiveCadru[] {
+export function interpreteazaCadru(m: Record<string, unknown>, setupPending = false): VocalLiveCadru[] {
   const type = String(m.type ?? '')
   if (type === 'session.updated') return [{ fel: 'gata' }]
   if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
@@ -384,6 +384,11 @@ export function interpreteazaCadru(m: Record<string, unknown>): VocalLiveCadru[]
   if (type === 'error') {
     const error = (m.error ?? {}) as Record<string, unknown>
     const code = clasificaEroareOpenAIRealtime(error)
+    // Before session.updated, a rejected request is a rejected setup, not a
+    // recoverable conversation turn. Otherwise the setup deadline masks it as
+    // transport and the client retries the same invalid configuration.
+    const setupRejected = setupPending && code === 'configuration'
+      && error.code !== 'response_cancel_not_active'
     // Invalid turn requests remain recoverable. Account-wide failures and
     // transient provider failures are surfaced with a closed public code so
     // the client can offer a safe retry without receiving provider text.
@@ -391,6 +396,7 @@ export function interpreteazaCadru(m: Record<string, unknown>): VocalLiveCadru[]
       !eroareOpenAIRealtimeEsteGlobala(code)
       && code !== 'rate_limit'
       && code !== 'provider_5xx'
+      && !setupRejected
     ) return []
     return [{
       fel: 'eroare',
@@ -784,7 +790,7 @@ export function deschideVocalLive(
       || providerType.startsWith('response.output_audio_transcript.')
       || providerType.startsWith('response.function_call_arguments.')
     ) raspunsProviderActiv = true
-    for (const event of interpreteazaCadru(message)) {
+    for (const event of interpreteazaCadru(message, !ready)) {
       if (closed) return
       if (event.fel === 'gata') {
         if (setupTimer) clearTimeout(setupTimer)

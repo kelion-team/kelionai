@@ -1183,7 +1183,7 @@ validate_constructor_service_unit() {
   case "$service" in
     kelion-codex-worker.service)
       marker=codex-worker; user=kelion-codex
-      exec_start='/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' ;;
+      exec_start='/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once' ;;
     kelion-constructor-publisher.service)
       marker=constructor-publisher; user=kelion-publisher
       exec_start='/usr/bin/node /opt/kelion-constructor/constructor-publisher.mjs --once' ;;

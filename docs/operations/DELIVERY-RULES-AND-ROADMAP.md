@@ -87,14 +87,9 @@ restabilirea autoritatii se reia acelasi checkpoint downstream. Receiptul
 `local_gates` confirma numai portile locale/offline; rezultatul GitHub
 `ci=green` este un checkpoint independent si ulterior.
 
-Exista exact doua exceptii tehnice, care nu relaxeaza regula ordinului:
-
-1. installerul poate activa temporar POWERFUL numai ca sa-i probeze model-list
-   si inferenta, apoi trebuie sa revina si sa dovedeasca FAST activ in receiptul
-   final; nu ruleaza si nu reia un ordin;
-2. dupa restart, controllerul de model poate continua numai intentia manuala
-   deja acceptata si persistata, cu acelasi request ID si aceeasi tinta. Nu
-   alege un profil, nu creeaza o comutare noua si nu repune ordinul in executie.
+Installerul verifica binarul fixat si configuratia canonica fara sa execute
+un ordin. Controllerul expune numai starea motorului configurat; nu comuta
+modele, nu continua intentii de comutare si nu repune ordine in executie.
 
 Rollbackul este parte a traseului, nu o nota ulterioara. Pentru fiecare release
 se pastreaza candidatul, point-of-no-return, artefactul anterior eligibil si
@@ -212,10 +207,12 @@ env-uri publice sau baze de date.
 
 Credentiala nu ajunge niciodata in browser, client nativ, Constructor,
 publisher, releaser, Git, GitHub Actions logs sau artefacte. Workerul Constructor
-nu primeste nicio cheie AI: executa OpenCode `1.18.25` cu
-Qwen3.6-35B-A3B Q4_K_M local, prin endpointul loopback llama.cpp. Configul
-permite exclusiv providerul `llama.cpp`, nu contine `apiKey`, iar loginul si
-cache-ul Codex legacy trebuie sa ramana absente.
+nu primeste nicio cheie AI: executa OpenCode `1.18.25` in container rootless,
+cu motorul gratuit Big Pickle aprobat de owner, definit exclusiv in
+`deploy/opencode-constructor.json`. Executorul primeste numai codul si ordinul,
+fara secrete sau acces privilegiat la host. Configul nu contine `apiKey`, iar
+loginul si cache-ul Codex legacy trebuie sa ramana absente. Gratuitatea
+furnizorului este temporara; nu autorizeaza comutarea la un model platit.
 
 Daca secretul lipseste sau nu poate fi citit, numai capabilitatile OpenAI ale
 produsului se opresc fail-closed si afiseaza un diagnostic stabil, redactat si
@@ -338,11 +335,9 @@ worker invocation, or model invocation.
 - Only publication, CI, and release transitions may resume idempotently, and
   only for the exact same immutable handoff and commit/SHA. Resume must not
   change the patch, substitute a commit, or invoke the worker/model again.
-- The installer may temporarily activate and probe POWERFUL, but it must return
-  to and prove FAST as the final active profile; this validation runs no order.
-- After restart, the model controller may continue only an already accepted,
-  persisted manual intent with the exact same request ID and target. It must not
-  choose a target, create a new switch, or re-enqueue an order.
+- The installer verifies the pinned binary and canonical runtime configuration
+  without executing an order. The read-only controller exposes that configured
+  engine and never switches models, resumes switch intents, or re-enqueues work.
 - A truly external authority step may pause a publication, CI, or release
   transition only for one explicit action such as interactive provider login,
   OAuth consent, or payment. The UI states that single action; when readiness is
@@ -360,8 +355,8 @@ worker invocation, or model invocation.
 - [ ] Percentage changes are derived from the canonical activity catalog and event history.
 - [ ] A claimed worker/model/order execution is never retried or re-executed automatically; only explicit Admin `Retry` may start a new cycle while the terminal cycle remains visible.
 - [ ] A publication/CI/release recovery event preserves the exact handoff and commit/SHA and never invokes the worker/model.
-- [ ] Installer POWERFUL probing ends with FAST proven active, without an order execution.
-- [ ] Controller restart recovery preserves the accepted manual switch request ID and target and creates no new decision.
+- [ ] Installer receipts prove the pinned binary and canonical configuration without executing an order.
+- [ ] Controller status reads the configured engine without any model-switch or order-execution side effects.
 - [ ] The monitor reaches 100% only with deployed commit, live version, readiness proof, and canonical links.
 - [ ] The session handoff records verified state, unfinished work, owner-only blockers, ordered next steps, and links.
 

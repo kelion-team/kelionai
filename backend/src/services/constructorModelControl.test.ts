@@ -1,227 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
 const { requestInternalService } = vi.hoisted(() => ({ requestInternalService: vi.fn() }))
-
-vi.mock('../config.js', () => ({
-  config: {
-    constructorModelControl: {
-      enabled: true,
-      socket: '/run/kelion-constructor-model-control/control.sock',
-      secret: 'm'.repeat(32),
-    },
-  },
-}))
+vi.mock('../config.js', () => ({ config: { constructorModelControl: {
+  enabled: true, socket: '/run/kelion-constructor-model-control/control.sock', secret: 'm'.repeat(32),
+} } }))
 vi.mock('./internalServiceRequest.js', () => ({ requestInternalService }))
-
-const {
-  ConstructorModelControlError,
-  parseConstructorModelSnapshot,
-  readConstructorModelSnapshot,
-  requestConstructorModelSwitch,
-} = await import('./constructorModelControl.js')
-
-const REQUEST_ID = '123e4567-e89b-42d3-a456-426614174000'
-const PROFILES = [
-  { id: 'powerful', label: 'Puternic', model: 'qwen3.5-122b-a10b-local', installed: true },
-  { id: 'fast', label: 'Rapid', model: 'qwen3.6-35b-a3b-local', installed: true },
-]
-
-function snapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    mode: 'manual',
-    defaultProfile: 'fast',
-    profiles: PROFILES,
-    activeProfile: 'fast',
-    activeModel: 'qwen3.6-35b-a3b-local',
-    state: 'ready',
-    requestedProfile: null,
-    requestId: null,
-    verifiedAt: '2026-09-01T12:00:00.000Z',
-    error: null,
-    ...overrides,
-  }
+const { parseConstructorModelSnapshot, readConstructorModelSnapshot } = await import('./constructorModelControl.js')
+const model = { id: 'fixture/engine', label: 'Configured engine', provider: 'fixture' }
+const state = {
+  mode: 'manual', defaultProfile: 'fast', model, status: 'ready', activeProfile: 'fast',
+  requestedProfile: null, requestId: null, installedProfiles: ['fast'],
 }
-
-function controllerState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    mode: 'manual',
-    defaultProfile: 'fast',
-    status: 'ready',
-    activeProfile: 'fast',
-    requestedProfile: null,
-    requestId: null,
-    installedProfiles: ['fast', 'powerful'],
-    ...overrides,
-  }
-}
-
-function measuredSnapshot() {
-  const measured = parseConstructorModelSnapshot(snapshot())
-  if (!measured) throw new Error('invalid test snapshot')
-  return measured
-}
-
-describe('Constructor model control client', () => {
-  beforeEach(() => requestInternalService.mockReset())
-
-  it('accepts only a coherent measured snapshot and canonicalizes profile order', () => {
-    expect(parseConstructorModelSnapshot(snapshot())).toMatchObject({
-      mode: 'manual',
-      defaultProfile: 'fast',
-      profiles: [
-        expect.objectContaining({ id: 'fast' }),
-        expect.objectContaining({ id: 'powerful' }),
-      ],
-      activeProfile: 'fast',
-      state: 'ready',
+const response = (value: unknown, status = 200) => ({ status, body: Buffer.from(JSON.stringify(value)) })
+const measuredAt = new Date('2026-09-05T05:00:00.000Z')
+describe('configured Constructor engine contract', () => {
+  beforeEach(() => { requestInternalService.mockReset() })
+  it('projects model metadata from the controller, not an old local profile catalog', async () => {
+    requestInternalService.mockResolvedValue(response(state))
+    const snapshot = await readConstructorModelSnapshot(measuredAt)
+    expect(snapshot).toEqual({
+      mode: 'manual', defaultProfile: 'fast', model, activeProfile: 'fast', activeModel: model.id,
+      profiles: [{ id: 'fast', label: model.label, model: model.id, installed: true }],
+      state: 'ready', requestedProfile: null, requestId: null, verifiedAt: measuredAt.toISOString(), error: null,
     })
-    expect(parseConstructorModelSnapshot({ ...snapshot(), surprise: true })).toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({ activeModel: 'qwen3.5-122b-a10b-local' }))).toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({ verifiedAt: null }))).toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({ profiles: [PROFILES[0], PROFILES[0]] }))).toBeNull()
+    expect(requestInternalService).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/v1/model/state', socketPath: '/run/kelion-constructor-model-control/control.sock',
+      timeoutMs: 10_000, maxResponseBytes: 32768,
+    }))
   })
-
-  it('validates switching, failed and unavailable state invariants', () => {
-    expect(parseConstructorModelSnapshot(snapshot({
-      state: 'switching', requestedProfile: 'powerful', requestId: REQUEST_ID,
-    }))).not.toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({
-      state: 'switching', requestedProfile: 'powerful', requestId: null,
-    }))).toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({ state: 'failed', error: 'activation_failed' }))).not.toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({
-      state: 'unavailable', activeProfile: null, activeModel: null, verifiedAt: null,
-      error: 'model_unreachable',
-    }))).not.toBeNull()
-    expect(parseConstructorModelSnapshot(snapshot({ state: 'unavailable', error: 'model_unreachable' }))).toBeNull()
+  it.each([
+    { status: 'switching' }, { activeProfile: 'powerful' }, { installedProfiles: ['fast', 'powerful'] },
+    { requestedProfile: 'fast' }, { requestId: '123e4567-e89b-42d3-a456-426614174000' },
+    { model: null }, { model: { ...model, provider: 'another' } }, { secret: 'unexpected' },
+    { model: { ...model, label: 'engine\ninjected' } }, { installedProfiles: [] },
+    { model: null, status: 'unavailable', activeProfile: null, installedProfiles: ['fast'] },
+  ])('refuses contradictory or unsafe controller state %j', async (overrides) => {
+    requestInternalService.mockResolvedValue(response({ ...state, ...overrides }))
+    await expect(readConstructorModelSnapshot()).rejects.toThrow('constructor_model_control_unavailable')
   })
-
-  it('reads state only through the bounded signed Unix-socket transport', async () => {
-    requestInternalService.mockResolvedValue({ status: 200, body: Buffer.from(JSON.stringify(controllerState())) })
-    await expect(readConstructorModelSnapshot(new Date('2026-09-01T12:00:00.000Z'))).resolves.toMatchObject({
-      activeProfile: 'fast',
-      activeModel: 'qwen3.6-35b-a3b-local',
-      verifiedAt: '2026-09-01T12:00:00.000Z',
-      profiles: [
-        expect.objectContaining({ id: 'fast', installed: true }),
-        expect.objectContaining({ id: 'powerful', installed: true }),
-      ],
+  it('keeps configuration distinct from availability and never assumes the engine is active', async () => {
+    requestInternalService.mockResolvedValue(response({ ...state, status: 'unavailable', activeProfile: null }))
+    expect(await readConstructorModelSnapshot()).toMatchObject({
+      model, state: 'unavailable', activeProfile: null, activeModel: null, verifiedAt: null,
+      profiles: [{ id: 'fast', installed: true }], error: 'constructor_model_unavailable',
     })
-    expect(requestInternalService).toHaveBeenCalledWith({
-      socketPath: '/run/kelion-constructor-model-control/control.sock',
-      secret: 'm'.repeat(32),
-      path: '/v1/model/state',
-      body: Buffer.from('{}'),
-      headers: { 'content-type': 'application/json' },
-      timeoutMs: 10_000,
-      maxResponseBytes: 32 * 1024,
-    })
+    requestInternalService.mockResolvedValue(response({ ...state, model: null, status: 'unavailable', activeProfile: null, installedProfiles: [] }))
+    expect(await readConstructorModelSnapshot()).toMatchObject({ model: null, profiles: [], state: 'unavailable' })
   })
-
-  it('accepts only a correlated 202 switch snapshot', async () => {
-    requestInternalService.mockResolvedValueOnce({
-      status: 202,
-      body: Buffer.from(JSON.stringify({ accepted: true, requestId: REQUEST_ID, profile: 'powerful' })),
-    }).mockResolvedValueOnce({
-      status: 200,
-      body: Buffer.from(JSON.stringify(controllerState({
-        status: 'switching', requestedProfile: 'powerful', requestId: REQUEST_ID,
-      }))),
-    })
-    await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, measuredSnapshot())).resolves.toMatchObject({
-      statusCode: 202,
-      snapshot: { state: 'switching', requestedProfile: 'powerful', requestId: REQUEST_ID },
-    })
-    const body = requestInternalService.mock.calls[0][0].body as Buffer
-    expect(JSON.parse(body.toString('utf8'))).toEqual({ requestId: REQUEST_ID, profile: 'powerful' })
-
-    requestInternalService.mockResolvedValueOnce({
-      status: 202,
-      body: Buffer.from(JSON.stringify({
-        accepted: true,
-        requestId: '223e4567-e89b-42d3-a456-426614174000',
-        profile: 'powerful',
-      })),
-    })
-    await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, measuredSnapshot())).rejects.toMatchObject({
-      statusCode: 503,
-      publicCode: 'constructor_model_control_unavailable',
-    })
+  it('rejects response failures and malformed JSON without leaking private error details', async () => {
+    requestInternalService.mockResolvedValue(response({}, 503))
+    await expect(readConstructorModelSnapshot()).rejects.toThrow('constructor_model_control_unavailable')
+    requestInternalService.mockResolvedValue({ status: 200, body: Buffer.from('invalid') })
+    await expect(readConstructorModelSnapshot()).rejects.toThrow('constructor_model_control_unavailable')
+    requestInternalService.mockRejectedValue(new Error('/private/token-detail'))
+    await expect(readConstructorModelSnapshot()).rejects.toThrow('constructor_model_control_unavailable')
   })
-
-  it.each(['switching', 'failed', 'unavailable'])(
-    'refuses service-level switch from %s without contacting the controller',
-    async (state) => {
-      const before = parseConstructorModelSnapshot(snapshot({
-        state,
-        ...(state === 'switching'
-          ? { requestedProfile: 'powerful', requestId: REQUEST_ID }
-          : state === 'failed'
-            ? { error: 'activation_failed' }
-            : { activeProfile: null, activeModel: null, verifiedAt: null, error: 'model_unreachable' }),
-      }))
-      expect(before).not.toBeNull()
-      await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, before!)).rejects.toMatchObject({
-        statusCode: 503,
-        publicCode: 'constructor_model_control_unavailable',
-      })
-      expect(requestInternalService).not.toHaveBeenCalled()
-    },
-  )
-
-  it('accepts a switch completed between the 202 ACK and the measured reread', async () => {
-    requestInternalService.mockResolvedValueOnce({
-      status: 202,
-      body: Buffer.from(JSON.stringify({ accepted: true, requestId: REQUEST_ID, profile: 'powerful' })),
-    }).mockResolvedValueOnce({
-      status: 200,
-      body: Buffer.from(JSON.stringify(controllerState({
-        activeProfile: 'powerful',
-      }))),
-    })
-    await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, measuredSnapshot())).resolves.toMatchObject({
-      statusCode: 200,
-      snapshot: { state: 'ready', activeProfile: 'powerful', requestedProfile: null, requestId: null },
-    })
-
-    requestInternalService.mockResolvedValueOnce({
-      status: 202,
-      body: Buffer.from(JSON.stringify({ accepted: true, requestId: REQUEST_ID, profile: 'powerful' })),
-    }).mockResolvedValueOnce({
-      status: 200,
-      body: Buffer.from(JSON.stringify(controllerState({ activeProfile: 'fast' }))),
-    })
-    await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, measuredSnapshot())).resolves.toMatchObject({
-      statusCode: 202,
-      snapshot: { state: 'switching', requestedProfile: 'powerful', requestId: REQUEST_ID },
-    })
-
-    requestInternalService.mockResolvedValueOnce({
-      status: 202,
-      body: Buffer.from(JSON.stringify({ accepted: true, requestId: REQUEST_ID, profile: 'powerful' })),
-    }).mockRejectedValueOnce(new Error('reread timeout after durable ACK'))
-    await expect(requestConstructorModelSwitch('powerful', REQUEST_ID, measuredSnapshot())).resolves.toMatchObject({
-      statusCode: 202,
-      snapshot: { state: 'switching', requestedProfile: 'powerful', requestId: REQUEST_ID },
-    })
-  })
-
-  it('projects only known conflicts and rejects malformed controller output', async () => {
-    requestInternalService.mockResolvedValueOnce({
-      status: 409,
-      body: Buffer.from('{"error":"worker_active"}'),
-    })
-    await expect(requestConstructorModelSwitch('fast', REQUEST_ID, measuredSnapshot())).rejects.toEqual(
-      new ConstructorModelControlError(409, 'constructor_busy'),
-    )
-
-    requestInternalService.mockResolvedValueOnce({ status: 200, body: Buffer.from('{"activeProfile":"fast"}') })
-    await expect(readConstructorModelSnapshot()).rejects.toMatchObject({ statusCode: 503 })
-
-    requestInternalService.mockRejectedValueOnce(new Error('socket down'))
-    await expect(readConstructorModelSnapshot()).rejects.toMatchObject({
-      statusCode: 503,
-      publicCode: 'constructor_model_control_unavailable',
-    })
+  it('validates its public projection strictly', async () => {
+    requestInternalService.mockResolvedValue(response(state))
+    const snapshot = await readConstructorModelSnapshot(measuredAt)
+    expect(parseConstructorModelSnapshot(snapshot)).toEqual(snapshot)
+    for (const change of [{ activeModel: 'another/model' }, { verifiedAt: 'yesterday' },
+      { state: 'unavailable' }, { profiles: [] }, { command: 'shell' }]) {
+      expect(parseConstructorModelSnapshot({ ...snapshot, ...change })).toBeNull()
+    }
   })
 })

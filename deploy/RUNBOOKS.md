@@ -150,150 +150,65 @@ Cheia master și backupul nu constituie disaster recovery dacă rămân pe aceea
 gazdă. Configurează și testează o destinație off-host înainte de producție.
 Dovada unei migrări distructive se consumă la release; nu se reutilizează.
 
-## Activarea workerului Constructor local OpenCode/Qwen pentru un singur admin
+## Constructorul izolat cu modelul aprobat
 
-Workerul automatizează joburile cu OpenCode `1.18.25` și două profiluri locale,
-servite numai pe loopback de llama.cpp: FAST folosește Qwen3.6-35B-A3B Q4_K_M
-și este implicit, iar POWERFUL folosește Qwen3.5-122B-A10B Q4_K_M și se
-selectează numai manual din Admin. Constructorul nu folosește cheie OpenAI,
-login ChatGPT, provider AI cloud sau task extern.
+Constructorul folosește OpenCode `1.18.25` și configurația unică
+`deploy/opencode-constructor.json`: Big Pickle, prin endpointul anonim
+OpenCode aprobat de owner. Modelul este gratuit în perioada anunțată de
+furnizor; nu există garanție de gratuitate permanentă sau disponibilitate
+24/7. Nu se configurează chei AI, conturi, plăți ori fallback-uri.
 
-1. Instalează mai întâi runtime-ul privat cu installerul Contabo versionat.
-   Receiptul `/etc/private-ai/.install-complete` trebuie să fixeze OpenCode
-   `1.18.25`, commitul llama.cpp și modelul FAST
-   `ggml-org/Qwen3.6-35B-A3B-GGUF` Q4_K_M. Instalează apoi POWERFUL numai prin
-   installerul versionat `.github/private-ai/upgrade-private-ai-max-model.sh`.
-   Acesta probează model-list și inferența pe POWERFUL, revine explicit la FAST
-   și probează model-list plus inferența pe FAST. Acceptă instalarea duală numai
-   cu receipturile finale `/etc/private-ai/.max-model-sealed` și
-   `/etc/private-ai/.max-model-complete`, ambele profile verificate și
-   `active_profile=fast`. Nu folosi `curl | bash` și nu înlocui binarele,
-   shardurile sau modelele în afara installerelor versionate.
-   Activarea temporară POWERFUL este o excepție tehnică aprobată exclusiv pentru
-   validarea installerului: nu este o decizie de profil, nu pornește workerul și
-   nu execută ori reia un ordin. Orice ieșire acceptată dovedește din nou FAST.
-2. Creează utilizatorul și grupul neprivilegiate `kelion-codex`. Numele Unix și
-   căile `codex-worker` sunt identificatori legacy păstrați pentru
-   compatibilitate; executorul este OpenCode. Repository-ul și starea joburilor
-   sunt în `/var/lib/kelion-codex` și nu sunt montate în containerul web.
-3. Instalează byte-identic `deploy/opencode-constructor.json` și
-   `deploy/opencode-constructor-instructions.md` în
-   `/srv/private-ai/home/.config/opencode/`, root-owned, grup `privateai` și
-   read-only pentru proces. Configul permite exclusiv providerul `llama.cpp`,
-   endpointul `http://127.0.0.1:24080/v1` și cele două modele locale fixate;
-   `model` și `small_model` rămân
-   `llama.cpp/qwen3.6-35b-a3b-local`. `apiKey`, autoupdate și sharing sunt
-   interzise.
-4. În starea implicită verifică `private-ai-llm.service` și
-   `private-ai-web.service` active, `/health` sănătos și `/v1/models` cu exact
-   aliasul FAST. PID-ul serviciului LLM trebuie să execute
-   `/opt/private-ai/bin/llama-server` și să aibă mapat fișierul GGUF canonic de
-   `20.419.565.568` bytes. Controllerul trebuie să raporteze ambele profile ca
-   instalate, dar numai FAST ca activ.
-5. Starea legacy de autentificare trebuie să fie absentă:
-   `/var/lib/kelion-codex-auth`, `/opt/kelion-codex/profile-home` și orice
-   wrapper Codex retras nu sunt precondiții și nu se recreează. Unitatea nu
-   primește `openai-project-key`; Constructorul nu are nicio credentială AI.
-6. Creează configul non-secret din `deploy/codex-worker.env.example`; el conține
-   numai flagul, API-ul loopback, repository-ul public și digestul imaginii de
-   porți. HMAC-ul cozii intră exclusiv prin `LoadCredential` și nu este o cheie
-   de model.
-7. Instalează regula sudoers versionată, unitatea și timerul cu markerul de
-   condiție absent. Supervisorul rămâne `kelion-codex`, iar OpenCode este pornit
-   explicit ca root prin `sudo -n`, cu acces full-host conform contractului
-   Constructor. Rulează `node deploy/codex-worker.mjs --self-test`; preflightul
-   verifică versiunea OpenCode, configul local, llama.cpp, modelul, regula sudo,
-   clona, Podman rootless și imaginea gate fixată prin digest.
-8. Activează în această ordine numai după probe: flagul backend,
-   `CODEX_WORKER_EXEC_ENABLED=1`, markerul
-   `/etc/kelion/codex-worker.enabled`, apoi timerul. Orice lipsă raportează
-   `setup_required`; nu există fallback la Codex cloud, ChatGPT/device-auth sau
-   alt furnizor AI.
+Pe VPS-ul existent, upgrade-ul de mai jos înlocuiește generația locală
+retrasă. Binarul OpenCode fixat prin versiune și SHA-256 este o precondiție;
+installerul nu descarcă și nu repornește modele locale. Workflow-urile de
+instalare/probare a modelelor locale sunt retrase.
 
-Workerul se oprește la `gates_passed`. Nu are credential Git, push, PR, merge
-sau deploy.
+1. Folosește numai checkoutul exact verificat din master și operația canonică
+   `upgrade-constructor` din `vps-run.yml`.
+2. Installerul verifică binarul și configurația prin același validator folosit
+   de controller, apoi păstrează intentul durabil, lockul de publicare,
+   quiesce-ul, receipturile și recuperarea generației.
+3. Sunt revocate regulile sudo full-host și este retras drop-inul web
+   privilegiat. Serviciile locale LLM și web sunt oprite și dezactivate.
+   Datele istorice ale joburilor nu sunt rescrise.
+4. Supervisorul `kelion-codex` citește configurația root-owned și primește
+   numai HMAC-ul cozii prin `LoadCredential`. AI-ul rulează într-un container
+   Podman rootless cu imaginea gate fixată prin digest, fără pull implicit.
+   Numai copia de cod a jobului este inscriptibilă; configurația, ordinul și
+   fișierul `.git` sunt read-only. Clona Git comună, secretele, baza de date,
+   alte joburi și socketurile hostului nu sunt montate.
+5. Runtime-ul OCI este calea verificată `/usr/bin/crun`, din pachetul oficial
+   al distribuției. Containerele rootless folosesc `--cgroups=disabled`; limitele
+   reale de CPU, memorie și procese sunt impuse și moștenite din unitățile
+   systemd ale workerului/publisherului. Nu se schimbă runtime-ul global Podman.
+   Rețeaua executorului
+   este IPv4 izolată; adresele providerului vin din DNS la fiecare invocare,
+   fără modificarea resolverului hostului.
+6. Controllerul dovedește configurația, binarul și disponibilitatea modelului
+   din catalog fără inferență. Acest status nu dovedește rezolvarea unui ordin.
+   Admin afișează modelul din configurația validată, nu un selector 35B/122B.
+7. Un ordin este acceptat numai prin aceeași coadă și trece porțile independente,
+   publisherul, PR-ul protejat și release-ul. Progresul vine din evenimente
+   reale și etape confirmate; 100% cere commitul publicat și versiunea live.
+8. Un timeout sau eșec de provider rămâne un eșec explicit, nu schimbare automată
+   de model, succes inventat sau reexecuție nelimitată. O reluare manuală
+   pornește un ciclu nou, păstrând dovada ciclului anterior.
 
-Timeout-ul executorului nu mai este o limită fixă ascunsă: pentru un ordin care
-menționează explicit o durată de audit (de exemplu `audit pentru 90 de minute`
-sau `audit timp de 2 ore`), workerul acordă durata cerută plus cinci minute
-pentru scrierea dovezilor și handoff, cu plafon sigur de patru ore. Ordinele
-fără durată explicită păstrează fereastra implicită de 30 de minute. Smoke-ul
-determinist al executorului are aceeași fereastră de 30 de minute, astfel încât
-un model local lent nu mai este omorât la 15 minute înainte să termine dovada.
+`private-ai-status-proof.yml` este o verificare read-only a generației
+instalate. `private-ai-constructor-proof.yml` cere dovada unei finalizări reale
+până la commitul live; nu creează, revendică sau publică un ordin pentru a
+inventa o probă. Niciunul nu este alternativă la testul vizibil în browser.
 
-## Profilurile locale și comutarea manuală din Admin
-
-| Profil Admin | Model local | Activare permisă | Stare implicită |
-| --- | --- | --- | --- |
-| FAST / Rapid (35B) | `qwen3.6-35b-a3b-local` | click explicit al ownerului în Admin | activ după instalare și după reboot |
-| POWERFUL / Puternic (122B) | `qwen3.5-122b-a10b-local` | click explicit al ownerului în Admin | instalat pe disc, inactiv |
-
-Ambele modele rămân instalate și verificate pe disc. Nu porni două servere LLM
-și nu ține ambele GGUF-uri mapate simultan: un singur profil este servit de
-`private-ai-llm.service` și mapat în procesul `llama-server`. Verificarea se face
-pe PID-ul măsurat, aliasul din `/v1/models` și fișierul din `/proc/<PID>/maps`,
-nu din numele unui drop-in. Page cache-ul kernelului nu este al doilea model
-activ și nu constituie dovadă că două modele sunt servite.
-
-Contractul de decizie este strict manual. După claim există zero retry automat
-și zero reexecuție automată pentru worker, invocarea modelului și ordin,
-indiferent dacă rezultatul este timeout, eroare tehnică sau `unresolved`:
-
-- FAST este profilul implicit. Nici workerul, backendul, controllerul și nici
-  interfața Admin nu aleg sau schimbă profilul fără intenția manuală a ownerului.
-- Numai un rezultat terminal real `unresolved` pe FAST, cu motivul bounded
-  `no_changes`, `test_failure` sau `quality_gate_failure`, afișează recomandarea
-  exactă de a comuta manual la POWERFUL și apoi de a folosi explicit `Reia`.
-  Recomandarea explică motivul, dar nu apasă butonul, nu trimite comanda de
-  comutare și nu repune ordinul în coadă.
-- Același rezultat `unresolved` pe POWERFUL este terminal pentru ciclul curent
-  și nu recomandă `Reia` sau un model superior.
-- `execution_timeout`, `brain_unavailable` și `worker_internal_failure` sunt
-  erori tehnice. Ele se afișează separat și nu recomandă schimbarea modelului
-  sau `Reia`, indiferent de profil. Nu interpreta o eroare tehnică drept
-  insuficiență a modelului.
-- Un rezultat nerezolvat sau eșuat rămâne terminal pentru ciclul curent. Dacă
-  ownerul dorește altă încercare, după orice alegere manuală de profil folosește
-  explicit `Reia`; aceasta pornește un `execution_cycle` nou și primește un task
-  ID worker nou, fără să rescrie ori să continue ciclul terminal anterior.
-
-Ordinea unei comutări aprobate de owner este:
-
-1. În Admin, deschide cardul de control al modelului și confirmă starea
-   `ready`, profilul activ măsurat și că FAST plus POWERFUL sunt instalate. Dacă
-   starea este `switching`, `failed` sau `unavailable`, nu trimite altă comandă;
-   diagnostichează read-only.
-2. Apasă explicit butonul profilului ales. Nu rula direct
-   `/opt/private-ai/bin/constructor-model-switch` și nu edita drop-in-uri
-   systemd; Admin este sursa intenției manuale și păstrează request ID-ul
-   auditat.
-3. Controllerul persistă request ID-ul și ținta intenției manuale acceptate,
-   serializează operația cu workerul, capturează și oprește temporar timerul
-   acestuia, validează receipturile/modelul țintă, schimbă unicul `llama-server`,
-   verifică aliasul și maparea GGUF, apoi restaurează exact starea timerului.
-   Admin afișează `switching` pe durata operației.
-4. Continuă numai după ce Admin revine la `ready` și arată profilul/modelul
-   cerut. Abia apoi ownerul poate decide separat `Reia`, care pornește un
-   `execution_cycle` și un task ID worker noi; ciclul anterior rămâne terminal.
-5. Dacă o comandă POWERFUL eșuează în timpul activării, helperul restaurează
-   FAST ca rollback tehnic al aceleiași comenzi. Aceasta nu este escaladare
-   automată și nu reexecută niciun ordin. Dacă restaurarea nu poate fi dovedită,
-   starea rămâne fail-closed și cere diagnostic read-only.
-6. Pentru revenire normală, ownerul apasă explicit FAST în Admin și așteaptă
-   din nou `ready`. După un reboot, serviciul pornește canonic FAST și nu
-   restaurează automat un profil POWERFUL selectat anterior. Singura excepție:
-   dacă restartul a întrerupt o operație de comutare deja acceptată și persistată,
-   controllerul poate continua exact aceeași intenție manuală, cu același
-   request ID și aceeași țintă. Nu deduce o țintă, nu creează o comutare nouă și
-   nu reexecută workerul/modelul/ordinul. Fără receiptul valid al intenției
-   acceptate rămâne FAST și cere un click nou. După boot, verifică profilul în
-   Admin înainte de a decide un nou `execution_cycle` prin `Reia`.
+Doctorul permanent este o cerință separată, încă neactivată. El trebuie să
+trimită reparații punctuale prin acest lanț, cu deduplicare persistentă,
+control administrativ revocabil și verificarea rezultatului pe live, fără
+să expună acest worker utilizatorilor obișnuiți.
 
 ## Instalarea publisherului și a dispatcherului de release
 
 Lanțul host-only are trei identități Unix și trei domenii HMAC distincte:
 
-1. `kelion-codex` (supervisorul OpenCode local) scrie numai handofful
+1. `kelion-codex` (supervisorul OpenCode izolat) scrie numai handofful
    `patch.diff` plus receiptul imuabil în
    `/var/lib/kelion-constructor-handoff/ready` și raportează `gates_passed`;
 2. `kelion-publisher` citește spool-ul, recreează commitul într-o clonă proprie,

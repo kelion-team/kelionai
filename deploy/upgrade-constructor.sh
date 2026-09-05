@@ -101,8 +101,6 @@ for source in \
   "$repo_root/deploy/lib/service-auth.mjs" \
   "$repo_root/deploy/opencode-constructor.json" \
   "$repo_root/deploy/opencode-constructor-instructions.md" \
-  "$repo_root/deploy/systemd/private-ai-web-full-access.conf" \
-  "$repo_root/deploy/sudoers/kelion-codex-full-access" \
   "$repo_root/deploy/systemd/kelion-codex-worker.service" \
   "$repo_root/deploy/systemd/kelion-constructor-model-control.service" \
   "$repo_root/deploy/lib/runtime-config-cutover.sh" \
@@ -110,7 +108,7 @@ for source in \
   [ -f "$source" ] && [ ! -L "$source" ] \
     || { echo 'bundle-ul upgrade-ului Constructor este incomplet' >&2; exit 1; }
 done
-for tool in awk cmp curl flock grep install jq mktemp python3 readlink realpath runuser sha256sum stat sync systemctl visudo wc; do
+for tool in awk cmp curl flock grep install jq mktemp python3 readlink realpath runuser sha256sum stat sync systemctl node wc; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "lipsește utilitarul $tool" >&2; exit 1; }
 done
@@ -555,177 +553,33 @@ restore_snapshot_markers() {
   fsync_path /etc/kelion
 }
 
-validate_max_model_complete_receipt() {
-  local receipt=/etc/private-ai/.max-model-complete
-  local expected_fast_path=$1
-  local -a lines=()
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
-  mapfile -t lines < "$receipt"
-  [ "${#lines[@]}" -eq 20 ] || return 1
-  [ "${lines[0]}" = 'schema=2' ] || return 1
-  [ "${lines[1]}" = 'default_model=llama.cpp/qwen3.6-35b-a3b-local' ] || return 1
-  [ "${lines[2]}" = 'powerful_model=llama.cpp/qwen3.5-122b-a10b-local' ] || return 1
-  [ "${lines[3]}" = 'active_profile=fast' ] || return 1
-  [ "${lines[4]}" = 'model_repo=unsloth/Qwen3.5-122B-A10B-GGUF' ] || return 1
-  [ "${lines[5]}" = 'model_revision=a97b483a9f8cad9788776aa0112a2c63bf349e9e' ] || return 1
-  [ "${lines[6]}" = 'model_quant=Q4_K_M' ] || return 1
-  [ "${lines[7]}" = 'model_total_bytes=76536964608' ] || return 1
-  [ "${lines[8]}" = 'shard_1_sha256=467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3' ] || return 1
-  [ "${lines[9]}" = 'shard_2_sha256=90db14846413aebdac365b57206441437cac5f7e5037d94b325f0167f902e6e7' ] || return 1
-  [ "${lines[10]}" = 'shard_3_sha256=e3c24b8ebec070bb4f69ea0aca25a16531da7440cd515529953e046882901f97' ] || return 1
-  [ "${lines[11]}" = 'fast_model_bytes=20419565568' ] || return 1
-  [ "${lines[12]}" = 'fast_model_sha256=671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7' ] || return 1
-  [[ "$expected_fast_path" == /srv/private-ai/models/* ]] \
-    && [ "$(realpath -e -- "$expected_fast_path")" = "$expected_fast_path" ] \
-    && [ "${lines[13]}" = "fast_model_path=$expected_fast_path" ] || return 1
-  [[ "${lines[14]}" =~ ^installer_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[15]}" =~ ^worker_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[16]}" =~ ^config_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[17]}" =~ ^worker_unit_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[18]}" =~ ^switch_source_sha256=[0-9a-f]{64}$ ]] || return 1
-  [[ "${lines[19]}" =~ ^verified_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
-}
-
-expected_powerful_runtime_dropin() {
-  cat <<'EOF'
-[Service]
-ExecStart=
-ExecStart=/opt/private-ai/bin/llama-server --model /srv/private-ai/models/qwen3.5-122b-a10b-q4_k_m/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf --alias qwen3.5-122b-a10b-local --host 127.0.0.1 --port 24080 --ctx-size 16384 --n-predict 4096 --threads 16 --parallel 1 --jinja --chat-template-kwargs '{"enable_thinking":false}'
-Restart=no
-TimeoutStartSec=3600
-CPUQuota=1600%
-MemoryHigh=84G
-MemoryMax=88G
-EOF
-}
-
 validate_private_ai_executor() {
   local expected_controller_state=${1:-active}
-  local receipt=/etc/private-ai/.install-complete
   local config=/srv/private-ai/home/.config/opencode/opencode.json
   local instructions=/srv/private-ai/home/.config/opencode/instructions.md
-  local llama_server=/opt/private-ai/bin/llama-server llama_source=/opt/private-ai/src/llama.cpp
-  local llama_state=/var/lib/private-ai/llama-cpp.commit model_cache=/srv/private-ai/models
-  local unit_text self_test_output web_dropin web_pid web_dropins model_file_path fast_model_file_path llm_pid active_alias powerful_root
-  local legacy_model_dropin=/etc/systemd/system/private-ai-llm.service.d/90-qwen35-122b-max.conf
-  local runtime_model_dropin=/run/systemd/system/private-ai-llm.service.d/90-constructor-model.conf model_dropins
-  local -a receipt_lines=()
-  local -a model_candidates=()
-  case "$expected_controller_state" in active|quiesced) ;; *) return 1 ;; esac
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$receipt")" = '0:0:600:1' ] || return 1
-  mapfile -t receipt_lines < "$receipt"
-  [ "${#receipt_lines[@]}" -eq 6 ] || return 1
-  [ "${receipt_lines[0]}" = 'installer_id=private-ai-contabo-v1' ] || return 1
-  [[ "${receipt_lines[1]}" =~ ^completed_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
-  [ "${receipt_lines[2]}" = 'llama_cpp_ref=c1d0e7a004015f23bc0233470b747b596f29b264' ] || return 1
-  [ "${receipt_lines[3]}" = 'opencode_version=1.18.25' ] || return 1
-  [ "${receipt_lines[4]}" = 'model_repo=ggml-org/Qwen3.6-35B-A3B-GGUF' ] || return 1
-  [ "${receipt_lines[5]}" = 'model_quant=Q4_K_M' ] || return 1
-  [ -x /opt/private-ai/bin/opencode ] && [ ! -L /opt/private-ai/bin/opencode ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' /opt/private-ai/bin/opencode)" = '0:0:755:1' ] || return 1
-  [ "$(sha256sum /opt/private-ai/bin/opencode | awk '{print $1}')" = \
-    d91e0d33676d0839f7cde87924cd4127ea88c9d6784eea9f009a7d08bdc60eeb ] || return 1
-  [ "$(env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin /opt/private-ai/bin/opencode --version)" = 1.18.25 ] || return 1
-  [ -x "$llama_server" ] && [ ! -L "$llama_server" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$llama_server")" = '0:0:755:1' ] || return 1
-  [ "$(sha256sum "$llama_server" | awk '{print $1}')" = \
-    b80a03e8c2b22e28eef05fd4e701af696a82cebe7643290dc931ca4d9d67847e ] || return 1
-  [ -f "$llama_state" ] && [ ! -L "$llama_state" ] \
-    && [ "$(stat -Lc '%U:%G:%a:%h' "$llama_state")" = 'privateai:privateai:600:1' ] || return 1
-  [ "$(tr -d '\n' < "$llama_state")" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
-  [ -d "$llama_source/.git" ] && [ ! -L "$llama_source" ] || return 1
-  [ "$(runuser -u privateai -- env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
-    git -C "$llama_source" rev-parse HEAD)" = c1d0e7a004015f23bc0233470b747b596f29b264 ] || return 1
-  mapfile -d '' -t model_candidates < <(
-    find "$model_cache" -xdev -type f -size 20419565568c -print0
-  )
-  [ "${#model_candidates[@]}" -eq 1 ] || return 1
-  fast_model_file_path=${model_candidates[0]}
-  [ -f "$fast_model_file_path" ] && [ ! -L "$fast_model_file_path" ] \
-    && [ "$(stat -Lc '%U:%G:%s:%h' "$fast_model_file_path")" = \
-      'privateai:privateai:20419565568:1' ] || return 1
-  [ "$(sha256sum "$fast_model_file_path" | awk '{print $1}')" = \
-    671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7 ] || return 1
-  systemctl is-active --quiet private-ai-llm.service || return 1
-  active_alias=$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id') || return 1
-  [ ! -e "$legacy_model_dropin" ] && [ ! -L "$legacy_model_dropin" ] || return 1
-  model_dropins=$(systemctl show private-ai-llm.service --property=DropInPaths --value) || return 1
-  [[ " $model_dropins " != *" $legacy_model_dropin "* ]] || return 1
-  case "$active_alias" in
-    qwen3.6-35b-a3b-local)
-      model_file_path=$fast_model_file_path
-      [ ! -e "$runtime_model_dropin" ] && [ ! -L "$runtime_model_dropin" ] || return 1
-      [[ " $model_dropins " != *" $runtime_model_dropin "* ]] || return 1
-      systemctl is-active --quiet private-ai-web.service || return 1
-      ;;
-    qwen3.5-122b-a10b-local)
-      powerful_root=$model_cache/qwen3.5-122b-a10b-q4_k_m
-      [ -f /etc/private-ai/.max-model-sealed ] && [ ! -L /etc/private-ai/.max-model-sealed ] || return 1
-      validate_max_model_complete_receipt "$fast_model_file_path" || return 1
-      [ -f "$runtime_model_dropin" ] && [ ! -L "$runtime_model_dropin" ] \
-        && [ "$(stat -Lc '%u:%g:%a:%h' "$runtime_model_dropin")" = '0:0:644:1' ] \
-        && [ "$(<"$runtime_model_dropin")" = "$(expected_powerful_runtime_dropin)" ] \
-        && [[ " $model_dropins " == *" $runtime_model_dropin "* ]] || return 1
-      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf")" = 'root:privateai:440:10943552:1' ] || return 1
-      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00002-of-00003.gguf")" = 'root:privateai:440:49968146912:1' ] || return 1
-      [ "$(stat -Lc '%U:%G:%a:%s:%h' "$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf")" = 'root:privateai:440:26557874144:1' ] || return 1
-      model_file_path=$powerful_root/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
-      ! systemctl is-active --quiet private-ai-web.service || return 1
-      ;;
-    *) return 1 ;;
-  esac
-  llm_pid=$(systemctl show private-ai-llm.service -p MainPID --value)
-  [[ "$llm_pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  [ "$(readlink -f -- "/proc/$llm_pid/exe")" = "$llama_server" ] || return 1
-  awk -v target="$model_file_path" '$NF == target { found=1 } END { exit !found }' \
-    "/proc/$llm_pid/maps" || return 1
-  curl --fail --silent --show-error --max-time 10 http://127.0.0.1:24080/health >/dev/null || return 1
-  [ "$active_alias" = "$(curl --fail --silent --show-error --max-time 30 \
-    http://127.0.0.1:24080/v1/models \
-    | jq -er '.data | select(type == "array" and length == 1) | .[0].id')" ] || return 1
+  local unit_text self_test_output retired unit state
+  env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+    /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
+    --verify-runtime-binary >/dev/null || return 1
+  env -i HOME=/srv/private-ai/home PATH=/usr/bin:/bin \
+    /usr/bin/node "$repo_root/deploy/constructor-model-control.mjs" \
+    --validate-runtime-config "$config" >/dev/null || return 1
   cmp -s -- "$repo_root/deploy/opencode-constructor.json" "$config" || return 1
   cmp -s -- "$repo_root/deploy/opencode-constructor-instructions.md" "$instructions" || return 1
   [ "$(stat -Lc '%U:%G:%a:%h' "$config")" = 'root:privateai:640:1' ] || return 1
   [ "$(stat -Lc '%U:%G:%a:%h' "$instructions")" = 'root:privateai:640:1' ] || return 1
-  jq -e '
-    . as $config |
-    $config.autoupdate == false and $config.share == "disabled" and
-    $config.model == "llama.cpp/qwen3.6-35b-a3b-local" and
-    ($config.small_model // $config.model) == "llama.cpp/qwen3.6-35b-a3b-local" and
-    $config.enabled_providers == ["llama.cpp"] and
-    ($config.provider | keys) == ["llama.cpp"] and
-    $config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and
-    $config.provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-    ($config.provider["llama.cpp"].options | has("apiKey") | not) and
-    ($config.provider["llama.cpp"].models | has("qwen3.6-35b-a3b-local")) and
-    ($config.provider["llama.cpp"].models | has("qwen3.5-122b-a10b-local")) and
-    (["*","read","glob","grep","edit","bash","task","skill","webfetch","websearch","external_directory"]
-      | all(.[]; $config.permission[.] == "allow"))
-  ' "$config" >/dev/null || return 1
   cmp -s -- "$repo_root/deploy/codex-worker.mjs" /opt/kelion-codex/codex-worker.mjs || return 1
   cmp -s -- "$repo_root/deploy/constructor-model-control.mjs" /opt/kelion-constructor/constructor-model-control.mjs || return 1
   cmp -s -- "$repo_root/deploy/constructor-model-switch.sh" /opt/private-ai/bin/constructor-model-switch || return 1
   cmp -s -- "$repo_root/deploy/lib/service-auth.mjs" /opt/kelion-constructor/lib/service-auth.mjs || return 1
   cmp -s -- "$repo_root/deploy/systemd/kelion-codex-worker.service" /etc/systemd/system/kelion-codex-worker.service || return 1
   cmp -s -- "$repo_root/deploy/systemd/kelion-constructor-model-control.service" /etc/systemd/system/kelion-constructor-model-control.service || return 1
-  cmp -s -- "$repo_root/deploy/sudoers/kelion-codex-full-access" /etc/sudoers.d/kelion-constructor-full-access || return 1
-  web_dropin=/etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf
-  cmp -s -- "$repo_root/deploy/systemd/private-ai-web-full-access.conf" "$web_dropin" || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-codex/codex-worker.mjs)" = '0:0:555:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-constructor/constructor-model-control.mjs)" = '0:0:555:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/private-ai/bin/constructor-model-switch)" = '0:0:755:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /opt/kelion-constructor/lib/service-auth.mjs)" = '0:0:444:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /etc/systemd/system/kelion-codex-worker.service)" = '0:0:444:1' ] || return 1
   [ "$(stat -Lc '%u:%g:%a:%h' /etc/systemd/system/kelion-constructor-model-control.service)" = '0:0:444:1' ] || return 1
-  [ "$(stat -Lc '%u:%g:%a:%h' /etc/sudoers.d/kelion-constructor-full-access)" = '0:0:440:1' ] || return 1
-  [ "$(stat -Lc '%u:%g:%a:%h' "$web_dropin")" = '0:0:444:1' ] || return 1
-  [ "$(wc -l < /etc/sudoers.d/kelion-constructor-full-access)" -eq 1 ] || return 1
-  grep -qxF 'kelion-codex ALL=(ALL:ALL) NOPASSWD: ALL' /etc/sudoers.d/kelion-constructor-full-access || return 1
-  visudo -cf /etc/sudoers.d/kelion-constructor-full-access >/dev/null || return 1
   [ "$(systemctl show kelion-codex-worker.service --property=FragmentPath --value)" = /etc/systemd/system/kelion-codex-worker.service ] || return 1
   [ "$(systemctl show kelion-constructor-model-control.service --property=FragmentPath --value)" = /etc/systemd/system/kelion-constructor-model-control.service ] || return 1
   [ -z "$(systemctl show kelion-constructor-model-control.service --property=DropInPaths --value)" ] || return 1
@@ -742,43 +596,25 @@ validate_private_ai_executor() {
   unit_text=$(systemctl cat kelion-codex-worker.service) || return 1
   grep -Fqx 'Environment=OPENCODE_BIN=/opt/private-ai/bin/opencode' <<<"$unit_text" || return 1
   ! grep -Eqi 'CODEX_(BIN|HOME)|OPENAI_(API|ADMIN)_KEY|openai-project-key|codex-real|opencode-constructor-root' <<<"$unit_text" || return 1
-  web_dropins=$(systemctl show private-ai-web.service --property=DropInPaths --value) || return 1
-  [ "$web_dropins" = "$web_dropin" ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=User --value)" = root ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=Group --value)" = root ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=NoNewPrivileges --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateIPC --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateDevices --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=PrivateTmp --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectHome --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectControlGroups --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelLogs --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelModules --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectKernelTunables --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=ProtectSystem --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=RestrictNamespaces --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=RestrictSUIDSGID --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=LockPersonality --value)" = no ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=CPUQuotaPerSecUSec --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=CPUWeight --value)" = 100 ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=MemoryHigh --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=MemoryMax --value)" = infinity ] || return 1
-  [ "$(systemctl show private-ai-web.service --property=TasksMax --value)" = infinity ] || return 1
-  if [ "$active_alias" = qwen3.6-35b-a3b-local ]; then
-    web_pid=$(systemctl show private-ai-web.service --property=MainPID --value) || return 1
-    [[ "$web_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/$web_pid/status" ] \
-      && [ "$(awk '/^Uid:/ { print $2 }' "/proc/$web_pid/status")" = 0 ] || return 1
-  fi
+  for unit in private-ai-llm.service private-ai-web.service; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      state=$(systemctl show "$unit" --property=ActiveState --value) || return 1
+      case "$state" in inactive|failed) ;; *) return 1 ;; esac
+      ! systemctl is-enabled --quiet "$unit" || return 1
+      [ -z "$(systemctl list-jobs --no-legend --plain "$unit" 2>/dev/null)" ] || return 1
+    fi
+  done
   for retired in \
     /var/lib/kelion-codex-auth /opt/kelion-codex/bin/codex-real \
     /opt/private-ai/bin/opencode-constructor-root /etc/private-ai/local-codex-compat-key \
-    /etc/sudoers.d/kelion-local-qwen-constructor \
+    /etc/sudoers.d/kelion-local-qwen-constructor /etc/sudoers.d/kelion-constructor-full-access \
+    /etc/systemd/system/private-ai-web.service.d/90-kelion-constructor-full-access.conf \
     /etc/systemd/system/kelion-codex-worker.service.d/90-local-qwen-full-access.conf \
     /etc/systemd/system/kelion-codex-worker.service.d/90-local-opencode-full-access.conf; do
     [ ! -e "$retired" ] && [ ! -L "$retired" ] || return 1
   done
-  [ "$(runuser -u kelion-codex -- env -i PATH=/usr/bin:/bin \
-    /usr/bin/sudo -n -u root -- /usr/bin/id -u)" = 0 ] || return 1
+  if runuser -u kelion-codex -- env -i PATH=/usr/bin:/bin \
+    /usr/bin/sudo -n -u root -- /usr/bin/id -u >/dev/null 2>&1; then return 1; fi
   self_test_output=$(runuser -u kelion-codex -- env -i HOME=/var/lib/kelion-codex PATH=/usr/bin:/bin \
     /usr/bin/node /opt/kelion-codex/codex-worker.mjs --self-test) || return 1
   [ "$self_test_output" = 'codex-worker self-test: TRECE' ]

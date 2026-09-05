@@ -91,7 +91,7 @@ function internalJobIdentity(idRaw: string, body: Record<string, unknown>): { id
 // "Kelion must be able to create any software the admin asks for, any change,
 // any improvement") ──────────────────────────────────────────────────────────
 // The order enters here (from chat/voice through build_software or the admin
-// panel). Execution belongs to the separate OpenCode + Qwen local (llama.cpp)
+// panel). Execution belongs to the separate, configured OpenCode
 // worker. The public web process owns no worktree, shell or GitHub credential;
 // it only writes build_jobs and records signed lifecycle events. The `codex_*`
 // internal route, column and task-id names below are frozen runtime identifiers
@@ -602,7 +602,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Publisherul este singura identitate care poate transforma un handoff cu
   // porți verzi într-un branch/PR și apoi într-un merge. Nu primește credentiale
-  // OpenCode/Qwen sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
+  // ale motorului OpenCode sau VPS, iar rutele sale nu acceptă comenzi, căi ori ref-uri arbitrare.
   app.post<{ Body: { state?: unknown; detail?: unknown } }>('/api/internal/constructor-publisher/heartbeat', async (req, reply) => {
     if (!await internalConstructorAuthorized(verifyPublisherRequest(req), reply)) return
     if (!exactKeys(req.body, ['state', 'detail']) || req.body.state !== 'degraded'

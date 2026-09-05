@@ -1,4 +1,4 @@
-export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode + Qwen local (llama.cpp)'
+export const CONSTRUCTOR_LOCAL_ACTOR = 'OpenCode (motor configurat separat)'
 
 const LEGACY_CONSTRUCTOR_ACTORS = new Set([
   'codex-worker',

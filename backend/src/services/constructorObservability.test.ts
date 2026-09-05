@@ -30,13 +30,24 @@ const event = (
 })
 
 describe('Constructor observability', () => {
-  it('derives progress from persisted catalog sequence rather than fixed percentages', () => {
+  it('does not invent progress from a stage string without persistent events', () => {
+    const view = projectConstructorObservability({ id: 7, status: 'running', constructorStage: 'working' }, catalog, [])
+    expect(view.progress.percent).toBeNull()
+    expect(view.progress.completed).toBe(0)
+    expect(view.progress.total).toBe(2)
+  })
+
+  it('does not advance beyond the last measured event when the stage string moves ahead', () => {
+    const view = projectConstructorObservability({ id: 7, status: 'running', constructorStage: 'deployed' }, catalog, [event('1', 'working', 'working', 10)])
+    expect(view.progress.percent).toBe(50)
+  })
+  it('counts confirmed catalog milestones instead of treating sequence gaps as completed work', () => {
     const view = projectConstructorObservability(
       { id: 7, status: 'running', constructorStage: 'working' },
       catalog,
       [event('1', 'queued', 'queued', 0), event('2', 'working', 'working', 10)],
     )
-    expect(view.progress.percent).toBe(25)
+    expect(view.progress.percent).toBe(50)
     expect(view.progress.source).toBe('constructor_activity_events')
     expect(view.activity.map((item) => item.label)).toEqual(['Acceptata', 'Executata'])
   })
@@ -54,7 +65,7 @@ describe('Constructor observability', () => {
       { id: 7, status: 'queued', constructorStage: 'queued' }, catalog, JSON.parse(JSON.stringify(persisted)),
     )
     expect(afterRefresh).toEqual(first)
-    expect(first.progress.percent).toBe(25)
+    expect(first.progress.percent).toBe(50)
     expect(first.activity.at(-1)?.state).toBe('recovery')
   })
 

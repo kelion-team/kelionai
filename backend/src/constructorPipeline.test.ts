@@ -150,6 +150,7 @@ beforeEach(async () => {
   )
   await database.exec(readFileSync(new URL('../migrations/20260908_constructor_release_dispatch_intents.sql', import.meta.url), 'utf8'))
   await database.exec(readFileSync(new URL('../migrations/20260911_constructor_manual_model_outcomes.sql', import.meta.url), 'utf8'))
+  await database.exec(readFileSync(new URL('../migrations/20260913_constructor_configured_engine_outcome.sql', import.meta.url), 'utf8'))
   await database.exec(readFileSync(new URL('../migrations/20260912_constructor_execution_profile.sql', import.meta.url), 'utf8'))
   await database.query(
     `INSERT INTO build_jobs(status, codex_task_id, execution_profile, constructor_stage, ordered_by, order_text)
@@ -229,21 +230,21 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       label: 'unresolved no_changes/fast',
       input: { event: 'unresolved', reason: 'no_changes', profile: 'fast' } as const,
       expectedStage: 'unresolved',
-      expectedProgress: 'fast_insufficient',
+      expectedProgress: 'unresolved',
       evidence: 'worker_unresolved:no_changes;profile=fast',
     },
     {
       label: 'unresolved test_failure/fast',
       input: { event: 'unresolved', reason: 'test_failure', profile: 'fast' } as const,
       expectedStage: 'unresolved',
-      expectedProgress: 'fast_insufficient',
+      expectedProgress: 'unresolved',
       evidence: 'worker_unresolved:test_failure;profile=fast',
     },
     {
       label: 'unresolved quality_gate_failure/powerful',
       input: { event: 'unresolved', reason: 'quality_gate_failure', profile: 'powerful' } as const,
       expectedStage: 'unresolved',
-      expectedProgress: 'powerful_final_failure',
+      expectedProgress: 'unresolved',
       evidence: 'worker_unresolved:quality_gate_failure;profile=powerful',
     },
   ])(
@@ -518,7 +519,7 @@ describe('Constructor worker -> publisher -> release pipeline', () => {
       gateReceiptSha256: hash2,
     })).resolves.toMatchObject({ ok: true, event: { stage: 'gates_passed', status: 'running' } })
     await expect(database.query<{ ci: string; brain: string }>('SELECT ci, brain FROM build_jobs WHERE id=1'))
-      .resolves.toMatchObject({ rows: [{ ci: 'local_gates', brain: 'OpenCode + Qwen local (llama.cpp)' }] })
+      .resolves.toMatchObject({ rows: [{ ci: 'local_gates', brain: 'OpenCode (motor configurat separat)' }] })
 
     await expect(pipeline.recordWorkerHandoff(1, taskId, {
       handoffId,

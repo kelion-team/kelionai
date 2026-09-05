@@ -92,23 +92,24 @@ describe('diagnosticul Constructor Admin', () => {
     expect(result.verdict).not.toContain('nu există blocaje critice')
   })
 
-  it('recomandă POWERFUL apoi Reia numai pentru outcome FAST unresolved', async () => {
+  it('păstrează rezultatul nerezolvat fără recomandarea modelelor retrase', async () => {
     state.failed = 1
     state.jobs = [failedJob('worker_unresolved:test_failure;profile=fast')]
     const result = await diagnosticConstructorViu(Date.parse('2026-08-26T12:00:00.000Z'))
     if ('error' in result) throw new Error(result.error)
-    const problem = result.probleme.find(({ cod }) => cod === 'constructor_fast_unresolved')
-    expect(problem?.recomandare).toBe('Comută manual la POWERFUL 122B dacă decizi asta, apoi folosește explicit Reia.')
+    const problem = result.probleme.find(({ cod }) => cod === 'constructor_unresolved')
+    expect(problem?.recomandare).toContain('comanda explicită Reia')
+    expect(problem?.recomandare).not.toMatch(/35B|122B|POWERFUL/)
   })
 
-  it('tratează POWERFUL unresolved ca terminal fără recomandare Reia sau model superior', async () => {
+  it('păstrează și istoricul profilului retras fără a recomanda comutarea', async () => {
     state.failed = 1
     state.jobs = [failedJob('worker_unresolved:quality_gate_failure;profile=powerful')]
     const result = await diagnosticConstructorViu(Date.parse('2026-08-26T12:00:00.000Z'))
     if ('error' in result) throw new Error(result.error)
-    const problem = result.probleme.find(({ cod }) => cod === 'constructor_powerful_unresolved')
-    expect(problem?.recomandare).toMatch(/terminal/)
-    expect(problem?.recomandare).toContain('nu recomandă Reia sau un model superior')
+    const problem = result.probleme.find(({ cod }) => cod === 'constructor_unresolved')
+    expect(problem?.recomandare).toContain('comanda explicită Reia')
+    expect(problem?.recomandare).not.toMatch(/POWERFUL|122B|model superior/)
   })
 
   it('nu recomandă model sau Reia pentru outcome technical_failure', async () => {

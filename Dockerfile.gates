@@ -4,6 +4,7 @@ ARG NODE_IMAGE=node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /opt/kelion
 COPY backend/package.json backend/package-lock.json ./backend/
+COPY backend/vendor/node-domexception ./backend/vendor/node-domexception
 RUN cd backend && npm ci --no-audit --no-fund
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci --no-audit --no-fund
@@ -31,6 +32,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/kelion/locks /work /var/lib/kelion-codex/repo/.git
 COPY --from=dependencies /opt/kelion/backend/node_modules /opt/kelion/backend/node_modules
+COPY --from=dependencies /opt/kelion/backend/vendor /opt/kelion/backend/vendor
 COPY --from=dependencies /opt/kelion/frontend/node_modules /opt/kelion/frontend/node_modules
 COPY --from=dependencies /opt/kelion/gates/node_modules /opt/kelion/gates/node_modules
 COPY backend/package.json /opt/kelion/locks/backend-package.json
