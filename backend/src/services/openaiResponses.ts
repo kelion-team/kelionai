@@ -285,6 +285,28 @@ function providerCodeFromPayload(providerError: unknown): OpenAIProviderErrorCod
   return allowlistedOpenAIProviderCode(429, providerError)
 }
 
+/**
+ * Un eveniment de eroare care nu este o limita din lista alba ajungea aruncat
+ * ca openai_stream_error gol: codul si mesajul furnizorului se pierdeau, iar
+ * jurnalul raporta isRateLimit/isQuota/isRefusal false fara nicio cauza reala.
+ * Aici pastram doar campurile de diagnostic ale furnizorului, marginite; nu se
+ * include corpul cererii, cheia sau continutul utilizatorului.
+ */
+function providerErrorDetail(providerError: unknown): string {
+  if (!providerError || typeof providerError !== 'object') return ''
+  const raw = providerError as Record<string, unknown>
+  const nested = raw.error && typeof raw.error === 'object' ? raw.error as Record<string, unknown> : raw
+  const parts: string[] = []
+  for (const field of ['code', 'type', 'param', 'status'] as const) {
+    const value = nested[field]
+    if (typeof value === 'string' && value) parts.push(field + '=' + value.slice(0, 60))
+    else if (typeof value === 'number') parts.push(field + '=' + String(value))
+  }
+  const message = nested.message
+  if (typeof message === 'string' && message) parts.push('message=' + message.slice(0, 200))
+  return parts.length ? ' (' + parts.join('; ') + ')' : ''
+}
+
 function exactProviderLimitError(providerError: unknown): OpenAIProviderRequestError | null {
   const code = providerCodeFromPayload(providerError)
   return code ? new OpenAIProviderRequestError(429, code) : null
@@ -562,7 +584,7 @@ export async function openaiResponsesStream(
       if (type === 'error') {
         const providerLimit = exactProviderLimitError(event)
         if (providerLimit) throw providerLimit
-        throw new Error('openai_stream_error')
+        throw new Error('openai_stream_error' + providerErrorDetail(event))
       }
     })
     const completed = finalResponse as OpenAIResponse | null
@@ -570,7 +592,7 @@ export async function openaiResponsesStream(
     if (completed.error) {
       const providerLimit = exactProviderLimitError(completed.error)
       if (providerLimit) throw providerLimit
-      throw new Error('openai_stream_response_error')
+      throw new Error('openai_stream_response_error' + providerErrorDetail(completed.error))
     }
     const usage = await meterResponse(completed, opts, model)
     if (completed.status === 'failed' || completed.status === 'incomplete' || completed.status === 'cancelled') {
