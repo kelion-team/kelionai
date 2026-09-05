@@ -18,8 +18,10 @@ secrete sau presupuneri din conversație.
 - OpenAI Responses este singurul creier online al conversației Kelion. OpenAI
   Realtime, transcrierea, imaginea și video pot fi folosite numai prin backend,
   cu modele validate din configurare. Constructorul este excepția explicită:
-  rulează separat, exclusiv cu OpenCode și modelul Qwen local prin llama.cpp;
-  nu este fallback pentru chat și nu folosește provider AI plătit sau cloud.
+  rulează separat cu OpenCode și modelul gratuit Big Pickle, aprobat explicit
+  de owner. Configurația canonică este `deploy/opencode-constructor.json`.
+  Nu este fallback pentru chat, nu folosește o cheie OpenAI și nu comută la
+  modele plătite. Gratuitatea furnizorului nu este o garanție permanentă.
 - Modul avion rulează exclusiv pe dispozitiv. Modelele/runtime-urile locale
   offline sunt permise, nu primesc chei și nu devin fallback online de server.
 - Browserul nu primește niciodată chei OpenAI, tokenuri Codex, refresh-tokenuri
@@ -30,7 +32,7 @@ secrete sau presupuneri din conversație.
 - Cheia project-scoped `OPENAI_API_KEY` este unica identitate pentru inferența
   cloud a aplicației și alimentează Responses, Realtime și media prin backend.
   Nu ajunge la Constructor. Constructorul rulează într-un worker separat cu
-  OpenCode/Qwen local; web-ul și clientul Constructor pentru laptop pun aceleași
+  OpenCode izolat; web-ul și clientul Constructor pentru laptop pun aceleași
   joburi validate în aceeași coadă și afișează starea, fără chei AI, OAuth
   OpenAI sau execuție shell/Git în procesul aplicației.
 - `OPENAI_ADMIN_KEY` este o credențială distinctă, montată numai în backend-ul
@@ -73,14 +75,13 @@ Fluxul unic este:
 
 1. admin Google autentificat creează un job validat;
 2. workerul HMAC îl revendică într-un checkout/worktree dedicat;
-3. OpenCode 1.18.25 folosește prin llama.cpp profilul local ales manual de
-   owner: Qwen3.6-35B-A3B implicit sau Qwen3.5-122B-A10B. Workerul nu schimbă
-   profilul și nu reexecută automat ordinul. Numai un rezultat FAST
-   `unresolved` real poate recomanda POWERFUL; o eroare tehnică nu recomandă
-   alt model, iar POWERFUL `unresolved` este terminal. Un singur model este
-   servit în RAM, iar orice boot revine la FAST. Executorul are acces complet
-   la host prin sudo, conform cerinței ownerului; ordinul, lease-ul, worktree-ul
-   și jurnalul rămân controlate de worker, iar secretele nu se publică în output;
+3. OpenCode 1.18.25 folosește numai modelul aprobat din configurația canonică.
+   Executorul rulează într-un container rootless cu copia de lucru a codului;
+   nu primește sudo pe host, secrete, baza de date, socketuri sau credențiale
+   Git/VPS. Workerul păstrează controlul ordinului, lease-ului și jurnalului;
+   publisherul separat gestionează publicarea. Profilul `fast` poate rămâne
+   identificator intern de compatibilitate, dar nu dovedește modelul unei
+   rulări istorice. Modelele locale și selectorul lor sunt retrase;
 4. schimbările dependente intră într-un singur release train bazat pe ultimul
    `origin/master`; rulează `node scripts/release-train-preflight.mjs` și toate
    porțile locale înainte de PR;
@@ -93,6 +94,13 @@ Fluxul unic este:
 Nu se face push direct în `master`, force-push, deploy din browser sau publicare
 dintr-un job care nu a trecut porțile. Credențialele Git/host sunt separate de
 aplicația publică și au permisiuni minime.
+
+Doctorul permanent cerut de owner identifică simptome măsurate și trimite
+reparații punctuale prin aceeași coadă și aceleași porți. Nu creează o conductă
+paralelă de publicare, nu repetă nelimitat un eșec și nu schimbă modelul,
+facturarea, secretele sau datele utilizatorilor pentru a ascunde o problemă.
+Un incident este rezolvat numai după verificarea rezultatului pe live; lipsa
+unor loguri noi sau trecerea testelor locale nu reprezintă dovadă de remediere.
 
 Regula completă și setările GitHub cerute ownerului sunt în
 `docs/RELEASE-TRAIN.md`.

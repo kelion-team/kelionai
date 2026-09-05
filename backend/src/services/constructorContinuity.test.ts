@@ -22,7 +22,7 @@ describe('constructorContinuity', () => {
   })
 
   it.each(['no_changes', 'test_failure', 'quality_gate_failure'] as const)(
-    'recommends a manual POWERFUL switch after measured FAST result %s',
+    'keeps measured unresolved result %s manual without retired model advice',
     (reason) => {
       const record = constructorWorkerUnresolvedRecord(reason, 'fast')
       const view = constructorContinuity({
@@ -38,13 +38,10 @@ describe('constructorContinuity', () => {
         result: 'unresolved',
         reasonCode: reason,
         reason: expect.any(String),
-        manualRecommendation: {
-          profile: 'powerful',
-          reasonCode: 'fast_result_not_publishable',
-          reason: expect.stringMatching(/FAST 35B.*POWERFUL 122B/i),
-        },
+        manualRecommendation: null,
       })
-      expect(view.nextAction).toMatch(/Comută manual.*POWERFUL 122B.*Reia/i)
+      expect(view.nextAction).toMatch(/comanda explicită Reia/i)
+      expect(view.message).not.toMatch(/35B|122B|Big Pickle/i)
     },
   )
 
@@ -108,8 +105,9 @@ describe('constructorContinuity', () => {
     expect(view.modelOutcome).toMatchObject({
       profile: 'powerful', result: 'unresolved', reasonCode: 'no_changes', manualRecommendation: null,
     })
-    expect(view.message).toMatch(/eșec final/i)
-    expect(view.nextAction).toMatch(/terminal.*nu recomandă Reia.*model superior/i)
+    expect(view.message).toMatch(/nerezolvat/i)
+    expect(view.nextAction).toMatch(/comanda explicită Reia/i)
+    expect(view.nextAction).not.toMatch(/POWERFUL|122B|model superior/i)
   })
 
   it('does not infer a model outcome from raw text or legacy evidence without a measured profile', () => {

@@ -556,28 +556,18 @@ jobs:
             [ ! -L /opt/private-ai/bin/opencode ]
             [ -f "$opencode_config" ] && [ ! -L "$opencode_config" ]
             [ -f "$opencode_instructions" ] && [ ! -L "$opencode_instructions" ]
-            [ "$(runuser -u kelion-codex -G privateai -G kelion-handoff -- env -i \
-              HOME=/var/lib/kelion-codex \
-              XDG_CONFIG_HOME=/srv/private-ai/home/.config \
-              PATH=/opt/private-ai/bin:/usr/bin:/bin \
-              /opt/private-ai/bin/opencode --version 2>/dev/null)" = '1.18.25' ]
-            jq -e '
-              .autoupdate == false and .share == "disabled" and
-              .enabled_providers == ["llama.cpp"] and
-              (.provider | keys) == ["llama.cpp"] and
-              .model == "llama.cpp/qwen3.6-35b-a3b-local" and
-              (.provider["llama.cpp"].options | has("apiKey") | not) and
-              .provider["llama.cpp"].options.baseURL == "http://127.0.0.1:24080/v1" and
-              .instructions == ["instructions.md"] and
-              .server == {hostname:"127.0.0.1",port:24096,mdns:false}
-            ' "$opencode_config" >/dev/null
-            systemctl is-active --quiet private-ai-llm.service
-            systemctl is-active --quiet private-ai-web.service
-            curl --fail --silent --show-error --max-time 10 \
-              http://127.0.0.1:24080/health >/dev/null
-            curl --fail --silent --show-error --max-time 30 \
-              http://127.0.0.1:24080/v1/models \
-              | jq -e '.data | type == "array" and length == 1 and .[0].id == "qwen3.6-35b-a3b-local"' >/dev/null
+            local controller=/opt/kelion-constructor/constructor-model-control.mjs
+            [ -f "$controller" ] && [ ! -L "$controller" ]
+            [ "$(stat -Lc '%u:%g:%a:%h' "$controller")" = '0:0:555:1' ]
+            /usr/bin/node "$controller" --validate-runtime-config "$opencode_config" >/dev/null
+            /usr/bin/node "$controller" --verify-runtime-binary >/dev/null
+            [ -x /usr/bin/podman ] && [ -x /usr/bin/slirp4netns ]
+            for retired in private-ai-llm.service private-ai-web.service; do
+              local retired_state
+              retired_state=$(systemctl show "$retired" --property=ActiveState --value)
+              case "$retired_state" in inactive|failed) ;; *) return 1 ;; esac
+              if systemctl is-enabled --quiet "$retired"; then return 1; fi
+            done
             [ ! -e /var/lib/kelion-codex-auth ] && [ ! -L /var/lib/kelion-codex-auth ]
             [ ! -e /opt/kelion-codex/profile-home ] && [ ! -L /opt/kelion-codex/profile-home ]
           }

@@ -14,6 +14,7 @@ import {
   type DovadaUnealta,
 } from './poartaFaptelor.js'
 import type { OrMessage, BrainTool } from './brainContract.js'
+import { AGENT_CUSTOM_ROLE_MAX_LENGTH } from '../shared/agentCustomPolicy.js'
 
 // ── ARSENALUL COMPLET (5 aug, ownerul: „nu are uneltele pentru tot ce are
 // nevoie... instalează-i tot") ───────────────────────────────────────────────
@@ -241,16 +242,28 @@ export async function executaCheamaAgent(
 /** agent_nou: creează un specialist NOU când lipsește tipul. Instant, scriere în
  *  DB (agenti_custom) — fără publicare, disponibil imediat prin cheama_agent.
  *  Întoarce JSON-ul pentru model. */
-export async function executaAgentNou(nume: string, rol: string, doarAdmin: boolean): Promise<string> {
-  const n = String(nume ?? '').trim().slice(0, 80)
-  const r = String(rol ?? '').trim()
-  if (n.length < 3 || r.length < 10) return JSON.stringify({ error: 'nume (min 3) și rol (min 10) obligatorii' })
+export async function creeazaAgentCustom(input: {
+  nume?: unknown; rol?: unknown; efort?: unknown; doarAdmin?: unknown
+}): Promise<{ ok: true; id: string; nume: string } | { ok: false; error: string; status: 400 | 409 }> {
+  const n = typeof input.nume === 'string' ? input.nume.trim().slice(0, 80) : ''
+  const r = typeof input.rol === 'string' ? input.rol.trim() : ''
+  if (n.length < 3 || r.length < 10) return { ok: false, error: 'nume (min 3) și rol (min 10) obligatorii', status: 400 }
+  if (r.length > AGENT_CUSTOM_ROLE_MAX_LENGTH) {
+    return { ok: false, error: `rolul poate avea cel mult ${AGENT_CUSTOM_ROLE_MAX_LENGTH} de caractere; nu a fost salvat sau trunchiat`, status: 400 }
+  }
   const id = n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/^agent\s+/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-  if (!id) return JSON.stringify({ error: 'din nume nu iese un id valid' })
-  const err = await adaugaAgentCustom({ id, nume: n, rol: r, doarAdmin })
-  if (err) return JSON.stringify({ error: err })
-  return JSON.stringify({ ok: true, id, nume: n, mesaj: `Agent nou creat: ${n} (${id}). Îl poți chema imediat cu cheama_agent.` })
+  if (!id) return { ok: false, error: 'din nume nu iese un id valid', status: 400 }
+  if (gasesteAgent(id)) return { ok: false, error: `id-ul „${id}” este rezervat unui agent existent; alege alt nume`, status: 409 }
+  const err = await adaugaAgentCustom({ id, nume: n, rol: r, efort: input.efort === 'high' ? 'high' : undefined, doarAdmin: input.doarAdmin === true })
+  if (err) return { ok: false, error: err, status: 409 }
+  return { ok: true, id, nume: n }
+}
+
+export async function executaAgentNou(nume: string, rol: string, doarAdmin: boolean): Promise<string> {
+  const result = await creeazaAgentCustom({ nume, rol, doarAdmin })
+  if (!result.ok) return JSON.stringify({ error: result.error })
+  return JSON.stringify({ ...result, mesaj: `Agent nou creat: ${result.nume} (${result.id}). Îl poți chema imediat cu cheama_agent.` })
 }
 
 const BAZA_PUBLICA = config.publicOrigin

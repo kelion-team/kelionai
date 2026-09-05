@@ -4050,37 +4050,23 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
 /* Toate au credit → totalul e discret (gri), nu alarmant (roșu). */
 .becuri-bara-nr.toate-ok { color: var(--text); opacity: 0.45; font-weight: 600; }
 
-/* „APLICAȚII" — buton cu meniu (trading + Adaptare CV grupate), owner 13 aug. */
-/* `.topbar` e pointer-events:none (ca să nu acopere avatarul), iar FIECARE copil
-   interactiv RE-activează clicurile. Butonul „Aplicații" stă în `.apps-wrap`, deci
-   NU e `.topbar > button` — fără linia de mai jos, wrap-ul + butonul + meniul moștenesc
-   `none` și clicul trece PRIN ele (owner, 14 aug: „butonul Aplicații nu merge"). Aceeași
-   cauză ca bugul vechi de la `.wallet`. */
-.apps-wrap { position: relative; display: inline-flex; pointer-events: auto; }
-/* Selectorul de limbă din bară (Cerința #29) — ACELAȘI tipar ca Aplicații:
-   wrap relativ cu pointer-events:auto (lecția .apps-wrap: bara e none, fiecare
-   copil interactiv re-activează clicul), meniu absolut, închis implicit. */
+/* Bara lasă clicurile să treacă spre avatar; selectorul de limbă le primește. */
 .lang-wrap { position: relative; display: inline-flex; pointer-events: auto; }
-.lang-menu { left: auto; right: 0; min-width: 150px; }
 .lang-activ { color: var(--accent, #4cc2ff); font-weight: 700; }
-.apps-backdrop { position: fixed; inset: 0; z-index: 40; }
-.apps-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 41;
-  display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px;
+.lang-backdrop { position: fixed; inset: 0; z-index: 40; }
+.lang-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 41;
+  display: flex; flex-direction: column; gap: 2px; min-width: 150px; padding: 6px;
   border-radius: 10px; background: var(--panel, #10162a);
   border: 1px solid var(--border); box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
-  /* MENIUL NU-ȘI MAI TAIE COADA (owner, 15 aug: „unde e generatorul video" —
-     🎬 e ULTIMA intrare, iar fără max-height lista de ~19 rânduri cădea sub
-     marginea ecranelor mai scunde, fără nicio derulare). Plafonat la fereastră
-     → derulează; pe ecran înalt nu se schimbă NIMIC. */
   max-height: calc(100vh - 120px); overflow-y: auto;
 }
-.apps-item {
+.lang-item {
   display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 0;
   border-radius: 7px; background: transparent; color: var(--text);
   font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; white-space: nowrap;
 }
-.apps-item:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.lang-item:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 
 /* CIFRELE VPS, SUB ADMIN (tabul „Sistem (VPS)") — mutate din bara de sus. */
 .vps-resurse {
@@ -4273,43 +4259,12 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--text) 3%, transparent);
 }
-.admin-constructor-meta {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid rgba(136, 136, 136, 0.27);
-  border-radius: 8px;
-  font-size: 11px;
-  opacity: 0.75;
-}
-.admin-constructor-model-control {
+.admin-constructor-engine {
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--text) 2%, transparent);
-}
-.admin-constructor-model-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-.constructor-model-button {
-  flex: 1 1 260px;
-  text-align: left;
-}
-.constructor-model-button.active {
-  border-color: #1a7f37;
-  color: #1a7f37;
-  opacity: 1;
-}
-.constructor-model-default,
-.constructor-model-verified {
-  opacity: 0.72;
-}
-.constructor-model-ready {
-  color: #1a7f37;
-  font-weight: 650;
 }
 .constructor-model-error {
   color: #c1121f;
@@ -4321,10 +4276,6 @@ a.bec-rand:hover { background: color-mix(in srgb, var(--text) 8%, transparent); 
   border: 1px solid;
   border-radius: 8px;
   font-size: 12px;
-}
-.constructor-outcome.recommendation {
-  border-color: rgba(208, 169, 32, 0.55);
-  background: rgba(208, 169, 32, 0.1);
 }
 .constructor-outcome.unresolved {
   border-color: rgba(138, 109, 26, 0.4);

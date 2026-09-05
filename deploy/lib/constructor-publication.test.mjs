@@ -45,6 +45,17 @@ const shellFunction = (source, name) => {
   assert.ok(end > start, `funcția shell ${name} nu poate fi extrasă`)
   return source.slice(start, end + 2)
 }
+const fixtureHostFunction = (source, name) => {
+  const extracted = shellFunction(source, name)
+  // Extracted host code must never observe or mutate the machine running a test.
+  // Keep the production predicates intact, but require a private filesystem root.
+  const hostPath = /\/(?:etc|run)\/kelion[A-Za-z0-9./-]*/g
+  assert.match(extracted, hostPath, `funcția ${name} nu mai conține căile host așteptate`)
+  const isolated = extracted.replace(hostPath, (path) => `"\${fixture_root:?}${path}"`)
+  assert.doesNotMatch(isolated, /(?<!\})\/(?:etc|run)\/kelion[A-Za-z0-9./-]*/,
+    `funcția ${name} păstrează o cale host neizolată`)
+  return isolated
+}
 const runtimeFixture = (cutover) => {
   const runtimeAllowed = cutover.match(/runtime\.env\)\s+allowed_names='([^']+)'/)
   assert.ok(runtimeAllowed, 'allowlist-ul runtime nu poate fi extras')
@@ -736,7 +747,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
     'install-resume-contract',
     'installer',
     'installer-journal-finalize',
-    'local-repair-executor',
+    'isolated-repair-executor',
     'model-control-secret-bootstrap',
     'node-runtime',
     'package-dependencies',
@@ -768,7 +779,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   for (const [check, command] of [
     ['package-index', 'apt-get update -qq'],
     ['package-dependencies', 'apt-get install -y -qq ca-certificates'],
-    ['local-repair-executor', '/opt/private-ai/bin/opencode --version'],
+    ['isolated-repair-executor', '--verify-runtime-binary'],
     ['signing-stale-cleanup', 'for stale_signing_root in'],
     ['signing-key-validation', 'validate_signing_key "$signing_key"'],
     ['signing-key-registration', 'existing_keys=$(curl'],
@@ -784,19 +795,17 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   }
 
   const localExecutor = remote.slice(
-    remote.indexOf("constructor_config_check='local-repair-executor'"),
+    remote.indexOf("constructor_config_check='isolated-repair-executor'"),
     remote.indexOf("constructor_config_check='cutover-stage'"),
   )
-  assert.match(localExecutor, /\/opt\/private-ai\/bin\/opencode --version\)" = '1\.18\.25'/)
-  assert.match(localExecutor, /\.enabled_providers == \["llama\.cpp"\]/)
-  assert.match(localExecutor, /\.model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
-  assert.match(localExecutor, /has\("apiKey"\) \| not/)
-  assert.match(localExecutor, /options\.baseURL == "http:\/\/127\.0\.0\.1:24080\/v1"/)
-  assert.match(localExecutor, /systemctl is-active --quiet private-ai-llm\.service/)
-  assert.match(localExecutor, /systemctl is-active --quiet private-ai-web\.service/)
-  assert.match(localExecutor, /127\.0\.0\.1:24080\/health/)
-  assert.match(localExecutor, /\[ ! -e \/var\/lib\/kelion-codex-auth \] && \[ ! -L \/var\/lib\/kelion-codex-auth \]/)
-  assert.match(localExecutor, /\[ ! -e \/opt\/kelion-codex\/profile-home \] && \[ ! -L \/opt\/kelion-codex\/profile-home \]/)
+  assert.match(localExecutor, /--verify-runtime-binary/)
+  assert.match(localExecutor, /--validate-runtime-config "\$opencode_config"/)
+  assert.match(localExecutor, /cmp -s -- "\$work\/deploy\/opencode-constructor\.json" "\$opencode_config"/)
+  assert.match(localExecutor, /private-ai-llm\.service private-ai-web\.service[\s\S]*! systemctl is-active[\s\S]*! systemctl is-enabled/)
+  assert.match(localExecutor, /\/var\/lib\/kelion-codex-auth \/opt\/kelion-codex\/profile-home/)
+  assert.match(localExecutor, /\/etc\/sudoers\.d\/kelion-constructor-full-access/)
+  assert.match(localExecutor, /\[ ! -e "\$retired" \] && \[ ! -L "\$retired" \]/)
+  assert.doesNotMatch(localExecutor, /127\.0\.0\.1:24080|qwen|NOPASSWD/)
   assert.doesNotMatch(remote, /@openai\/codex|forced_login_method|CODEX_HOME|login status|npm install --global/)
 
   const handlerStart = remote.indexOf('report_constructor_config_failure() {')
@@ -810,7 +819,7 @@ test('configurarea Constructor atribuie fail-closed eșecurile tăcute post-inst
   const sourceCommit = 'a'.repeat(40)
   const script = `set -Euo pipefail
 constructor_config_phase='post-installer'
-constructor_config_check='local-repair-executor'
+constructor_config_check='isolated-repair-executor'
 source_commit='${sourceCommit}'
 ${handler}
 cleanup_remote() { trap - ERR; printf '%s\\n' cleanup-complete; }
@@ -830,7 +839,7 @@ exit 99
     ok: false,
     event: 'constructor_config_failure',
     phase: 'post-installer',
-    check: 'local-repair-executor',
+    check: 'isolated-repair-executor',
     line: 0,
     exit_code: 17,
     source_commit: sourceCommit,
@@ -849,7 +858,7 @@ test('configurarea Constructor păstrează ACL-ul canonic al secretelor de produ
   assert.match(cutover, /publisher-secret\.github-publisher-token[\s\S]*group_id kelion-publisher[\s\S]*mapped_mode=440/)
 })
 
-test('configure leagă retry-ul installerului de aceeași tuplă exactă de 25 artefacte', () => {
+test('configure leagă retry-ul installerului de aceeași tuplă exactă de artefacte canonice', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const installer = read('deploy/instaleaza-constructor.sh')
   const normalized = workflow.replace(/^ {10}/gm, '')
@@ -864,7 +873,7 @@ test('configure leagă retry-ul installerului de aceeași tuplă exactă de 25 a
   const configureLogicals = arrayValues(normalized, 'configure_install_logicals', /^  ([a-z0-9.-]+)$/gm)
   const installerSources = arrayValues(installer, 'install_sources', /^  "\$repo_root\/([^"]+)"$/gm)
   const configureSources = arrayValues(normalized, 'configure_install_sources', /^  "\$work\/([^"]+)"$/gm)
-  assert.equal(installerLogicals.length, 25)
+  assert.equal(installerLogicals.length, 23)
   assert.deepEqual(configureLogicals, installerLogicals,
     'workflowul trebuie să folosească ordinea logică exactă a producerului jurnalului')
   assert.deepEqual(configureSources, installerSources,
@@ -907,10 +916,10 @@ test('configure leagă retry-ul installerului de aceeași tuplă exactă de 25 a
   assert.equal(sameGeneration.stdout.trim(), 'accepted')
   const masterAdvanced = runGuard(oldGenerationSha, expectedSourceSha, oldGenerationSha.slice(0, 40))
   assert.equal(masterAdvanced.status, 1, masterAdvanced.stdout)
-  assert.match(masterAdvanced.stderr, /altei generații de 25 artefacte/)
+  assert.match(masterAdvanced.stderr, /altei generații de artefacte canonice/)
 
   const bind = workflow.indexOf('configure_install_journal_source_sha256=$(jq -er', workflow.indexOf('load_configure_install_journal()'))
-  const mismatchExit = workflow.indexOf('altei generații de 25 artefacte', bind)
+  const mismatchExit = workflow.indexOf('altei generații de artefacte canonice', bind)
   const bothOrResume = workflow.indexOf('if [ -e "$reactivation_journal" ]', mismatchExit)
   const candidatePublication = workflow.indexOf("constructor_config_check='runtime-helper-publication'", bothOrResume)
   assert.ok(bind >= 0 && mismatchExit > bind && bothOrResume > mismatchExit && candidatePublication > bothOrResume,
@@ -953,8 +962,10 @@ test('configure păstrează ownerul installerului până la mixed commit și rep
   assert.match(configureBranch, /validate_constructor_activation_pending[\s\S]*validate_model_controller_quiesced[\s\S]*load_install_transaction[\s\S]*constructor-unit-migration\.pending/)
   assert.doesNotMatch(configureBranch, /clear_install_transaction|clear_constructor_activation_pending|start_model_controller/)
 
-  const restore = shellFunction(normalized, 'restore_configure_recovery_and_controller')
+  const restore = fixtureHostFunction(normalized, 'restore_configure_recovery_and_controller')
   const harness = `set -euo pipefail
+fixture_root=$(mktemp -d)
+trap 'rm -rf -- "$fixture_root"' EXIT
 calls=''
 record() { calls="\${calls}|$*"; }
 flock() { record "flock:$*"; }
@@ -966,7 +977,7 @@ systemctl() {
   esac
 }
 probe_configured_model_controller() { record probe; }
-reactivation_journal=/tmp/kelion-test-reactivation-journal-absent
+reactivation_journal="$fixture_root/reactivation-journal-absent"
 exec 9>/dev/null
 ${restore}
 restore_configure_recovery_and_controller
@@ -1012,14 +1023,15 @@ test('secretul controllerului se naște o singură dată pe VPS și rămâne ide
     'configure trebuie să publice secretul local înainte de orice reluare/instalare')
 })
 
-test('workerul serializează execuția cu schimbarea manuală pe lockul canonic', () => {
+test('workerul izolat pornește fără selectorul și lockul modelelor retrase', () => {
   const unit = read('deploy/systemd/kelion-codex-worker.service')
   const cutover = shellFunction(read('deploy/lib/runtime-config-cutover.sh'), 'validate_constructor_service_unit')
-  const execStart = 'ExecStart=/usr/bin/flock --exclusive --wait 9000 /run/lock/private-ai-model-switch.lock /usr/bin/node /opt/kelion-codex/codex-worker.mjs --once'
+  const execStart = 'ExecStart=/usr/bin/node /opt/kelion-codex/codex-worker.mjs --once'
   assert.match(unit, /^SupplementaryGroups=kelion-handoff privateai$/m)
   assert.equal(unit.split('\n').filter((line) => line === execStart).length, 1)
   assert.ok(cutover.includes(execStart.slice('ExecStart='.length)))
   assert.match(cutover, /grep -Fxc "ExecStart=\$exec_start"/)
+  assert.doesNotMatch(unit, /private-ai-model-switch\.lock|sudo|private-ai-llm\.service/)
 })
 
 test('politica de retry și checks a Constructorului rămâne aliniată în provisionare, deploy și control', () => {
@@ -1246,17 +1258,26 @@ test('systemd păstrează secret stores, userii și spool-ul separate', () => {
     assert.doesNotMatch(worker, /^RestrictNamespaces=.*\bmount\b/m)
   }
   for (const unit of [publisher, release]) {
-    assert.match(unit, /NoNewPrivileges=true/)
     assert.match(unit, /ProtectSystem=strict/)
-    assert.match(unit, /CapabilityBoundingSet=\n/)
+  }
+  assert.match(release, /^NoNewPrivileges=true$/m)
+  assert.match(release, /^CapabilityBoundingSet=$/m)
+  assert.match(publisher, /^NoNewPrivileges=false$/m)
+  assert.match(publisher, /^CapabilityBoundingSet=~$/m)
+  assert.match(publisher, /^RestrictSUIDSGID=false$/m)
+  assert.match(publisher, /^ProcSubset=all$/m)
+  for (const unit of [worker, publisher]) {
+    assert.match(unit, /^CPUQuota=200%$/m)
+    assert.match(unit, /^MemoryMax=6G$/m)
+    assert.match(unit, /^TasksMax=512$/m)
+    assert.match(unit, /^KillMode=control-group$/m)
   }
   for (const unit of [worker, publisher, release]) {
     assert.match(unit, /After=[^\n]*kelion-runtime-config-recovery\.service/)
     assert.match(unit, /ConditionPathExists=\/run\/kelion\/runtime-config-recovery\.ready/)
     assert.doesNotMatch(unit, /\[Install\]|WantedBy=multi-user\.target/)
   }
-  assert.match(publisher, /^RestrictNamespaces=user mnt net pid ipc uts$/m)
-  assert.doesNotMatch(publisher, /^RestrictNamespaces=.*\bmount\b/m)
+  assert.match(publisher, /^RestrictNamespaces=false$/m)
 })
 
 test('quiesce-ul elimină și orice enable legacy al serviciilor oneshot', () => {
@@ -1289,7 +1310,7 @@ test('workerul oprește copilul activ la pierderea lease-ului și păstrează ad
   assert.match(runLogged, /signal\?\.removeEventListener\('abort', onAbort\)/)
   if (runLogged.includes("signalGroup('SIGTERM')")) {
     assert.match(runLogged, /detached: true[\s\S]*signalGroup\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*signalGroup\('SIGKILL'\)[\s\S]*2_000/)
-    assert.match(runLogged, /privilegedKill[\s\S]*\/usr\/bin\/sudo[\s\S]*\/usr\/bin\/kill/)
+    assert.doesNotMatch(runLogged, /privilegedKill|\/usr\/bin\/sudo/)
   } else {
   assert.match(runLogged, /child\.kill\('SIGTERM'\)[\s\S]*setTimeout\([\s\S]*child\.kill\('SIGKILL'\)[\s\S]*2_000/)
   }
@@ -1395,13 +1416,15 @@ test('installerul lasă capabilitățile dezactivate și pornește controllerul 
   assert.ok(lock >= 0 && identities > lock && transaction > lock,
     'identitățile și tranzacția durabilă se modifică numai sub lock-ul comun dovedit')
   const logicalBlock = installer.slice(installer.indexOf('install_logicals=('), installer.indexOf('\n)', installer.indexOf('install_logicals=(')))
-  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 25)
-  assert.equal(installer.split('systemctl restart private-ai-web.service').length - 1, 1)
+  assert.equal(logicalBlock.split('\n').filter((line) => /^  [a-z0-9.-]+$/.test(line)).length, 23)
+  assert.doesNotMatch(installer, /systemctl (?:start|restart) private-ai-(?:web|llm)\.service/)
   assert.equal(installer.split('systemctl enable kelion-runtime-config-recovery.service').length - 1, 1)
-  const privateAiRestart = installer.indexOf('systemctl restart private-ai-web.service')
-  const privateAiValidation = installer.indexOf('validate_private_ai_web_full_access', privateAiRestart)
-  assert.ok(privateAiRestart >= 0 && privateAiValidation > privateAiRestart,
-    'restartul necesar al executorului local trebuie urmat de validarea contractului live')
+  const retirement = shellFunction(installer, 'retire_legacy_model_dropin')
+  assert.match(retirement, /private-ai-web\.service private-ai-llm\.service[\s\S]*systemctl stop[\s\S]*systemctl disable/)
+  assert.match(retirement, /validate_retired_local_runtime/)
+  const retired = shellFunction(installer, 'validate_retired_local_runtime')
+  assert.match(retired, /! systemctl is-enabled[\s\S]*systemctl list-jobs/)
+  assert.match(retired, /sudo -n -u root[\s\S]*then return 1/)
   const installerMain = installer.slice(installer.indexOf('set_constructor_install_phase transaction-prepare'))
   const pendingPublish = installerMain.indexOf('publish_constructor_activation_pending')
   const quiesce = installerMain.indexOf('quiesce_before_install', pendingPublish)
@@ -2531,7 +2554,6 @@ test('recovery-ul de boot precedă timerele Constructor', () => {
 
 test('toate unitățile systemd publicate respectă contractul strict de bytes text', () => {
   const unitPaths = [
-    'private-ai-web-full-access.conf',
     'kelion-runtime-config-recovery.service',
     'kelion-constructor-sync.service',
     'kelion-codex-worker.timer',
@@ -3272,7 +3294,7 @@ test('vps-set-env separă bootstrapul fără controller de reactivarea canonică
   assert.match(classification, /constructor-model-control\.mjs[\s\S]*constructor-model-switch[\s\S]*kelion-constructor-model-control\.service/)
   assert.match(classification,
     /validate_controller_artifact_bytes[\s\S]*controller_candidates[\s\S]*controller_sha256[\s\S]*Controllerul manual diferă byte-exact de checkout/)
-  assert.match(classification, /--self-test[\s\S]*After=local-fs\.target private-ai-llm\.service[\s\S]*systemctl is-enabled --quiet kelion-constructor-model-control\.service/)
+  assert.match(classification, /--self-test[\s\S]*After=local-fs\.target network-online\.target[\s\S]*systemctl is-enabled --quiet kelion-constructor-model-control\.service/)
   assert.match(provision.slice(finalBranch), /bootstrap-quiesced până la configure-constructor/)
 
   const bundleStart = provision.indexOf('git archive --format=tar HEAD')
@@ -3450,7 +3472,7 @@ done`
   }
 
   const runtimeBarrier = shellFunction(cutover, 'validate_constructor_quiesce_barrier')
-  const runtimeEarly = shellFunction(cutover, 'early_recover_only_barrier')
+  const runtimeEarly = fixtureHostFunction(cutover, 'early_recover_only_barrier')
   const runtimeStopTimer = shellFunction(cutover, 'stop_and_disable_constructor_timer')
   const runtimeStopService = shellFunction(cutover, 'stop_and_disable_constructor_service')
   const runtimeReport = shellFunction(cutover, 'report_quiesce_postcondition_failure')
@@ -3474,6 +3496,17 @@ done`
   assert.doesNotMatch(installerQuiesce, /is-enabled/)
 
   const earlyHarness = `set -euo pipefail
+fixture_root=$(mktemp -d)
+trap 'rm -rf -- "$fixture_root"' EXIT
+mkdir -p "$fixture_root/run/kelion" "$fixture_root/run/kelion-constructor-model-control"
+printf 'ready-fixture\\n' > "$fixture_root/run/kelion/runtime-config-recovery.ready"
+printf 'preserve-fixture\\n' > "$fixture_root/untouched"
+stat() {
+  [ "$#" = 3 ] && [ "$1" = -c ] && [ "$2" = '%u:%g:%a' ] \
+    && [ "$3" = "$fixture_root/run/kelion" ] || return 91
+  printf '0:0:755\\n'
+}
+sync() { [ "$#" = 2 ] && [ "$1" = -f ] && [ "$2" = "$fixture_root/run/kelion" ]; }
 ${runtimeStopTimer}
 ${runtimeStopService}
 ${runtimeReport}
@@ -3496,6 +3529,8 @@ systemctl() {
   esac
 }
 early_recover_only_barrier
+[ ! -e "$fixture_root/run/kelion/runtime-config-recovery.ready" ]
+[ "$(cat "$fixture_root/untouched")" = preserve-fixture ]
 FAIL_STOP=1 FAIL_DISABLE=1
 early_recover_only_barrier
 FAIL_STOP=0 FAIL_DISABLE=0
@@ -3504,7 +3539,11 @@ if early_recover_only_barrier; then exit 101; fi
 SERVICE_STATE=static ACTIVE_STATE=active
 if early_recover_only_barrier; then exit 102; fi
 ACTIVE_STATE=inactive PENDING_JOB=1
-if early_recover_only_barrier; then exit 103; fi`
+if early_recover_only_barrier; then exit 103; fi
+PENDING_JOB=0
+printf 'socket-fixture\\n' > "$fixture_root/run/kelion-constructor-model-control/control.sock"
+if early_recover_only_barrier; then exit 104; fi
+[ -f "$fixture_root/run/kelion-constructor-model-control/control.sock" ]`
   const earlyResult = spawnSync(bashExecutable, ['-c', earlyHarness], { encoding: 'utf8' })
   assert.equal(earlyResult.status, 0, earlyResult.stderr || earlyResult.stdout)
 })
@@ -5083,24 +5122,18 @@ test('cutover-ul final al upgrade-ului restage-uiește toate cele trei configuri
   assert.match(restored, /validate_service_quiescence/)
 })
 
-test('statusul VPS leagă profilul manual de snapshotul HMAC și de runtime-ul modelului', () => {
+test('statusul VPS leagă modelul aprobat de snapshotul HMAC și binarul fixat', () => {
   const workflow = read('.github/workflows/vps-run.yml')
   const stepStart = workflow.indexOf('- name: Activeaza etapizat sau raporteaza starea')
   const stepEnd = workflow.indexOf('\n      - name:', stepStart + 1)
   assert.ok(stepStart >= 0 && stepEnd > stepStart, 'pasul de status Constructor trebuie delimitat')
   const remote = workflow.slice(stepStart, stepEnd).replace(/^ {10}/gm, '')
   const snapshotStart = remote.indexOf('constructor_model_snapshot() {')
-  const fastInstallStart = remote.indexOf('validate_fast_model_install() {', snapshotStart)
-  const powerfulInstallStart = remote.indexOf('validate_powerful_model_install() {', fastInstallStart)
-  const dropinStart = remote.indexOf('expected_powerful_status_dropin() {', powerfulInstallStart)
-  const validatorStart = remote.indexOf('validate_constructor_model_status() {', dropinStart)
+  const validatorStart = remote.indexOf('validate_constructor_model_status() {', snapshotStart)
   const statusStart = remote.indexOf('\nstatus() {', validatorStart) + 1
-  assert.ok(snapshotStart >= 0 && fastInstallStart > snapshotStart
-    && powerfulInstallStart > fastInstallStart && dropinStart > powerfulInstallStart
-    && validatorStart > dropinStart && statusStart > validatorStart,
-  'dovezile modelului trebuie definite înaintea statusului')
-
-  const snapshot = remote.slice(snapshotStart, fastInstallStart)
+  assert.ok(snapshotStart >= 0 && validatorStart > snapshotStart && statusStart > validatorStart,
+    'dovezile modelului trebuie definite înaintea statusului')
+  const snapshot = remote.slice(snapshotStart, validatorStart)
   assert.match(snapshot, /systemctl is-active --quiet kelion-constructor-model-control\.service/)
   assert.match(snapshot, /control\.sock[\s\S]*0:10050:660/)
   assert.match(snapshot, /constructor-model-control-secret[\s\S]*0:10050:440:1/)
@@ -5109,38 +5142,17 @@ test('statusul VPS leagă profilul manual de snapshotul HMAC și de runtime-ul m
   assert.match(snapshot, /x-kelion-nonce[\s\S]*x-kelion-signature[\s\S]*x-kelion-timestamp/)
   assert.match(snapshot, /response\.statusCode !== 200[\s\S]*contentType !== 'application\/json'/)
 
-  const fastInstall = remote.slice(fastInstallStart, powerfulInstallStart)
-  assert.match(fastInstall, /\.install-complete[\s\S]*installer_id=private-ai-contabo-v1/)
-  assert.match(fastInstall, /model\.ready[\s\S]*privateai:privateai:600:1/)
-  assert.match(fastInstall, /find "\$model_cache" -xdev -type f -size 20419565568c/)
-  assert.match(fastInstall, /privateai:privateai:20419565568:1/)
-
-  const powerfulInstall = remote.slice(powerfulInstallStart, dropinStart)
-  assert.match(powerfulInstall, /\.max-model-complete[\s\S]*"\$\{#complete_lines\[@\]\}" -eq 20/)
-  assert.match(powerfulInstall, /schema=2[\s\S]*default_model=llama\.cpp\/qwen3\.6-35b-a3b-local/)
-  assert.match(powerfulInstall, /powerful_model=llama\.cpp\/qwen3\.5-122b-a10b-local/)
-  assert.match(powerfulInstall, /fast_model_path=\$fast_model_path/)
-  for (const bytes of ['10943552', '49968146912', '26557874144']) {
-    assert.match(powerfulInstall, new RegExp(`root:privateai:440:${bytes}:1`))
-  }
-
   const validator = remote.slice(validatorStart, statusStart)
-  assert.match(validator, /private-ai-model-switch\.lock[\s\S]*root:privateai:660:1[\s\S]*flock --shared --wait 30 8/)
-  assert.match(validator, /\.model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
-  assert.match(validator, /\.small_model == "llama\.cpp\/qwen3\.6-35b-a3b-local"/)
-  assert.match(validator,
-    /models \| keys[\s\S]*\["qwen3\.5-122b-a10b-local", "qwen3\.6-35b-a3b-local"\]/)
+  assert.match(validator, /--verify-runtime-binary/)
+  assert.match(validator, /expected_model=\$\(node "\$controller" --validate-runtime-config "\$opencode_config"\)/)
   assert.match(validator, /snapshot=\$\(constructor_model_snapshot\)/)
-  assert.match(validator, /\.defaultProfile == "fast"[\s\S]*\.installedProfiles == \["fast", "powerful"\]/)
-  assert.match(validator, /\.activeProfile == "fast" or \.activeProfile == "powerful"/)
-  assert.match(validator, /127\.0\.0\.1:24080\/v1\/models/)
-  assert.match(validator, /fast:qwen3\.6-35b-a3b-local\)[\s\S]*"\$web_state" = active[\s\S]*"\$dropins"/)
-  assert.match(validator,
-    /powerful:qwen3\.5-122b-a10b-local\)[\s\S]*"\$web_state" = inactive[\s\S]*expected_powerful_status_dropin/)
-  assert.match(validator, /\/proc\/\$llm_pid\/maps/)
-
+  assert.match(validator, /--argjson expected "\$expected_model"/)
+  assert.match(validator, /\.status == "ready"[\s\S]*\.activeProfile == "fast"[\s\S]*\.installedProfiles == \["fast"\] and \.model == \$expected/)
+  assert.match(validator, /private-ai-llm\.service private-ai-web\.service[\s\S]*! systemctl is-active[\s\S]*! systemctl is-enabled/)
+  assert.match(validator, /\[ ! -e \/etc\/sudoers\.d\/kelion-constructor-full-access \]/)
+  assert.doesNotMatch(validator, /127\.0\.0\.1:24080|qwen|\/proc\/\$llm_pid\/maps/)
   const status = remote.slice(statusStart, remote.indexOf('\ncase "$operation" in', statusStart))
-  assert.match(status, /if validate_constructor_model_status; then[\s\S]*opencode-qwen-local=ready[\s\S]*opencode-qwen-local=required/)
+  assert.match(status, /if validate_constructor_model_status; then[\s\S]*opencode-isolated=ready[\s\S]*opencode-isolated=required/)
 })
 
 test('jurnalul exterior al upgrade-ului blochează fiecare mutator după eliberarea lock-ului la crash', () => {
@@ -6307,11 +6319,9 @@ test('telemetria upgrade-ului Constructor este structurată și nu divulgă medi
   const upgrade = read('deploy/upgrade-constructor.sh')
   const reporter = shellFunction(upgrade, 'report_constructor_upgrade_failure')
   const capture = shellFunction(upgrade, 'capture_constructor_upgrade_failure')
-  const pinnedProviderMetadata = '$config.provider["llama.cpp"].npm == "@ai-sdk/openai-compatible" and'
-  assert.equal(upgrade.split(pinnedProviderMetadata).length - 1, 1,
-    'singura apariție npm permisă este cheia de schemă fixată a providerului local')
-  const upgradeWithoutPinnedProviderMetadata = upgrade.replace(pinnedProviderMetadata, '')
-  assert.doesNotMatch(upgradeWithoutPinnedProviderMetadata,
+  assert.match(upgrade, /--validate-runtime-config "\$config"/,
+    'validatorul canonic de provider este partajat cu controllerul')
+  assert.doesNotMatch(upgrade,
     /CODEX_WORKER_SECRET|CONSTRUCTOR_(?:PUBLISHER|RELEASE)_SECRET|SYNC_GITHUB_TOKEN|PUBLISHER_GITHUB_TOKEN|RELEASE_GITHUB_TOKEN|GHCR_READ_TOKEN|OPENAI_(?:API|ADMIN)_KEY|\bpayload\b|\bapt(?:-get)?\b|\bnpm\b/i)
   assert.doesNotMatch(reporter,
     /BASH_COMMAND|set\s+-x|printenv|declare\s+-p|export\s+-p|printf[^\n]*(?:token|secret|value|env)/i)
@@ -6352,43 +6362,16 @@ false
   assert.doesNotMatch(probe.stdout + probe.stderr, /CANARY_SECRET|BASH_COMMAND|(?:^|\n)false(?:\n|$)/)
 })
 
-// Instalatorul si controllerul valideaza aceleasi artefacte private-ai, dar prin
-// mecanisme diferite: primul dupa nume de cont, al doilea numeric. Cand cele doua
-// contracte diverg, detectInstalledProfiles intoarce [] pe orice gazda unde
-// `privateai` nu are exact uid-ul hardcodat, controllerul raporteaza `unavailable`
-// si claim-ul raspunde 503 constructor_model_not_ready - fara ca vreun test sa cada,
-// pentru ca suita controllerului injecteaza un dublu peste fastArtifactsInstalled.
-// Testul de fata compara direct cele doua contracte, nu logica fiecaruia separat.
-test('contractul de proprietate al artefactelor private-ai este acelasi in installer si in controller', () => {
+test('installerul și controllerul partajează validarea runtime-ului fără modele locale', () => {
   const installer = read('deploy/instaleaza-constructor.sh')
+  const upgrade = read('deploy/upgrade-constructor.sh')
   const controller = read('deploy/constructor-model-control.mjs')
-
-  // Installerul ramane sursa de adevar si valideaza dupa nume de cont.
-  assert.match(installer, /privateai:privateai:600:1/)
-  assert.match(installer, /privateai:privateai:20419565568:1/)
-
-  const fastArtifacts = controller.slice(
-    controller.indexOf('function fastArtifactsInstalled('),
-    controller.indexOf('function discoverFastModelPath('),
-  )
-  assert.ok(fastArtifacts.length > 0, 'fastArtifactsInstalled nu a putut fi izolata')
-
-  // Controllerul nu are voie sa compare proprietarul cu un uid/gid literal:
-  // identitatile conturilor difera de la o gazda la alta, iar 10050 este gid-ul
-  // grupului kelion-app, nu al contului privateai.
-  const numericOwnerComparison = /\b(?:uid|gid)\s*===\s*\d+/
-  assert.doesNotMatch(
-    fastArtifacts,
-    numericOwnerComparison,
-    'proprietarul artefactelor private-ai este comparat cu un identificator numeric fix',
-  )
-
-  // Trebuie rezolvat la rulare, exact contul pe care il cere installerul.
-  assert.match(fastArtifacts, /privateAiIdentity\(\)/)
-  const identity = controller.slice(
-    controller.indexOf('function privateAiIdentity('),
-    controller.indexOf('function fastArtifactsInstalled('),
-  )
-  assert.match(identity, /\/etc\/passwd[\s\S]*privateai:/)
-  assert.match(identity, /\/etc\/group[\s\S]*privateai:/)
+  for (const source of [installer, upgrade]) {
+    assert.match(source, /--verify-runtime-binary/)
+    assert.match(source, /--validate-runtime-config/)
+    assert.doesNotMatch(source, /20419565568|fastArtifactsInstalled|validate_max_model_complete_receipt/)
+  }
+  assert.match(controller, /OPENCODE_SHA256 = '[0-9a-f]{64}'/)
+  assert.match(controller, /function validateProviderConfig/)
+  assert.match(controller, /process\.argv\[2\] === '--verify-runtime-binary'/)
 })

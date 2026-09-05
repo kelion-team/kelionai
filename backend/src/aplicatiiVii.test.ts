@@ -1,11 +1,5 @@
-// ── P28: APLICAȚIILE SUNT VII (owner, 15 aug, verbatim: „Aplicatiile, nu sunt
-// doar poze, ele sunt aplicatii care trebuie sa ruleze, si kelion sa apeleze
-// si sa dea subiectele cind sunt chemate, sa analizeze si sa gestioneze tot")
-//
-// Auditul aplicațiilor (15 aug seara) a măsurat 7 rupturi pe drumul
-// meniu → creier → unealtă. Lacătele de aici țin fiecare reparație pe loc:
-// o comandă de meniu care nu-și mai primește unealta în runda 1 pică AICI,
-// nu în mâna ownerului pe live.
+// Contractele acțiunilor explicite din chat rămân valabile după retragerea
+// meniului Aplicații. Nicio intrare sau comandă de meniu nu este recreată aici.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -16,7 +10,6 @@ function sursa(rel: string): string {
   return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 }
 
-const stage = sursa('../../frontend/src/pages/Stage.tsx')
 const chat = sursa('./routes/chat.ts')
 
 describe('P28 — RUPTURA #4: granițele regex pe diacritice (bugul „Fă-mi")', () => {
@@ -34,30 +27,6 @@ describe('P28 — RUPTURA #4: granițele regex pe diacritice (bugul „Fă-mi")'
   it('cuvintele care doar CONȚIN literele nu declanșează (fals-pozitivele stau afară)', () => {
     expect(hasActionIntent('e o fărâmă de adevăr')).toBe(false)
     expect(hasActionIntent('ce mai faci?')).toBe(false)
-  })
-})
-
-describe('P28 — RUPTURA #3: FIECARE comandă din meniul ▦ Aplicații e o ACȚIUNE', () => {
-  // Textele se citesc CHIAR din Stage.tsx (perechile [etichetă, comandă]) —
-  // dacă cineva adaugă mâine o intrare care pică pe faza de vorbire (fără
-  // unealta ei în runda 1), testul ăsta o prinde înainte de live.
-  const perechi = [...stage.matchAll(/\[\s*'[^']+'\s*,\s*'([^']{10,})'\s*,?\s*\]/g)].map((m) => m[1])
-
-  it('meniul are comenzile așteptate (plasa citirii nu s-a rupt)', () => {
-    expect(perechi.length).toBeGreaterThanOrEqual(15)
-  })
-
-  it('toate comenzile din meniu prind intenția de acțiune (unealta vine în runda 1)', () => {
-    for (const comanda of perechi) {
-      expect(hasActionIntent(comanda), `comanda de meniu NU e acțiune: „${comanda}"`).toBe(true)
-    }
-  })
-
-  it('și cele două foste ocolitoare (Tranzacții, CV) merg acum PRIN Kelion', () => {
-    expect(stage).toMatch(/Deschide-mi Centrul de Tranzacționare/)
-    expect(stage).toMatch(/Deschide-mi panoul de adaptare CV/)
-    expect(hasActionIntent('Deschide-mi Centrul de Tranzacționare și spune-mi pe scurt starea lui.')).toBe(true)
-    expect(hasActionIntent('Deschide-mi panoul de adaptare CV și spune-mi pe scurt cum funcționează.')).toBe(true)
   })
 })
 

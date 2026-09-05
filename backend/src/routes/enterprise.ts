@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { adaugaAgentCustom } from '../db.js'
+import { creeazaAgentCustom } from '../services/agentiKelion.js'
 import { cerAdmin } from '../session.js'
 
 // AdminPanel este singura interfață pentru agenții personalizați. Backendul
@@ -18,30 +18,8 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/enterprise/agent-nou', async (req, reply) => {
     const user = adminSau403(req, reply)
     if (!user) return { error: 'forbidden' }
-    const b = (req.body ?? {}) as { nume?: string; rol?: string; efort?: string; doarAdmin?: boolean }
-    const nume = (b.nume ?? '').trim().slice(0, 80)
-    const rol = (b.rol ?? '').trim()
-    if (nume.length < 3 || rol.length < 10) {
-      reply.code(400)
-      return { error: 'numele (min 3 caractere) și meseria (min 10 caractere) sunt obligatorii' }
-    }
-    const id = nume
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/^agent\s+/i, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40)
-    if (!id) {
-      reply.code(400)
-      return { error: 'din numele ăsta nu iese un id valid (folosește litere/cifre)' }
-    }
-    const err = await adaugaAgentCustom({ id, nume, rol, efort: b.efort === 'high' ? 'high' : undefined, doarAdmin: b.doarAdmin === true })
-    if (err) {
-      reply.code(409)
-      return { error: err }
-    }
-    return { ok: true, id }
+    const result = await creeazaAgentCustom((req.body ?? {}) as { nume?: unknown; rol?: unknown; efort?: unknown; doarAdmin?: unknown })
+    if (!result.ok) return reply.code(result.status).send({ error: result.error })
+    return { ok: true, id: result.id }
   })
 }

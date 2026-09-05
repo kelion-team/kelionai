@@ -27,10 +27,8 @@ const DOVEZI: Record<string, { fisier: string; semnatura: RegExp }> = {
 }
 
 describe('lanțul aplicațiilor din meniu', () => {
-  it('fiecare intrare afișată are o integrare măsurată', () => {
-    for (const eticheta of Object.keys(DOVEZI)) {
-      expect(stage, `intrarea ${eticheta} lipsește din meniu`).toContain(`'${eticheta}'`)
-    }
+  it('meniul retras nu mai expune vechile oferte', () => {
+    expect(stage).not.toContain('apps-wrap')
   })
 
   it('fiecare integrare păstrează executorul real', () => {

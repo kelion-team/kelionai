@@ -645,7 +645,7 @@ jobs:
               [ -f "${controller_artifacts[2]}" ] && [ ! -L "${controller_artifacts[2]}" ] \
                 && [ "$(stat -Lc '%u:%g:%a:%h' "${controller_artifacts[2]}")" = '0:0:444:1' ]
               /usr/bin/node "${controller_artifacts[0]}" --self-test >/dev/null
-              grep -Fqx 'After=local-fs.target private-ai-llm.service' "${controller_artifacts[2]}"
+              grep -Fqx 'After=local-fs.target network-online.target' "${controller_artifacts[2]}"
               ! grep -Eq '^(After|Requires)=.*kelion-runtime-config-recovery\.service' "${controller_artifacts[2]}"
               grep -Fqx 'ConditionPathExists=/run/kelion/runtime-config-recovery.ready' "${controller_artifacts[2]}"
               grep -Fqx 'ExecStartPre=/opt/private-ai/bin/constructor-model-switch --prepare-lock' "${controller_artifacts[2]}"

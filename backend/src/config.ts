@@ -48,7 +48,7 @@ export const ENV_ALIASES: Record<string, string[]> = {
   // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
   // de la fostul câmp config.googleMapsKey de mai jos.)
   // OpenAI is the single online conversation provider. Constructor is outside
-  // that boundary and uses only OpenCode + Qwen local (llama.cpp).
+  // that boundary and uses OpenCode with its separately validated engine.
   // The organization Admin key remains a backend-only control-plane credential.
   openaiKey: ['OPENAI_API_KEY'],
   openaiAdminKey: ['OPENAI_ADMIN_KEY'],
@@ -513,7 +513,7 @@ export const config = {
   // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
   // configureze o cheie fără niciun efect — încălcarea regulii #4.)
   // OpenAI is the only online provider for Kelion conversation/media. Constructor
-  // is separate and executes only OpenCode + Qwen local (llama.cpp); it never
+  // is separate and executes OpenCode with its deployed engine; it never
   // receives either OpenAI credential.
   openai: {
     key: runtimeOpenAIKey(),

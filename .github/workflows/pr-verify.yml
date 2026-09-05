@@ -65,10 +65,7 @@ jobs:
           KELION_REQUIRE_ROOT_PUBLICATION_BARRIER_PROBE: '1'
         run: |
           node --test \
-            .github/private-ai/benchmark-active-model.test.mjs \
-            .github/private-ai/finalize-private-ai-constructor.test.mjs \
-            .github/private-ai/install-private-ai.test.mjs \
-            .github/private-ai/upgrade-private-ai-max-model.test.mjs \
+            .github/private-ai/constructor-status-proof.test.mjs \
             scripts/verifica-butoane.test.mjs \
             scripts/verifica-exporturi.test.mjs \
             scripts/verifica-hardcodari.test.mjs \

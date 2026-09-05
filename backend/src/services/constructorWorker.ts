@@ -16,7 +16,7 @@ interface StoredWorkerStatus {
   detail?: string
 }
 
-export const CONSTRUCTOR_EXECUTOR = 'OpenCode + Qwen local (llama.cpp)' as const
+export const CONSTRUCTOR_EXECUTOR = 'OpenCode (motor configurat separat)' as const
 export const CONSTRUCTOR_QUEUE = 'build_jobs' as const
 
 export function parseStoredConstructorWorkerStatus(raw: string): StoredWorkerStatus | null {
@@ -109,7 +109,7 @@ export async function getConstructorWorkerStatus(now = Date.now()): Promise<{
   return {
     worker: { state, lastHeartbeat: stored?.at ?? null },
     setupInstructions: state === 'setup_required'
-      ? 'Verifică preflightul OpenCode 1.18.25 + Qwen local (llama.cpp) și credentiala HMAC care permite workerului să revendice ordine din `build_jobs`.'
+      ? 'Verifică preflightul OpenCode și motorul configurat și credentiala HMAC care permite workerului să revendice ordine din `build_jobs`.'
       : null,
     status: fresh && stored ? (stored.detail ?? stored.status) : null,
     executor: CONSTRUCTOR_EXECUTOR,

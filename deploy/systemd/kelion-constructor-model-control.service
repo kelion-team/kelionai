@@ -1,7 +1,7 @@
 [Unit]
-Description=Kelion Constructor manual local-model controller
-After=local-fs.target private-ai-llm.service
-Wants=private-ai-llm.service
+Description=Kelion Constructor approved-provider readiness controller
+After=local-fs.target network-online.target
+Wants=network-online.target
 ConditionPathExists=/run/kelion/runtime-config-recovery.ready
 ConditionPathExists=!/run/kelion/constructor-activation.pending
 ConditionPathExists=!/root/kelion/runtime/constructor-deploy-quiesce.journal
@@ -47,10 +47,9 @@ ProtectKernelTunables=true
 ProtectProc=default
 ProcSubset=all
 ProtectSystem=strict
-ReadWritePaths=/etc/private-ai -/etc/systemd/system/private-ai-llm.service.d -/etc/systemd/system/timers.target.wants /run/private-ai /run/systemd/system/private-ai-llm.service.d /run/lock
-RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
-IPAddressDeny=any
-IPAddressAllow=localhost
+ReadWritePaths=/run/lock
+# The controller makes only the fixed anonymous HTTPS catalog request over IPv4.
+RestrictAddressFamilies=AF_UNIX AF_INET
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
@@ -58,7 +57,7 @@ LockPersonality=true
 SystemCallArchitectures=native
 TasksMax=96
 MemoryMax=256M
-TimeoutStopSec=180min
+TimeoutStopSec=30s
 KillMode=control-group
 
 [Install]

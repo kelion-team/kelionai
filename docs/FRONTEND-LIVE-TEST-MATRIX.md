@@ -38,7 +38,8 @@ Rute UI: `/` landing sau Stage după sesiune; `/login`; `/manual`; `/credite` ș
 | `admin/AdminBani.tsx` | tab-ele finance + stores (costuri AI, circuit plăți, magazine) |
 | `admin/AdminComunicare.tsx` | tab-ele inbox + notificari + share (mailbox, contact, social) |
 | `admin/AdminUtilizatori.tsx` | tab-ele users + tokenuri + gesturi (activitate, chei, gesturi avatar) |
-| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, OpenCode/Qwen local, modele OpenAI ale produsului) |
+| `admin/ConstructorJobProgress.tsx` | progres din etape persistente, necunoscut fără procent; 100% numai cu dovadă live exactă |
+| `admin/AdminProductie.tsx` | tab-ele constructor + creier (coada build, motor Constructor configurat separat, modele OpenAI ale produsului) |
 | `admin/AdminOperatii.tsx` | tab-ele sistem + erori + recuperare (VPS, autoverificare, backup) |
 | `ApelOverlay.tsx` | interfața apelului |
 | `AvatarLoading.tsx` | fallback avatar |

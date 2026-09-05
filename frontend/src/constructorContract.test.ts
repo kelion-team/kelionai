@@ -139,7 +139,7 @@ describe('contractul acțiunilor și rezultatului Constructor în Admin', () => 
       manualRecommendation: null,
     })).toBe(true)
 
-    expect(isConstructorModelOutcome({ ...fastUnresolved, manualRecommendation: null })).toBe(false)
+    expect(isConstructorModelOutcome({ ...fastUnresolved, manualRecommendation: null })).toBe(true)
     expect(isConstructorModelOutcome({ ...fastUnresolved, profile: 'powerful' })).toBe(false)
     expect(isConstructorModelOutcome({ ...fastUnresolved, result: 'technical_failure' })).toBe(false)
     expect(isConstructorModelOutcome({

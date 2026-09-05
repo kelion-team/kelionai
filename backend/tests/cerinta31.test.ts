@@ -11,7 +11,7 @@ describe('Cerința #31 - Opțiunile de schimbare a limbii din bara de admin', ()
 
   it('bara de admin are meniul de limbi cu toate opțiunile vizibile', () => {
     expect(stageCode).toContain('className="lang-wrap"')
-    expect(stageCode).toContain('className="apps-menu lang-menu"')
+    expect(stageCode).toContain('className="lang-menu"')
     expect(stageCode).toContain('aria-expanded={langOpen}')
     expect(stageCode).toContain('handleAdminLangChange(l.code as Lang)')
   })

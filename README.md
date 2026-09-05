@@ -15,10 +15,12 @@ canonică pentru aplicația web, API, clienții nativi și banda Constructor.
   native, Git, loguri sau joburi Constructor.
 - **Admin prin Google:** biometria, vocea și fața pot personaliza experiența,
   dar nu acordă privilegii administrative.
-- **Constructor local separat:** worker-ul de încredere execută direct OpenCode
-  1.18.25 cu Qwen3.6 local prin llama.cpp, fără login sau credentială OpenAI.
+- **Constructor separat și izolat:** OpenCode 1.18.25 folosește modelul gratuit
+  Big Pickle aprobat de owner, fără login sau credentială OpenAI. Executorul
+  nu primește secrete ori acces privilegiat la VPS; gratuitatea furnizorului
+  nu este o garanție permanentă.
   Chatul intern și aplicația desktop separată folosesc aceeași coadă server-side.
-- **Fără publicare directă:** job → worktree dedicat → OpenCode/Qwen → porți
+- **Fără publicare directă:** job → worktree izolat → OpenCode → porți
   blocante → PR → master → deploy verificat.
 
 Regulile complete pentru orice agent sau contribuitor sunt în

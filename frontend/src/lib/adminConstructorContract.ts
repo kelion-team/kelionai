@@ -175,116 +175,54 @@ export function parseAdminConstructorIntake(value: unknown): AdminConstructorInt
   return { ...chain, id: value.id, deduplicated: value.deduplicated }
 }
 
-export type ConstructorModelProfile = 'fast' | 'powerful'
-export type ConstructorModelState = 'ready' | 'switching' | 'failed' | 'unavailable'
-
-export interface AdminConstructorModelProfile {
-  id: ConstructorModelProfile
-  label: string
-  model: string
-  installed: boolean
-}
+export type ConstructorModelProfile = 'fast'
+export type ConstructorModelState = 'ready' | 'failed' | 'unavailable'
 
 export interface AdminConstructorModelSnapshot {
   mode: 'manual'
   defaultProfile: 'fast'
-  profiles: [AdminConstructorModelProfile, AdminConstructorModelProfile]
+  model: { id: string; label: string; provider: string } | null
+  profiles: { id: 'fast'; label: string; model: string; installed: boolean }[]
   activeProfile: ConstructorModelProfile | null
   activeModel: string | null
   state: ConstructorModelState
-  requestedProfile: ConstructorModelProfile | null
-  requestId: string | null
+  requestedProfile: null
+  requestId: null
   verifiedAt: string | null
   error: string | null
 }
 
-const MODEL_PROFILES: readonly ConstructorModelProfile[] = ['fast', 'powerful']
-const MODEL_STATES: readonly ConstructorModelState[] = ['ready', 'switching', 'failed', 'unavailable']
 const MODEL_SNAPSHOT_KEYS = [
-  'mode',
-  'defaultProfile',
-  'profiles',
-  'activeProfile',
-  'activeModel',
-  'state',
-  'requestedProfile',
-  'requestId',
-  'verifiedAt',
-  'error',
+  'mode', 'defaultProfile', 'model', 'profiles', 'activeProfile', 'activeModel',
+  'state', 'requestedProfile', 'requestId', 'verifiedAt', 'error',
 ] as const
-const MODEL_PROFILE_KEYS = ['id', 'label', 'model', 'installed'] as const
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const MODEL_ERROR_CODE = /^[a-z][a-z0-9_]{0,79}$/
 
-function isModelProfile(value: unknown): value is AdminConstructorModelProfile {
-  if (!isObject(value) || !hasExactKeys(value, MODEL_PROFILE_KEYS)) return false
-  return MODEL_PROFILES.includes(value.id as ConstructorModelProfile)
-    && isBoundedPlainText(value.label, 80)
-    && isBoundedPlainText(value.model, 180)
-    && typeof value.installed === 'boolean'
-}
-
-/**
- * Contractul controlului manual este intenționat strict: browserul nu acceptă
- * mod automat, căi/comenzi de host ori un model activ contradictoriu cu
- * catalogul verificat de server.
- */
+/** Configuration metadata is measured by the server; no model names or
+ * runtime capabilities are inferred from the historic fast profile key. */
 export function parseAdminConstructorModelSnapshot(value: unknown): AdminConstructorModelSnapshot | null {
   if (!isObject(value) || !hasExactKeys(value, MODEL_SNAPSHOT_KEYS)) return null
-  if (
-    value.mode !== 'manual'
-    || value.defaultProfile !== 'fast'
-    || !Array.isArray(value.profiles)
-    || value.profiles.length !== 2
-    || !value.profiles.every(isModelProfile)
-  ) return null
-
-  const profiles = value.profiles as AdminConstructorModelProfile[]
-  if (new Set(profiles.map((profile) => profile.id)).size !== 2) return null
-  if (!MODEL_PROFILES.every((id) => profiles.some((profile) => profile.id === id))) return null
-
-  const activeProfile = value.activeProfile
-  const requestedProfile = value.requestedProfile
-  const state = value.state
-  if (activeProfile !== null && !MODEL_PROFILES.includes(activeProfile as ConstructorModelProfile)) return null
-  if (requestedProfile !== null && !MODEL_PROFILES.includes(requestedProfile as ConstructorModelProfile)) return null
-  if (!MODEL_STATES.includes(state as ConstructorModelState)) return null
-  if (value.activeModel !== null && !isBoundedPlainText(value.activeModel, 180)) return null
-  if (value.requestId !== null && (typeof value.requestId !== 'string' || !UUID.test(value.requestId))) return null
-  if (value.verifiedAt !== null && !isExactIsoDateString(value.verifiedAt)) return null
-  if (value.error !== null && (typeof value.error !== 'string' || !MODEL_ERROR_CODE.test(value.error))) return null
-
-  const activeDescriptor = activeProfile === null
-    ? null
-    : profiles.find((profile) => profile.id === activeProfile) ?? null
-  if ((activeDescriptor === null) !== (value.activeModel === null)) return null
-  if (activeDescriptor && (!activeDescriptor.installed || activeDescriptor.model !== value.activeModel)) return null
-  if ((activeProfile === null) !== (value.verifiedAt === null)) return null
-
-  if (state === 'ready') {
-    if (!activeDescriptor || requestedProfile !== null || value.requestId !== null || value.error !== null) return null
-  } else if (state === 'switching') {
-    if (requestedProfile === null || value.requestId === null || value.error !== null) return null
-    const requestedDescriptor = profiles.find((profile) => profile.id === requestedProfile)
-    if (!requestedDescriptor?.installed || requestedProfile === activeProfile) return null
-  } else if (state === 'failed') {
-    if (value.error === null) return null
-  } else if (requestedProfile !== null || value.requestId !== null || value.error === null) {
-    return null
-  }
-
-  return {
-    mode: 'manual',
-    defaultProfile: 'fast',
-    profiles: [profiles[0], profiles[1]],
-    activeProfile: activeProfile as ConstructorModelProfile | null,
-    activeModel: value.activeModel,
-    state: state as ConstructorModelState,
-    requestedProfile: requestedProfile as ConstructorModelProfile | null,
-    requestId: value.requestId,
-    verifiedAt: value.verifiedAt,
-    error: value.error,
-  }
+  if (value.mode !== 'manual' || value.defaultProfile !== 'fast'
+    || value.requestedProfile !== null || value.requestId !== null) return null
+  const model = value.model
+  if (model !== null && (!isObject(model) || !hasExactKeys(model, ['id', 'label', 'provider'])
+    || !isBoundedPlainText(model.id, 160) || !isBoundedPlainText(model.label, 80)
+    || !isBoundedPlainText(model.provider, 80)
+    || !/^[a-z0-9][a-z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(model.id)
+    || model.id.split('/')[0] !== model.provider)) return null
+  if (!Array.isArray(value.profiles) || value.profiles.length !== (model ? 1 : 0)) return null
+  const profile = value.profiles[0]
+  if (model && (!isObject(profile) || !hasExactKeys(profile, ['id', 'label', 'model', 'installed'])
+    || profile.id !== 'fast' || profile.label !== model.label || profile.model !== model.id
+    || typeof profile.installed !== 'boolean')) return null
+  if (!['ready', 'failed', 'unavailable'].includes(String(value.state))) return null
+  if (value.state === 'ready') {
+    if (!model || !profile?.installed || value.activeProfile !== 'fast'
+      || value.activeModel !== model.id || !isExactIsoDateString(value.verifiedAt)
+      || value.error !== null) return null
+  } else if (value.activeProfile !== null || value.activeModel !== null
+    || value.verifiedAt !== null || typeof value.error !== 'string'
+    || !/^[a-z][a-z0-9_]{0,79}$/.test(value.error)) return null
+  return value as unknown as AdminConstructorModelSnapshot
 }
 
 export interface AdminConstructorProblem {

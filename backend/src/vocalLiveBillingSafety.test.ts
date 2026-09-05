@@ -77,6 +77,7 @@ config.openai.key = 'test-key'
 async function deschideSesiuneTest(
   errors: Array<{ motiv: string; code?: string }>,
   onUsage?: () => Promise<void> | void,
+  sessionReady = true,
 ) {
   const live = deschideVocalLive('test', [], {
     onAudioIesire: () => undefined,
@@ -90,11 +91,61 @@ async function deschideSesiuneTest(
   const ws = wsMock.instances.at(-1)
   expect(ws).toBeDefined()
   ws!.emit('open')
-  ws!.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated' })))
+  if (sessionReady) ws!.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated' })))
   await Promise.resolve()
   await Promise.resolve()
   return { live: live!, ws: ws! }
 }
+
+describe('configurarea sesiunii vocale', () => {
+  it.each(['invalid_request_error', 'invalid_value'])('raportează imediat %s la setup fără retry de transport sau audio trimis', async (code) => {
+    vi.useFakeTimers()
+    const errors: Array<{ motiv: string; code?: string }> = []
+    const { live, ws } = await deschideSesiuneTest(errors, undefined, false)
+    try {
+      live.scrieAudio(Buffer.alloc(320, 1))
+      ws.emit('message', Buffer.from(JSON.stringify({
+        type: 'error',
+        error: { code, type: 'invalid_request_error', param: 'session.audio.input', message: 'private provider setup detail' },
+      })))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(errors).toEqual([{ motiv: 'openai_realtime_unavailable', code: 'configuration' }])
+      expect(ws.terminated).toBe(true)
+      ws.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated' })))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(errors).toHaveLength(1)
+      expect(ws.sent.map((raw) => JSON.parse(raw).type)).toEqual(['session.update'])
+    } finally {
+      live.inchide()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('păstrează sesiunea după o anulare fără răspuns activ (ready=%s)', async (sessionReady) => {
+    const errors: Array<{ motiv: string; code?: string }> = []
+    const { live, ws } = await deschideSesiuneTest(errors, undefined, sessionReady)
+    try {
+      live.intrerupe()
+      ws.emit('message', Buffer.from(JSON.stringify({
+        type: 'error', error: { code: 'response_cancel_not_active', type: 'invalid_request_error' },
+      })))
+      await Promise.resolve()
+      await Promise.resolve()
+      if (!sessionReady) {
+        ws.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated' })))
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      live.scrieAudio(Buffer.alloc(320, 1))
+      expect(errors).toEqual([])
+      expect(ws.terminated).toBe(false)
+      await vi.waitFor(() => expect(JSON.parse(ws.sent.at(-1)!).type).toBe('input_audio_buffer.append'))
+    } finally {
+      live.inchide()
+    }
+  })
+})
 
 describe('siguranța debitării vocale', () => {
   it('ține audio, anunț, ancoră și răspunsul uneltei în coadă până la succes durabil', async () => {

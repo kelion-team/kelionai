@@ -1,112 +1,129 @@
 # Checkpoint operațional curent
 
-Actualizat: `2026-09-04T21:13:36Z`
+Actualizat: `2026-09-05T05:36:00Z`
 
 ## Stare verificată
 
-- `origin/master` este la `7ace63e8ead06c2a475c9e13f52a00695158871e`;
-  PR-urile operaționale `#1642` și `#1644` au fost îmbinate prin rebase.
-- AI Constructor rămâne separat de Kelion și folosește exclusiv OpenCode
-  `1.18.25` cu llama.cpp și `Qwen3.6-35B-A3B Q4_K_M` local pe Contabo.
-- Modelul canonic este Qwen open-weight, licență Apache-2.0; fișierul GGUF
-  instalat are `20,419,565,568` bytes și SHA-256
-  `671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7`.
-- Run-ul `33364953572` a verificat baza AI, accesul full-host, executorul
-  OpenCode și heartbeat-ul HMAC, apoi a făcut rollback deoarece
-  `kelion-constructor-sync.service` a încercat un `runuser` blocat de sandbox.
-- Laptopul nu găzduiește modelul. Clientul Windows trebuie să folosească
-  `https://kelionai.app` și aceeași coadă procesată de workerul Contabo.
-- Proba read-only `private-ai-active-model-benchmark`, run `33497637524`, a
-  măsurat `private-ai-llm.service` ca inactiv înainte de inferență; nu există o
-  măsurătoare validă de viteză pentru niciun model în starea curentă.
-- Re-rularea #2 a runului `33339737404` pentru vechiul workflow de reparare a
-  eșuat la `resume-install` în 19 secunde și nu a restaurat serviciul.
-- Artefactele GGUF sigilate au exact `20.419.565.568` bytes pentru 35B și
-  `76.536.964.608` bytes pentru 122B, în total `96.956.530.176` bytes.
-- Freeze-ul local final este verde: backend `1.539/1.539`, frontend `321/321`,
-  manifestul static exact `332/332`, în total `2.192/2.192` teste. Au trecut
-  separat 11 porți statice, 3 self-testuri, Gitleaks pe 50,32 MB fără secrete,
-  jscpd pe 316 fișiere fără clone, sintaxa Bash `19/19`, YAML `25/25`, Node
-  `97/97` și verificarea staged a 12 unități systemd.
-- Re-auditul pe hashurile finale a dat `GO` pentru deployul safe. Publicarea
-  are `114/114` teste verzi; reluarea configurării leagă byte-exact aceeași
-  tuplă ordonată de 25 artefacte și refuză înainte de mutații o generație veche.
-- Prima rulare GitHub a trecut merge-policy, secret-scan, preflight, backend și
-  frontend. Poarta statică a identificat că proba reală `flock` era lansată de
-  runnerul neprivilegiat, deși contractul verificat cere root:root `0600`.
-  Pasul PR CI activează explicit numai acea probă prin boundary-ul `sudo` deja
-  obligatoriu în workflow. Gate-ul container rămâne portabil fără `sudo`, iar un
-  test static sigilează diferența; validatorul și codul de producție nu au fost
-  relaxate.
-- Planul de migrare pentru starea live măsurată are exact versiunile
-  `20260910`–`20260912` pending, toate `destructive=false`; testele plannerului
-  sunt `11/11` verzi. Pilotul nu intră pe calea de restore distructiv.
-- Finalizerul live `33915591080` a confirmat o limită tehnică ascunsă în
-  executor: OpenCode primește SIGTERM la exact 15 minute în smoke și la exact
-  patru ore în execuția reală, apoi SIGKILL după două secunde. Modelul local
-  apucă să scrie o parte din dovadă, dar jobul este raportat eșuat înainte de
-  finalizare; acesta este motivul măsurat pentru auditurile cerute pe durate mai
-  lungi.
+- Baza verificată `origin/master` și versiunea live sunt
+  `44c570d7e5feac01c7c5cbd5e7345070f9787802`. Instanța existentă răspunde la
+  `/api/version`, `/readyz` și `/api/release-proof`. Aceste verificări nu
+  demonstrează executarea unui ordin Constructor până la deploy.
+- Trainul este pe `fix/runtime-failure-evidence-20260905`. Sursele sunt
+  înghețate pentru commit, verificări GitHub și publicare protejată. Noul
+  Constructor nu are încă un deploy live verificat.
+- Constructorul live este `setup_required`: workerul păstrează configurația
+  Qwen 35B, iar modelele 35B și 122B lipseau de pe host înaintea acestei reluări.
+- La `04:06:14Z` a fost eliminat, cu autorizarea ownerului, fișierul 7B de
+  `4.683.073.536` bytes din
+  `/srv/private-ai/models/qwen2.5-coder-7b/qwen2.5-coder-7b-instruct-q4_k_m.gguf`.
+  Singurul GGUF rămas este
+  `/srv/private-ai/models/qwen2.5-coder-3b/qwen2.5-coder-3b-instruct-q4_k_m.gguf`,
+  `2.104.932.800` bytes, SHA-256
+  `724fb256bec1ff062b2f65e4569e871ad2e95ab2a3989723d1769c54294730b7`.
+- Proba OpenCode 3B din `/srv/private-ai/proofs/constructor3b-1Eh67opm` a
+  eșuat: pornire rece `240.238 ms`, pornire caldă `101.577 ms`, zero apeluri
+  reale de unelte în ambele. Răspunsul cald a emis JSON în bloc de cod, fără
+  execuție. Fișierul de probă pentru sumă a rămas neschimbat, iar verificarea
+  independentă a eșuat. Modelul nu are dovadă de funcționare ca Constructor.
+  Listenerul temporar de test de pe `127.0.0.1:24081` este oprit.
 
-## Schimbarea în curs
+## Schimbări nepublicate și limite
 
-- Ownerul a respins al doilea VPS și orice cost nou. Ambele modele rămân pe
-  discul Contabo existent, dar numai unul este încărcat în RAM: 35B implicit la
-  instalare/reboot și 122B numai după comutarea manuală a ownerului din Admin.
-- Workerul nu schimbă modelul și nu reîncearcă/reexecută automat. Numai dacă o
-  execuție FAST validă se termină `unresolved`, produsul recomandă explicit
-  comutarea manuală la POWERFUL; ownerul decide separat comutarea și comanda
-  `Reia`. O cădere tehnică este terminală și raportată separat, fără recomandare
-  de model. POWERFUL nerezolvat este terminal, fără alt model recomandat.
-- Backendul și interfața Admin pentru starea/comanda manuală sunt verzi local.
-  Controllerul privilegiat UDS/HMAC, comutatorul systemd, workerul cu un singur
-  profil activ și cablarea installer/upgrade au teste locale verzi. Controllerul
-  este blocat fail-closed de recovery/ready și de toate jurnalele persistente,
-  iar ACK-ul de switch este serializat cu lockul canonic de publicare.
-- Instalarea 122B este reluabilă sub lockurile host + GitHub, păstrează profilul
-  manual la rerun și nu pornește controllerul înainte de receiptul final.
-  Workflowurile mutatoare Contabo folosesc aceeași coadă `production-release`,
-  iar configurarea Constructor poate aștepta bounded dovada release-images
-  exactă a noului master.
-- Schimbarea nu este încă publicată și nu este activă pe Contabo. Nu există încă
-  măsurători valide de inferență sau de durată a comutării; în această etapă nu
-  este cerut și nu este pretins niciun benchmark valid de viteză.
-- Remedierea în curs pentru limita de audit face timeout-ul executorului
-  dependent de durata explicită din ordin (durata cerută + 5 minute pentru
-  dovadă/handoff, plafonată la patru ore) și ridică smoke-ul la 30 de minute.
-  Codul nu este încă publicat pe Contabo și nu se raportează ca funcțional live
-  până când finalizerul și proba reală nu trec pe același commit.
-- Prima rotație post-merge a refuzat corect markerul live
-  `constructor-unit-migration.pending` înainte de mutațiile runtime. Calea
-  owner-aware următoare este `configure-constructor`, iar `vps-set-env` poate fi
-  reluat numai după succesul complet al configurării.
-- Buildul release exact pentru `f57c77b` a oprit publicarea imaginilor la proba
-  read-only: self-testul workerului folosea două căi `/tmp` literale, iar testul
-  boundary elimina `TMPDIR=/work/tmp` din mediul allowlist al copilului. Fixul
-  în curs folosește `node:os.tmpdir()` pentru ambele directoare și transmite
-  explicit `TMPDIR`; manifestul static exact este local `332/332` verde.
-- Ownerul a aprobat explicit publicarea urgentă pe Contabo existent, fără cost
-  nou. Nu mai este necesară o altă aprobare pentru commit, merge și deploy în
-  limitele acestui contract; orice extindere de cost sau schimbare a profilurilor
-  rămâne exclusiv decizia ownerului.
-- Helperul de restore distructiv are defecte preexistente de reluare după
-  SIGKILL între jurnalul intern și receiptul exterior, precum și după eșecul
-  fazei `restoring`; un workdir decriptat poate rămâne și orfan. Nu sunt pe
-  calea acestui pilot safe; orice release viitor clasificat `destructive`
-  rămâne blocat până la remedierea și testarea acelor cazuri.
+- Sunt în lucru tratarea fail-closed a erorii timpurii de inițializare audio,
+  eliminarea dependențelor `Wants` prin care pollingul workerului repornea
+  modelul oprit și eliminarea meniului dropdown Aplicații cerută de owner.
+  Aceste schimbări nu sunt pe live și nu reprezintă finalizarea Constructorului.
+- Constructorul izolat pentru utilizatori nu este implementat. Workerul
+  privilegiat al adminului nu trebuie expus utilizatorilor.
+- Ownerul cere conectori independenți pentru aplicații și un Constructor care
+  execută efectiv cerința. VPS-ul existent rămâne în scop; nu se aleg unilateral
+  alte modele, provideri sau costuri.
+- Candidatul găzduit Big Pickle a trecut o probă sintetică reală pe VPS la
+  `04:34:18.286–04:34:30.618Z`: OpenCode `1.18.25`, `12114 ms`, patru unelte
+  executate (read, read, edit, bash), fișier modificat și test independent verde,
+  oracle neschimbat. API anonim, fără cheie sau abonament nou. Prima încercare
+  a expirat la transport pe IPv6; reluarea a folosit IPv4 numai în sandbox.
+  Dovezi private: `/srv/private-ai/proofs/opencode-free-ZMqthVQ8`. Serviciile
+  temporare sunt oprite. Nu s-a trimis cod Kelion și nu există integrare live.
+  Gratuitatea este temporară; furnizorul poate folosi datele trimise pentru
+  îmbunătățirea modelului. Ownerul a aprobat acum acest model și procesarea
+  codului proiectului. Migrarea coerentă worker/controller/UI/installer este
+  în lucru; nu există încă dovadă de funcționare a noului Constructor pe live.
+- Ownerul cere și un Doctor permanent: simptome măsurate, diagnostic punctual,
+  ordine deduplicate în aceeași coadă, testare, deploy și verificare live.
+  `autodiagnostic.ts` colectează în prezent probleme la cerere; nu este o buclă
+  permanentă de reparații. Această capabilitate nu este încă activă pe live.
+- În browserul autentificat s-a trimis efectiv în chat cererea read-only de
+  verificare worker/publisher/release. După `7.4 s`, răspunsul live a fost
+  „Încearcă din nou în câteva secunde.” Nu s-a primit diagnostic, nu s-a creat
+  ordin și nu există dovadă de finalizare Constructor în browser.
 
-## Prag de finalizare
+## Incident de izolare a testelor
 
-Nu se raportează finalizat până când finalizerul Contabo, claimul real al
-workerului și verificarea clientului Windows nu sunt toate verzi pentru același
-commit. Installerul Windows se publică numai semnat, după integrarea canonică.
-Următorul pas sigur este PR-ul liniar al fixului de timeout, CI/buildul canonic
-și merge-ul prin rebase. După buildul verde se reia finalizerul și deployul
-serializat pe Contabo. Până la dovada live exactă nu se raportează instalat sau
-finalizat.
+- Testele statice Linux au fost lansate greșit ca root într-un checkout
+  temporar direct pe host. La `04:19:51Z`, un harness nesigur a eliminat
+  `/run/kelion/runtime-config-recovery.ready` de pe hostul real.
+- La `04:24:59Z` a fost pornit numai serviciul canonic instalat
+  `kelion-runtime-config-recovery.service`, după verificarea hashului sursei.
+  Acesta a terminat cu succes la `04:25:20Z`; markerul ready a fost restaurat
+  ca `root:root`, mod `0444`, iar timerele au fost reconciliate prin mecanismul
+  existent. Nu s-a inventat manual un marker de succes.
+- Remedierea celor două harnessuri a trecut proba comportamentală `2/2` în
+  container fără rețea și cu hostul montat exclusiv read-only în directorul
+  temporar. Testele boundary/controller au trecut separat `33/33` izolat;
+  markerul real a rămas neatins și containerele temporare au fost eliminate.
+  Manifestul static complet a trecut `288/288`, fără skip, în container Linux
+  izolat. Corecția ulterioară a runtime-ului rootless se reverifică înainte de PR.
+  Testele care execută helperi de host
+  sau ating căi absolute se rulează de acum numai în containere izolate, nu ca
+  root direct pe VPS. Un director temporar nu izolează filesystemul hostului.
+
+## Blocajul actual de publicare
+
+- Proba rootless a identificat concurența timerului vechi asupra
+  `RuntimeDirectory`, apoi lipsa delegării cgroup către utilizatorul workerului.
+  Varianta verificată folosește explicit `/usr/bin/crun` din pachetul oficial
+  al distribuției și `--cgroups=disabled`; din container s-au citit limitele
+  moștenite din systemd: 6 GiB, CPU 200%, 512 procese. Proba a rulat ca UID 995,
+  nu root. Timerul oprit temporar a fost restaurat la starea active/enabled.
+  Aceasta dovedește izolarea executorului, nu finalizarea unui ordin live.
+- Publisherul rootless a trecut ca UID 994, cu limitele de resurse verificate.
+  Varianta finală a executorului, inclusiv tmpfs privat 0700 deținut de UID-ul
+  workerului, a executat proba sintetică AI în `38299 ms`: șase unelte,
+  fișier reparat, test independent trecut și oracle neschimbat. Imaginea gate
+  reală și regresiile finale sunt în verificare. Noul worker/controller/config
+  nu sunt încă instalați în producție.
+- Backendul a trecut `1546/1546` după trei actualizări patch ale dependențelor;
+  auditul de producție este fără vulnerabilități raportate. Frontendul a trecut
+  `348/348`, lint și build. Aceste probe nu sunt dovadă de deploy.
+- Gitleaks pentru snapshotul curent este curat. Scanarea istoriei a găsit
+  11 potriviri anterioare acestui train, inclusiv fixture-uri și literali vechi
+  în documente/cod. Revocarea eventualelor credențiale istorice nu este probată;
+  istoricul nu este declarat curat și nu a fost rescris ori allowlistat.
+- Nu este necesară o nouă decizie de provider din partea ownerului. Doctorul
+  și funcțiile suplimentare rămân oprite din dezvoltare până la livrarea
+  Constructorului; verificarea read-only a opțiunilor Admin continuă în paralel.
+- Cele trei defecte demonstrate în crearea/expunerea agenților specializați au
+  corecții în același train: ID-uri rezervate respinse, limite de rol validate
+  fără trunchiere și metadate admin excluse din răspunsurile publice. Regresiile
+  focalizate au trecut `34/34`; nu se declară încă remediere live.
+
+## Următorul pas sigur și acceptare
+
+Providerul și trimiterea codului sunt autorizate. Implementează într-un
+singur train migrarea coerentă a workerului, controllerului, contractelor UI,
+installerului și dovezilor de release. Păstrează HMAC, lease-urile, receipturile,
+rollbackul și porțile obligatorii. Rulează testele de host numai izolat, apoi
+PR, verificări, merge protejat și release separat pe VPS-ul existent.
+
+Constructorul nu este „gata” până când un ordin real din chat produce o
+modificare verificată, trece testele, ajunge prin publisher și PR la release,
+iar versiunea live și rezultatul ordinului sunt confirmate independent.
+Funcțiile audio, memorie și conectorii se raportează separat, numai în limita
+probelor efectiv executate.
 
 ## Legături canonice
 
-- Finalizare Contabo: <https://github.com/kelion-team/kelionai/actions/workflows/private-ai-finalize.yml>
-- PR operațional: <https://github.com/kelion-team/kelionai/pull/1571>
 - Aplicație: <https://kelionai.app>
+- Repository: <https://github.com/kelion-team/kelionai>
+- Upgrade canonic VPS: <https://github.com/kelion-team/kelionai/actions/workflows/vps-run.yml>

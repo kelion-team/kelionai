@@ -92,7 +92,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'lookup_address', category: 'google', does: 'adresa+codul poștal din coordonate (sau invers)', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.3 Constructor boundary and bounded diagnostics — admin
-  { name: 'build_software', category: 'cod', does: 'pune direct în build_jobs un ordin validat pentru OpenCode + Qwen local (llama.cpp)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'build_software', category: 'cod', does: 'pune direct în build_jobs un ordin validat pentru OpenCode (motor configurat separat)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'constructor_status', category: 'cod', does: 'starea ordinelor de construcție', chat: true, voice: false, voiceViaBrain: true, admin: true },
   // THE OWNER'S REQUIREMENTS (Jul 30): the table existed, but nobody filled
   // it — requirements stayed in chat and got lost. These three fill it from

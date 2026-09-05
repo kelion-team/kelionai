@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Clientul separat al cozii Constructor. OpenCode folosește exclusiv modelul
-// Qwen local prin llama.cpp; publisherul separat păstrează tokenul GitHub,
+// Clientul separat al cozii Constructor. OpenCode folosește modelul gratuit
+// aprobat într-un container code-only; publisherul păstrează tokenul GitHub,
 // porțile, push-ul, merge-ul și deploy-ul în afara executorului.
 
 import { createHash, createHmac, randomUUID } from 'node:crypto'
@@ -28,16 +28,18 @@ import {
 } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolve4 } from 'node:dns/promises'
+import { isIP } from 'node:net'
 
 const API = new URL(process.env.KELION_CODEX_API ?? 'http://127.0.0.1:8080/')
 const OPENCODE_BIN = resolve(process.env.OPENCODE_BIN ?? '/opt/private-ai/bin/opencode')
 const OPENCODE_CONFIG_HOME = resolve(process.env.OPENCODE_CONFIG_HOME ?? '/srv/private-ai/home/.config')
 const OPENCODE_CONFIG = resolve(process.env.OPENCODE_CONFIG ?? '/srv/private-ai/home/.config/opencode/opencode.json')
-const OPENCODE_MODEL = process.env.OPENCODE_MODEL ?? 'llama.cpp/qwen3.6-35b-a3b-local'
-const FAST_OPENCODE_MODEL = 'llama.cpp/qwen3.6-35b-a3b-local'
-const OPENCODE_BASE_URL = process.env.OPENCODE_BASE_URL ?? 'http://127.0.0.1:24080/v1'
+const OPENCODE_MODEL = process.env.OPENCODE_MODEL ?? 'opencode-free/big-pickle'
+const FAST_OPENCODE_MODEL = 'opencode-free/big-pickle'
+const OPENCODE_BASE_URL = process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/inference/openai/v1'
 const REPO = resolve(process.env.CODEX_WORKER_REPO ?? '/var/lib/kelion-codex/repo')
 const JOBS = resolve(process.env.CODEX_WORKER_JOBS ?? '/var/lib/kelion-codex/jobs')
 const HANDOFF_READY = resolve(process.env.CODEX_HANDOFF_READY ?? '/var/lib/kelion-constructor-handoff/ready')
@@ -63,9 +65,7 @@ function fsyncPath(path) {
 const EXEC_ENABLED = process.env.CODEX_WORKER_EXEC_ENABLED === '1'
 const GATE_IMAGE = process.env.KELION_CODEX_GATE_IMAGE ?? ''
 const OPENCODE_VERSION = '1.18.25'
-const OPENCODE_MODEL_ID = 'qwen3.6-35b-a3b-local'
-const POWERFUL_OPENCODE_MODEL = 'llama.cpp/qwen3.5-122b-a10b-local'
-const POWERFUL_OPENCODE_MODEL_ID = 'qwen3.5-122b-a10b-local'
+const OPENCODE_MODEL_ID = 'big-pickle'
 const OPENCODE_PROMPT = 'Execută integral ordinul Constructor atașat. Modifică worktree-ul, rulează testele relevante și nu te opri la plan. Nu crea commituri, nu muta HEAD și nu indexa modificările; handoff-ul Git este făcut separat.'
 const WORKER_LOG_MAX_BYTES = 16 * 1024 * 1024
 const MIN_EXECUTION_TIMEOUT_MS = 5 * 60_000
@@ -88,12 +88,11 @@ const REQUIRED_LAYOUT = Object.freeze({
   repo: '/var/lib/kelion-codex/repo',
   jobs: '/var/lib/kelion-codex/jobs',
   handoffReady: '/var/lib/kelion-constructor-handoff/ready',
-  sudo: '/usr/bin/sudo',
   podman: '/usr/bin/podman',
+  ociRuntime: '/usr/bin/crun',
 })
 const CONSTRUCTOR_MODEL_PROFILES = Object.freeze({
-  fast: Object.freeze({ tier: 'fast', model: FAST_OPENCODE_MODEL, modelId: OPENCODE_MODEL_ID, label: 'FAST 35B' }),
-  powerful: Object.freeze({ tier: 'powerful', model: POWERFUL_OPENCODE_MODEL, modelId: POWERFUL_OPENCODE_MODEL_ID, label: 'POWERFUL 122B' }),
+  fast: Object.freeze({ tier: 'fast', model: FAST_OPENCODE_MODEL, modelId: OPENCODE_MODEL_ID, label: 'Big Pickle' }),
 })
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RECOVERY_GUIDANCE = Object.freeze({
@@ -102,7 +101,7 @@ const RECOVERY_GUIDANCE = Object.freeze({
   local_gate_failed: 'Revalidarea izolată a publisherului a respins versiunea anterioară. Reproduce toate porțile și repară orice diferență deterministă.',
   pr_closed: 'PR-ul anterior a fost închis fără merge. Reexecută ordinul curat și produce un handoff nou, fără a reutiliza branch-ul anterior.',
   execution_timeout: 'Execuția anterioară a depășit fereastra de timp. Lucrează concentrat pe ordin, fără explorare inutilă, și oprește-te când ordinul este îndeplinit.',
-  brain_unavailable: 'Execuția anterioară a căzut fiindcă modelul local era indisponibil, nu din vina ordinului. Reia lucrul de la zero, fără a presupune nimic despre starea anterioară.',
+  brain_unavailable: 'Execuția anterioară a căzut fiindcă serviciul modelului era indisponibil, nu din vina ordinului. Reia lucrul de la zero, fără a presupune nimic despre starea anterioară.',
   worker_internal_failure: 'Execuția anterioară a căzut dintr-o cauză tehnică a lucrătorului, nu din vina ordinului. Reia lucrul de la zero, pe worktree curat.',
 })
 const WORKER_FAILURE_CODES = new Set([
@@ -234,7 +233,7 @@ function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
   if (result.timedOut || /timed out|timeout|timp.{0,20}depăș/i.test(source)) return 'execution_timeout'
   if (
     phase === 'opencode'
-    && /(?:llama\.cpp|qwen3?\b|127\.0\.0\.1:24080|ECONNREFUSED|ECONNRESET|connection refused|failed to connect|fetch failed|model.{0,80}(?:unavailable|invalid|refused|not found)|brain unavailable|răspuns gol)/i.test(source)
+    && /(?:ECONNREFUSED|ECONNRESET|ENOTFOUND|connection refused|failed to connect|fetch failed|rate.?limit|too many requests|insufficient_quota|unauthorized|model.{0,80}(?:unavailable|invalid|refused|not found)|brain unavailable|răspuns gol)/i.test(source)
   ) return 'brain_unavailable'
   if (phase === 'gate') {
     if (
@@ -250,9 +249,8 @@ function classifyWorkerFailure(logPath, phase, result = {}, error = null) {
     if (GATE_QUALITY_FAILURE.test(privateLog)) return 'quality_gate_failure'
     return 'worker_internal_failure'
   }
-  // Constructorul local nu emite coduri de autentificare/credit ale unui
-  // furnizor cloud. Un eșec OpenCode fără o dovadă locală mai precisă
-  // rămâne intern până la citirea jurnalului privat.
+  // O eroare de furnizor nu autorizează chei, facturare ori fallback plătit.
+  // Textul brut rămâne privat; serverul primește numai codul canonic.
   if (phase === 'opencode') return 'worker_internal_failure'
   return 'worker_internal_failure'
 }
@@ -312,39 +310,28 @@ export function openCodeParentEnv() {
   }
 }
 
-function openCodeRootEnvironmentArgs(safeDirectory = null) {
-  const gitEnvironment = []
-  if (safeDirectory !== null) {
-    const worktree = resolve(safeDirectory)
-    assertDescendant(JOBS, worktree, 'safe.directory OpenCode')
-    if (worktree.includes('\0') || worktree.includes('\n') || worktree.includes('\r')) fail('safe.directory OpenCode este invalid')
-    gitEnvironment.push(
-      'GIT_CONFIG_NOSYSTEM=1',
-      'GIT_CONFIG_GLOBAL=/dev/null',
-      'GIT_CONFIG_COUNT=1',
-      'GIT_CONFIG_KEY_0=safe.directory',
-      `GIT_CONFIG_VALUE_0=${worktree}`,
-      'GIT_TERMINAL_PROMPT=0',
-      'GIT_ASKPASS=/bin/false',
-    )
-  }
+function openCodeEnvironmentArgs() {
   return [
-    'HOME=/srv/private-ai/home',
-    `XDG_CONFIG_HOME=${OPENCODE_CONFIG_HOME}`,
-    'XDG_CACHE_HOME=/srv/private-ai/cache',
-    'XDG_DATA_HOME=/srv/private-ai/home/.local/share',
-    `OPENCODE_CONFIG=${OPENCODE_CONFIG}`,
+    'HOME=/work/runtime/home',
+    'XDG_CONFIG_HOME=/work/runtime/config',
+    'XDG_CACHE_HOME=/work/runtime/cache',
+    'XDG_DATA_HOME=/work/runtime/data',
+    'XDG_STATE_HOME=/work/runtime/state',
+    'OPENCODE_CONFIG=/constructor/opencode.json',
     'OPENCODE_DISABLE_PROJECT_CONFIG=true',
     'OPENCODE_DISABLE_LSP_DOWNLOAD=true',
     'OPENCODE_DISABLE_MODELS_FETCH=true',
     'OPENCODE_DISABLE_AUTOUPDATE=true',
     'OPENCODE_DISABLE_DEFAULT_PLUGINS=true',
-    'PATH=/opt/private-ai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    'PATH=/usr/local/bin:/usr/bin:/bin',
     'LANG=C.UTF-8',
     'LC_ALL=C.UTF-8',
     'CI=1',
     'NO_COLOR=1',
-    ...gitEnvironment,
+    'GIT_CONFIG_NOSYSTEM=1',
+    'GIT_CONFIG_GLOBAL=/dev/null',
+    'GIT_TERMINAL_PROMPT=0',
+    'GIT_ASKPASS=/bin/false',
   ]
 }
 
@@ -380,28 +367,129 @@ export function openCodeExecArgs(jobDir, orderPath, model = OPENCODE_MODEL) {
   const order = resolve(orderPath)
   assertDescendant(JOBS, worktree, 'Worktree OpenCode')
   assertDescendant(JOBS, order, 'Ordin OpenCode')
-  if (![FAST_OPENCODE_MODEL, POWERFUL_OPENCODE_MODEL].includes(model)) fail('Modelul OpenCode solicitat nu aparține politicii Constructor')
+  if (dirname(worktree) !== dirname(order)) fail('Ordinul și worktree-ul nu aparțin aceluiași job')
+  if (model !== FAST_OPENCODE_MODEL) fail('Modelul OpenCode solicitat nu aparține politicii Constructor')
   const modelArgs = ['--model', model]
   return [
     '--pure',
     'run',
     OPENCODE_PROMPT,
     ...modelArgs,
-    '--file', order,
+    '--file', '/constructor/order.md',
+    '--format', 'json',
   ]
 }
 
-export function rootOpenCodeArgs(openCodeArgs, safeDirectory = null) {
-  if (!Array.isArray(openCodeArgs) || openCodeArgs.some((value) => typeof value !== 'string' || value.includes('\0'))) {
-    fail('Argumentele OpenCode sunt invalide')
+export function validateProviderAddresses(addresses) {
+  if (!Array.isArray(addresses) || !addresses.length || addresses.length > 32) fail('DNS-ul providerului nu a furnizat IPv4 valid')
+  for (const address of addresses) {
+    if (isIP(address) !== 4) fail('Providerul necesită exclusiv adrese IPv4 publice')
+    const [a, b] = address.split('.').map(Number)
+    if (a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+      || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))) {
+      fail('DNS-ul providerului indică o adresă locală sau rezervată')
+    }
   }
+  return [...new Set(addresses)]
+}
+
+async function providerAddresses() {
+  let timer
+  try {
+    return validateProviderAddresses(await Promise.race([
+      resolve4(new URL(OPENCODE_BASE_URL).hostname),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('DNS provider timeout')), 10_000) }),
+    ]))
+  } finally { clearTimeout(timer) }
+}
+
+/** Only the job's code is writable. No host root, credentials, Git common dir,
+ * other jobs or sockets enter the executor. DNS is refreshed for every launch;
+ * podman's private hosts file never changes the host resolver configuration. */
+export function openCodeContainerArgs(jobDir, orderPath, addresses, image = GATE_IMAGE, identity = {}) {
+  const uid = identity.uid ?? process.getuid?.()
+  const gid = identity.gid ?? process.getgid?.()
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid === 0) fail('Executorul necesită o identitate rootless')
+  const execArgs = openCodeExecArgs(jobDir, orderPath)
+  const providerHost = new URL(OPENCODE_BASE_URL).hostname
   return [
-    '-n', '-u', 'root', '--',
-    '/usr/bin/env', '-i',
-    ...openCodeRootEnvironmentArgs(safeDirectory),
-    OPENCODE_BIN,
-    ...openCodeArgs,
+    '--runtime', REQUIRED_LAYOUT.ociRuntime,
+    'run', '--rm', '--name', executorContainerName(jobDir), '--pull=never', '--read-only',
+    '--network=slirp4netns:allow_host_loopback=false,enable_ipv6=false',
+    '--cap-drop=all', '--security-opt=no-new-privileges',
+    '--cgroups=disabled', '--ulimit=nofile=1024:1024',
+    '--userns=keep-id', '--user', `${uid}:${gid}`,
+    '--mount', 'type=tmpfs,dst=/work/runtime,tmpfs-size=1g,tmpfs-mode=0700,U=true',
+    '--mount', 'type=tmpfs,dst=/tmp,tmpfs-size=1g,tmpfs-mode=0700,U=true',
+    '--mount', `type=bind,src=${resolve(jobDir)},dst=/work/repo,ro=false`,
+    '--mount', `type=bind,src=${join(resolve(jobDir), '.git')},dst=/work/repo/.git,ro=true`,
+    '--mount', `type=bind,src=${resolve(orderPath)},dst=/constructor/order.md,ro=true`,
+    '--mount', `type=bind,src=${OPENCODE_BIN},dst=/usr/local/bin/opencode,ro=true`,
+    '--mount', `type=bind,src=${join(dirname(resolve(orderPath)), 'executor-inputs/opencode.json')},dst=/constructor/opencode.json,ro=true`,
+    '--mount', `type=bind,src=${join(dirname(resolve(orderPath)), 'executor-inputs/instructions.md')},dst=/constructor/instructions.md,ro=true`,
+    ...validateProviderAddresses(addresses).flatMap((address) => ['--add-host', `${providerHost}:${address}`]),
+    '--workdir', '/work/repo', '--entrypoint', '/usr/bin/env',
+    image, '-i', ...openCodeEnvironmentArgs(), '/usr/bin/bash', '-c',
+    'mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME"; for section in backend frontend; do if [ -d "$section" ] && [ ! -e "$section/node_modules" ]; then ln -s "/opt/kelion/$section/node_modules" "$section/node_modules"; fi; done; exec /usr/local/bin/opencode "$@"',
+    'opencode', ...execArgs,
   ]
+}
+
+function prepareExecutorInputs(orderPath) {
+  const directory = join(dirname(resolve(orderPath)), 'executor-inputs')
+  assertDescendant(JOBS, directory, 'Configurația privată a executorului')
+  const config = JSON.parse(readFileSync(OPENCODE_CONFIG, 'utf8'))
+  validateOpenCodeConfig(config)
+  const instructions = readFileSync(join(OPENCODE_CONFIG_HOME, 'opencode/instructions.md'), 'utf8')
+  if (!instructions || Buffer.byteLength(instructions) > 128 * 1024) fail('Instrucțiunile executorului au dimensiune invalidă')
+  mkdirSync(directory, { mode: 0o700 })
+  // Owner-readable copies avoid exposing the privateai home or supplementary
+  // host groups in rootless user namespaces. Both files are mounted read-only.
+  writeFileSync(join(directory, 'opencode.json'), JSON.stringify(config), { flag: 'wx', mode: 0o400 })
+  writeFileSync(join(directory, 'instructions.md'), instructions, { flag: 'wx', mode: 0o400 })
+}
+
+function executorContainerName(jobDir) {
+  assertDescendant(JOBS, resolve(jobDir), 'Containerul jobului')
+  return `kelion-constructor-${createHash('sha256').update(resolve(jobDir)).digest('hex').slice(0, 24)}`
+}
+
+function stopExecutorContainer(jobDir) {
+  // The runtime may exit before conmon on cancellation. Remove only this job's
+  // deterministic container, including after a lost lease or output overflow.
+  const result = commandResult(REQUIRED_LAYOUT.podman, ['--runtime', REQUIRED_LAYOUT.ociRuntime, 'rm', '--force', '--ignore', executorContainerName(jobDir)], undefined, podmanSupervisorEnv())
+  if (result.status !== 0) fail('Containerul executorului nu a putut fi oprit; nu continui către publicare')
+}
+
+export function createOpenCodeProgress(onProgress = () => {}) {
+  let pending = ''
+  let failed = false
+  const completed = new Set()
+  let stage = 'Aștept primul rezultat al uneltelor'
+  const stages = { read: 'Citire verificată', glob: 'Fișiere identificate', grep: 'Căutare în cod terminată', edit: 'Modificare aplicată', apply_patch: 'Modificare aplicată', write: 'Fișier scris', bash: 'Comandă executată', task: 'Agent specializat terminat' }
+  const snapshot = () => ({ completedTools: completed.size, stage, failed })
+  const consume = (chunk) => {
+    pending += String(chunk)
+    if (pending.length > 1024 * 1024) fail('Evenimentul OpenCode depășește limita sigură')
+    let newline
+    while ((newline = pending.indexOf('\n')) !== -1) {
+      const line = pending.slice(0, newline)
+      pending = pending.slice(newline + 1)
+      let event
+      try { event = JSON.parse(line) } catch { continue }
+      if (event?.type === 'error') failed = true
+      const part = event?.part
+      if (event?.type !== 'tool_use' || part?.state?.status !== 'completed'
+        || typeof part.callID !== 'string' || part.callID.length > 256 || !Object.hasOwn(stages, part.tool)
+        || completed.has(part.callID)) continue
+      if (completed.size >= 100_000) fail('Numărul uneltelor OpenCode depășește limita sigură')
+      completed.add(part.callID)
+      stage = stages[part.tool]
+      onProgress(`${stage}; ${completed.size} unelte terminate și confirmate`)
+    }
+  }
+  return { consume, snapshot }
 }
 
 export function gateContainerArgs(jobDir, image = GATE_IMAGE, identity = {}) {
@@ -409,11 +497,12 @@ export function gateContainerArgs(jobDir, image = GATE_IMAGE, identity = {}) {
   const gid = identity.gid ?? process.getgid?.()
   if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid)) fail('Identitatea workerului nu este disponibilă')
   return [
+    '--runtime', REQUIRED_LAYOUT.ociRuntime,
     'run', '--rm', '--pull=never', '--network=none', '--read-only',
     '--cap-drop=all', '--security-opt=no-new-privileges',
-    '--pids-limit=512', '--memory=4g', '--cpus=2', '--ulimit=nofile=1024:1024',
+    '--cgroups=disabled', '--ulimit=nofile=1024:1024',
     '--userns=keep-id', '--user', `${uid}:${gid}`,
-    '--tmpfs', `/work:rw,nosuid,nodev,size=6g,uid=${uid},gid=${gid}`,
+    '--mount', 'type=tmpfs,dst=/work,tmpfs-size=6g,tmpfs-mode=0700,U=true',
     '--mount', `type=bind,src=${resolve(jobDir)},dst=/source,ro=true`,
     '--mount', `type=bind,src=${join(REPO, '.git')},dst=${join(REPO, '.git')},ro=true`,
     '--env', 'HOME=/nonexistent', '--env', 'CI=1',
@@ -727,81 +816,75 @@ function exactOutput(command, args, cwd, env) {
   return String(result.stdout ?? '').trim()
 }
 
-function activeLocalModelId() {
-  const health = commandResult('/usr/bin/curl', [
-    '--fail', '--silent', '--show-error', '--max-time', '10', `${OPENCODE_BASE_URL.replace(/\/v1$/, '')}/health`,
-  ], undefined, openCodeParentEnv())
-  if (health.status !== 0) fail('Endpointul llama.cpp local nu este sănătos')
+function assertProviderCatalog() {
   const models = commandResult('/usr/bin/curl', [
-    '--fail', '--silent', '--show-error', '--max-time', '30', `${OPENCODE_BASE_URL}/models`,
+    '--ipv4', '--fail', '--silent', '--show-error', '--max-time', '10', '--max-filesize', '524288',
+    'https://opencode.ai/zen/v1/models',
   ], undefined, openCodeParentEnv())
-  if (models.status !== 0) fail('Endpointul llama.cpp local nu publică modelul activ')
+  if (models.status !== 0) fail('Catalogul public al providerului gratuit este indisponibil')
   let modelPayload
   try {
     modelPayload = JSON.parse(String(models.stdout ?? ''))
   } catch {
-    fail('Răspunsul /v1/models al llama.cpp nu este JSON valid')
+    fail('Catalogul providerului nu este JSON valid')
   }
   const modelIds = Array.isArray(modelPayload?.data)
     ? modelPayload.data.map((item) => item?.id).filter((value) => typeof value === 'string')
     : []
-  if (modelIds.length !== 1 || ![OPENCODE_MODEL_ID, POWERFUL_OPENCODE_MODEL_ID].includes(modelIds[0])) {
-    fail('Endpointul unic llama.cpp nu publică exact un model Constructor permis')
-  }
-  return modelIds[0]
-}
-
-function assertActiveLocalModel(expectedModelId) {
-  if (![OPENCODE_MODEL_ID, POWERFUL_OPENCODE_MODEL_ID].includes(expectedModelId)) {
-    fail('Modelul activ solicitat pentru verificare este invalid')
-  }
-  if (activeLocalModelId() !== expectedModelId) {
-    fail(`Endpointul unic llama.cpp nu are activ exclusiv modelul ${expectedModelId}`)
+  if (!modelIds.includes(OPENCODE_MODEL_ID)) {
+    fail('Modelul gratuit aprobat nu este disponibil în catalogul providerului')
   }
   return true
 }
 
 function activeConstructorProfile() {
-  const modelId = activeLocalModelId()
-  return modelId === POWERFUL_OPENCODE_MODEL_ID
-    ? CONSTRUCTOR_MODEL_PROFILES.powerful
-    : CONSTRUCTOR_MODEL_PROFILES.fast
+  return CONSTRUCTOR_MODEL_PROFILES.fast
 }
 
 export function validateOpenCodeConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) fail('Configurația OpenCode este invalidă')
+  const allowedKeys = ['$schema', 'autoupdate', 'model', 'small_model', 'enabled_providers', 'share', 'provider', 'permission', 'instructions', 'server']
+  if (Object.keys(config).some((key) => !allowedKeys.includes(key))) fail('Configurația OpenCode adaugă extensii sau override-uri neautorizate')
   if (config.autoupdate !== false || config.share !== 'disabled') fail('OpenCode trebuie să aibă update-ul și partajarea dezactivate')
   if (config.model !== FAST_OPENCODE_MODEL || (config.small_model ?? config.model) !== FAST_OPENCODE_MODEL) {
-    fail('OpenCode nu are modelul FAST local drept implicit unic')
+    fail('OpenCode trebuie să folosească numai modelul gratuit aprobat')
   }
-  if (!Array.isArray(config.enabled_providers) || config.enabled_providers.length !== 1 || config.enabled_providers[0] !== 'llama.cpp') {
-    fail('OpenCode trebuie să aibă exclusiv providerul llama.cpp activ')
+  if (!Array.isArray(config.enabled_providers) || config.enabled_providers.length !== 1 || config.enabled_providers[0] !== 'opencode-free') {
+    fail('OpenCode trebuie să aibă exclusiv providerul anonim aprobat activ')
   }
   const providers = config.provider
-  if (!providers || typeof providers !== 'object' || Array.isArray(providers) || Object.keys(providers).join(',') !== 'llama.cpp') {
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers) || Object.keys(providers).join(',') !== 'opencode-free') {
     fail('Configurația OpenCode conține provideri neautorizați')
   }
-  const local = providers['llama.cpp']
-  const configuredModels = Object.keys(local?.models ?? {}).sort()
+  const provider = providers['opencode-free']
+  const configuredModels = Object.keys(provider?.models ?? {})
   if (
-    !local
-    || local.npm !== '@ai-sdk/openai-compatible'
-    || local.options?.baseURL !== OPENCODE_BASE_URL
-    || Object.hasOwn(local.options ?? {}, 'apiKey')
-    || configuredModels.join(',') !== [POWERFUL_OPENCODE_MODEL_ID, OPENCODE_MODEL_ID].sort().join(',')
-  ) fail('Providerul OpenCode nu are exact configurația duală FAST/POWERFUL pe endpointul llama.cpp unic')
+    !provider
+    || Object.keys(provider).some((key) => !['npm', 'name', 'options', 'models'].includes(key))
+    || provider.npm !== '@ai-sdk/openai-compatible'
+    || provider.options?.baseURL !== OPENCODE_BASE_URL
+    || Object.keys(provider.options ?? {}).some((key) => !['baseURL', 'timeout', 'chunkTimeout'].includes(key))
+    || configuredModels.join(',') !== OPENCODE_MODEL_ID
+    || provider.models[OPENCODE_MODEL_ID]?.tool_call !== true
+    || Object.keys(provider.models[OPENCODE_MODEL_ID] ?? {}).some((key) => !['name', 'tool_call', 'limit'].includes(key))
+  ) fail('Providerul OpenCode trebuie să fie anonim, cu un singur model gratuit și unelte')
   const permissions = config.permission
-  for (const capability of ['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory']) {
-    if (permissions?.[capability] !== 'allow') fail(`OpenCode nu are accesul complet cerut pentru ${capability}`)
+  if (Object.keys(permissions ?? {}).some((key) => !['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory'].includes(key))) fail('Permisiuni OpenCode suplimentare neautorizate')
+  if (JSON.stringify(config.instructions) !== '["instructions.md"]') fail('Instrucțiunile executorului nu sunt cele canonice')
+  for (const capability of ['read', 'glob', 'grep', 'edit', 'bash', 'task']) {
+    if (permissions?.[capability] !== 'allow') fail(`Lipsește unealta de cod ${capability}`)
+  }
+  for (const capability of ['*', 'skill', 'webfetch', 'websearch', 'external_directory']) {
+    if (permissions?.[capability] !== 'deny') fail(`Unealta ${capability} iese din limita executorului`)
   }
   return true
 }
 
 function assertEnabledLayout(expectedModelId) {
   if (process.platform !== 'linux') fail('Execuția OpenCode este permisă numai pe Linux')
-  if (process.getuid?.() === 0) fail('Supervisorul rulează necanonic ca root; OpenCode trebuie să escaladeze explicit prin sudo')
-  if (OPENCODE_MODEL !== FAST_OPENCODE_MODEL) fail('Modelul implicit al workerului trebuie să fie treapta FAST de 35B')
-  if (OPENCODE_BASE_URL !== 'http://127.0.0.1:24080/v1') fail('llama.cpp trebuie să rămână pe endpointul loopback unic fixat')
+  if (process.getuid?.() === 0) fail('Supervisorul și executorul trebuie să ruleze rootless')
+  if (expectedModelId !== OPENCODE_MODEL_ID || OPENCODE_MODEL !== FAST_OPENCODE_MODEL) fail('Workerul nu folosește modelul gratuit aprobat')
+  if (OPENCODE_BASE_URL !== 'https://opencode.ai/inference/openai/v1') fail('Endpointul anonim aprobat nu poate fi înlocuit')
   const actual = {
     openCodeBin: OPENCODE_BIN,
     openCodeConfigHome: OPENCODE_CONFIG_HOME,
@@ -811,25 +894,18 @@ function assertEnabledLayout(expectedModelId) {
     handoffReady: HANDOFF_READY,
   }
   for (const [name, expected] of Object.entries(REQUIRED_LAYOUT)) {
-    if (name === 'sudo' || name === 'podman') continue
+    if (name === 'podman' || name === 'ociRuntime') continue
     if (actual[name] !== expected) fail(`Layout OpenCode necanonic: ${name}`)
   }
 
   if (!existsSync(OPENCODE_BIN) || realpathSync(OPENCODE_BIN) !== REQUIRED_LAYOUT.openCodeBin) fail('OpenCode trebuie să fie binarul canonic fixat')
   assertRootOwnedReadonly(OPENCODE_BIN, 'CLI-ul OpenCode')
-  const sudoPath = REQUIRED_LAYOUT.sudo
-  if (!existsSync(sudoPath) || realpathSync(sudoPath) !== REQUIRED_LAYOUT.sudo) fail('sudo trebuie să fie exact /usr/bin/sudo')
-  assertRootOwnedReadonly(sudoPath, 'sudo')
-  const rootIdentity = exactOutput(sudoPath, ['-n', '-u', 'root', '--', '/usr/bin/id', '-u'], undefined, openCodeParentEnv())
-  if (rootIdentity !== '0') fail('OpenCode nu are acces root non-interactiv prin sudo')
-  const rootOpenCodeVersion = exactOutput(sudoPath, rootOpenCodeArgs(['--version']), undefined, openCodeParentEnv())
-  if (rootOpenCodeVersion !== OPENCODE_VERSION) fail('Executorul root nu pornește binarul OpenCode fixat')
-  repairSupervisorOwnership()
 
   const podmanPath = REQUIRED_LAYOUT.podman
   if (!existsSync(podmanPath) || realpathSync(podmanPath) !== REQUIRED_LAYOUT.podman) fail('podman trebuie să fie exact /usr/bin/podman')
   assertRootOwnedReadonly(podmanPath, 'podman')
-  const podmanProbe = commandResult(podmanPath, ['--version'], undefined, podmanSupervisorEnv())
+  assertRootOwnedReadonly(REQUIRED_LAYOUT.ociRuntime, 'Runtime OCI')
+  const podmanProbe = commandResult(podmanPath, ['--runtime', REQUIRED_LAYOUT.ociRuntime, '--version'], undefined, podmanSupervisorEnv())
   if (podmanProbe.status !== 0) {
     const diagnostic = String(podmanProbe.stderr ?? '')
       .replace(/[^\x20-\x7e]/g, ' ')
@@ -844,10 +920,11 @@ function assertEnabledLayout(expectedModelId) {
   assertRootOwnedReadonly(OPENCODE_CONFIG, 'Configurația OpenCode')
   if (configInfo.size < 2 || configInfo.size > 128 * 1024) fail('Configurația OpenCode are dimensiune invalidă')
   validateOpenCodeConfig(JSON.parse(readFileSync(OPENCODE_CONFIG, 'utf8')))
+  assertRootOwnedReadonly(join(OPENCODE_CONFIG_HOME, 'opencode/instructions.md'), 'Instrucțiunile executorului')
 
   const version = exactOutput(OPENCODE_BIN, ['--version'], undefined, openCodeParentEnv())
   if (version !== OPENCODE_VERSION) fail(`Versiunea OpenCode trebuie să fie exact ${OPENCODE_VERSION}`)
-  assertActiveLocalModel(expectedModelId)
+  assertProviderCatalog()
 
   if (!existsSync(REPO) || !commandOk('/usr/bin/git', ['rev-parse', '--verify', 'origin/master^{commit}'], REPO, gitSupervisorEnv())) {
     fail('Clona dedicată nu are ref-ul origin/master verificabil')
@@ -867,11 +944,11 @@ function assertEnabledLayout(expectedModelId) {
   if (!GATE_IMAGE.startsWith(expectedGatePrefix) || !/^ghcr\.io\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/codex-gates@sha256:[0-9a-f]{64}$/.test(GATE_IMAGE)) {
     fail('KELION_CODEX_GATE_IMAGE trebuie să fie imaginea canonică fixată prin digest')
   }
-  const imageDigest = exactOutput(podmanPath, ['image', 'inspect', '--format', '{{.Digest}}', GATE_IMAGE], undefined, podmanSupervisorEnv())
+  const imageDigest = exactOutput(podmanPath, ['--runtime', REQUIRED_LAYOUT.ociRuntime, 'image', 'inspect', '--format', '{{.Digest}}', GATE_IMAGE], undefined, podmanSupervisorEnv())
   if (imageDigest !== GATE_IMAGE.slice(GATE_IMAGE.indexOf('@') + 1)) fail('Digestul imaginii gate locale nu corespunde configurației')
   const gateRevision = exactOutput(
     podmanPath,
-    ['image', 'inspect', '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}', GATE_IMAGE],
+    ['--runtime', REQUIRED_LAYOUT.ociRuntime, 'image', 'inspect', '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}', GATE_IMAGE],
     undefined,
     podmanSupervisorEnv(),
   )
@@ -920,7 +997,7 @@ export function runSucceeded(result) {
     && result.outputExceeded === false
 }
 
-function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = DEFAULT_EXECUTION_TIMEOUT_MS, signal = undefined, privilegedKill = false, maxLogBytes = WORKER_LOG_MAX_BYTES) {
+function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = DEFAULT_EXECUTION_TIMEOUT_MS, signal = undefined, maxLogBytes = WORKER_LOG_MAX_BYTES, onStdout = null) {
   return new Promise((done, reject) => {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_EXECUTION_TIMEOUT_MS) {
       reject(new Error('Timeout-ul execuției worker este invalid'))
@@ -974,14 +1051,6 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = D
       return
     }
     const signalGroup = (name) => {
-      if (privilegedKill) {
-        const killed = spawnSync(
-          '/usr/bin/sudo',
-          ['-n', '-u', 'root', '--', '/usr/bin/kill', `-${name.replace(/^SIG/, '')}`, '--', `-${child.pid}`],
-          { env: openCodeParentEnv(), stdio: 'ignore', timeout: 10_000, windowsHide: true },
-        )
-        if (killed.status === 0) return
-      }
       try {
         process.kill(-child.pid, name)
       } catch {
@@ -1036,7 +1105,12 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = D
         fd = null
       }
     }
-    child.stdout.on('data', appendOutput)
+    child.stdout.on('data', (chunk) => {
+      appendOutput(chunk)
+      if (onStdout && !outputExceeded && !outputError) {
+        try { onStdout(chunk) } catch (error) { outputError = error; terminate() }
+      }
+    })
     child.stderr.on('data', appendOutput)
     signal?.addEventListener('abort', onAbort, { once: true })
     if (signal?.aborted) onAbort()
@@ -1047,8 +1121,7 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = D
       reject(error)
     })
     child.once('exit', () => {
-      // `sudo` poate ieși la SIGTERM înaintea executorului său. Grupul încă
-      // păstrează PGID-ul inițial, deci îl închidem definitiv înainte de cleanup.
+      // Închide și descendenții runtime-ului după anulare, înainte de cleanup.
       if (killTimer) signalGroup('SIGKILL')
     })
     child.once('close', (code, exitSignal) => {
@@ -1068,95 +1141,6 @@ function runLogged(command, args, cwd, logPath, env, stdin = null, timeoutMs = D
       child.stdin.end(stdin)
     }
   })
-}
-
-function canonicalDirectory(path, label) {
-  const canonical = resolve(path)
-  const info = lstatSync(canonical)
-  if (!info.isDirectory() || info.isSymbolicLink() || realpathSync(canonical) !== canonical) {
-    fail(`${label} nu este un director canonic`)
-  }
-  return canonical
-}
-
-function isInsideOrEqual(parent, child) {
-  const base = resolve(parent)
-  const candidate = resolve(child)
-  return candidate === base || candidate.startsWith(`${base}/`)
-}
-
-function rootExecutorOwnershipScope(jobDir) {
-  const worktree = canonicalDirectory(jobDir, 'Worktree-ul OpenCode')
-  assertDescendant(JOBS, worktree, 'Worktree OpenCode la schimbarea ownershipului')
-  const commonOutput = exactOutput(
-    '/usr/bin/git',
-    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-    worktree,
-    gitSupervisorEnv(),
-  )
-  if (!commonOutput || commonOutput.includes('\0') || commonOutput.includes('\n') || commonOutput.includes('\r')) {
-    fail('Directorul Git comun al worktree-ului este invalid')
-  }
-  const gitCommon = canonicalDirectory(commonOutput, 'Directorul Git comun al worktree-ului')
-  let externalGitCommon = null
-  if (!isInsideOrEqual(worktree, gitCommon)) {
-    const expectedRepoGit = canonicalDirectory(join(REPO, '.git'), 'Directorul Git al clonei dedicate')
-    if (gitCommon !== expectedRepoGit) fail('Worktree-ul OpenCode folosește un director Git comun neautorizat')
-    externalGitCommon = gitCommon
-  }
-  return Object.freeze({ worktree, externalGitCommon })
-}
-
-function chownAsRoot(paths, owner, failureMessage) {
-  const changed = spawnSync(
-    '/usr/bin/sudo',
-    ['-n', '-u', 'root', '--', '/usr/bin/chown', '-R', '-P', '--no-dereference', owner, '--', ...paths],
-    { env: openCodeParentEnv(), stdio: 'ignore', timeout: 60_000, windowsHide: true },
-  )
-  if (changed.status !== 0) fail(failureMessage)
-}
-
-function supervisorOwner() {
-  const uid = process.getuid?.()
-  const gid = process.getgid?.()
-  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid === 0) fail('Identitatea workerului pentru ownership este invalidă')
-  return `${uid}:${gid}`
-}
-
-function repairSupervisorOwnership() {
-  const jobs = canonicalDirectory(JOBS, 'Directorul joburilor Constructor')
-  canonicalDirectory(REPO, 'Clona dedicată Constructor')
-  const repoGit = canonicalDirectory(join(REPO, '.git'), 'Directorul Git al clonei dedicate')
-  chownAsRoot(
-    [jobs, repoGit],
-    supervisorOwner(),
-    'Ownershipul supervisorului nu a putut fi recuperat înainte de preflight',
-  )
-}
-
-function restoreJobOwnership(jobStateDir, scope = null) {
-  assertDescendant(JOBS, jobStateDir, 'Directorul jobului la restabilirea ownershipului')
-  canonicalDirectory(jobStateDir, 'Directorul jobului după execuția OpenCode')
-  const paths = [resolve(jobStateDir)]
-  if (scope?.externalGitCommon) {
-    const expectedRepoGit = canonicalDirectory(join(REPO, '.git'), 'Directorul Git al clonei după execuția OpenCode')
-    if (scope.externalGitCommon !== expectedRepoGit) fail('Directorul Git comun s-a schimbat în timpul execuției OpenCode')
-    paths.push(expectedRepoGit)
-  }
-  chownAsRoot(paths, supervisorOwner(), 'Ownershipul worktree-ului OpenCode nu a putut fi restabilit')
-}
-
-function rootGitStatus(worktree, cwd) {
-  return commandResult(
-    REQUIRED_LAYOUT.sudo,
-    [
-      '-n', '-u', 'root', '--', '/usr/bin/env', '-i',
-      ...openCodeRootEnvironmentArgs(worktree),
-      '/usr/bin/git', '-C', resolve(worktree), 'status', '--porcelain=v1', '--untracked-files=no',
-    ],
-    cwd,
-    openCodeParentEnv(),
-  )
 }
 
 async function reportEvent(secret, jobId, body) {
@@ -1216,7 +1200,7 @@ async function prepareWorkerClaim(secret, dependencies = {}) {
   const reconcile = dependencies.reconcile ?? reconcilePendingHandoffs
   const claim = dependencies.claim ?? ((value) => {
     const profile = dependencies.profile
-    if (profile !== 'fast' && profile !== 'powerful') fail('Profilul claimului Constructor nu este valid')
+    if (profile !== 'fast') fail('Profilul claimului Constructor nu este instalat')
     return post(value, '/api/internal/codex/jobs/claim', { profile })
   })
   const reportHeartbeat = dependencies.reportHeartbeat ?? heartbeat
@@ -1298,6 +1282,10 @@ function startJobLease(secret, jobId, taskId, progress) {
   }
   stop.assert = assertHeld
   stop.signal = controller.signal
+  stop.update = (confirmedProgress) => {
+    progress = confirmedProgress
+    renew()
+  }
   return stop
 }
 
@@ -1307,7 +1295,7 @@ function worktreeHasChanges(jobDir) {
   return Buffer.byteLength(String(status.stdout ?? ''), 'utf8') > 0
 }
 
-async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, ownershipScope, turn, order) {
+async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, orderPath, turn, order) {
   const logPrefix = `model-${turn.tier}`
   const executorLogPath = join(jobStateDir, `${logPrefix}-opencode.log`)
   const gateLogPath = join(jobStateDir, `${logPrefix}-gates.log`)
@@ -1329,25 +1317,27 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
     secret,
     jobId,
     taskId,
-    `Model selectat manual ${turn.label}: OpenCode execută ordinul (timeout=${Math.round(executorTimeout / 60_000)}m)`,
+    `${turn.label}: pornire executor izolat; aștept primul rezultat al uneltelor`,
   )
-  let executorAttempted = false
+  const progress = createOpenCodeProgress(stopExecLease.update)
   let executorResult = null
   let executorError = null
   try {
-    executorAttempted = true
     try {
+      prepareExecutorInputs(orderPath)
       executorResult = await runLogged(
-        REQUIRED_LAYOUT.sudo,
-        rootOpenCodeArgs(openCodeExecArgs(jobDir, orderPath, turn.model), jobDir),
+        REQUIRED_LAYOUT.podman,
+        openCodeContainerArgs(jobDir, orderPath, await providerAddresses()),
         jobDir,
         executorLogPath,
-        openCodeParentEnv(),
+        podmanSupervisorEnv(),
         null,
         executorTimeout,
         stopExecLease.signal,
-        true,
+        WORKER_LOG_MAX_BYTES,
+        progress.consume,
       )
+      if (progress.snapshot().failed && executorResult.code === 0) executorResult.code = 1
     } catch (error) {
       executorError = error
     }
@@ -1355,7 +1345,7 @@ async function runConstructorTurn(secret, jobId, taskId, jobStateDir, jobDir, or
     try {
       await stopExecLease()
     } finally {
-      if (executorAttempted && existsSync(jobStateDir)) restoreJobOwnership(jobStateDir, ownershipScope)
+      stopExecutorContainer(jobDir)
     }
   }
   if (executorError || !runSucceeded(executorResult)) {
@@ -1451,11 +1441,10 @@ async function runOnce() {
     // al lui origin/master. Nu folosim varful lui master: acesta se poate muta
     // in timpul executiei, iar ordinul ar muri fara vina lui.
     if (!/^[0-9a-f]{40}$/.test(baseCommit ?? '') || baseCommit !== gateCommit) fail('Worktree-ul nu corespunde commitului imaginii gate')
-    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-local-qwen', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
+    writeFileSync(join(jobStateDir, 'job.json'), `${JSON.stringify({ jobId, taskId, baseCommit, executor: 'opencode-anonymous-isolated', profile: profile.tier, createdAt: new Date().toISOString() })}\n`, { mode: 0o600 })
     const orderPath = join(jobStateDir, 'order.md')
     writeFileSync(orderPath, `${effectiveOrder}\n`, { flag: 'wx', mode: 0o600 })
 
-    const ownershipScope = rootExecutorOwnershipScope(jobDir)
     const finalOutcome = await runConstructorTurn(
       secret,
       jobId,
@@ -1463,7 +1452,6 @@ async function runOnce() {
       jobStateDir,
       jobDir,
       orderPath,
-      ownershipScope,
       profile,
       effectiveOrder,
     )
@@ -1561,35 +1549,31 @@ async function executorSmoke() {
       'Execută numai această probă deterministă.',
       'Rulează `/usr/bin/git status --porcelain=v1 --untracked-files=no` în worktree.',
       'Stdout trebuie să fie exact ` M tracked.txt` urmat de newline.',
-      `Creează fișierul ${gitProofPath} cu exact acel stdout, inclusiv newline-ul final.`,
-      `Creează fișierul ${proofPath} cu exact textul ${nonce} urmat de newline.`,
+      'Creează fișierul git-status-proof.txt în directorul curent cu exact acel stdout, inclusiv newline-ul final.',
+      `Creează fișierul executor-proof.txt în directorul curent cu exact textul ${nonce} urmat de newline.`,
       'Nu modifica tracked.txt, nu indexa nimic, nu crea commit și oprește-te după ce verifici ambele fișiere.',
     ].join('\n')
     writeFileSync(orderPath, `${order}\n`, { flag: 'wx', mode: 0o600 })
-    const ownershipScope = rootExecutorOwnershipScope(smokeDir)
-    let executorAttempted = false
+    const progress = createOpenCodeProgress()
     let result
     try {
-      executorAttempted = true
-      const gitProbe = rootGitStatus(smokeDir, smokeStateDir)
-      if (gitProbe.status !== 0 || String(gitProbe.stdout ?? '') !== expectedGitStatus) {
-        fail('Executorul root nu poate rula Git status în worktree-ul smoke')
-      }
+      prepareExecutorInputs(orderPath)
       result = await runLogged(
-        REQUIRED_LAYOUT.sudo,
-        rootOpenCodeArgs(openCodeExecArgs(smokeDir, orderPath, profile.model), smokeDir),
+        REQUIRED_LAYOUT.podman,
+        openCodeContainerArgs(smokeDir, orderPath, await providerAddresses()),
         smokeDir,
         logPath,
-        openCodeParentEnv(),
+        podmanSupervisorEnv(),
         null,
         smokeTimeoutMs(),
         undefined,
-        true,
+        WORKER_LOG_MAX_BYTES,
+        progress.consume,
       )
     } finally {
-      if (executorAttempted && existsSync(smokeStateDir)) restoreJobOwnership(smokeStateDir, ownershipScope)
+      stopExecutorContainer(smokeDir)
     }
-    if (!runSucceeded(result)) {
+    if (!runSucceeded(result) || progress.snapshot().failed || progress.snapshot().completedTools === 0) {
       const diagnostic = tailText(logPath, 8 * 1024)
         .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
         .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '?')
@@ -1608,11 +1592,11 @@ async function executorSmoke() {
       gitSupervisorEnv(),
     )
     if (supervisorGitProbe.status !== 0 || String(supervisorGitProbe.stdout ?? '') !== expectedGitStatus) {
-      fail('Ownershipul Git nu a fost restabilit după smoke-ul OpenCode')
+      fail('Fișierul urmărit Git s-a schimbat nepermis în timpul smoke-ului OpenCode')
     }
     const proofSha256 = createHash('sha256').update(readFileSync(proofPath)).digest('hex')
     process.stdout.write('OPENCODE_EXECUTOR_GIT_VERIFIED status=porcelain-v1\n')
-    process.stdout.write(`OPENCODE_EXECUTOR_SMOKE_VERIFIED sha256=${proofSha256}\n`)
+    process.stdout.write(`OPENCODE_EXECUTOR_SMOKE_VERIFIED sha256=${proofSha256} tools=${progress.snapshot().completedTools}\n`)
   } finally {
     rmSync(smokeStateDir, { recursive: true, force: true })
   }
@@ -1630,8 +1614,7 @@ async function selfTest() {
   if (
     CONSTRUCTOR_MODEL_PROFILES.fast.model !== FAST_OPENCODE_MODEL
     || CONSTRUCTOR_MODEL_PROFILES.fast.modelId !== OPENCODE_MODEL_ID
-    || CONSTRUCTOR_MODEL_PROFILES.powerful.model !== POWERFUL_OPENCODE_MODEL
-    || CONSTRUCTOR_MODEL_PROFILES.powerful.modelId !== POWERFUL_OPENCODE_MODEL_ID
+    || Object.keys(CONSTRUCTOR_MODEL_PROFILES).join(',') !== 'fast'
   ) fail('Catalogul modelelor selectabile manual diferă de politica Constructor')
   const body = { z: 1, a: { y: true, x: null }, b: [2, 'q'] }
   const canonical = canonicalJson(body)
@@ -1656,17 +1639,15 @@ async function selfTest() {
     || args[1] !== 'run'
     || args[2] !== OPENCODE_PROMPT
     || args[3] !== '--model'
-    || args[4] !== 'llama.cpp/qwen3.6-35b-a3b-local'
+    || args[4] !== 'opencode-free/big-pickle'
     || args[5] !== '--file'
-    || args[6] !== '/var/lib/kelion-codex/jobs/codex-test/order.md'
+    || args[6] !== '/constructor/order.md'
+    || args[7] !== '--format' || args[8] !== 'json'
     || args.some((value) => ['--attach', '--auto', '--dir', 'codex', 'login'].includes(value))
   ) fail('Argumentele OpenCode nu fixează execuția locală și ordinul privat')
-  const powerfulArgs = openCodeExecArgs(
-    '/var/lib/kelion-codex/jobs/codex-test/worktree',
-    '/var/lib/kelion-codex/jobs/codex-test/order.md',
-    POWERFUL_OPENCODE_MODEL,
-  )
-  if (powerfulArgs[4] !== 'llama.cpp/qwen3.5-122b-a10b-local') fail('Selecția manuală POWERFUL nu fixează modelul local 122B')
+  let retiredModelRejected = false
+  try { openCodeExecArgs('/var/lib/kelion-codex/jobs/codex-test/worktree', '/var/lib/kelion-codex/jobs/codex-test/order.md', 'powerful') } catch { retiredModelRejected = true }
+  if (!retiredModelRejected) fail('Modelul retras poate fi încă executat')
   const requestedAuditDurations = [
     ['audit pentru 90 de minute', 90],
     ['auditează timp de 2 ore', 120],
@@ -1691,34 +1672,34 @@ async function selfTest() {
   if (smokeTimeoutMs({ CODEX_WORKER_SMOKE_TIMEOUT_SECONDS: '1800' }) !== 30 * 60_000) {
     fail('Timeout-ul smoke implicit/configurabil este inconsistent')
   }
-  const rootArgs = rootOpenCodeArgs(args, '/var/lib/kelion-codex/jobs/codex-test/worktree')
+  const executorArgs = openCodeContainerArgs('/var/lib/kelion-codex/jobs/codex-test/worktree', '/var/lib/kelion-codex/jobs/codex-test/order.md', ['203.0.113.10'], 'test-image', { uid: 1000, gid: 1000 })
   if (
-    rootArgs.slice(0, 6).join(' ') !== '-n -u root -- /usr/bin/env -i'
-    || !rootArgs.includes('HOME=/srv/private-ai/home')
-    || !rootArgs.includes('OPENCODE_CONFIG=/srv/private-ai/home/.config/opencode/opencode.json')
-    || !rootArgs.includes('OPENCODE_DISABLE_MODELS_FETCH=true')
-    || !rootArgs.includes('GIT_CONFIG_COUNT=1')
-    || !rootArgs.includes('GIT_CONFIG_KEY_0=safe.directory')
-    || !rootArgs.includes('GIT_CONFIG_VALUE_0=/var/lib/kelion-codex/jobs/codex-test/worktree')
-    || !rootArgs.includes('/opt/private-ai/bin/opencode')
-  ) fail('Lansatorul OpenCode root nu fixează mediul local curat')
+    !executorArgs.includes('--security-opt=no-new-privileges')
+    || !executorArgs.includes('--network=slirp4netns:allow_host_loopback=false,enable_ipv6=false')
+    || !executorArgs.includes('HOME=/work/runtime/home')
+    || !executorArgs.includes('OPENCODE_DISABLE_MODELS_FETCH=true')
+    || executorArgs.some((value) => /CREDENTIAL|TOKEN|SECRET|sudo/.test(value))
+  ) fail('Containerul OpenCode nu păstrează limita code-only')
   const validOpenCodeConfig = {
     autoupdate: false,
     share: 'disabled',
-    model: 'llama.cpp/qwen3.6-35b-a3b-local',
-    small_model: 'llama.cpp/qwen3.6-35b-a3b-local',
-    enabled_providers: ['llama.cpp'],
+    model: 'opencode-free/big-pickle',
+    small_model: 'opencode-free/big-pickle',
+    enabled_providers: ['opencode-free'],
+    instructions: ['instructions.md'],
     provider: {
-      'llama.cpp': {
+      'opencode-free': {
         npm: '@ai-sdk/openai-compatible',
-        options: { baseURL: 'http://127.0.0.1:24080/v1' },
+        options: { baseURL: 'https://opencode.ai/inference/openai/v1' },
         models: {
-          'qwen3.6-35b-a3b-local': {},
-          'qwen3.5-122b-a10b-local': {},
+          'big-pickle': { tool_call: true },
         },
       },
     },
-    permission: Object.fromEntries(['*', 'read', 'glob', 'grep', 'edit', 'bash', 'task', 'skill', 'webfetch', 'websearch', 'external_directory'].map((key) => [key, 'allow'])),
+    permission: {
+      ...Object.fromEntries(['read', 'glob', 'grep', 'edit', 'bash', 'task'].map((key) => [key, 'allow'])),
+      ...Object.fromEntries(['*', 'skill', 'webfetch', 'websearch', 'external_directory'].map((key) => [key, 'deny'])),
+    },
   }
   validateOpenCodeConfig(validOpenCodeConfig)
   let externalProviderRejected = false
@@ -1728,21 +1709,21 @@ async function selfTest() {
     externalProviderRejected = true
   }
   if (!externalProviderRejected) fail('Configurația OpenCode acceptă un provider extern')
-  let incompleteDualConfigRejected = false
+  let additionalModelRejected = false
   try {
     validateOpenCodeConfig({
       ...validOpenCodeConfig,
       provider: {
-        'llama.cpp': {
-          ...validOpenCodeConfig.provider['llama.cpp'],
-          models: { 'qwen3.6-35b-a3b-local': {} },
+        'opencode-free': {
+          ...validOpenCodeConfig.provider['opencode-free'],
+          models: { ...validOpenCodeConfig.provider['opencode-free'].models, 'paid-fallback': {} },
         },
       },
     })
   } catch {
-    incompleteDualConfigRejected = true
+    additionalModelRejected = true
   }
-  if (!incompleteDualConfigRejected) fail('Configurația OpenCode acceptă lipsa treptei POWERFUL')
+  if (!additionalModelRejected) fail('Configurația OpenCode acceptă un model suplimentar')
   const gateArgs = gateContainerArgs(
     '/var/lib/kelion-codex/jobs/codex-test/worktree',
     'ghcr.io/example/repository/codex-gates@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -1760,7 +1741,7 @@ async function selfTest() {
     NO_COLOR: '1',
     CI: '1',
   }
-  if (canonicalJson(parentEnv) !== canonicalJson(expectedParentEnv)) fail('Procesul sudo moștenește un mediu neautorizat')
+  if (canonicalJson(parentEnv) !== canonicalJson(expectedParentEnv)) fail('Procesul executor moștenește un mediu neautorizat')
   const receipt = handoffReceipt({
     jobId: '42',
     taskId: 'codex-123e4567-e89b-42d3-a456-426614174000',
@@ -1852,13 +1833,15 @@ async function selfTest() {
   if (classifyWorkerOutcome(null, 'opencode', { code: 1 }, new Error('no changes')).code !== 'worker_internal_failure') {
     fail('Textul unui exit OpenCode eșuat este confundat cu verdictul măsurat unresolved')
   }
-  for (const localFailure of [
-    'connect ECONNREFUSED 127.0.0.1:24080',
-    'llama.cpp model qwen3.6-35b-a3b-local unavailable',
-    'fetch failed while contacting Qwen3',
+  for (const providerFailure of [
+    'connect ECONNREFUSED',
+    'model big-pickle unavailable',
+    'fetch failed while contacting provider',
+    'rate_limit_exceeded',
+    'insufficient_quota',
   ]) {
-    if (classifyWorkerFailure(null, 'opencode', {}, new Error(localFailure)) !== 'brain_unavailable') {
-      fail(`Indisponibilitatea locală nu este clasificată brain_unavailable: ${localFailure}`)
+    if (classifyWorkerFailure(null, 'opencode', {}, new Error(providerFailure)) !== 'brain_unavailable') {
+      fail(`Indisponibilitatea providerului nu este clasificată brain_unavailable: ${providerFailure}`)
     }
   }
   for (const obsoleteCloudFailure of [
@@ -1866,7 +1849,7 @@ async function selfTest() {
     'credit_balance_exhausted',
   ]) {
     if (classifyWorkerFailure(null, 'opencode', {}, new Error(obsoleteCloudFailure)) !== 'worker_internal_failure') {
-      fail('Executorul local emite încă o taxonomie cloud')
+      fail('Un mesaj necunoscut este clasificat fără dovadă')
     }
   }
 
@@ -2037,7 +2020,6 @@ async function selfTest() {
       null,
       10_000,
       undefined,
-      false,
       overflowLimit,
     )
     if (
@@ -2096,7 +2078,7 @@ async function preflightOnly() {
   const { problem, profile } = await preflight()
   if (problem) fail(problem)
   if (!profile) fail('Preflightul nu a furnizat modelul selectat manual')
-  process.stdout.write(`opencode ${OPENCODE_VERSION}\nmodel=${profile.modelId}\nopencode-local-full-access: TRECE\n`)
+  process.stdout.write(`opencode ${OPENCODE_VERSION}\nmodel=${profile.modelId}\nopencode-isolated-anonymous: TRECE\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

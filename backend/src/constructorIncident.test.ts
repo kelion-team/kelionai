@@ -43,15 +43,16 @@ describe('constructor incident — clasificare deterministă', () => {
     }
 
     expect(classifyConstructorFailure('worker_failure:provider_auth').causeSummary).toContain('legacy')
-    expect(classifyConstructorFailure('worker_failure:provider_credit').nextAction).toContain('Qwen local')
+    expect(classifyConstructorFailure('worker_failure:provider_credit').nextAction).toContain('fără fallback plătit')
   })
 
-  it('diagnostichează exclusiv serviciul local pentru model indisponibil', () => {
+  it('cere dovezile motorului rulării fără să inventeze modelul indisponibil', () => {
     const result = classifyConstructorFailure('worker_failure:brain_unavailable')
     expect(result.stage).toBe('local_inference')
-    expect(result.causeSummary).toContain('llama.cpp')
-    expect(result.nextAction).toContain('private-ai-llm.service')
-    expect(result.nextAction).toContain('fără fallback cloud')
+    expect(result.causeSummary).toContain('trebuie verificate')
+    expect(result.nextAction).toContain('configurația validată')
+    expect(result.nextAction).toContain('fără fallback plătit')
+    expect(result.nextAction).not.toMatch(/llama|Qwen|private-ai-llm/)
   })
 
   it('păstrează eșecul generic OpenCode necunoscut până există dovadă privată', () => {
@@ -60,7 +61,7 @@ describe('constructor incident — clasificare deterministă', () => {
       expect(result.causeCode).toBe('unknown')
       expect(result.stage).toBe('local_executor')
       expect(result.nextAction).toContain('OpenCode')
-      expect(result.nextAction).toContain('llama.cpp')
+      expect(result.nextAction).toContain('motorului folosit de acea rulare')
     }
   })
 
@@ -69,7 +70,7 @@ describe('constructor incident — clasificare deterministă', () => {
     expect(fast).toMatchObject({
       causeCode: 'no_changes', stage: 'implementation',
     })
-    expect(fast.nextAction).toMatch(/Comută manual.*POWERFUL 122B.*Reia/i)
+    expect(fast.nextAction).toMatch(/comanda explicită Reia/i)
     expect(classifyConstructorFailure('worker_unresolved:test_failure;profile=fast')).toMatchObject({
       causeCode: 'test_failure',
     })
@@ -77,7 +78,7 @@ describe('constructor incident — clasificare deterministă', () => {
     expect(powerful).toMatchObject({
       causeCode: 'build_failure',
     })
-    expect(powerful.nextAction).toMatch(/terminal.*nu recomandă Reia.*model superior/i)
+    expect(powerful.nextAction).toMatch(/comanda explicită Reia/i)
   })
 
   it('outcome-ul tehnic canonic nu recomandă alt model sau Reia', () => {

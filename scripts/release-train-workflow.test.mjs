@@ -10,10 +10,7 @@ const require = createRequire(import.meta.url)
 const ts = require('../backend/node_modules/typescript')
 
 const STATIC_GATE_TESTS = [
-  '.github/private-ai/benchmark-active-model.test.mjs',
-  '.github/private-ai/finalize-private-ai-constructor.test.mjs',
-  '.github/private-ai/install-private-ai.test.mjs',
-  '.github/private-ai/upgrade-private-ai-max-model.test.mjs',
+  '.github/private-ai/constructor-status-proof.test.mjs',
   'scripts/verifica-butoane.test.mjs',
   'scripts/verifica-exporturi.test.mjs',
   'scripts/verifica-hardcodari.test.mjs',

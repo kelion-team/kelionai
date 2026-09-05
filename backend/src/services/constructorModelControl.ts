@@ -1,371 +1,103 @@
 import { config } from '../config.js'
 import { requestInternalService } from './internalServiceRequest.js'
 
-export type ConstructorModelProfile = 'fast' | 'powerful'
-export type ConstructorModelState = 'ready' | 'switching' | 'failed' | 'unavailable'
+export type ConstructorModelProfile = 'fast'
+export type ConstructorModelState = 'ready' | 'failed' | 'unavailable'
 
-export interface ConstructorModelProfileInfo {
-  id: ConstructorModelProfile
+export interface ConstructorConfiguredModel {
+  id: string
   label: string
-  model: string
-  installed: boolean
+  provider: string
 }
 
 export interface ConstructorModelSnapshot {
   mode: 'manual'
   defaultProfile: 'fast'
-  profiles: ConstructorModelProfileInfo[]
+  model: ConstructorConfiguredModel | null
+  profiles: { id: 'fast'; label: string; model: string; installed: boolean }[]
   activeProfile: ConstructorModelProfile | null
   activeModel: string | null
   state: ConstructorModelState
-  requestedProfile: ConstructorModelProfile | null
-  requestId: string | null
+  requestedProfile: null
+  requestId: null
   verifiedAt: string | null
   error: string | null
 }
 
-export type ConstructorModelConflict = 'constructor_busy' | 'model_switch_in_progress'
+const SNAPSHOT_KEYS = ['mode', 'defaultProfile', 'model', 'profiles', 'activeProfile', 'activeModel', 'state', 'requestedProfile', 'requestId', 'verifiedAt', 'error']
+const CONTROLLER_KEYS = ['mode', 'defaultProfile', 'model', 'status', 'activeProfile', 'requestedProfile', 'requestId', 'installedProfiles']
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key))
+const plainText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length > 0 && value.length <= max && value.trim() === value && !/[\p{Cc}\p{Cs}]/u.test(value)
 
-export class ConstructorModelControlError extends Error {
-  constructor(
-    readonly statusCode: 409 | 503,
-    readonly publicCode: ConstructorModelConflict | 'constructor_model_control_unavailable',
-  ) {
-    super(publicCode)
-    this.name = 'ConstructorModelControlError'
-  }
+function configuredModel(value: unknown): ConstructorConfiguredModel | null {
+  if (!isRecord(value) || !exactKeys(value, ['id', 'label', 'provider'])) return null
+  if (!plainText(value.id, 160) || !plainText(value.label, 80) || !plainText(value.provider, 80)) return null
+  if (!/^[a-z0-9][a-z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value.id) || value.id.split('/')[0] !== value.provider) return null
+  return { id: value.id, label: value.label, provider: value.provider }
 }
 
-const PROFILE_IDS = ['fast', 'powerful'] as const
-const PROFILE_CATALOG: Readonly<Record<ConstructorModelProfile, Omit<ConstructorModelProfileInfo, 'installed'>>> = {
-  // Aliasurile sunt contractul local fix dintre OpenCode și llama.cpp; numele
-  // afișate rămân aici, în server, și nu sunt duplicate în browser.
-  fast: { id: 'fast', label: 'Rapid (35B)', model: 'qwen3.6-35b-a3b-local' },
-  powerful: { id: 'powerful', label: 'Puternic (122B)', model: 'qwen3.5-122b-a10b-local' },
-}
-const SNAPSHOT_KEYS = [
-  'mode',
-  'defaultProfile',
-  'profiles',
-  'activeProfile',
-  'activeModel',
-  'state',
-  'requestedProfile',
-  'requestId',
-  'verifiedAt',
-  'error',
-] as const
-const PROFILE_KEYS = ['id', 'label', 'model', 'installed'] as const
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value)
-  return actual.length === keys.length && actual.every((key) => keys.includes(key))
-}
-
-function displayText(value: unknown, max: number): string | null {
-  if (typeof value !== 'string' || value.length < 1 || value.length > max) return null
-  if (value.trim() !== value || /\p{Cc}/u.test(value)) return null
-  return value
-}
-
-function profileId(value: unknown): ConstructorModelProfile | null {
-  return value === 'fast' || value === 'powerful' ? value : null
-}
-
-function nullableProfile(value: unknown): ConstructorModelProfile | null | undefined {
-  if (value === null) return null
-  return profileId(value) ?? undefined
-}
-
-function exactIso(value: unknown): string | null | undefined {
-  if (value === null) return null
-  if (typeof value !== 'string') return undefined
-  const millis = Date.parse(value)
-  return Number.isFinite(millis) && new Date(millis).toISOString() === value ? value : undefined
-}
-
-function nullableRequestId(value: unknown): string | null | undefined {
-  if (value === null) return null
-  return typeof value === 'string' && UUID.test(value) ? value.toLowerCase() : undefined
-}
-
-function nullableError(value: unknown): string | null | undefined {
-  if (value === null) return null
-  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(value)
-    ? value
-    : undefined
-}
-
-function parseProfiles(value: unknown): ConstructorModelProfileInfo[] | null {
-  if (!Array.isArray(value) || value.length !== 2) return null
-  const parsed: ConstructorModelProfileInfo[] = []
-  for (const candidate of value) {
-    if (!isRecord(candidate) || !hasExactKeys(candidate, PROFILE_KEYS)) return null
-    const id = profileId(candidate.id)
-    const label = displayText(candidate.label, 80)
-    const model = displayText(candidate.model, 160)
-    if (!id || !label || !model || typeof candidate.installed !== 'boolean') return null
-    parsed.push({ id, label, model, installed: candidate.installed })
-  }
-  if (new Set(parsed.map((profile) => profile.id)).size !== PROFILE_IDS.length) return null
-  return PROFILE_IDS.map((id) => parsed.find((profile) => profile.id === id)!)
-}
-
-/** Controllerul host este autoritatea pentru inventarul instalat și aliasul
- * activ. Browserul primește numai acest snapshot validat, niciodată fallbackuri
- * hardcodate care ar putea descrie un model inexistent. */
+/** Names come only from the controller's validated deployed configuration.
+ * The internal fast identifier is not a model identity or a historic label. */
 export function parseConstructorModelSnapshot(value: unknown): ConstructorModelSnapshot | null {
-  if (!isRecord(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) return null
-  if (value.mode !== 'manual' || value.defaultProfile !== 'fast') return null
-  const profiles = parseProfiles(value.profiles)
-  const activeProfile = nullableProfile(value.activeProfile)
-  const requestedProfile = nullableProfile(value.requestedProfile)
-  const requestId = nullableRequestId(value.requestId)
-  const verifiedAt = exactIso(value.verifiedAt)
-  const error = nullableError(value.error)
-  const activeModel = value.activeModel === null ? null : displayText(value.activeModel, 160)
-  const state = value.state
-  if (
-    !profiles
-    || activeProfile === undefined
-    || requestedProfile === undefined
-    || requestId === undefined
-    || verifiedAt === undefined
-    || error === undefined
-    || (state !== 'ready' && state !== 'switching' && state !== 'failed' && state !== 'unavailable')
-  ) return null
-
-  if ((activeProfile === null) !== (activeModel === null)) return null
-  if ((requestedProfile === null) !== (requestId === null)) return null
-  if ((activeProfile === null) !== (verifiedAt === null)) return null
-  if (activeProfile !== null) {
-    const active = profiles.find((profile) => profile.id === activeProfile)
-    if (!active?.installed || active.model !== activeModel) return null
-  }
-
-  if (state === 'ready') {
-    if (activeProfile === null || requestedProfile !== null || requestId !== null || error !== null) return null
-  } else if (state === 'switching') {
-    if (requestedProfile === null || requestId === null || error !== null) return null
-    if (!profiles.find((profile) => profile.id === requestedProfile)?.installed) return null
-  } else if (state === 'failed') {
-    if (error === null) return null
-  } else if (
-    error === null
-    || activeProfile !== null
-    || activeModel !== null
-    || requestedProfile !== null
-    || requestId !== null
-    || verifiedAt !== null
-  ) return null
-
-  return {
-    mode: 'manual',
-    defaultProfile: 'fast',
-    profiles,
-    activeProfile,
-    activeModel,
-    state,
-    requestedProfile,
-    requestId,
-    verifiedAt,
-    error,
-  }
+  if (!isRecord(value) || !exactKeys(value, SNAPSHOT_KEYS)) return null
+  if (value.mode !== 'manual' || value.defaultProfile !== 'fast' || value.requestedProfile !== null || value.requestId !== null) return null
+  const model = configuredModel(value.model)
+  if (value.model !== null && model === null) return null
+  if (!Array.isArray(value.profiles) || value.profiles.length !== (model ? 1 : 0)) return null
+  const profile = value.profiles[0]
+  if (model && (!isRecord(profile) || !exactKeys(profile, ['id', 'label', 'model', 'installed']) || profile.id !== 'fast' || profile.label !== model.label || profile.model !== model.id || typeof profile.installed !== 'boolean')) return null
+  if (value.state !== 'ready' && value.state !== 'failed' && value.state !== 'unavailable') return null
+  if (value.state === 'ready') {
+    if (!model || !profile?.installed || value.activeProfile !== 'fast' || value.activeModel !== model.id || value.error !== null) return null
+    if (typeof value.verifiedAt !== 'string' || !Number.isFinite(Date.parse(value.verifiedAt)) || new Date(value.verifiedAt).toISOString() !== value.verifiedAt) return null
+  } else if (value.activeProfile !== null || value.activeModel !== null || value.verifiedAt !== null || typeof value.error !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(value.error)) return null
+  return value as unknown as ConstructorModelSnapshot
 }
 
-function unavailable(): ConstructorModelControlError {
-  return new ConstructorModelControlError(503, 'constructor_model_control_unavailable')
+function unavailable(): Error {
+  return new Error('constructor_model_control_unavailable')
 }
 
-function configured(): { socketPath: string; secret: string } {
+export async function readConstructorModelSnapshot(now = new Date()): Promise<ConstructorModelSnapshot> {
   const control = config.constructorModelControl
-  if (
-    !control.enabled
-    || !control.socket.startsWith('/')
-    || !control.socket.endsWith('.sock')
-    || control.secret.length < 32
-  ) throw unavailable()
-  return { socketPath: control.socket, secret: control.secret }
-}
-
-async function controlRequest(
-  path: '/v1/model/state' | '/v1/model/switch',
-  payload: Record<string, unknown>,
-): Promise<{ status: number; decoded: unknown }> {
-  const control = configured()
-  const body = Buffer.from(JSON.stringify(payload), 'utf8')
-  let response
+  if (!control.enabled || !control.socket.startsWith('/') || !control.socket.endsWith('.sock') || control.secret.length < 32) throw unavailable()
+  let value: unknown
   try {
-    response = await requestInternalService({
-      ...control,
-      path,
-      body,
+    const response = await requestInternalService({
+      socketPath: control.socket,
+      secret: control.secret,
+      path: '/v1/model/state',
+      body: Buffer.from('{}', 'utf8'),
       headers: { 'content-type': 'application/json' },
       timeoutMs: 10_000,
       maxResponseBytes: 32 * 1024,
     })
+    if (response.status !== 200) throw unavailable()
+    value = JSON.parse(response.body.toString('utf8'))
   } catch {
     throw unavailable()
   }
-  let decoded: unknown
-  try {
-    decoded = JSON.parse(response.body.toString('utf8'))
-  } catch {
-    throw unavailable()
-  }
-  return { status: response.status, decoded }
-}
-
-function parseConflict(value: unknown): ConstructorModelConflict | null {
-  if (!isRecord(value) || !hasExactKeys(value, ['error'])) return null
-  if (value.error === 'worker_active') return 'constructor_busy'
-  if (value.error === 'switch_in_progress') return 'model_switch_in_progress'
-  return null
-}
-
-interface ControllerState {
-  status: ConstructorModelState
-  activeProfile: ConstructorModelProfile | null
-  requestedProfile: ConstructorModelProfile | null
-  requestId: string | null
-  installedProfiles: ConstructorModelProfile[]
-}
-
-const CONTROLLER_STATE_KEYS = [
-  'mode',
-  'defaultProfile',
-  'status',
-  'activeProfile',
-  'requestedProfile',
-  'requestId',
-  'installedProfiles',
-] as const
-
-function parseControllerState(value: unknown): ControllerState | null {
-  if (!isRecord(value) || !hasExactKeys(value, CONTROLLER_STATE_KEYS)) return null
-  if (value.mode !== 'manual' || value.defaultProfile !== 'fast') return null
-  if (
-    value.status !== 'ready'
-    && value.status !== 'switching'
-    && value.status !== 'failed'
-    && value.status !== 'unavailable'
-  ) return null
-  const activeProfile = nullableProfile(value.activeProfile)
-  const requestedProfile = nullableProfile(value.requestedProfile)
-  const requestId = nullableRequestId(value.requestId)
-  if (activeProfile === undefined || requestedProfile === undefined || requestId === undefined) return null
-  if (!Array.isArray(value.installedProfiles) || value.installedProfiles.length > PROFILE_IDS.length) return null
-  const installedProfiles = value.installedProfiles.map(profileId)
-  if (
-    installedProfiles.some((profile) => profile === null)
-    || new Set(installedProfiles).size !== installedProfiles.length
-  ) return null
-  const installed = installedProfiles as ConstructorModelProfile[]
-  if ((requestedProfile === null) !== (requestId === null)) return null
-  if (activeProfile !== null && !installed.includes(activeProfile)) return null
-
-  if (value.status === 'ready') {
-    if (activeProfile === null || requestedProfile !== null || requestId !== null) return null
-  } else if (value.status === 'switching') {
-    if (requestedProfile === null || requestId === null || !installed.includes(requestedProfile)) return null
-  } else if (value.status === 'unavailable') {
-    if (activeProfile !== null || requestedProfile !== null || requestId !== null) return null
-  }
-  return { status: value.status, activeProfile, requestedProfile, requestId, installedProfiles: installed }
-}
-
-function projectControllerState(value: ControllerState, verifiedAt: string): ConstructorModelSnapshot {
-  const active = value.activeProfile === null ? null : PROFILE_CATALOG[value.activeProfile]
-  const snapshot: ConstructorModelSnapshot = {
+  if (!isRecord(value) || !exactKeys(value, CONTROLLER_KEYS) || value.mode !== 'manual' || value.defaultProfile !== 'fast' || value.requestedProfile !== null || value.requestId !== null) throw unavailable()
+  const model = configuredModel(value.model)
+  if ((value.model !== null && !model) || !Array.isArray(value.installedProfiles) || value.installedProfiles.length > 1 || value.installedProfiles.some((id) => id !== 'fast')) throw unavailable()
+  if (!model && value.installedProfiles.length > 0) throw unavailable()
+  if (value.activeProfile !== null && value.activeProfile !== 'fast') throw unavailable()
+  const ready = value.status === 'ready'
+  if (ready ? !model || value.activeProfile !== 'fast' || value.installedProfiles.length !== 1 : value.activeProfile !== null) throw unavailable()
+  const snapshot = parseConstructorModelSnapshot({
     mode: 'manual',
     defaultProfile: 'fast',
-    profiles: PROFILE_IDS.map((id) => ({
-      ...PROFILE_CATALOG[id],
-      installed: value.installedProfiles.includes(id),
-    })),
-    activeProfile: value.activeProfile,
-    activeModel: active?.model ?? null,
+    model,
+    profiles: model ? [{ id: 'fast', label: model.label, model: model.id, installed: value.installedProfiles.includes('fast') }] : [],
+    activeProfile: ready ? 'fast' : null,
+    activeModel: ready ? model?.id : null,
     state: value.status,
-    requestedProfile: value.requestedProfile,
-    requestId: value.requestId,
-    verifiedAt: active ? verifiedAt : null,
-    error: value.status === 'failed'
-      ? 'constructor_model_switch_failed'
-      : value.status === 'unavailable'
-        ? 'constructor_model_unavailable'
-        : null,
-  }
-  if (!parseConstructorModelSnapshot(snapshot)) throw unavailable()
+    requestedProfile: null,
+    requestId: null,
+    verifiedAt: ready ? now.toISOString() : null,
+    error: ready ? null : 'constructor_model_unavailable',
+  })
+  if (!snapshot) throw unavailable()
   return snapshot
-}
-
-export async function readConstructorModelSnapshot(now = new Date()): Promise<ConstructorModelSnapshot> {
-  const response = await controlRequest('/v1/model/state', {})
-  if (response.status !== 200) throw unavailable()
-  const state = parseControllerState(response.decoded)
-  if (!state) throw unavailable()
-  return projectControllerState(state, now.toISOString())
-}
-
-export async function requestConstructorModelSwitch(
-  profile: ConstructorModelProfile,
-  requestId: string,
-  before: ConstructorModelSnapshot,
-): Promise<{ statusCode: 200 | 202; snapshot: ConstructorModelSnapshot }> {
-  const measuredBefore = parseConstructorModelSnapshot(before)
-  if (
-    !PROFILE_IDS.includes(profile)
-    || !UUID.test(requestId)
-    || !measuredBefore
-    || measuredBefore.state !== 'ready'
-    || measuredBefore.activeProfile === null
-    || !measuredBefore.profiles.find((candidate) => candidate.id === profile)?.installed
-  ) throw unavailable()
-  const response = await controlRequest('/v1/model/switch', { requestId, profile })
-  if (response.status === 409) {
-    const conflict = parseConflict(response.decoded)
-    if (!conflict) throw unavailable()
-    throw new ConstructorModelControlError(409, conflict)
-  }
-  if (
-    response.status !== 202
-    || !isRecord(response.decoded)
-    || !hasExactKeys(response.decoded, ['accepted', 'requestId', 'profile'])
-    || response.decoded.accepted !== true
-    || response.decoded.requestId !== requestId.toLowerCase()
-    || response.decoded.profile !== profile
-  ) throw unavailable()
-  let reread: ConstructorModelSnapshot | null = null
-  try {
-    reread = await readConstructorModelSnapshot()
-  } catch {
-    // ACK-ul durabil nu devine fals 503 dacă măsurătoarea imediată pierde
-    // cursa cu operația asincronă sau controllerul este momentan ocupat.
-  }
-  const correlatedSwitch = reread?.state === 'switching'
-    && reread.requestId === requestId.toLowerCase()
-    && reread.requestedProfile === profile
-  // Controllerul poate termina încărcarea între ACK și recitire. În acel caz
-  // requestId-ul este deja curățat, iar singura dovadă acceptată este starea
-  // strict validată `ready` chiar pe profilul cerut.
-  const completedBeforeRead = reread?.state === 'ready'
-    && reread.activeProfile === profile
-  if (correlatedSwitch || completedBeforeRead) {
-    return { statusCode: completedBeforeRead ? 200 : 202, snapshot: reread! }
-  }
-
-  const acknowledged: ConstructorModelSnapshot = {
-    ...measuredBefore,
-    state: 'switching',
-    requestedProfile: profile,
-    requestId: requestId.toLowerCase(),
-    error: null,
-  }
-  if (!parseConstructorModelSnapshot(acknowledged)) throw unavailable()
-  return { statusCode: 202, snapshot: acknowledged }
 }
