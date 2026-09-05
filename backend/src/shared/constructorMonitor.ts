@@ -2,8 +2,8 @@
 export interface ConstructorHostSnapshot {
   schema: 1
   measuredAt: string
-  worker: { timer: 'active' | 'inactive' | 'failed'; service: 'active' | 'activating' | 'inactive' | 'failed'; mainPid: number }
-  intentionalPause: boolean
+  worker: { timer: 'active' | 'inactive' | 'failed'; service: 'active' | 'activating' | 'inactive' | 'failed'; mainPid: number } | null
+  intentionalPause: boolean | null
   deployGate: boolean
 }
 export interface ConstructorMonitorThresholds {

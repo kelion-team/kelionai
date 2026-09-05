@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { chmodSync, chownSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, chownSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -22,12 +22,21 @@ const paths = {
 let serial = 0
 function hash(path) { return createHash('sha256').update(readFileSync(path)).digest('hex') }
 function rewrite(path, content, mode) { chmodSync(path, 0o600); writeFileSync(path, content); chmodSync(path, mode) }
-async function fixture(run) {
+async function fixture(run, source = guardSource) {
   assert.ok(!existsSync('/opt/kelion-codex') && !existsSync('/opt/kelion-constructor'), 'Refuse pre-existing installed targets')
   try {
     for (const path of Object.values(paths)) mkdirSync(dirname(path), { recursive: true, mode: 0o755 })
     for (const path of [paths.worker, paths.publisher]) { writeFileSync(path, `// Synthetic supervisor: ${path}\n`); chmodSync(path, 0o555) }
-    for (const path of [paths.workerGuard, paths.publisherGuard]) { copyFileSync(guardSource, path); chmodSync(path, 0o444) }
+    // Stage bytes as container root, not checkout ownership/copy metadata.
+    // The source may be runner-owned and read-only; no extra capability is needed.
+    const guardBytes = readFileSync(source)
+    for (const path of [paths.workerGuard, paths.publisherGuard]) {
+      writeFileSync(path, guardBytes, { flag: 'wx', mode: 0o444 })
+      const installed = lstatSync(path)
+      assert.equal(installed.uid, 0); assert.equal(installed.gid, 0)
+      assert.equal(installed.mode & 0o7777, 0o444); assert.equal(installed.nlink, 1)
+      assert.equal(hash(path), createHash('sha256').update(guardBytes).digest('hex'))
+    }
     const expected = { protocol: 2, guardSha256: hash(paths.workerGuard), workerSha256: hash(paths.worker), publisherSha256: hash(paths.publisher) }
     const load = async (path = paths.workerGuard) => import(`${pathToFileURL(path).href}?fixture=${++serial}`)
     await run({ expected, load })
@@ -90,4 +99,20 @@ test('unsafe root ownership, writable mode, symlinks, hardlinks and parent modes
     assert.equal(before.measureDoctorCapability(), null)
     assert.equal((await load()).measureDoctorCapability(), null)
   })
+})
+
+test('fixture stages identical root-owned guard bytes from a read-only runner-owned checkout', async () => {
+  const directory = mkdtempSync('/tmp/doctor-runner-source-')
+  const source = join(directory, 'guard.mjs')
+  const bytes = readFileSync(guardSource)
+  writeFileSync(source, bytes, { flag: 'wx', mode: 0o444 })
+  chownSync(source, 1001, 1001)
+  try {
+    await fixture(async ({ expected, load }) => {
+      assert.deepEqual((await load()).measureDoctorCapability(), expected)
+    }, source)
+    assert.equal(lstatSync(source).uid, 1001)
+    assert.equal(lstatSync(source).mode & 0o7777, 0o444)
+    assert.deepEqual(readFileSync(source), bytes)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

@@ -331,6 +331,7 @@ finish_worker_pause_bootstrap() {
 
 bootstrap_worker_pause() {
   local pending=$RUNTIME_ROOT/constructor-unit-migration.pending temporary
+  [ "$(worker_pause_state)" = paused ] || return 1
   worker_pause_bootstrap_context || return 1
   [ ! -e "$pending" ] && [ ! -L "$pending" ] || return 1
   temporary=$(mktemp "$RUNTIME_ROOT/.worker-pause-bootstrap.XXXXXX") || return 1
@@ -359,7 +360,7 @@ worker_pause_no_foreign_transaction() {
 
 capture_worker_pause() {
   local state timer=kelion-codex-worker.timer marker=/etc/kelion/codex-worker.paused
-  local enabled active pending
+  local enabled active
   [ "${boot_recovery:-0}" = 0 ] && [ "${KELION_CUTOVER_LOCK_HELD:-0}" = 1 ] || return 1
   worker_pause_no_foreign_transaction || return 1
   if [ -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] || [ -L "$RUNTIME_ROOT/constructor-unit-migration.pending" ]; then
@@ -379,24 +380,10 @@ capture_worker_pause() {
   enabled=$(systemctl show "$timer" --property=UnitFileState --value) || return 1
   active=$(systemctl show "$timer" --property=ActiveState --value) || return 1
   [ "$enabled" = enabled ] && systemctl is-enabled --quiet "$timer" || return 1
-  if [ "$active" = active ]; then systemctl is-active --quiet "$timer"; return; fi
-  [ "$active" = inactive ] || return 1
-  if systemctl is-active --quiet "$timer"; then return 1; fi
-  [ -d /run/kelion ] && [ ! -L /run/kelion ] \
-    && [ "$(stat -Lc '%u:%g:%a' /run/kelion)" = '0:0:755' ] \
-    && [ -f "$READY_STAMP" ] && [ ! -L "$READY_STAMP" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h:%s' "$READY_STAMP")" = '0:0:444:1:9' ] \
-    && grep -qx 'schema=1' "$READY_STAMP" || return 1
-  [ -f "$CONFIG_ROOT/codex-worker.env" ] && [ ! -L "$CONFIG_ROOT/codex-worker.env" ] \
-    && [ "$(stat -Lc '%u:%g:%a:%h' "$CONFIG_ROOT/codex-worker.env")" = '0:0:640:1' ] \
-    && grep -qx 'CODEX_WORKER_EXEC_ENABLED=1' "$CONFIG_ROOT/codex-worker.env" || return 1
-  state=$(systemctl show kelion-codex-worker.service --property=ActiveState --value) || return 1
-  case "$state" in inactive|failed) ;; *) return 1 ;; esac
-  for state in "$timer" kelion-codex-worker.service; do
-    pending=$(systemctl list-jobs --no-legend --plain "$state") || return 1
-    [ -z "$pending" ] || return 1
-  done
-  bootstrap_worker_pause
+  # Inactive is not proof of an operator pause. Only a pre-existing canonical
+  # marker or this owner's authenticated bootstrap journal carries that intent.
+  # A stopped/unhealthy unpaused worker must fail closed without publishing it.
+  [ "$active" = active ] && systemctl is-active --quiet "$timer"
 }
 
 ROOT=/root/kelion

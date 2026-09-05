@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite'
 import { readFileSync } from 'node:fs'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DoctorEvidence } from './shared/doctor.js'
 
 let db: PGlite
@@ -30,7 +30,7 @@ vi.mock('./services/doctorRuntimeCapability.js', () => ({ doctorRuntimeScopeVeri
 const store = await import('./services/doctorStore.js')
 const { createBuildJob } = await import('./db.js')
 const { classifyDoctorResponse, doctorRepairOrder, doctorVerifiedSymptom, doctorCode, validDoctorGrant } = await import('./services/doctorPolicy.js')
-const { createDoctor } = await import('./services/doctor.js')
+const { createDoctor, relayKelionSymptom } = await import('./services/doctor.js')
 const email = 'owner@example.test'
 const session = 'a'.repeat(64)
 const oldSha = '1'.repeat(40)
@@ -54,6 +54,7 @@ beforeAll(async () => {
   await db.exec(readFileSync(new URL('../migrations/20260914_doctor_live_repair.sql',import.meta.url),'utf8'))
 },30_000)
 afterAll(async () => { await db.close() })
+afterEach(() => { vi.unstubAllEnvs() })
 beforeEach(async () => {
   active = true
   runtime.verified = true
@@ -233,6 +234,109 @@ describe('Doctor durable grant and intake', () => {
       expect((await db.query('SELECT id FROM build_jobs')).rows).toHaveLength(0)
       expect((await db.query('SELECT jobs_created FROM doctor_grants')).rows).toEqual([{ jobs_created:0 }])
     } finally { await db.exec('ALTER TABLE doctor_incidents DROP CONSTRAINT fixture_no_queue') }
+  })
+})
+
+describe('Doctor unverified symptoms are not mechanism blockers or verified recovery', () => {
+  async function ready() {
+    await store.grantDoctor(email,session,request)
+    const lease = (await store.acquireDoctorLease())!
+    await store.releaseDoctorLease(lease,false,oldSha)
+  }
+
+  it.each([
+    ['chat-mut','chat_output_missing'],['audio-error','audio_session_failure'],
+    ['fara-vedere','camera_unavailable'],['memory-error','memory_unavailable'],
+  ] as const)('keeps %s visible and unverified without blocking the ready mechanism', async (kind,code) => {
+    await ready()
+    vi.stubEnv('GIT_COMMIT_SHA',oldSha)
+    await relayKelionSymptom(kind)
+    const snapshot = await store.doctorSnapshot()
+    expect(snapshot).toMatchObject({ state:'ready',error:null,incidents:[{
+      code,status:'observed',jobId:null,closure:null,
+      evidence:{ result:'unverified',reason:'reported_requires_explicit_live_probe',httpStatus:null,releaseSha:oldSha },
+    }] })
+    expect(snapshot.incidents[0].summary).not.toBe('')
+    const id = snapshot.incidents[0].id
+    const unverified = { ...snapshot.incidents[0].evidence,reason:'explicit_live_probe_required' }
+    expect(await store.recordDoctorObservation(unverified)).toBe(id)
+    expect((await store.doctorSnapshot()).incidents[0]).toMatchObject({ id,status:'observed',evidence:unverified,closure:null })
+    const lease = (await store.acquireDoctorLease())!
+    expect(await store.queueDoctorRepair(id,'Never authorize an unmeasured report',lease)).toBeNull()
+    expect(doctorRepairOrder(unverified)).toBeNull()
+    expect((await db.query('SELECT status,repair_attempted FROM doctor_incidents')).rows)
+      .toEqual([{ status:'observed',repair_attempted:false }])
+    expect((await db.query('SELECT id FROM build_jobs')).rows).toEqual([])
+    expect((await db.query('SELECT jobs_created FROM doctor_grants')).rows).toEqual([{ jobs_created:0 }])
+  })
+
+  it('projects an old blocked/unverified report without changing its row or inventing closure', async () => {
+    await ready()
+    const ev = { ...evidence('memory_unavailable'),result:'unverified' as const,httpStatus:null,reason:'reported_requires_explicit_live_probe' }
+    const id = (await store.recordDoctorObservation(ev))!
+    await db.query("UPDATE doctor_incidents SET status='blocked' WHERE id=$1",[id])
+    const before = (await db.query('SELECT * FROM doctor_incidents WHERE id=$1',[id])).rows
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'ready',error:null,incidents:[{
+      id,status:'observed',evidence:ev,closure:null,jobId:null,
+    }] })
+    expect((await db.query('SELECT * FROM doctor_incidents WHERE id=$1',[id])).rows).toEqual(before)
+    await store.recordDoctorObservation({ ...ev,reason:'explicit_live_probe_required' })
+    expect((await db.query('SELECT id,status FROM doctor_incidents')).rows).toEqual([{ id,status:'observed' }])
+  })
+
+  it('a periodic public check leaves non-public reports visible and unverified', async () => {
+    await ready()
+    vi.stubEnv('GIT_COMMIT_SHA',oldSha)
+    await relayKelionSymptom('chat-mut')
+    const original = (await store.doctorSnapshot()).incidents[0]
+    const measure = vi.fn(async (code:DoctorEvidence['code']) => ({ ...evidence(code),result:'healthy' as const,reason:'contract_verified' }))
+    const doctor = createDoctor({ active:() => true,localRelease:() => oldSha,liveRelease:async () => oldSha,
+      measure,store,chain:async () => ({ state:'ready',reason:'measured',lastHeartbeat:new Date().toISOString(),legs:{
+        worker:{ state:'ready',lastHeartbeat:null,detail:null },publisher:{ state:'ready',lastHeartbeat:null,detail:null },
+        release:{ state:'ready',lastHeartbeat:null,detail:null },
+      } }) })
+    await doctor.tick()
+    expect(measure.mock.calls.map(([code]) => code)).toEqual(['public_health','agent_registry','release_version'])
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'ready',incidents:[original] })
+    expect(original).toMatchObject({ status:'observed',evidence:{ result:'unverified' },closure:null })
+    expect((await db.query('SELECT id FROM build_jobs')).rows).toEqual([])
+  })
+
+  it.each(['public_health','constructor_worker_offline'] as const)('does not replace a measured %s blocker with an unverified manual probe', async (code) => {
+    await ready()
+    const measured = { ...evidence(code),result:'blocked' as const,httpStatus:503,reason:'http_dependency_unavailable' }
+    const id = (await store.recordDoctorObservation(measured))!
+    const before = (await db.query('SELECT * FROM doctor_incidents WHERE id=$1',[id])).rows
+    await store.recordDoctorObservation({ ...measured,result:'unverified',httpStatus:null,reason:'explicit_live_probe_required' })
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'blocked',incidents:[{ id,status:'blocked',evidence:measured,closure:null }] })
+    expect((await db.query('SELECT * FROM doctor_incidents WHERE id=$1',[id])).rows).toEqual(before)
+    await store.recordDoctorObservation({ ...measured,result:'healthy',httpStatus:200,reason:'contract_verified' })
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'ready',incidents:[{ id,status:'observed',evidence:{ result:'healthy' },closure:null }] })
+  })
+
+  it('does not relabel a failed repair or a deleted job as an unattempted report', async () => {
+    await ready()
+    const { id,jobId,lease } = await queued()
+    await db.query("UPDATE build_jobs SET status='failed',constructor_stage='failed' WHERE id=$1",[jobId])
+    await store.updateDoctorJob((await store.doctorPendingJobs())[0],null,null,lease)
+    const report = { ...evidence(),result:'unverified' as const,httpStatus:null,reason:'explicit_live_probe_required' }
+    await store.recordDoctorObservation(report)
+    await store.releaseDoctorLease(lease,false,oldSha)
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'blocked',incidents:[{ id,status:'blocked',jobId,evidence:report,closure:null }] })
+    await db.query('DELETE FROM build_jobs WHERE id=$1',[jobId])
+    await store.recordDoctorObservation(report)
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'blocked',incidents:[{ id,status:'blocked',jobId:null,closure:null }] })
+    expect((await db.query('SELECT repair_attempted FROM doctor_incidents')).rows).toEqual([{ repair_attempted:true }])
+  })
+
+  it('keeps real readiness gates blocked in the presence of an unverified report', async () => {
+    await ready()
+    await store.recordDoctorObservation({ ...evidence('camera_unavailable'),result:'unverified',httpStatus:null,reason:'explicit_live_probe_required' })
+    runtime.verified = false
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'blocked',error:'doctor_runtime_scope_unverified' })
+    runtime.verified = true
+    await db.exec("UPDATE doctor_lease SET last_error='doctor_check_incomplete'")
+    expect(await store.doctorSnapshot()).toMatchObject({ state:'blocked',error:'doctor_check_incomplete' })
   })
 })
 

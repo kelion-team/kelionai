@@ -408,6 +408,7 @@ validate_live_activation_vector() {
     if [ "$present" = 1 ]; then
       [ "$unit_file_state" = enabled ] && systemctl is-enabled --quiet "$timer" || return 1
       if [ "$timer" = kelion-codex-worker.timer ] && [ "$active_state" = inactive ]; then
+        [ "$pause" = paused ] || return 1
         if systemctl is-active --quiet "$timer"; then return 1; fi
       else
         if [ "$timer" = kelion-codex-worker.timer ] && [ "$pause" = paused ]; then return 1; fi
@@ -510,11 +511,22 @@ load_upgrade_journal() {
 }
 
 create_upgrade_snapshot() {
-  local index marker timer present enabled active digest state_file
+  local index marker timer present enabled active digest state_file pause
   validate_live_activation_vector || return 1
-  KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+  pause=$(KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
     KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
-    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --capture-worker-pause || return 1
+    bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --worker-pause-state) || return 1
+  # Only an explicit canonical pause may be preserved or bootstrapped. Never
+  # infer operator intent if an active timer stops between these observations.
+  case "$pause" in
+    paused)
+      KELION_CUTOVER_LOCK_HELD=1 KELION_CONSTRUCTOR_UPGRADE_OWNER=1 \
+        KELION_CONSTRUCTOR_UPGRADE_SOURCE_COMMIT="$constructor_upgrade_source_commit" \
+        bash "$repo_root/deploy/lib/runtime-config-cutover.sh" --capture-worker-pause || return 1 ;;
+    unpaused) ;;
+    *) return 1 ;;
+  esac
+  validate_live_activation_vector || return 1
   snapshot_root=$(mktemp -d "$RUNTIME_ROOT/constructor-upgrade.XXXXXX") || return 1
   chown root:root "$snapshot_root"
   chmod 0700 "$snapshot_root"

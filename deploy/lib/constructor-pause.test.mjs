@@ -18,17 +18,23 @@ const upgrade = read('../upgrade-constructor.sh')
 const deploy = read('../deploy.sh')
 const installer = read('../instaleaza-constructor.sh')
 
-function run(operation, paused = true, boot = false) {
-  const selected = operation === 'restore' ? extract(cutover, 'restore_constructor_timers')
+function run(operation, paused = true, boot = false, scenario = '') {
+  let selected = operation === 'restore' ? extract(cutover, 'restore_constructor_timers')
     : operation === 'upgrade' ? extract(upgrade, 'validate_live_activation_vector')
       : operation === 'installer' ? extract(installer, 'constructor_reactivation_postcondition')
         : extract(deploy, 'restore_constructor_after_release')
+  const isSnapshot = operation === 'upgrade' && scenario.startsWith('snapshot-')
+  if (isSnapshot) selected = selected.replace('validate_live_activation_vector() {', 'validate_live_activation_vector_impl() {')
+    + '\n' + extract(upgrade, 'create_upgrade_snapshot') + '\n' + "validation_count=0\nvalidate_live_activation_vector() {\n  validation_count=$((validation_count + 1))\n  validate_live_activation_vector_impl || return 1\n  if [ \"$scenario\" = snapshot-race ] && [ \"$validation_count\" = 1 ]; then fixture_active[kelion-codex-worker.timer]=0; fi\n}\nmktemp() { printf 'snapshot-allocation-attempt\\n' >&2; return 1; }"
   const result = spawnSync('bash', ['--noprofile', '--norc', '-c', `
 set -u
 PATH=/no-executables
 operation=$1
 paused=$2
+scenario=$3
+capture_count=0
 ROOT=/synthetic
+RUNTIME_ROOT=/synthetic/runtime
 repo_root=/synthetic/repo
 CONFIG_ROOT=/synthetic/config
 READY_STAMP=/synthetic/ready
@@ -38,13 +44,13 @@ constructor_services=(kelion-codex-worker.service kelion-constructor-publisher.s
 constructor_markers=(/etc/kelion/codex-worker.enabled /etc/kelion/constructor-publisher.enabled /etc/kelion/constructor-release.enabled)
 constructor_release_timers=("\${constructor_timers[@]}")
 constructor_release_markers=("\${constructor_markers[@]}")
-declare -A enabled=() active=()
-for timer in "\${constructor_timers[@]}"; do enabled[$timer]=1; active[$timer]=1; done
+declare -A fixture_enabled=() fixture_active=()
+for timer in "\${constructor_timers[@]}"; do fixture_enabled[$timer]=1; fixture_active[$timer]=1; done
 constructor_upgrade_source_commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-if [ "$paused" = 1 ]; then active[kelion-codex-worker.timer]=0; fi
-for unit in "\${constructor_services[@]}"; do enabled[$unit]=0; active[$unit]=0; done
+if [ "$paused" = 1 ] || [ "$scenario" = unrequested-stop ]; then fixture_active[kelion-codex-worker.timer]=0; fi
+for unit in "\${constructor_services[@]}"; do fixture_enabled[$unit]=0; fixture_active[$unit]=0; done
 if [ "$operation" = restore ]; then
-  for timer in "\${constructor_timers[@]}"; do enabled[$timer]=0; active[$timer]=0; done
+  for timer in "\${constructor_timers[@]}"; do fixture_enabled[$timer]=0; fixture_active[$timer]=0; done
 fi
 units_quiesced=1
 constructor_release_quiesced=1
@@ -57,17 +63,17 @@ systemctl() {
   case "$1" in
     daemon-reload|cat) return 0 ;;
     list-jobs) return 0 ;;
-    enable) enabled[$unit]=1 ;;
-    disable) enabled[$unit]=0; if [ "\${2:-}" = --now ]; then active[$unit]=0; fi ;;
-    start) starts="$starts $unit"; active[$unit]=1 ;;
-    stop) active[$unit]=0 ;;
-    is-enabled) [ "\${enabled[$unit]:-0}" = 1 ] ;;
-    is-active) if [ "$unit" = kelion-constructor-model-control.service ]; then return 0; fi; [ "\${active[$unit]:-0}" = 1 ] ;;
+    enable) fixture_enabled[$unit]=1 ;;
+    disable) fixture_enabled[$unit]=0; if [ "\${2:-}" = --now ]; then fixture_active[$unit]=0; fi ;;
+    start) starts="$starts $unit"; fixture_active[$unit]=1 ;;
+    stop) fixture_active[$unit]=0 ;;
+    is-enabled) [ "\${fixture_enabled[$unit]:-0}" = 1 ] ;;
+    is-active) if [ "$unit" = kelion-constructor-model-control.service ]; then return 0; fi; [ "\${fixture_active[$unit]:-0}" = 1 ] ;;
     show)
       unit=$2; property=\${3#--property=}
       case "$property" in
-        UnitFileState) if [[ "$unit" = *.service ]]; then printf 'static\\n'; elif [ "\${enabled[$unit]}" = 1 ]; then printf 'enabled\\n'; else printf 'disabled\\n'; fi ;;
-        ActiveState) if [ "\${active[$unit]}" = 1 ]; then printf 'active\\n'; else printf 'inactive\\n'; fi ;;
+        UnitFileState) if [[ "$unit" = *.service ]]; then printf 'static\\n'; elif [ "\${fixture_enabled[$unit]}" = 1 ]; then printf 'enabled\\n'; else printf 'disabled\\n'; fi ;;
+        ActiveState) if [ "\${fixture_active[$unit]}" = 1 ]; then printf 'active\\n'; else printf 'inactive\\n'; fi ;;
         *) return 95 ;;
       esac ;;
     *) return 96 ;;
@@ -85,7 +91,16 @@ stat() { if [ "\${@: -1}" = /run/kelion-constructor-model-control/control.sock ]
 validate_marker_root() { return 0; }
 validate_ready_stamp() { return 0; }
 worker_pause_state() { if [ "$paused" = 1 ]; then printf 'paused\\n'; else printf 'unpaused\\n'; fi; }
-bash() { worker_pause_state; }
+bash() {
+  case "\${@: -1}" in
+    --worker-pause-state) worker_pause_state ;;
+    --capture-worker-pause)
+      capture_count=$((capture_count + 1))
+      if [ "$scenario" = snapshot-marker-lost ]; then paused=0
+      else paused=1; fixture_active[kelion-codex-worker.timer]=0; fi ;;
+    *) return 98 ;;
+  esac
+}
 validate_service_quiescence() { return 0; }
 validate_constructor_unit_file_state() { return 0; }
 start_constructor_unit() { systemctl start "$1"; }
@@ -97,11 +112,12 @@ quiesce_constructor_after_failed_reactivation_proof() { return 0; }
 function /synthetic/bin/runtime-config-cutover.sh { if [ "$1" = --worker-pause-state ]; then worker_pause_state; fi; return 0; }
 ${selected}
 exec 8>&2
-${operation === 'restore' ? 'restore_constructor_timers' : operation === 'upgrade' ? 'validate_live_activation_vector' : operation === 'installer' ? 'constructor_reactivation_postcondition' : 'restore_constructor_after_release'}
+${isSnapshot ? 'create_upgrade_snapshot' : operation === 'restore' ? 'restore_constructor_timers' : operation === 'upgrade' ? 'validate_live_activation_vector' : operation === 'installer' ? 'constructor_reactivation_postcondition' : 'restore_constructor_after_release'}
 status=$?
-printf 'status=%s worker=%s:%s publisher=%s:%s release=%s:%s starts=%s\\n' "$status" "\${enabled[kelion-codex-worker.timer]}" "\${active[kelion-codex-worker.timer]}" "\${enabled[kelion-constructor-publisher.timer]}" "\${active[kelion-constructor-publisher.timer]}" "\${enabled[kelion-constructor-release.timer]}" "\${active[kelion-constructor-release.timer]}" "$starts"
+printf 'captures=%s\\n' "$capture_count"
+printf 'status=%s worker=%s:%s publisher=%s:%s release=%s:%s starts=%s\\n' "$status" "\${fixture_enabled[kelion-codex-worker.timer]}" "\${fixture_active[kelion-codex-worker.timer]}" "\${fixture_enabled[kelion-constructor-publisher.timer]}" "\${fixture_active[kelion-constructor-publisher.timer]}" "\${fixture_enabled[kelion-constructor-release.timer]}" "\${fixture_active[kelion-constructor-release.timer]}" "$starts"
 exit "$status"
-`, 'pause-fixture', operation, paused ? '1' : '0'], { encoding: 'utf8', timeout: 5_000 })
+`, 'pause-fixture', operation, paused ? '1' : '0', scenario], { encoding: 'utf8', timeout: 5_000 })
   return result
 }
 
@@ -125,6 +141,29 @@ test('boot recovery restores active publisher/release but never starts a durably
   assert.match(result.stdout, /worker=1:0 publisher=1:1 release=1:1/)
   assert.doesNotMatch(result.stdout, /starts=.*kelion-codex-worker\.timer/)
 })
+
+
+test('upgrade rejects an enabled but unpaused stopped worker before capture', () => {
+  const result = run('upgrade', false, false, 'unrequested-stop')
+  assert.equal(result.status, 1, result.stderr + result.stdout)
+  assert.match(result.stdout, /captures=0/)
+})
+
+for (const [scenario, paused, allocation, captures] of [
+  ['snapshot-active', false, true, 0],
+  ['snapshot-paused', true, true, 1],
+  ['snapshot-race', false, false, 0],
+  ['snapshot-marker-lost', true, false, 1],
+]) {
+  test('upgrade snapshot intent and revalidation: ' + scenario, () => {
+    // Only the real pre-allocation control flow is executed. mktemp is a
+    // fail-closed sentinel; no host path, journal or real helper is reachable.
+    const result = run('upgrade', paused, false, scenario)
+    assert.equal(result.status, 1, result.stderr + result.stdout)
+    assert.match(result.stdout, new RegExp('captures=' + captures))
+    assert.equal(result.stderr, allocation ? 'snapshot-allocation-attempt\n' : '', result.stderr + result.stdout)
+  })
+}
 
 function filesystemCase(mode) {
   assert.ok(process.env.CI === 'true' || existsSync('/.dockerenv') || existsSync('/run/.containerenv'),
@@ -171,12 +210,19 @@ printf 'schema=1\\n' > "$FIXTURE/etc/codex-worker.enabled"
 printf 'CODEX_WORKER_EXEC_ENABLED=1\\n' > "$CONFIG_ROOT/codex-worker.env"
 chmod 0444 "$READY_STAMP" "$FIXTURE/etc/codex-worker.enabled"
 chmod 0640 "$CONFIG_ROOT/codex-worker.env"
+# Explicit operator intent is a fixture input, never inferred from inactive.
+case "$mode" in
+  capture|candidate-foreign-owner|sync-before|sync-after|snapshot|symlink|hardlink|writable|foreign-owner|malformed|unsafe-parent)
+    printf 'schema=1\\n' > "$marker"
+    chmod 0444 "$marker" ;;
+esac
 boot_recovery=0
 worker_active=inactive
 systemctl() {
   local unit=\${@: -1}
   case "$1" in
     show)
+      [ "$mode" != query-error ] || return 1
       case "$3" in
         --property=UnitFileState) printf 'enabled\\n' ;;
         --property=ActiveState) if [ "$2" = kelion-codex-worker.timer ]; then printf '%s\\n' "$worker_active"; else printf 'inactive\\n'; fi ;;
@@ -198,11 +244,17 @@ case "$mode" in
     before=$(stat -c '%i' "$marker")
     capture_worker_pause
     [ "$before" = "$(stat -c '%i' "$marker")" ] ;;
+  unrequested-stop)
+    helper_before=$(sha256sum "$FIXTURE/bin/runtime-config-cutover.sh" | awk '{print $1}')
+    if capture_worker_pause; then exit 91; fi
+    [ ! -e "$marker" ] && [ ! -L "$marker" ]
+    [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ]
+    [ "$helper_before" = "$(sha256sum "$FIXTURE/bin/runtime-config-cutover.sh" | awk '{print $1}')" ] ;;
   active) worker_active=active; capture_worker_pause; [ ! -e "$marker" ] ;;
   candidate-foreign-owner)
     chown 1000:1000 "$worker_pause_candidate_source"
     if capture_worker_pause; then exit 91; fi
-    [ ! -e "$marker" ]
+    [ "$(worker_pause_state)" = paused ]
     [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] ;;
   boot) boot_recovery=1; if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ] ;;
   journals)
@@ -210,16 +262,17 @@ case "$mode" in
       touch "$RUNTIME_ROOT/$name"; if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ]; rm "$RUNTIME_ROOT/$name"
     done ;;
   no-ready) rm "$READY_STAMP"; if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ] ;;
-  query-error) if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ] ;;
+  query-error) worker_active=active; if capture_worker_pause; then exit 91; fi; [ ! -e "$marker" ] ;;
   sync-before)
     sync() { return 1; }
-    if capture_worker_pause; then exit 91; fi
-    [ ! -e "$marker" ] ;;
+    if bootstrap_worker_pause; then exit 91; fi
+    [ "$(worker_pause_state)" = paused ]
+    [ ! -e "$RUNTIME_ROOT/constructor-unit-migration.pending" ] ;;
   sync-after)
     sync_count=0
     sync() { sync_count=$((sync_count + 1)); [ "$sync_count" -lt 2 ]; }
-    if capture_worker_pause; then exit 91; fi
-    [ ! -e "$marker" ]
+    if bootstrap_worker_pause; then exit 91; fi
+    [ "$(worker_pause_state)" = paused ]
     [ -f "$RUNTIME_ROOT/constructor-unit-migration.pending" ]
     unset -f sync
     capture_worker_pause >/dev/null
@@ -282,7 +335,7 @@ printf 'verified:%s\\n' "$mode"
   }
 }
 
-for (const mode of ['capture', 'active', 'candidate-foreign-owner', 'boot', 'journals', 'no-ready', 'query-error', 'sync-before', 'sync-after', 'snapshot', 'legacy-unit', 'symlink', 'hardlink', 'writable', 'foreign-owner', 'malformed', 'unsafe-parent']) {
+for (const mode of ['capture', 'unrequested-stop', 'active', 'candidate-foreign-owner', 'boot', 'journals', 'no-ready', 'query-error', 'sync-before', 'sync-after', 'snapshot', 'legacy-unit', 'symlink', 'hardlink', 'writable', 'foreign-owner', 'malformed', 'unsafe-parent']) {
   rootFilesystemTest(`durable worker pause with real filesystem: ${mode}`, () => {
     const result = filesystemCase(mode)
     assert.equal(result.status, 0, `${mode}: ${result.error ?? ''}${result.stderr}${result.stdout}`)

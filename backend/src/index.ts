@@ -76,6 +76,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 capturaConsole()
 const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
 let schemaReady = false
+let constructorMonitorTimer: NodeJS.Timeout | null = null
+app.addHook('onClose', async () => {
+  if (constructorMonitorTimer) clearInterval(constructorMonitorTimer)
+  constructorMonitorTimer = null
+})
 
 let fatalShutdownStarted = false
 function shutdownAfterFatal(kind: 'unhandledRejection' | 'uncaughtException', value: unknown): void {
@@ -448,9 +453,8 @@ try {
       void tickConstructorMonitor().catch(() => { app.log.warn('constructor monitor check unavailable') })
     }
     monitorTick()
-    const constructorMonitorTimer = setInterval(monitorTick, CONSTRUCTOR_MONITOR_LIMITS.tickMs)
+    constructorMonitorTimer = setInterval(monitorTick, CONSTRUCTOR_MONITOR_LIMITS.tickMs)
     constructorMonitorTimer.unref()
-    app.addHook('onClose', async () => { clearInterval(constructorMonitorTimer) })
     const constructorWatchdog = async (): Promise<void> => {
       if (!releaseSideEffectsEnabled()) return
       const result = await deblocheazaJoburileClaimate()

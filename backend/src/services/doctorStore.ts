@@ -54,7 +54,13 @@ function grantDto(row: GrantRow): DoctorGrant {
 }
 
 function incidentDto(row: IncidentRow): DoctorIncident {
-  return { id: row.id, code: row.code, status: row.repair_attempted && row.job_id === null ? 'blocked' : row.status, summary: row.summary,
+  // Older releases stored unmeasured reports as blockers. Project those
+  // unattempted, unlinked rows truthfully without deleting the report or
+  // inventing a healthy probe/closure. Repair failures remain blockers.
+  const status = row.repair_attempted && row.job_id === null ? 'blocked'
+    : !row.repair_attempted && row.job_id === null && row.status === 'blocked' && row.evidence.result === 'unverified'
+      ? 'observed' : row.status
+  return { id: row.id, code: row.code, status, summary: row.summary,
     detectedAt: row.detected_at.toISOString(), checkedAt: row.checked_at.toISOString(),
     jobId: row.job_id === null ? null : Number(row.job_id), evidence: row.evidence, closure: row.closure }
 }
@@ -152,8 +158,11 @@ export async function recordDoctorObservation(evidence: DoctorEvidence): Promise
       AND (status <> 'resolved' OR fingerprint=$2) ORDER BY (status='resolved'),detected_at LIMIT 1 FOR UPDATE`, [evidence.code, fingerprint])
     const found = existing.rows[0]
     if (found && found.status !== 'resolved') {
+      // A missing manual probe cannot erase a measured dependency failure,
+      // nor refresh its timestamp as if recovery had been measured.
+      if (evidence.result === 'unverified' && found.evidence.result === 'blocked') return found.id
       const status = found.repair_attempted && found.job_id === null ? 'blocked' : found.job_id !== null ? found.status
-        : evidence.result === 'defect' || evidence.result === 'healthy' ? 'observed' : 'blocked'
+        : evidence.result === 'blocked' ? 'blocked' : 'observed'
       await sql.query('UPDATE doctor_incidents SET evidence=$2::jsonb,status=$3,closure=NULL,checked_at=now() WHERE id=$1::uuid', [found.id,JSON.stringify(evidence),status])
       return found.id
     }
@@ -166,7 +175,7 @@ export async function recordDoctorObservation(evidence: DoctorEvidence): Promise
     const id = randomUUID()
     await sql.query(`INSERT INTO doctor_incidents(id,code,fingerprint,release_sha,status,summary,evidence,repair_attempted)
       VALUES ($1::uuid,$2,$3,$4,$5,$6,$7::jsonb,$8)`, [id,evidence.code,fingerprint,evidence.releaseSha,
-      !recurrence && evidence.result === 'defect' ? 'observed' : 'blocked',DOCTOR_PROBES[evidence.code].summary,JSON.stringify(evidence),recurrence])
+      recurrence || evidence.result === 'blocked' ? 'blocked' : 'observed',DOCTOR_PROBES[evidence.code].summary,JSON.stringify(evidence),recurrence])
     return id
   })
 }

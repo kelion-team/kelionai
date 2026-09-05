@@ -3676,13 +3676,13 @@ export async function getUserActivity(): Promise<{
                 MAX(v.last_seen_at)::text AS last_seen,
                 EXISTS(SELECT 1 FROM blocked_users b WHERE lower(b.email) = MIN(lower(v.user_email))) AS blocked,
                 COALESCE((SELECT w.balance_minor FROM wallets w WHERE lower(w.user_email) = MIN(lower(v.user_email)) LIMIT 1), 0)::float / $2::float AS balance,
-                COALESCE((SELECT SUM(c.cost_usd_micros) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email)) AND ($4::timestamptz IS NULL OR c.created_at >= $4)), 0)::float / 1000000.0 AS "consumedUsd",
+                COALESCE((SELECT SUM(c.cost_usd_micros) FROM cost_events c WHERE lower(c.user_email) = MIN(lower(v.user_email)) AND EXISTS(SELECT 1 FROM admin_stats_baselines b WHERE b.id=$3 AND (b.stats_since IS NULL OR c.stats_recorded_at >= b.stats_since))), 0)::float / 1000000.0 AS "consumedUsd",
                 (MIN(lower(v.user_email)) = lower($1)) AS scutit,
                 EXISTS(SELECT 1 FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email))) AS voce,
                 COALESCE((SELECT vp.audio_clip <> '' FROM voiceprints vp WHERE lower(vp.user_email) = MIN(lower(v.user_email)) LIMIT 1), false) AS "mostraAudio"
          FROM admin_presence_since($3::bigint) v
          LEFT JOIN (SELECT lower(user_email) AS email_jos, COUNT(*)::int AS n
-                    FROM messages WHERE ($4::timestamptz IS NULL OR created_at >= $4) GROUP BY lower(user_email)) m
+                    FROM messages WHERE EXISTS(SELECT 1 FROM admin_stats_baselines b WHERE b.id=$3 AND (b.stats_since IS NULL OR stats_recorded_at >= b.stats_since)) GROUP BY lower(user_email)) m
            ON m.email_jos = lower(v.user_email)
          GROUP BY lower(v.user_email)
          ORDER BY MAX(v.last_seen_at) DESC
@@ -3690,7 +3690,7 @@ export async function getUserActivity(): Promise<{
         // P10: ownerul e scutit de taxare peste tot („e casa lui", tarife.ts) —
         // soldul lui negativ e datorie ISTORICĂ dinaintea scutirilor, fără
         // efect; rândul lui se marchează ca panoul să spună asta, nu să sperie.
-        [config.adminEmail, 10 ** config.billing.minorUnit,baseline.id,baseline.statsSince],
+        [config.adminEmail, 10 ** config.billing.minorUnit,baseline.id],
       )
     ).rows
     return { users,statsSince:baseline.statsSince }
@@ -4093,10 +4093,10 @@ export async function citesteRezumatCost(): Promise<Citire<CostSummary>> {
       `SELECT
          COALESCE(SUM(cost_usd_micros), 0)::float / 1000000.0 AS total,
          COALESCE(SUM(cost_usd_micros) FILTER (WHERE created_at >= date_trunc('day', now())), 0)::float / 1000000.0 AS today
-       FROM cost_events WHERE ($1::timestamptz IS NULL OR created_at >= $1)`,[baseline.statsSince],
+       FROM cost_events WHERE EXISTS(SELECT 1 FROM admin_stats_baselines b WHERE b.id=$1 AND (b.stats_since IS NULL OR stats_recorded_at >= b.stats_since))`,[baseline.id],
     )
     const kinds = await pool.query<{ kind: string; sum: string }>(
-      'SELECT kind, SUM(cost_usd_micros)::float / 1000000.0 AS sum FROM cost_events WHERE ($1::timestamptz IS NULL OR created_at >= $1) GROUP BY kind',[baseline.statsSince],
+      'SELECT kind, SUM(cost_usd_micros)::float / 1000000.0 AS sum FROM cost_events WHERE EXISTS(SELECT 1 FROM admin_stats_baselines b WHERE b.id=$1 AND (b.stats_since IS NULL OR stats_recorded_at >= b.stats_since)) GROUP BY kind',[baseline.id],
     )
     const byKind: Record<string, number> = {}
     const felul: Record<string, 'masurat' | 'estimat'> = {}
@@ -4409,8 +4409,8 @@ export async function citesteUtilizatori(): Promise<Citire<{ users:UserSummary[]
   return citireDb('citirea utilizatorilor', async () => {
     const baseline = await readAdminStatsBaseline()
     const r = await getPool().query<UserSummary>(
-      `SELECT user_email AS email, COUNT(*) FILTER (WHERE $1::timestamptz IS NULL OR created_at >= $1)::int AS count, MAX(created_at) AS last
-       FROM messages GROUP BY user_email ORDER BY last DESC`,[baseline.statsSince],
+      `SELECT user_email AS email, COUNT(*) FILTER (WHERE EXISTS(SELECT 1 FROM admin_stats_baselines b WHERE b.id=$1 AND (b.stats_since IS NULL OR stats_recorded_at >= b.stats_since)))::int AS count, MAX(created_at) AS last
+       FROM messages GROUP BY user_email ORDER BY last DESC`,[baseline.id],
     )
     return { users:r.rows,statsSince:baseline.statsSince }
   })

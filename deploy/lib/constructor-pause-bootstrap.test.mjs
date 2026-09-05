@@ -67,6 +67,12 @@ printf 'schema=1\n' > "$FIXTURE/etc/codex-worker.enabled"
 printf 'CODEX_WORKER_EXEC_ENABLED=1\n' > "$CONFIG_ROOT/codex-worker.env"
 chmod 0444 "$READY_STAMP" "$FIXTURE/etc/codex-worker.enabled"
 chmod 0640 "$CONFIG_ROOT/codex-worker.env"
+if [[ "$MODE" != no-marker* ]]; then
+  printf 'schema=1\n' > "$MARKER"
+  chown root:root "$MARKER"
+  chmod 0444 "$MARKER"
+  MARKER_IDENTITY=$(stat -Lc '%d:%i:%u:%g:%a:%h:%s' "$MARKER")
+fi
 worker_pause_candidate_source=$CANDIDATE
 boot_recovery=0
 KELION_CUTOVER_LOCK_HELD=1
@@ -87,11 +93,13 @@ systemctl() {
     show)
       case "$3" in
         --property=UnitFileState) printf 'enabled\n' ;;
-        --property=ActiveState) printf 'inactive\n' ;;
+        --property=ActiveState)
+          if [ "$MODE" = no-marker-active ]; then printf 'active\n'
+          else printf 'inactive\n'; fi ;;
         *) return 98 ;;
       esac ;;
     is-enabled) return 0 ;;
-    is-active) return 1 ;;
+    is-active) [ "$MODE" = no-marker-active ]; return ;;
     list-jobs) return 0 ;;
     *) return 99 ;;
   esac
@@ -137,6 +145,7 @@ snapshot() {
 assert_complete() {
   [ ! -e "$PENDING" ] && [ ! -L "$PENDING" ]
   [ "$(worker_pause_state)" = paused ]
+  [ "$(stat -Lc '%d:%i:%u:%g:%a:%h:%s' "$MARKER")" = "$MARKER_IDENTITY" ]
   [ "$(stat -Lc '%u:%g:%a:%h' "$LIVE_HELPER")" = 0:0:500:1 ]
   cmp -s "$CANDIDATE" "$LIVE_HELPER"
 }
@@ -160,18 +169,35 @@ function legacyValidator(source) {
 }
 
 const body = String.raw`
+if [[ "$MODE" = no-marker* ]]; then
+  before=$(snapshot)
+  if [ "$MODE" = no-marker-active ]; then
+    capture_worker_pause
+  elif [ "$MODE" = no-marker-direct ]; then
+    if bootstrap_worker_pause; then exit 91; fi
+    [ ! -s "$SYSTEMCTL_LOG" ]
+  else
+    if capture_worker_pause; then exit 91; fi
+  fi
+  [ "$before" = "$(snapshot)" ]
+  [ ! -e "$TRACE" ]
+  [ "$(worker_pause_state)" = unpaused ]
+  printf 'VERIFIED %s no_mutation=true\n' "$MODE"
+  exit 0
+fi
 if [ "$MODE" = foreign ]; then KILL_LABEL=mv:after:$PENDING; fi
 start_interrupted
 if [ "$MODE" = baseline ]; then
   [ "$child_status" = 0 ]
   assert_complete
+  [ ! -s "$SYSTEMCTL_LOG" ]
   printf 'BOUNDARY_COUNT=%s\n' "$(wc -l < "$TRACE")"
   cat "$TRACE"
   exit 0
 fi
 [ "$child_status" = 137 ]
 if [ "$MODE" = foreign ]; then
-  [ -f "$PENDING" ] && [ ! -e "$MARKER" ]
+  [ -f "$PENDING" ] && [ "$(worker_pause_state)" = paused ]
   case "$MUTATION" in
     request) deploy_owner_request_id=22222222-2222-4222-8222-222222222222 ;;
     commit) deploy_owner_commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; constructor_upgrade_source_commit=$deploy_owner_commit ;;
@@ -225,9 +251,11 @@ elif cmp -s "$CANDIDATE" "$LIVE_HELPER"; then
   [ "$(worker_pause_state)" = paused ]
   strict_retry=1
 else
-  # Before the first durable barrier, no pause/helper publication may exist.
+  # Before the first barrier, preserve the existing explicit intent and do
+  # not publish a replacement helper or infer intent from timer state.
   cmp -s "$LEGACY" "$LIVE_HELPER"
-  [ ! -e "$MARKER" ] && [ ! -L "$MARKER" ]
+  [ "$(worker_pause_state)" = paused ]
+  strict_retry=1
 fi
 : > "$SYSTEMCTL_LOG"
 SYSTEMCTL_FORBIDDEN=$strict_retry
@@ -295,5 +323,12 @@ for (const mutation of [
     const result = runCase('foreign', 0, mutation)
     assert.equal(result.status, 0, result.stderr + result.stdout)
     assert.match(result.stdout, /no_mutation=true no_systemctl=true/)
+  })
+}
+for (const mode of ['no-marker-stopped','no-marker-active','no-marker-direct']) {
+  rootFilesystemTest('pause bootstrap ' + mode + ' preserves the absence of explicit intent', () => {
+    const result = runCase(mode)
+    assert.equal(result.status, 0, result.stderr + result.stdout)
+    assert.match(result.stdout, /no_mutation=true/)
   })
 }

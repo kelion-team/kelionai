@@ -63,7 +63,7 @@ describe('deterministic monitor, no action authority',()=>{
   it('intentional pause and deployment barrier never authorize recovery or indicate a fault',()=>{
     expect(classify(job(),host({intentionalPause:true,worker:{timer:'inactive',service:'inactive',mainPid:0}})))
       .toMatchObject({code:'intentional_pause',fault:false,activeExecution:false})
-    expect(classify(job(),host({deployGate:true}))).toMatchObject({code:'deploy_gate',fault:false,activeExecution:false})
+    expect(classify(job(),host({deployGate:true,worker:null,intentionalPause:null}))).toMatchObject({code:'deploy_gate',fault:false,activeExecution:false})
   })
   it('stale heartbeat is distinct from missing process; downstream never requires worker PID',()=>{
     expect(classify(job({heartbeatAt:at(400_000)}))).toMatchObject({code:'heartbeat_stale'})
@@ -119,6 +119,18 @@ describe('real durable SQL observer',()=>{
     expect((await db.query('SELECT kind FROM constructor_monitor_events ORDER BY id DESC LIMIT 1')).rows).toEqual([{kind:'state_change'}])
     await observe(classify())
     expect((await db.query('SELECT kind FROM constructor_monitor_events ORDER BY id DESC LIMIT 1')).rows).toEqual([{kind:'recovery'}])
+  })
+  it('a measured held gate is durable but never a fabricated monitor failure or useful execution',async()=>{
+    const before=(await db.query('SELECT * FROM build_jobs')).rows
+    const gate=host({deployGate:true,worker:null,intentionalPause:null})
+    for(let i=0;i<2;i++) await store.finishMonitorCheck((await store.acquireMonitorLease())!,[classify(job(),gate)])
+    expect((await db.query('SELECT * FROM admin_notifications')).rows).toHaveLength(0)
+    expect((await db.query('SELECT kind FROM constructor_monitor_events')).rows).toEqual([{kind:'state_change'}])
+    const snapshot=await store.constructorMonitorSnapshot(limits)
+    expect(snapshot).toMatchObject({error:null,activeExecution:false,cases:[{code:'deploy_gate',fault:false,host:gate}]})
+    expect(snapshot.lastSuccessfulCheck).not.toBeNull()
+    expect((await db.query('SELECT * FROM build_jobs')).rows).toEqual(before)
+    expect(classify(job({status:'failed',stage:'failed'}),gate)).toMatchObject({code:'terminal_failure',fault:true})
   })
   it('monitor failure retains last success and deduplicates error and recovery notifications',async()=>{
     await store.finishMonitorCheck((await store.acquireMonitorLease())!,[classify()])

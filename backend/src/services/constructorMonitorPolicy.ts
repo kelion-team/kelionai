@@ -21,7 +21,12 @@ export function validateConstructorHostSnapshot(value: unknown, now: number, max
   const keys = (o: object, expected: string[]): boolean => Object.keys(o).length === expected.length && Object.keys(o).every((key) => expected.includes(key))
   if (!v || typeof v !== 'object' || !keys(v,['schema','measuredAt','worker','intentionalPause','deployGate'])
     || v.schema !== 1 || !iso(v.measuredAt) || Date.parse(v.measuredAt) > now || now-Date.parse(v.measuredAt) > maxAge
-    || typeof v.intentionalPause !== 'boolean' || typeof v.deployGate !== 'boolean'
+    || typeof v.deployGate !== 'boolean') throw new Error('constructor_host_unverified')
+  if (v.deployGate) {
+    if (v.worker !== null || v.intentionalPause !== null) throw new Error('constructor_host_unverified')
+    return v
+  }
+  if (typeof v.intentionalPause !== 'boolean'
     || !v.worker || typeof v.worker !== 'object' || !keys(v.worker,['timer','service','mainPid'])
     || !['active','inactive','failed'].includes(v.worker.timer) || !['active','activating','inactive','failed'].includes(v.worker.service)
     || !Number.isSafeInteger(v.worker.mainPid) || v.worker.mainPid < 0
@@ -38,7 +43,7 @@ const ACTIONS: Record<ConstructorMonitorCode,string> = {
   stage_stall:'Inspectează etapa și receipturile: rapoartele repetate nu dovedesc avans.',
   terminal_failure:'Diagnostichează cauza și păstrează istoricul; numai Reia explicit poate crea un ciclu nou.',
   intentional_pause:'Pauză intenționată confirmată; nu reporni și nu trata pauza ca defecțiune.',
-  deploy_gate:'Publicarea ține execuția închisă; așteaptă verificarea barierei, fără restart.',
+  deploy_gate:'Bariera de publicare este ocupată; starea procesului nu a fost măsurată. Așteaptă o observație nouă, fără restart.',
   cancelled:'Anularea explicită este terminală; nu relansa ordinul.',
   completed:'Receiptul de release și starea terminală sunt prezente; nu relansa ordinul.',
   unverified:'Dovada este incompletă; nu declara funcționare și verifică sursa măsurătorii.',
@@ -58,18 +63,18 @@ export function classifyConstructorMonitor(job: ConstructorMonitorJob, host: Con
   else if (host.deployGate) code = 'deploy_gate'
   else if (job.status === 'queued') {
     code = elapsed(job.lastRealProgress ?? job.createdAt) < limits.queuedGraceMs ? 'waiting'
-      : host.worker.timer !== 'active' ? 'worker_stopped'
+      : host.worker?.timer !== 'active' ? 'worker_stopped'
       : elapsed(job.heartbeatAt) > limits.heartbeatStaleMs ? 'heartbeat_stale'
       : elapsed(job.lastRealProgress ?? job.createdAt) >= limits.stageStallMs ? 'stage_stall' : 'waiting'
   } else if (job.status === 'running') {
-    code = workerStage && (host.worker.service !== 'active' || host.worker.mainPid === 0) ? 'process_missing'
+    code = workerStage && (host.worker?.service !== 'active' || (host.worker?.mainPid ?? 0) === 0) ? 'process_missing'
       : workerStage && elapsed(job.heartbeatAt) > limits.heartbeatStaleMs ? 'heartbeat_stale'
       : elapsed(job.lastRealProgress ?? job.createdAt) >= limits.stageStallMs ? 'stage_stall' : 'executing'
   }
   const fault = ['worker_stopped','process_missing','heartbeat_stale','stage_stall','terminal_failure'].includes(code)
   const until = Math.min(Date.parse(host.measuredAt)+limits.hostMaxAgeMs, Date.parse(job.lastRealProgress ?? '')+limits.usefulActivityMs)
-  const activeExecution = code === 'executing' && workerStage && host.worker.service === 'active'
-    && host.worker.mainPid > 0 && Number.isFinite(until) && until > now
+  const activeExecution = code === 'executing' && workerStage && host.worker?.service === 'active'
+    && (host.worker?.mainPid ?? 0) > 0 && Number.isFinite(until) && until > now
   const responsible = code === 'terminal_failure' ? 'owner' : code === 'unverified' ? 'monitor'
     : ['merged','release_dispatched','deployed'].includes(job.stage) ? 'release'
     : ['gates_passed','pr_opened'].includes(job.stage) ? 'publisher' : 'worker'

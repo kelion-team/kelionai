@@ -68,10 +68,25 @@ async function assertRealPublicationBarrier(path) {
   const first = await barrier.acquire()
   assert.ok(first)
   assert.equal(await barrier.acquire(), null)
+  assert.deepEqual(await barrier.acquire({ observeContention: true }), { contended: true })
+  const observed = await listenControl(readyDependencies({
+    publicationBarrier: barrier, deploymentPending: () => true,
+    probeWorkerState: async () => { throw new Error('must not probe across held publication lock') },
+  }))
+  try {
+    const response = await signedRequest(observed.endpoint, '/v1/worker/state', {})
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.body, { schema: 1, measuredAt: response.body.measuredAt,
+      worker: null, intentionalPause: null, deployGate: true })
+    assert.ok(Date.now() - Date.parse(response.body.measuredAt) < 1000)
+  } finally { await observed.close() }
   await first.release()
   const second = await barrier.acquire()
   assert.ok(second)
   await second.release()
+  chmodSync(path, 0o644)
+  assert.equal(await barrier.acquire({ observeContention: true }), null)
+  chmodSync(path, 0o600)
 }
 
 
@@ -417,4 +432,42 @@ test('worker pause validates parent ownership before absence and refuses disappe
   assert.throws(()=>readWorkerPause({...base,readFileSync:()=> 'schema=2\n',closeSync:()=>{closed=true}}))
   assert.equal(closed,true)
   assert.equal(marker,'/etc/kelion/codex-worker.paused')
+})
+
+test('worker observation reports an authenticated held publication barrier without fabricated process state', async (context) => {
+  let probes = 0, acquisitions = 0
+  const control = await listenControl(readyDependencies({
+    deploymentPending: () => true,
+    publicationBarrier: { acquire: async (options) => {
+      acquisitions += 1
+      assert.deepEqual(options, { observeContention: true })
+      return { contended: true }
+    } },
+    probeWorkerState: async () => { probes += 1; throw new Error('must_not_probe_during_gate') },
+  }))
+  context.after(() => control.close())
+  const response = await signedRequest(control.endpoint, '/v1/worker/state', {})
+  assert.equal(response.status, 200)
+  assert.deepEqual(response.body, { schema: 1, measuredAt: response.body.measuredAt,
+    worker: null, intentionalPause: null, deployGate: true })
+  assert.ok(Number.isFinite(Date.parse(response.body.measuredAt)))
+  assert.equal(probes, 0)
+  assert.equal(acquisitions, 1)
+  assert.equal((await signedRequest(control.endpoint, '/v1/worker/state', { unit: 'foreign' })).status, 422)
+  assert.equal((await signedRequest(control.endpoint, '/v1/worker/state', {}, { signature: 'x' })).status, 401)
+  assert.equal(acquisitions, 1)
+})
+
+test('worker gate observation never promotes invalid locks or unknown pending state into a measured gate', async (context) => {
+  for (const lock of [null, { release: async () => {} }]) {
+    const control = await listenControl(readyDependencies({
+      deploymentPending: () => true,
+      publicationBarrier: { acquire: async () => lock },
+      probeWorkerState: async () => { throw new Error('must_not_probe') },
+    }))
+    context.after(() => control.close())
+    const response = await signedRequest(control.endpoint, '/v1/worker/state', {})
+    assert.equal(response.status, 503)
+    assert.deepEqual(response.body, { error: 'deployment_in_progress' })
+  }
 })

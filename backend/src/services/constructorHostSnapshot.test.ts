@@ -14,6 +14,14 @@ describe('read-only independent worker host observation', () => {
   it('accepts a fresh measured pause without inventing process activity', () => {
     expect(parseConstructorHostSnapshot(state, now)).toEqual(state)
   })
+  it('accepts only a fresh limited gate observation, not fabricated worker state', () => {
+    const gate = { ...state, intentionalPause: null, worker: null, deployGate: true }
+    expect(parseConstructorHostSnapshot(gate, now)).toEqual(gate)
+    for (const change of [{ intentionalPause: false }, { worker: state.worker }, { deployGate: false },
+      { measuredAt: new Date(now - 15001).toISOString() }, { measuredAt: new Date(now + 1).toISOString() }]) {
+      expect(() => parseConstructorHostSnapshot({ ...gate, ...change }, now)).toThrow()
+    }
+  })
   it.each([
     { measuredAt: new Date(now - 15001).toISOString() },
     { measuredAt: new Date(now + 1).toISOString() }, { measuredAt: 'yesterday' },

@@ -230,7 +230,7 @@ function assertPublicationLock(path) {
 
 export function createPublicationBarrier(path = PUBLICATION_LOCK) {
   return {
-    async acquire() {
+    async acquire({ observeContention = false } = {}) {
       let fd
       try {
         assertPublicationLock(path)
@@ -269,11 +269,12 @@ export function createPublicationBarrier(path = PUBLICATION_LOCK) {
         closeSync(fd)
         return null
       }
-      const acquired = await new Promise((resolvePromise) => {
-        child.once('error', () => resolvePromise(false))
-        child.once('close', (code, signal) => resolvePromise(code === 0 && signal === null))
+      const outcome = await new Promise((resolvePromise) => {
+        child.once('error', () => resolvePromise('invalid'))
+        child.once('close', (code, signal) => resolvePromise(signal !== null ? 'invalid'
+          : code === 0 ? 'acquired' : code === 75 ? 'contended' : 'invalid'))
       })
-      if (!acquired) {
+      if (outcome === 'invalid' || (outcome === 'contended' && !observeContention)) {
         closeSync(fd)
         return null
       }
@@ -285,6 +286,11 @@ export function createPublicationBarrier(path = PUBLICATION_LOCK) {
       } catch {
         closeSync(fd)
         return null
+      }
+      if (outcome === 'contended') {
+        closeSync(fd)
+        // Observation only: no lease, no worker state and no authority to run.
+        return { contended: true }
       }
       let released = false
       return {
@@ -612,7 +618,8 @@ export function createModelControl(secret, dependencies = {}) {
         signature: req.headers['x-kelion-signature'],
         method: req.method, path: req.url, body: raw,
       })
-      if (deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
+      const workerObservation = req.url === '/v1/worker/state'
+      if (!workerObservation && deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
       if (req.url === '/v1/model/switch') {
         const input = exactObject(raw, ['requestId', 'profile'])
         exactRawJson(raw, { requestId: input.requestId, profile: input.profile })
@@ -620,9 +627,17 @@ export function createModelControl(secret, dependencies = {}) {
         return json(res, 410, { error: 'constructor_model_switch_retired' })
       }
       exactRawJson(raw, exactObject(raw, []))
-      lease = await publicationBarrier.acquire()
+      lease = await publicationBarrier.acquire(workerObservation ? { observeContention: true } : {})
+      if (workerObservation && lease?.contended === true) {
+        lease = null
+        // Only the validated lock's actual EWOULDBLOCK proves a held barrier.
+        // Pending/invalid journals alone remain unverified; never probe across
+        // another transaction or invent a PID, timer or intentional pause.
+        return json(res, 200, { schema: 1, measuredAt: new Date().toISOString(),
+          worker: null, intentionalPause: null, deployGate: true })
+      }
       if (!lease || deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
-      const state = req.url === '/v1/worker/state'
+      const state = workerObservation
         ? await (dependencies.probeWorkerState ?? (() => probeWorkerState(dependencies)))()
         : await snapshot()
       if (deploymentPending()) return json(res, 503, { error: 'deployment_in_progress' })
