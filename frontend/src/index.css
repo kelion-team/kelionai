@@ -2773,9 +2773,7 @@ a.card-item:hover {
 .ws-zoom-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .doc-text { transition: font-size 0.12s ease; }
 
-/* Version + update-date watermark (Adrian, Jul 7): the visible proof, on
-every shell, that the latest version is installed. Discreet, bottom-right,
-catches no clicks; stays readable on small monitors. */
+/* Installed UI build and measured server version are distinct. Neither timestamp proves deployment. */
 .app-watermark {
   position: fixed;
   right: 8px;
@@ -2783,7 +2781,9 @@ catches no clicks; stays readable on small monitors. */
   z-index: 9999;
   pointer-events: none;
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.35;
+  max-width: calc(100vw - 16px);
+  overflow-wrap: anywhere;
   letter-spacing: 0.3px;
   /* NEON SPRE VERDE (owner, 13 aug) — LIZIBIL PE ORICE TEMĂ. Pe fundal deschis
      verdele neon se spăla (neonul iese corect doar pe întuneric), de-aia îi punem

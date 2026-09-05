@@ -1,13 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startLease } from './constructor-service-client.mjs'
+import { correctPinnedInstaller, applyPinnedInstallerCorrection } from '../../scripts/constructor-upgrade-compat.mjs'
 
 test('diagnoza VPS raportează numai etichetele coliziunilor de token', () => {
   const workflow = read('.github/workflows/vps-diag.yml')
@@ -856,6 +857,110 @@ test('configurarea Constructor păstrează ACL-ul canonic al secretelor de produ
   assert.match(cutover, /app-secret\.openai-project-key[\s\S]*mapped_target=[$]SECRET_ROOT\/[$]secret_name; mapped_group=10050; mapped_mode=440/)
   assert.match(cutover, /gate-secret\.github-ghcr-read-token[\s\S]*mapped_target=[$]ROOT\/gate-secrets\/github-ghcr-read-token; mapped_mode=400/)
   assert.match(cutover, /publisher-secret\.github-publisher-token[\s\S]*group_id kelion-publisher[\s\S]*mapped_mode=440/)
+})
+
+test('recovery e65 corectează numai installerul digest-pinned și păstrează cele 23 artefacte', () => {
+  const sourceCommit = 'e65f0112aa2265fea12bfd248b8da645b428017a'
+  const executorCommit = 'a'.repeat(40)
+  const fixed = read('deploy/instaleaza-constructor.sh')
+  const predicate = shellFunction(fixed, 'validate_source_systemd_text_files')
+  const original = Buffer.from(fixed.replace(predicate, predicate.replace('[ "$count" -eq 9 ]', '[ "$count" -eq 10 ]')))
+  const result = correctPinnedInstaller(sourceCommit, executorCommit, original)
+  assert.equal(result.fixed.toString(), fixed)
+  assert.deepEqual(result.provenance, {
+    schema: 1, event: 'constructor_upgrade_compatibility', correction: 'e65-systemd-unit-count', sourceCommit, executorCommit,
+    originalInstallerSha256: 'f1a1d60e83bfcd247f8af137f18aa181b30dd5578c6250f68f373c9a9949561e',
+    fixedInstallerSha256: '801e14436d8ac8341614f04fb7b9d327172db7523535c31868832ef597be7ab5',
+    installedArtifactsChanged: false, journalChanged: false,
+  })
+  for (const [owner, executor, bytes] of [
+    ['b'.repeat(40), executorCommit, original], [sourceCommit, 'master', original], [sourceCommit, sourceCommit, original],
+    [sourceCommit, executorCommit, Buffer.from(original.toString().replace('set -Eeuo pipefail', 'set +e'))],
+    [sourceCommit, executorCommit, Buffer.concat([original, Buffer.from('\n')])],
+    [sourceCommit, executorCommit, result.fixed],
+  ]) assert.throws(() => correctPinnedInstaller(owner, executor, bytes), /not_authorized/)
+  const temp = mkdtempSync(join(tmpdir(), 'kelion-e65-compat-'))
+  try {
+    const sourcesBlock = fixed.slice(fixed.indexOf('install_sources=('), fixed.indexOf('\n)', fixed.indexOf('install_sources=(')))
+    const sourcePaths = [...sourcesBlock.matchAll(/"\$repo_root\/([^"\n]+)"/g)].map((match) => match[1])
+    assert.equal(sourcePaths.length, 23)
+    assert.equal(sourcePaths.includes('deploy/instaleaza-constructor.sh'), false)
+    const before = new Map()
+    for (const path of sourcePaths) {
+      const bytes = readFileSync(join(root, path))
+      before.set(path, createHash('sha256').update(bytes).digest('hex'))
+      mkdirSync(dirname(join(temp, path)), { recursive: true })
+      writeFileSync(join(temp, path), bytes)
+    }
+    const installer = join(temp, 'deploy/instaleaza-constructor.sh')
+    writeFileSync(installer, original)
+    const sentinel = join(temp, 'constructor-upgrade.journal')
+    writeFileSync(sentinel, JSON.stringify({ phase: 'armed', sourceCommit, stateSha256: 'c'.repeat(64) }))
+    const journalBefore = readFileSync(sentinel)
+    assert.deepEqual(applyPinnedInstallerCorrection(sourceCommit, executorCommit, installer), result.provenance)
+    assert.equal(readFileSync(installer, 'utf8'), fixed)
+    assert.deepEqual(readFileSync(sentinel), journalBefore)
+    for (const [path, digest] of before) assert.equal(createHash('sha256').update(readFileSync(join(temp, path))).digest('hex'), digest, path)
+    assert.throws(() => applyPinnedInstallerCorrection(sourceCommit, executorCommit, installer), /not_authorized/)
+    const linked = join(temp, 'linked-installer.sh')
+    writeFileSync(installer, original)
+    linkSync(installer, linked)
+    assert.throws(() => applyPinnedInstallerCorrection(sourceCommit, executorCommit, linked), /file_invalid/)
+    assert.deepEqual(readFileSync(installer), original, 'fișierul hard-linked este refuzat înaintea oricărei scrieri')
+    assert.throws(() => applyPinnedInstallerCorrection(sourceCommit, executorCommit, temp), /file_invalid/)
+  } finally { rmSync(temp, { recursive: true, force: true }) }
+})
+
+test('workflowul separă executorul compatibil de owner și păstrează gates/live/journal pin e65', () => {
+  const workflow = read('.github/workflows/vps-run.yml')
+  const source = workflow.slice(workflow.indexOf('- name: Selecteaza determinist'), workflow.indexOf('- name: Leaga imaginea gate'))
+  assert.ok(source.indexOf('install -m 0600 scripts/constructor-upgrade-compat.mjs') < source.indexOf('git checkout --detach "$source_commit"'))
+  assert.match(source, /source_commit=\$journal_source\s+recovery=1/)
+  const gateStart = workflow.indexOf('- name: Leaga imaginea gate')
+  const gateEnd = workflow.indexOf('\n      - name:', gateStart + 1)
+  assert.ok(gateStart >= 0 && gateEnd > gateStart)
+  const gate = workflow.slice(gateStart, gateEnd)
+  assert.match(gate, /OPERATION.*upgrade-constructor.*UPGRADE_RECOVERY.*1[\s\S]*commit.*e65f0112aa2265fea12bfd248b8da645b428017a/)
+  assert.match(gate, /sha256sum "\$compatibility_helper"[\s\S]*UPGRADE_COMPATIBILITY_SHA/)
+  assert.match(gate, /node "\$compatibility_helper" --apply "\$commit" "\$UPGRADE_MASTER_COMMIT"/)
+  assert.ok(gate.indexOf('source_run=$(gh api') < gate.indexOf('node "$compatibility_helper" --apply'))
+  assert.match(workflow, /\.activeCommit == \$expected/)
+  assert.match(workflow, /grep -qx "\$source_commit" "\$active_marker"/)
+  const helper = read('scripts/constructor-upgrade-compat.mjs')
+  assert.doesNotMatch(helper, /child_process|fetch\(|https?:|systemctl|UPGRADE_JOURNAL|unlinkSync|rmSync|renameSync/)
+})
+
+test('installerul validează bytes pentru toate cele nouă unități reale fără fostul drop-in retras', () => {
+  const installer = read('deploy/instaleaza-constructor.sh')
+  const logicalStart = installer.indexOf('install_logicals=(')
+  const logicalEnd = installer.indexOf('\n)', logicalStart) + 2
+  const sourceStart = installer.indexOf('install_sources=(')
+  const sourceEnd = installer.indexOf('\n)', sourceStart) + 2
+  const declarations = `${installer.slice(logicalStart, logicalEnd)}\n${installer.slice(sourceStart, sourceEnd)}`
+  const validators = `${shellFunction(installer, 'validate_systemd_text_file_bytes')}\n${shellFunction(installer, 'validate_source_systemd_text_files')}`
+  const unitRows = [...installer.slice(logicalStart, logicalEnd).matchAll(/^  (systemd-[a-z0-9.-]+)$/gm)].map((match) => match[1])
+  assert.equal(unitRows.length, 9)
+  const run = (extra) => spawnSync(bashExecutable, ['-s', '--', root], {
+    input: `set -euo pipefail\nrepo_root=$1\n${declarations}\n${validators}\n${extra}\n`,
+    encoding: 'utf8',
+  })
+  const valid = run('validate_source_systemd_text_files')
+  assert.equal(valid.status, 0, valid.stderr)
+  const missing = run('unset \'install_logicals[${#install_logicals[@]}-1]\'; validate_source_systemd_text_files')
+  assert.notEqual(missing.status, 0, 'lipsa unei unități rămâne fail-closed')
+  const extra = run('install_logicals+=(systemd-controller.unexpected.service); install_sources+=("$repo_root/deploy/systemd/kelion-constructor-model-control.service"); validate_source_systemd_text_files')
+  assert.notEqual(extra.status, 0, 'o unitate suplimentară nu poate dilua tupla exactă')
+  const temp = mkdtempSync(join(tmpdir(), 'kelion-unit-bytes-'))
+  try {
+    const path = join(temp, 'invalid.service')
+    for (const body of ['[Unit]\r\n', '[Unit]\n\tDescription=x\n', '[Unit]', '[Unit]\0\n']) {
+      writeFileSync(path, body)
+      const result = spawnSync(bashExecutable, ['-s', '--', path], {
+        input: `set -euo pipefail\n${validators}\nvalidate_systemd_text_file_bytes "$1"\n`, encoding: 'utf8',
+      })
+      assert.notEqual(result.status, 0, 'CRLF, tab, NUL și lipsa newline final rămân interzise')
+    }
+  } finally { rmSync(temp, { recursive: true, force: true }) }
 })
 
 test('configure leagă retry-ul installerului de aceeași tuplă exactă de artefacte canonice', () => {
@@ -2573,7 +2678,7 @@ test('toate unitățile systemd publicate respectă contractul strict de bytes t
   const sourceValidator = shellFunction(installer, 'validate_source_systemd_text_files')
   const verifyCandidateUnits = shellFunction(installer, 'verify_candidate_units')
   assert.match(sourceValidator,
-    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 10/)
+    /systemd-\*\)[\s\S]*validate_systemd_text_file_bytes "\$\{install_sources\[\$index\]\}"[\s\S]*"\$count" -eq 9/)
   assert.match(verifyCandidateUnits,
     /local allow_legacy_text=\$\{1:-0\}[\s\S]*case "\$allow_legacy_text" in 0\|1\)[\s\S]*if \[ "\$allow_legacy_text" = 0 \]; then[\s\S]*validate_systemd_text_file_bytes/)
   assert.match(mergePolicy, /"deploy\/systemd\/kelion-constructor-sync\.service"/)

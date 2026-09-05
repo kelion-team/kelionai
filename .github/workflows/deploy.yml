@@ -346,8 +346,22 @@ jobs:
             echo "::error::Master a avansat în timpul aprobării production; release-ul vechi este retras."
             exit 1
           fi
+          # Provisioning owns this directory. Recreating it during login used
+          # to replace the Constructor runtime group/mode and break upgrades.
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'RUNTIME_PREFLIGHT'
+          set -euo pipefail
+          runtime_root=/root/kelion/runtime
+          [ -d "$runtime_root" ] && [ ! -L "$runtime_root" ]
+          [ "$(realpath -e -- "$runtime_root")" = "$runtime_root" ]
+          [ "$(stat -c '%u:%g:%a' -- "$runtime_root")" = 0:10050:750 ] \
+            || { echo 'runtime directory violates the canonical ownership/mode contract' >&2; exit 1; }
+          # The pinned Constructor recovery must finish against its live SHA
+          # before a different application release may touch the VPS.
+          [ ! -e "$runtime_root/constructor-upgrade.journal" ] && [ ! -L "$runtime_root/constructor-upgrade.journal" ] \
+            || { echo 'finish the pinned Constructor upgrade recovery before application deployment' >&2; exit 1; }
+          RUNTIME_PREFLIGHT
           printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-            "install -d -o root -g root -m 0700 /root/kelion/runtime && docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
+            "docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin" >/dev/null
           scp "${ssh_opts[@]}" "$archive" "$VPS_USER@$VPS_HOST:$remote_archive"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s -- \
             "$CANDIDATE_SHA" "$CI_RUN_ID" "$BUILD_RUN_ID" "$RELEASE_MODE" "$RELEASE_REQUEST_ID" "$GITHUB_RUN_ID" "$remote_archive" <<'REMOTE'

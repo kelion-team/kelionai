@@ -21,6 +21,22 @@ test('contractul real backend-provision-compose este complet', () => {
   assert.deepEqual(contractErrors(), [])
 })
 
+test('release-ul verifică runtime-ul canonic fără să îi rescrie proprietarul sau modul la login', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
+  const preflight = workflow.match(/<<'RUNTIME_PREFLIGHT'\n([\s\S]+?)\n\s*RUNTIME_PREFLIGHT\n/)?.[1]
+  assert.ok(preflight, 'lipsește verificarea runtime înainte de autentificarea registry')
+  assert.ok(preflight.includes('[ -d "$runtime_root" ] && [ ! -L "$runtime_root" ]'))
+  assert.ok(preflight.includes('[ "$(realpath -e -- "$runtime_root")" = "$runtime_root" ]'))
+  assert.ok(preflight.includes('[ "$(stat -c \'%u:%g:%a\' -- "$runtime_root")" = 0:10050:750 ]'))
+  assert.ok(preflight.includes('[ ! -e "$runtime_root/constructor-upgrade.journal" ] && [ ! -L "$runtime_root/constructor-upgrade.journal" ]'))
+  assert.doesNotMatch(preflight, /\b(?:install|chmod|chown|mkdir|rm|mv)\b/)
+  assert.doesNotMatch(workflow, /install -d[^\n]*\/root\/kelion\/runtime/)
+  const preflightPosition = workflow.indexOf("<<'RUNTIME_PREFLIGHT'")
+  const loginPosition = workflow.indexOf('"docker login ghcr.io --username', preflightPosition)
+  const uploadPosition = workflow.indexOf('"$archive" "$VPS_USER@$VPS_HOST:$remote_archive"', preflightPosition)
+  assert.ok(loginPosition > preflightPosition && uploadPosition > loginPosition)
+})
+
 test('contractul declară exact schema runtime și toate intrările de control ale provisioning-ului', () => {
   const contract = JSON.parse(readFileSync(new URL('../config/runtime-contract.json', import.meta.url), 'utf8'))
   const expected = [...runtimeContractNames(contract)].sort()

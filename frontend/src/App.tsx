@@ -18,11 +18,11 @@ const Manual = lazy(() => import('./pages/Manual'))
 const Stage = lazy(() => import('./pages/Stage'))
 import {
   watchForPwaUpdate,
-  versionLabel,
   type ApplyPwaUpdate,
 } from './lib/updateCheck'
 import { watchdogInit } from './lib/watchdog'
 import { BannerOffline } from './components/BannerOffline'
+import { VersionBadge } from './components/VersionBadge'
 
 import { uiStrings } from './lib/i18n'
 
@@ -169,10 +169,8 @@ export default function App() {
           <Landing error={error} />
         )}
       </Suspense>
-      {/* Versiunea buildului care rulează efectiv în această fereastră. */}
-      <div className="app-watermark" aria-hidden="true">
-        {versionLabel()}
-      </div>
+      {/* Buildul instalat și commitul serverului sunt probe distincte, nu un deploy presupus. */}
+      <VersionBadge online={online} />
     </>
   )
 }

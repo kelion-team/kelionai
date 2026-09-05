@@ -1252,7 +1252,7 @@ validate_source_systemd_text_files() {
         ;;
     esac
   done
-  [ "$count" -eq 10 ]
+  [ "$count" -eq 9 ]
 }
 
 verify_candidate_units() {
