@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { loadedUiCommit, versionLabel } from '../lib/updateCheck'
+import { loadedUiCommit, versionLabel, versionShort } from '../lib/updateCheck'
 import { fetchReleaseVersions, releaseComparisonLabel, runtimeVersionLabel, type ReleaseVersionEvidence } from '../lib/versionEvidence'
 import { ceas } from '../lib/ceas'
 
@@ -32,9 +32,8 @@ export function VersionBadge({ online }: { online: boolean }) {
   const current = online ? evidence : null
   return <div className="app-watermark" aria-label="Versiune și ore Europe/London"
     data-version-state={current?.state ?? 'unverified'} data-ui-commit={loadedUiCommit() ?? 'unknown'}
-    data-runtime-commit={current?.runtime?.commit ?? 'unknown'} data-live-commit={current?.liveCommit ?? 'unknown'}>
-    <div>{versionLabel()}</div>
-    <div>{runtimeVersionLabel(current?.runtime ?? null)}</div>
-    <div title={`UI ${loadedUiCommit() ?? 'unknown'} / live ${current?.liveCommit ?? 'unknown'}`}>{releaseComparisonLabel(current)}</div>
+    data-runtime-commit={current?.runtime?.commit ?? 'unknown'} data-live-commit={current?.liveCommit ?? 'unknown'}
+    title={`${versionLabel()} · ${runtimeVersionLabel(current?.runtime ?? null)} · ${releaseComparisonLabel(current)}`}>
+    {versionShort()}
   </div>
 }
