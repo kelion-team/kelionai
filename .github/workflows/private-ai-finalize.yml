@@ -603,13 +603,16 @@ jobs:
           [ "$(systemctl show private-ai-constructor-finalize.service -p WorkingDirectory --value)" = "$durable_root" ]
           deadline=$((SECONDS + 6850))
           success_invocation=''
+          last_invocation=''
           while :; do
+            invocation=$(systemctl show private-ai-constructor-finalize.service -p InvocationID --value)
+            if [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+              last_invocation=$invocation
+            fi
             active=$(systemctl show private-ai-constructor-finalize.service -p ActiveState --value)
             result=$(systemctl show private-ai-constructor-finalize.service -p Result --value)
-            invocation=$(systemctl show private-ai-constructor-finalize.service -p InvocationID --value)
-            if [ "$active" = inactive ] && [ "$result" = success ] \
-              && [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
-              success_invocation=$invocation
+            if [ "$active" = inactive ] && [ "$result" = success ]; then
+              success_invocation=$last_invocation
               break
             fi
             restarts=$(systemctl show private-ai-constructor-finalize.service -p NRestarts --value)
