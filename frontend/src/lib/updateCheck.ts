@@ -12,6 +12,13 @@ export function versionLabel(): string {
   return installedBuildLabel(__APP_VERSION__, __BUILD_DATE__, loadedUiCommit())
 }
 
+/** Doar versiunea instalata. Filigranul sta fixat peste continut, deci afiseaza
+ *  minimul lizibil; dovezile complete raman in atributele data-* ale badge-ului
+ *  si in titlul lui, fara sa acopere textul aplicatiei. */
+export function versionShort(): string {
+  return `V${__APP_VERSION__}`
+}
+
 export type ApplyPwaUpdate = () => void
 const PWA_UPDATE_CHECK_MS = 60_000 // hardcod-permis: verificare standard SW, nu estimare a unui deploy.
 
